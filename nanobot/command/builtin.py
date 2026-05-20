@@ -105,6 +105,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "circle-help",
     ),
     BuiltinCommandSpec(
+        "/insights",
+        "Usage insights",
+        "Show aggregated token usage for the last N days (default: 7).",
+        "bar-chart",
+        "[days]",
+    ),
+    BuiltinCommandSpec(
         "/pairing",
         "Manage pairing",
         "List, approve, deny or revoke pairing requests.",
@@ -628,6 +635,55 @@ def build_help_text() -> str:
     return "\n".join(lines)
 
 
+async def cmd_insights(ctx: CommandContext) -> OutboundMessage:
+    """Show aggregated token usage over the last N days."""
+    loop = ctx.loop
+    try:
+        days = max(1, int(ctx.raw.strip())) if ctx.raw.strip() else 7
+    except (ValueError, TypeError):
+        days = 7
+    data = loop.usage_log.insights(days)
+    if data["turns"] == 0:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"No usage data recorded in the last {days} day(s).",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    def _fmt(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1000:
+            return f"{n / 1000:.1f}k"
+        return str(n)
+
+    lines = [
+        f"\U0001f4ca Usage — last {days} day(s)",
+        "",
+        f"Turns:      {data['turns']}",
+        f"Tokens:     {_fmt(data['total_tokens'])}",
+        f"  Prompt:   {_fmt(data['prompt_tokens'])}",
+        f"  Output:   {_fmt(data['completion_tokens'])}",
+    ]
+    if data["cached_tokens"]:
+        lines.append(f"  Cached:   {_fmt(data['cached_tokens'])}")
+
+    models = data.get("models", {})
+    if models:
+        lines.append("")
+        lines.append("Models:")
+        for mname, mu in sorted(models.items(), key=lambda x: -x[1].get("total_tokens", 0)):
+            lines.append(f"  {mname}: {_fmt(mu.get('total_tokens', 0))} tokens")
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="\n".join(lines),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 def register_builtin_commands(router: CommandRouter) -> None:
     """Register the default set of slash commands."""
     router.priority("/stop", cmd_stop)
@@ -647,5 +703,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/help", cmd_help)
+    router.exact("/insights", cmd_insights)
+    router.prefix("/insights ", cmd_insights)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
