@@ -1372,6 +1372,139 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     bus.publish_outbound.assert_not_awaited()
 
 
+def test_gateway_cron_job_streams_when_channel_supports_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Cron jobs on streaming channels must emit deltas with stream_id and turn_end."""
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
+    monkeypatch.setattr(
+        "nanobot.providers.factory.build_provider_snapshot",
+        lambda _config: _test_provider_snapshot(object(), _config),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.factory.load_provider_snapshot",
+        lambda _config_path=None: _test_provider_snapshot(object(), config),
+    )
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeStreamingChannel:
+        supports_streaming = True
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.channels = {"websocket": _FakeStreamingChannel()}
+            self.enabled_channels = ["websocket"]
+
+        async def start_all(self):
+            pass
+
+        async def stop_all(self):
+            pass
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self):
+            return {"enabled": True, "jobs": 0, "next_wake_at_ms": None}
+
+        def register_system_job(self, job):
+            pass
+
+        def stop(self):
+            pass
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.tools = {}
+            self.dream = MagicMock()
+            self.sessions = MagicMock()
+
+        async def process_direct(self, *_args, on_stream=None, on_stream_end=None, **_kwargs):
+            seen["on_stream"] = on_stream
+            seen["on_stream_end"] = on_stream_end
+            if on_stream:
+                await on_stream("Hello")
+                await on_stream(" world")
+            if on_stream_end:
+                await on_stream_end(resuming=False)
+            return OutboundMessage(
+                channel="websocket",
+                chat_id="user-1",
+                content="Hello world",
+            )
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    assert result.exit_code == 0
+
+    cron = seen["cron"]
+    job = CronJob(
+        id="cron-stream-test",
+        name="test-stream",
+        payload=CronPayload(
+            message="Say hello.",
+            deliver=True,
+            channel="websocket",
+            to="user-1",
+        ),
+    )
+    response = asyncio.run(cron.on_job(job))
+
+    assert response == "Hello world"
+    assert seen["on_stream"] is not None
+    assert seen["on_stream_end"] is not None
+
+    calls = bus.publish_outbound.await_args_list
+    # First two calls are streaming deltas
+    assert calls[0].args[0].metadata.get("_stream_delta") is True
+    assert calls[0].args[0].metadata.get("_stream_id") is not None
+    assert calls[0].args[0].content == "Hello"
+    assert calls[1].args[0].metadata.get("_stream_delta") is True
+    assert calls[1].args[0].metadata.get("_stream_id") == calls[0].args[0].metadata["_stream_id"]
+    assert calls[1].args[0].content == " world"
+    # Third call is stream_end
+    assert calls[2].args[0].metadata.get("_stream_end") is True
+    assert calls[2].args[0].metadata.get("_stream_id") == calls[0].args[0].metadata["_stream_id"]
+    # Fourth call is the final message with _streamed marker
+    assert calls[3].args[0].metadata.get("_streamed") is True
+    assert calls[3].args[0].content == "Hello world"
+    # Fifth call is turn_end
+    assert calls[4].args[0].metadata.get("_turn_end") is True
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:

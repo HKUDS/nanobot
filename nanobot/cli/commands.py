@@ -5,6 +5,7 @@ import os
 import select
 import signal
 import sys
+import time
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from pathlib import Path
@@ -841,13 +842,57 @@ def _run_gateway(
         if isinstance(message_tool, MessageTool):
             message_record_token = message_tool.set_record_channel_delivery(True)
 
+        channel_name = job.payload.channel or "cli"
+        chat_id = job.payload.to or "direct"
+        try:
+            target_channel = channels.channels.get(channel_name)
+        except NameError:
+            target_channel = None
+        wants_stream = target_channel is not None and target_channel.supports_streaming
+
+        stream_base_id = None
+        stream_segment = 0
+
+        def _current_stream_id() -> str:
+            return f"{stream_base_id}:{stream_segment}"
+
+        async def _on_stream(delta: str) -> None:
+            meta = dict(job.payload.channel_meta)
+            meta["_stream_delta"] = True
+            meta["_stream_id"] = _current_stream_id()
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel_name,
+                chat_id=chat_id,
+                content=delta,
+                metadata=meta,
+            ))
+
+        async def _on_stream_end(*, resuming: bool = False) -> None:
+            nonlocal stream_segment
+            meta = dict(job.payload.channel_meta)
+            meta["_stream_end"] = True
+            meta["_resuming"] = resuming
+            meta["_stream_id"] = _current_stream_id()
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel_name,
+                chat_id=chat_id,
+                content="",
+                metadata=meta,
+            ))
+            stream_segment += 1
+
+        if wants_stream:
+            stream_base_id = f"cron:{job.id}:{time.time_ns()}"
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
+                channel=channel_name,
+                chat_id=chat_id,
                 on_progress=_silent,
+                on_stream=_on_stream if wants_stream else None,
+                on_stream_end=_on_stream_end if wants_stream else None,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -858,6 +903,13 @@ def _run_gateway(
         response = resp.content if resp else ""
 
         if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            if wants_stream:
+                await bus.publish_outbound(OutboundMessage(
+                    channel=channel_name,
+                    chat_id=chat_id,
+                    content="",
+                    metadata={**job.payload.channel_meta, "_turn_end": True},
+                ))
             return response
 
         if job.payload.deliver and job.payload.to and response:
@@ -865,16 +917,26 @@ def _run_gateway(
                 response, reminder_note, agent.provider, agent.model,
             )
             if should_notify:
+                meta = dict(job.payload.channel_meta)
+                if wants_stream:
+                    meta["_streamed"] = True
                 await _deliver_to_channel(
                     OutboundMessage(
-                        channel=job.payload.channel or "cli",
-                        chat_id=job.payload.to,
+                        channel=channel_name,
+                        chat_id=chat_id,
                         content=response,
-                        metadata=dict(job.payload.channel_meta),
+                        metadata=meta,
                     ),
                     record=True,
                     session_key=job.payload.session_key,
                 )
+        if wants_stream:
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel_name,
+                chat_id=chat_id,
+                content="",
+                metadata={**job.payload.channel_meta, "_turn_end": True},
+            ))
         return response
 
     cron.on_job = on_cron_job
