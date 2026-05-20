@@ -111,6 +111,23 @@ def test_discover_plugins_loads_entry_points():
     assert result["line"] is _FakePlugin
 
 
+def test_discover_plugins_skips_names_outside_enabled_set():
+    from nanobot.channels.registry import discover_plugins
+
+    loaded: list[str] = []
+
+    def _load_disabled():
+        loaded.append("disabled")
+        return _FakePlugin
+
+    ep = SimpleNamespace(name="disabled", load=_load_disabled)
+    with patch(_EP_TARGET, return_value=[ep]):
+        result = discover_plugins({"enabled"})
+
+    assert result == {}
+    assert loaded == []
+
+
 def test_discover_plugins_handles_load_error():
     from nanobot.channels.registry import discover_plugins
 
@@ -150,6 +167,25 @@ def test_discover_all_includes_external_plugin():
 
     assert "line" in result
     assert result["line"] is _FakePlugin
+
+
+def test_discover_enabled_imports_only_enabled_builtins():
+    from nanobot.channels.registry import discover_enabled
+
+    loaded: list[str] = []
+
+    def _load_channel(name: str):
+        loaded.append(name)
+        return _FakePlugin
+
+    with (
+        patch("nanobot.channels.registry.load_channel_class", side_effect=_load_channel),
+        patch(_EP_TARGET, return_value=[]),
+    ):
+        result = discover_enabled({"enabled"}, _names=["enabled", "disabled"])
+
+    assert result == {"enabled": _FakePlugin}
+    assert loaded == ["enabled"]
 
 
 def test_discover_all_builtin_shadows_plugin():

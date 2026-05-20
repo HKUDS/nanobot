@@ -307,13 +307,9 @@ class OpenAICompatProvider(LLMProvider):
         self._is_local = _is_local_endpoint(spec, effective_base)
 
         # Lazy-init: the OpenAI client and its httpx transport are expensive
-        # to create (~700 ms on Windows).  Defer until first use — unless
-        # AsyncOpenAI has been patched (tests), in which case build eagerly.
+        # to create (~700 ms on Windows). Defer until first use.
         self._client: AsyncOpenAIType | None = None
         self._client_lock = asyncio.Lock()
-
-        if AsyncOpenAI is not None:
-            self._build_client()
 
         # Responses API circuit breaker: skip after repeated failures,
         # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.

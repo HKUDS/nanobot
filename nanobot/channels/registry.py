@@ -36,12 +36,14 @@ def load_channel_class(module_name: str) -> type[BaseChannel]:
     raise ImportError(f"No BaseChannel subclass in nanobot.channels.{module_name}")
 
 
-def discover_plugins() -> dict[str, type[BaseChannel]]:
+def discover_plugins(enabled_names: set[str] | None = None) -> dict[str, type[BaseChannel]]:
     """Discover external channel plugins registered via entry_points."""
     from importlib.metadata import entry_points
 
     plugins: dict[str, type[BaseChannel]] = {}
     for ep in entry_points(group="nanobot.channels"):
+        if enabled_names is not None and ep.name not in enabled_names:
+            continue
         try:
             cls = ep.load()
             plugins[ep.name] = cls
@@ -72,7 +74,7 @@ def discover_enabled(
         except ImportError as e:
             logger.debug("Skipping built-in channel '{}': {}", modname, e)
 
-    external = discover_plugins()
+    external = discover_plugins(None if _include_all_external else enabled_names)
     shadowed = set(external) & set(result)
     if shadowed:
         logger.warning("Plugin(s) shadowed by built-in channels (ignored): {}", shadowed)
