@@ -431,6 +431,15 @@ class SessionManager:
             if not messages and not metadata:
                 return None
 
+            if last_consolidated > len(messages):
+                logger.warning(
+                    "Session {} repair: last_consolidated {} > len(messages) {}, resetting to 0",
+                    key,
+                    last_consolidated,
+                    len(messages),
+                )
+                last_consolidated = 0
+
             return Session(
                 key=key,
                 messages=messages,
