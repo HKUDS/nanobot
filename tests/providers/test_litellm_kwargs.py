@@ -441,6 +441,15 @@ def test_openrouter_spec_is_gateway() -> None:
     assert spec.default_api_base == "https://openrouter.ai/api/v1"
 
 
+def test_novita_spec_uses_openai_compatible_gateway() -> None:
+    spec = find_by_name("novita")
+    assert spec is not None
+    assert spec.is_gateway is True
+    assert spec.backend == "openai_compat"
+    assert spec.env_key == "NOVITA_API_KEY"
+    assert spec.default_api_base == "https://api.novita.ai/openai"
+
+
 def test_gemma_routes_to_gemini_provider() -> None:
     """gemma models (e.g. gemma-3-27b-it) must auto-route to Gemini when GEMINI_API_KEY is set.
     Users running gemma via the Gemini API endpoint expect automatic provider detection."""
