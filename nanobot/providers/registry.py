@@ -155,6 +155,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="huggingface",
         default_api_base="https://router.huggingface.co/v1",
     ),
+    # Skywork API platform (APIFree): OpenAI-compatible MaaS gateway.
+    ProviderSpec(
+        name="skywork",
+        keywords=("skywork", "skyclaw", "apifree"),
+        env_key="SKYWORK_API_KEY",
+        display_name="Skywork",
+        backend="openai_compat",
+        env_extras=(("APIFREE_API_KEY", "{api_key}"),),
+        is_gateway=True,
+        detect_by_base_keyword="apifree.ai",
+        default_api_base="https://api.apifree.ai/v1",
+    ),
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: doesn't understand "anthropic/claude-3",
     # strips to bare "claude-3".

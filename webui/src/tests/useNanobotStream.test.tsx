@@ -308,6 +308,56 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("dedupes finish-phase tool events after their start trace", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-tool-finish", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-tool-finish", {
+        event: "message",
+        chat_id: "chat-tool-finish",
+        text: 'exec({"cmd":"ls"})',
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-exec",
+          name: "exec",
+          arguments: { cmd: "ls" },
+        }],
+      });
+      fake.emit("chat-tool-finish", {
+        event: "message",
+        chat_id: "chat-tool-finish",
+        text: "",
+        kind: "progress",
+        tool_events: [
+          {
+            phase: "end",
+            call_id: "call-exec",
+            name: "exec",
+            arguments: { cmd: "ls" },
+            result: "ok",
+          },
+          {
+            phase: "error",
+            call_id: "call-read",
+            name: "read_file",
+            arguments: { path: "notes.md" },
+            error: "missing",
+          },
+        ],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].traces).toEqual([
+      'exec({"cmd":"ls"})',
+      'read_file({"path":"notes.md"})',
+    ]);
+  });
+
   it("renders live file_edit events as their own activity trace", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-edit", EMPTY_MESSAGES), {

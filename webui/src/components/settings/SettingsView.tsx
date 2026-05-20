@@ -2129,6 +2129,7 @@ function providerLabel(
 const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
+  skywork: Sparkles,
   aihubmix: Triangle,
   anthropic: Brain,
   openai: Bot,

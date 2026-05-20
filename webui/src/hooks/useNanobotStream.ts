@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
-import { toolTraceLinesFromEvents } from "@/lib/tool-traces";
+import { mergeUniqueToolTraceLines, toolTraceLinesFromEvents } from "@/lib/tool-traces";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
@@ -678,10 +678,16 @@ export function useNanobotStream(
                 : last.content
                   ? [last.content]
                   : [];
+              const mergedLines = structuredLines.length > 0
+                ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
+                : null;
+              if (mergedLines && !mergedLines.added) return prev;
               const merged: UIMessage = {
                 ...last,
-                traces: [...previousTraces, ...lines],
-                content: lines[lines.length - 1],
+                traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
+                content: mergedLines
+                  ? mergedLines.traces[mergedLines.traces.length - 1]
+                  : lines[lines.length - 1],
                 activitySegmentId: last.activitySegmentId ?? segmentId,
               };
               return [...prev.slice(0, -1), merged];

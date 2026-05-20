@@ -99,15 +99,37 @@ def tool_trace_lines_from_events(events: Any) -> list[str]:
     if not isinstance(events, list):
         return []
     lines: list[str] = []
+    seen: set[str] = set()
     for event in events:
         if not event or not isinstance(event, dict):
             continue
-        if event.get("phase") != "start":
+        if event.get("phase") not in {"start", "end", "error"}:
             continue
+        call_id = event.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            if call_id in seen:
+                continue
+            seen.add(call_id)
         t = _format_tool_call_trace(event)
         if t:
             lines.append(t)
     return lines
+
+
+def _merge_unique_tool_trace_lines(
+    previous_traces: list[str],
+    lines: list[str],
+) -> tuple[list[str], bool]:
+    seen_lines = set(previous_traces)
+    traces = list(previous_traces)
+    added = False
+    for line in lines:
+        if line in seen_lines:
+            continue
+        seen_lines.add(line)
+        traces.append(line)
+        added = True
+    return traces, added
 
 
 def replay_transcript_to_ui_messages(
@@ -478,13 +500,19 @@ def replay_transcript_to_ui_messages(
                     and (last.get("activitySegmentId") in (None, segment))
                 ):
                     prev_traces = list(last.get("traces") or [last.get("content")])
-                    merged_traces = prev_traces + trace_lines
-                    messages[-1] = {
+                    if structured:
+                        merged_traces, added = _merge_unique_tool_trace_lines(prev_traces, structured)
+                        if not added:
+                            continue
+                    else:
+                        merged_traces = prev_traces + trace_lines
+                    merged = {
                         **last,
                         "traces": merged_traces,
-                        "content": trace_lines[-1],
+                        "content": merged_traces[-1],
                         "activitySegmentId": last.get("activitySegmentId") or segment,
                     }
+                    messages[-1] = merged
                 else:
                     messages.append(
                         {
