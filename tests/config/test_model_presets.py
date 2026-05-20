@@ -194,14 +194,15 @@ def test_match_provider_uses_preset_provider_when_forced() -> None:
     assert name == "anthropic"
 
 
-def test_match_provider_routes_novita_prefixed_models() -> None:
+def test_match_provider_routes_forced_novita_model_api_models() -> None:
     config = Config.model_validate({
         "providers": {
             "novita": {"apiKey": "sk-test"},
         },
         "agents": {
             "defaults": {
-                "model": "novita/deepseek/deepseek-v4-pro",
+                "model": "deepseek-v4-pro",
+                "provider": "novita",
             }
         },
     })
