@@ -95,7 +95,8 @@ async def _get_with_safe_redirects(
             return None, f"Redirect blocked: {error_msg}"
 
         response = await client.get(current_url, headers=headers, follow_redirects=False)
-        if not response.is_redirect:
+        is_redirect = 300 <= response.status_code < 400
+        if not is_redirect:
             return response, None
 
         location = response.headers.get("location")
