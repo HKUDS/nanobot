@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(.venv/Scripts/python.exe -m ruff check nanobot/providers/transcription.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -x -q)"
+    ]
+  }
+}
