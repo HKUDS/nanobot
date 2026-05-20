@@ -142,6 +142,7 @@ def test_default_config_includes_safe_bind_and_streaming() -> None:
     assert defaults["host"] == "127.0.0.1"
     assert defaults["streaming"] is True
     assert defaults["allowFrom"] == ["*"]
+    assert defaults["bootstrapLocalhostOnly"] is True
     assert defaults.get("tokenIssuePath", "") == ""
 
 
