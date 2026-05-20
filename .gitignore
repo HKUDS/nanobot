@@ -18,6 +18,9 @@ webui/coverage/
 webui/.vite/
 *.tsbuildinfo
 
+# bridge
+bridge/node_modules
+
 # Python bytecode & caches
 *.pyc
 *.pyo
