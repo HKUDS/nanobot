@@ -1,11 +1,13 @@
 ## Runtime
 {{ runtime }}
 
+{% if is_privileged %}
 ## Workspace
 Your workspace is at: {{ workspace_path }}
 - Long-term memory: {{ workspace_path }}/memory/MEMORY.md (automatically managed by Dream — do not edit directly)
 - History log: {{ workspace_path }}/memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).
 - Custom skills: {{ workspace_path }}/skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
+{% endif %}
 
 {{ platform_policy }}
 {% if channel == 'telegram' or channel == 'qq' or channel == 'discord' %}
@@ -24,8 +26,10 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 
 ## Search & Discovery
 
+{% if is_privileged %}
 - Prefer built-in `grep` over `exec` for workspace search.
 - On broad searches, use `grep(output_mode="count")` to scope before requesting full content.
+{% endif %}
 {% include 'agent/_snippets/untrusted_content.md' %}
 
 Reply directly with text for the current conversation. Do not use the 'message' tool for normal replies in the current chat.

@@ -100,5 +100,3 @@ class Nanobot:
             tools_used=capture.tools_used,
             messages=capture.messages,
         )
-
-

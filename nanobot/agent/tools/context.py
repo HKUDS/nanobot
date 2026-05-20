@@ -12,6 +12,8 @@ class RequestContext:
     chat_id: str
     message_id: str | None = None
     session_key: str | None = None
+    sender_id: str | None = None
+    is_privileged: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

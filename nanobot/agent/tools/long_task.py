@@ -224,4 +224,3 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         if tail:
             return f"Goal marked complete ({ended}). Recap:\n{tail}"
         return f"Goal marked complete ({ended})."
-

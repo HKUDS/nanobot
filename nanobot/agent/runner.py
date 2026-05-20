@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -773,8 +774,10 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
-        workspace_violation_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int] | None = None,
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+        if workspace_violation_counts is None:
+            workspace_violation_counts = {}
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
@@ -932,6 +935,30 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
+
+        # Tools like web_fetch may return JSON-encoded error payloads, e.g.
+        # {"error": "HTTP 404 fetching image URL", "url": "..."}.
+        # Treat these as recoverable tool errors so the model changes approach.
+        if isinstance(result, str) and result.startswith("{"):
+            try:
+                parsed_result = json.loads(result)
+            except Exception:
+                parsed_result = None
+            if isinstance(parsed_result, dict) and "error" in parsed_result:
+                err_detail = str(parsed_result["error"])[:120]
+                event = {
+                    "name": tool_call.name,
+                    "status": "error",
+                    "detail": err_detail,
+                }
+                if file_edit_tracker is not None and progress_callback is not None:
+                    await invoke_file_edit_progress(
+                        progress_callback,
+                        [build_file_edit_error_event(file_edit_tracker, result)],
+                    )
+                if spec.fail_on_tool_error:
+                    return result + hint, event, RuntimeError(err_detail)
+                return result + hint, event, None
 
         if file_edit_tracker is not None and progress_callback is not None:
             await invoke_file_edit_progress(

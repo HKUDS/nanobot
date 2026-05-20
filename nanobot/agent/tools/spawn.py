@@ -32,6 +32,7 @@ class SpawnTool(Tool, ContextAware):
             "spawn_origin_message_id",
             default=None,
         )
+        self._is_privileged: ContextVar[bool] = ContextVar("spawn_is_privileged", default=False)
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -43,6 +44,7 @@ class SpawnTool(Tool, ContextAware):
         self._origin_chat_id.set(ctx.chat_id)
         self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
         self._origin_message_id.set(ctx.message_id)
+        self._is_privileged.set(ctx.is_privileged)
 
     @property
     def name(self) -> str:
@@ -75,4 +77,5 @@ class SpawnTool(Tool, ContextAware):
             origin_chat_id=self._origin_chat_id.get(),
             session_key=self._session_key.get(),
             origin_message_id=self._origin_message_id.get(),
+            is_privileged=self._is_privileged.get(),
         )

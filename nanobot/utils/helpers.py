@@ -351,6 +351,7 @@ def maybe_persist_tool_result(
     try:
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
+        logger.warning("Failed to clean stale tool result buckets in {}", root)
         logger.exception("Failed to clean stale tool result buckets in {}", root)
     path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
     if not path.exists():

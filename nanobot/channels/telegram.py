@@ -24,7 +24,7 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -235,6 +235,8 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    group_allow_from: list[str] = Field(default_factory=list)
+    log_all_messages: bool = False
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -305,14 +307,58 @@ class TelegramChannel(BaseChannel):
             return False
 
         sender_str = str(sender_id)
-        if sender_str.count("|") != 1:
+        if "|" not in sender_str:
             return False
 
-        sid, username = sender_str.split("|", 1)
-        if not sid.isdigit() or not username:
+        sid, remainder = sender_str.split("|", 1)
+        if not sid.isdigit() or not remainder:
             return False
 
-        return sid in allow_list or username in allow_list
+        # Match id, username-only legacy values, or the descriptive
+        # "Full Name (username)" form used for logs and strict policies.
+        remainder = remainder.replace(" [BOT]", "").strip()
+        username_match = re.search(r"\(([^)]+)\)$", remainder)
+        username = username_match.group(1) if username_match else remainder
+        return sid in allow_list or remainder in allow_list or username in allow_list
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+        is_dm: bool = False,
+    ) -> None:
+        """Apply sender allowlist to DMs and to groups when group_allow_from is unset."""
+        meta = metadata or {}
+        if not meta.get("is_group") or not self.config.group_allow_from:
+            await super()._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=content,
+                media=media,
+                metadata=meta,
+                session_key=session_key,
+                is_dm=is_dm,
+            )
+            return
+
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
+
+        await self.bus.publish_inbound(
+            InboundMessage(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(chat_id),
+                content=content,
+                media=media or [],
+                metadata=meta,
+                session_key_override=session_key,
+            )
+        )
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
@@ -816,9 +862,16 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _sender_id(user) -> str:
-        """Build sender_id with username for allowlist matching."""
+        """Build sender_id with username or full_name for allowlist matching and logging."""
         sid = str(user.id)
-        return f"{sid}|{user.username}" if user.username else sid
+        is_bot = " [BOT]" if getattr(user, "is_bot", False) else ""
+        name = getattr(user, "full_name", None) or getattr(user, "first_name", "") or ""
+        suffix = f" ({user.username})" if getattr(user, "username", None) else ""
+        if name:
+            return f"{sid}|{name}{suffix}{is_bot}"
+        if getattr(user, "username", None):
+            return f"{sid}|{user.username}{is_bot}"
+        return f"{sid}{is_bot}"
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
@@ -960,10 +1013,12 @@ class TelegramChannel(BaseChannel):
 
     async def _is_group_message_for_bot(self, message) -> bool:
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
-        if message.chat.type == "private" or self.config.group_policy == "open":
+        if message.chat.type == "private":
             return True
 
         bot_id, bot_username = await self._ensure_bot_identity()
+        if self.config.group_policy == "open":
+            return True
         if bot_username:
             text = message.text or ""
             caption = message.caption or ""
@@ -985,6 +1040,22 @@ class TelegramChannel(BaseChannel):
         reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
         return bool(bot_id and reply_user and reply_user.id == bot_id)
 
+    def _is_group_allowed(self, message) -> bool:
+        """Allow private chats by default; optionally restrict non-private chats by chat_id."""
+        if getattr(message.chat, "type", "private") == "private":
+            return True
+        allowed_groups = self.config.group_allow_from
+        if not allowed_groups:
+            return True
+        return str(message.chat_id) in allowed_groups
+
+    def _is_update_group_allowed(self, update: Update) -> bool:
+        """Apply groupAllowFrom gating consistently for handlers that receive an Update."""
+        message = getattr(update, "effective_message", None)
+        if message is None:
+            return True
+        return self._is_group_allowed(message)
+
     def _remember_thread_context(self, message) -> None:
         """Cache Telegram thread context by chat/message id for follow-up replies."""
         message_thread_id = getattr(message, "message_thread_id", None)
@@ -1000,6 +1071,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         message = update.message
+        bot_id, _ = await self._ensure_bot_identity()
+        if bot_id and update.effective_user.id == bot_id:
+            return
+        if not self._is_group_allowed(message):
+            return
         user = update.effective_user
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
@@ -1009,9 +1085,15 @@ class TelegramChannel(BaseChannel):
         # Strip @bot_username suffix if present
         content = message.text or ""
         if content.startswith("/") and "@" in content:
-            cmd_part, *rest = content.split(" ", 1)
-            cmd_part = cmd_part.split("@")[0]
-            content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+            _, bot_username = await self._ensure_bot_identity()
+            if bot_username:
+                handle = f"@{bot_username}".lower()
+                cmd_part, *rest = content.split(" ", 1)
+                if cmd_part.lower().endswith(handle):
+                    cmd_part = cmd_part.split("@")[0]
+                    content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+                else:
+                    return
         content = self._normalize_telegram_command(content)
 
         await self._handle_message(
@@ -1029,10 +1111,20 @@ class TelegramChannel(BaseChannel):
             return
 
         message = update.message
+        bot_id, _ = await self._ensure_bot_identity()
+        if bot_id and update.effective_user.id == bot_id:
+            return
+        if not self._is_group_allowed(message):
+            return
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
-        if not self.is_allowed(sender_id):
+        group_sender_bypass = (
+            getattr(message.chat, "type", "private") != "private"
+            and bool(self.config.group_allow_from)
+        )
+        allow_from = getattr(self.config, "allow_from", []) or []
+        if allow_from and "*" not in allow_from and not group_sender_bypass and not self.is_allowed(sender_id):
             return
         self._remember_thread_context(message)
 
@@ -1118,6 +1210,7 @@ class TelegramChannel(BaseChannel):
             media=media_paths,
             metadata=metadata,
             session_key=session_key,
+            is_dm=message.chat.type == "private",
         )
 
     async def _flush_media_group(self, key: str) -> None:

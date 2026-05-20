@@ -63,6 +63,7 @@ class CronTool(Tool, ContextAware):
         self._default_timezone = default_timezone
         self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
         self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
+        self._sender_id: ContextVar[str] = ContextVar("cron_sender_id", default="")
         self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
@@ -79,6 +80,7 @@ class CronTool(Tool, ContextAware):
         """Set the current session context for delivery."""
         self._channel.set(ctx.channel)
         self._chat_id.set(ctx.chat_id)
+        self._sender_id.set(ctx.sender_id or "")
         self._metadata.set(ctx.metadata)
         self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
 

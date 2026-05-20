@@ -318,9 +318,7 @@ class SlackChannel(BaseChannel):
             return
 
         # Acknowledge right away
-        await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
-        )
+        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         payload = req.payload or {}
         event = payload.get("event") or {}
@@ -645,7 +643,17 @@ class SlackChannel(BaseChannel):
 
         # Group / channel messages
         if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
+            if chat_id not in self.config.group_allow_from:
+                return False
+        # Check user-level allow_from for groups when configured. For the
+        # default mention policy, an empty list preserves the historical
+        # "any mentioned user may talk" behavior; allowlist mode remains
+        # explicit and denies when no users are listed.
+        if self.config.allow_from:
+            if "*" not in self.config.allow_from and sender_id not in self.config.allow_from:
+                return False
+        elif self.config.group_policy == "allowlist":
+            return False
         return True
 
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:

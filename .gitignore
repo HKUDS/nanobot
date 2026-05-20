@@ -1,5 +1,6 @@
 # Project-specific
 .worktrees/
+.devcontainer/
 .worktree/
 .assets
 .docs
