@@ -416,9 +416,15 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
-        """Coerce block/list content into plain text for strict string-only APIs."""
-        if content is None or isinstance(content, str):
-            return content
+        """Coerce block/list content into plain text for strict string-only APIs.
+
+        Returns a string (possibly a single space for empty/null content), or
+        None when content is None and the caller should decide the default.
+        """
+        if content is None:
+            return None
+        if isinstance(content, str):
+            return content if content else " "
         text = OpenAICompatProvider._extract_text_content(content)
         if isinstance(text, str) and text:
             return text
@@ -426,13 +432,14 @@ class OpenAICompatProvider(LLMProvider):
             dumped = json.dumps(content, ensure_ascii=False)
         except Exception:
             dumped = str(content)
-        return dumped or "(empty)"
+        return dumped or " "
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         force_string_content = bool(self._spec and self._spec.name == "deepseek")
+        preserve_content = bool(self._spec and self._spec.preserve_content_with_tool_calls)
 
         def map_id(value: Any) -> Any:
             if not isinstance(value, str):
@@ -460,17 +467,19 @@ class OpenAICompatProvider(LLMProvider):
                         tc_clean["function"] = function_clean
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
-                if clean.get("role") == "assistant":
+                if clean.get("role") == "assistant" and not preserve_content:
                     # Some OpenAI-compatible gateways reject assistant messages
-                    # that mix non-empty content with tool_calls.
+                    # that mix non-empty content with tool_calls unless the
+                    # provider spec explicitly opts in (preserve_content_with_tool_calls).
+                    # DeepSeek (preserve_content=True) accepts content alongside
+                    # tool_calls, preserving the natural-language preface for
+                    # better end-user experience.
                     clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
-            if (
-                force_string_content
-                and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
-            ):
-                clean["content"] = self._coerce_content_to_string(clean.get("content"))
+            if force_string_content:
+                content = self._coerce_content_to_string(clean.get("content"))
+                clean["content"] = content if content is not None else " "
         return self._enforce_role_alternation(sanitized)
 
     # ------------------------------------------------------------------

@@ -76,6 +76,13 @@ class ProviderSpec:
     # whose API returns the actual answer in "reasoning" instead of "content".
     reasoning_as_content: bool = False
 
+    # When True, assistant messages with tool_calls keep their text content
+    # alongside the tool calls.  Some gateways/providers reject this
+    # combination; others (e.g. DeepSeek) accept it, resulting in better
+    # end-user experience when the model includes a natural-language preface
+    # (e.g. "Let me check that for you") before a tool call.
+    preserve_content_with_tool_calls: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -288,6 +295,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        preserve_content_with_tool_calls=True,
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
