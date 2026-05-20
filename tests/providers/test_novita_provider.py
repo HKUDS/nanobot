@@ -54,6 +54,25 @@ def test_novita_forced_provider_uses_default_api_base() -> None:
     assert config.get_api_base("deepseek-v4-pro") == "https://api.novita.ai/openai"
 
 
+def test_novita_gateway_routes_unprefixed_models_when_configured() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "novita": {
+                "apiKey": "novita-key",
+            },
+        },
+        "agents": {
+            "defaults": {
+                "model": "deepseek-v4-pro",
+            },
+        },
+    })
+
+    assert config.get_provider_name("deepseek-v4-pro") == "novita"
+    assert config.get_api_key("deepseek-v4-pro") == "novita-key"
+    assert config.get_api_base("deepseek-v4-pro") == "https://api.novita.ai/openai"
+
+
 def test_novita_preserves_model_api_id() -> None:
     spec = find_by_name("novita")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):

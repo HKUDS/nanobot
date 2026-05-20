@@ -193,8 +193,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.siliconflow.cn/v1",
     ),
 
-    # NovitaAI: AI-native cloud for builders and agents. Model API exposes
-    # 200+ models through an OpenAI-compatible gateway.
+    # Novita AI: OpenAI-compatible gateway for hosted model APIs.
     ProviderSpec(
         name="novita",
         keywords=("novita",),
