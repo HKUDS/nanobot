@@ -34,7 +34,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "xai_oauth" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -287,6 +287,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Github Copilot",
         backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
+        strip_model_prefix=True,
+        is_oauth=True,
+        supports_max_completion_tokens=True,
+    ),
+    # xAI Grok OAuth: SuperGrok subscription-backed Responses API provider
+    ProviderSpec(
+        name="xai_oauth",
+        keywords=("xai-oauth", "grok-oauth", "x-ai-oauth", "xai-grok-oauth"),
+        env_key="",
+        display_name="xAI Grok OAuth",
+        backend="xai_oauth",
+        default_api_base="https://api.x.ai/v1",
         strip_model_prefix=True,
         is_oauth=True,
         supports_max_completion_tokens=True,
