@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from nanobot.providers.base import LLMProvider
+
 
 def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """Convert Chat Completions messages to Responses API input items.
@@ -58,8 +60,10 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
 def convert_user_message(content: Any) -> dict[str, Any]:
     """Convert a user message's content to Responses API format.
 
-    Handles plain strings, ``text`` blocks -> ``input_text``, and
-    ``image_url`` blocks -> ``input_image``.
+    Handles plain strings, ``text`` blocks -> ``input_text``,
+    ``image_url`` blocks -> ``input_image``, and ``input_audio`` blocks.
+    ``video_url`` is downgraded to a text placeholder because Codex does
+    not support native video.
     """
     if isinstance(content, str):
         return {"role": "user", "content": [{"type": "input_text", "text": content}]}
@@ -74,6 +78,18 @@ def convert_user_message(content: Any) -> dict[str, Any]:
                 url = (item.get("image_url") or {}).get("url")
                 if url:
                     converted.append({"type": "input_image", "image_url": url, "detail": "auto"})
+            elif item.get("type") == "input_audio":
+                audio_info = item.get("input_audio") or {}
+                audio_data = audio_info.get("data")
+                if audio_data:
+                    converted.append({
+                        "type": "input_audio",
+                        "input_audio": {"data": audio_data, "format": audio_info.get("format", "wav")},
+                    })
+            elif item.get("type") == "video_url":
+                # Codex doesn't support native video → text placeholder
+                placeholder = LLMProvider._media_placeholder("video_url", item)
+                converted.append({"type": "input_text", "text": placeholder["text"]})
         if converted:
             return {"role": "user", "content": converted}
     return {"role": "user", "content": [{"type": "input_text", "text": ""}]}

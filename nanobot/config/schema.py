@@ -155,7 +155,34 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("consolidationRatio"),
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
+    vision_models: list[str] = Field(default_factory=list)  # Models that support image input
+    audio_models: list[str] = Field(default_factory=list)  # Models that support native audio input
+    video_models: list[str] = Field(default_factory=list)  # Models that support native video input
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+    @staticmethod
+    def _bare_model(model: str) -> str:
+        """Strip provider prefix, e.g. 'openai/gpt-4o' -> 'gpt-4o'."""
+        return model.split("/", 1)[-1].lower() if "/" in model else model.lower()
+
+    def _supports_capability(self, model: str, patterns: list[str]) -> bool | None:
+        """Check if model matches any pattern. Returns None if patterns is empty."""
+        if not patterns:
+            return None
+        bare = self._bare_model(model)
+        return any(p.lower() in bare for p in patterns)
+
+    def supports_vision(self, model: str) -> bool | None:
+        """Check if model supports vision. None if unconfigured."""
+        return self._supports_capability(model, self.vision_models)
+
+    def supports_audio(self, model: str) -> bool | None:
+        """Check if model supports native audio. None if unconfigured."""
+        return self._supports_capability(model, self.audio_models)
+
+    def supports_video(self, model: str) -> bool | None:
+        """Check if model supports native video. None if unconfigured."""
+        return self._supports_capability(model, self.video_models)
 
 
 class AgentsConfig(Base):
@@ -258,6 +285,17 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
+class InputLimitsConfig(Base):
+    """Limits for user-provided multimodal inputs."""
+
+    max_input_images: int = 3
+    max_input_image_bytes: int = 10 * 1024 * 1024  # 10 MB
+    max_input_audios: int = 1
+    max_input_audio_bytes: int = 10 * 1024 * 1024  # 10 MB
+    max_input_videos: int = 1
+    max_input_video_bytes: int = 20 * 1024 * 1024  # 20 MB
+
+
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
     import importlib
@@ -279,6 +317,7 @@ class ToolsConfig(Base):
     image_generation: ImageGenerationToolConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
+    input_limits: InputLimitsConfig = Field(default_factory=InputLimitsConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
