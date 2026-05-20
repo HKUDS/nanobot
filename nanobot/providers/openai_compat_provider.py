@@ -1054,7 +1054,7 @@ class OpenAICompatProvider(LLMProvider):
             content="".join(content_parts) or None,
             tool_calls=[
                 ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
+                    id=_short_tool_id(),
                     name=b["name"],
                     arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
                     extra_content=b.get("extra_content"),
