@@ -367,12 +367,14 @@ class StreamingFileEditTracker:
 
     def apply_final_call_ids(self, final_tool_calls: list[Any]) -> None:
         """Keep final start/end events keyed to any earlier streamed placeholder."""
+        used_canonicals: set[str] = set()
         for tool_call in final_tool_calls:
             canonical = self.canonical_call_id_for(tool_call)
-            if canonical:
+            if canonical and canonical not in used_canonicals:
                 try:
                     tool_call.id = canonical
-                except Exception:
+                    used_canonicals.add(canonical)
+                except (AttributeError, TypeError):
                     pass
 
     def canonical_call_id_for(self, tool_call: Any) -> str | None:

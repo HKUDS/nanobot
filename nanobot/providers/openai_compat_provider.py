@@ -1097,6 +1097,15 @@ class OpenAICompatProvider(LLMProvider):
             if delta:
                 _accum_legacy_function_call(getattr(delta, "function_call", None))
 
+        # Some providers (e.g. Zhipu/GLM) reuse the same tool_call id for
+        # parallel tool calls in streaming mode. Deduplicate before building
+        # the response so downstream tool messages don't collide.
+        _seen_tc_ids: set[str] = set()
+        for b in tc_bufs.values():
+            if not b["id"] or b["id"] in _seen_tc_ids:
+                b["id"] = _short_tool_id()
+            _seen_tc_ids.add(b["id"])
+
         return LLMResponse(
             content="".join(content_parts) or None,
             tool_calls=[
