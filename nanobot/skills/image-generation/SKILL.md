@@ -1,6 +1,7 @@
 ---
 name: image-generation
 description: Generate images and iteratively edit saved image artifacts.
+triggers: ["图片", "生成图片", "画", "绘画", "绘图", "设计图", "渲染", "生成图", "画画", "image", "draw", "generate image", "render", "illustration"]
 ---
 
 # Image Generation
