@@ -13,8 +13,6 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.utils.helpers import image_placeholder_text
-
 
 @dataclass
 class ToolCallRequest:
@@ -439,9 +437,23 @@ class LLMProvider(ABC):
 
         return merged
 
+    _MEDIA_LABEL_MAP = {"image_url": "image", "input_audio": "audio", "video_url": "video"}
+    _STRIP_MEDIA_TYPES = frozenset({"image_url", "input_audio", "video_url"})
+
     @staticmethod
-    def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-        """Replace image_url blocks with text placeholder. Returns None if no images found."""
+    def _media_placeholder(btype: str, block: dict[str, Any]) -> dict[str, str]:
+        """Build a text placeholder for a media block."""
+        path = (block.get("_meta") or {}).get("path", "")
+        label = LLMProvider._MEDIA_LABEL_MAP.get(btype, "media")
+        text = f"[{label}: {path}]" if path else f"[{label}]"
+        return {"type": "text", "text": text}
+
+    @staticmethod
+    def _strip_media_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Replace image_url, input_audio, and video_url blocks with text placeholders.
+
+        Returns None if no media blocks were found (no changes needed).
+        """
         found = False
         result = []
         for msg in messages:
@@ -449,10 +461,8 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 new_content = []
                 for b in content:
-                    if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
-                        new_content.append({"type": "text", "text": placeholder})
+                    if isinstance(b, dict) and b.get("type") in LLMProvider._STRIP_MEDIA_TYPES:
+                        new_content.append(LLMProvider._media_placeholder(b["type"], b))
                         found = True
                     else:
                         new_content.append(b)
@@ -462,8 +472,13 @@ class LLMProvider(ABC):
         return result if found else None
 
     @staticmethod
-    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
-        """Replace image_url blocks with text placeholder *in-place*.
+    def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Replace image_url blocks with text placeholder. Returns None if no images found."""
+        return LLMProvider._strip_media_content(messages)
+
+    @staticmethod
+    def _strip_media_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace media blocks with text placeholder *in-place*.
 
         Mutates the content lists of the original message dicts so that
         callers holding references to those dicts also see the stripped
@@ -474,12 +489,15 @@ class LLMProvider(ABC):
             content = msg.get("content")
             if isinstance(content, list):
                 for i, b in enumerate(content):
-                    if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
-                        content[i] = {"type": "text", "text": placeholder}
+                    if isinstance(b, dict) and b.get("type") in LLMProvider._STRIP_MEDIA_TYPES:
+                        content[i] = LLMProvider._media_placeholder(b["type"], b)
                         found = True
         return found
+
+    @staticmethod
+    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace image_url blocks with text placeholder *in-place*."""
+        return LLMProvider._strip_media_content_inplace(messages)
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
@@ -738,18 +756,18 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self._is_transient_response(response):
-                stripped = self._strip_image_content(original_messages)
+                stripped = self._strip_media_content(original_messages)
                 if stripped is not None and stripped != kw["messages"]:
                     logger.warning(
-                        "Non-transient LLM error with image content, retrying without images"
+                        "Non-transient LLM error with media content, retrying without media"
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped
                     result = await call(**retry_kw)
-                    # Permanently strip images from the original messages so
+                    # Permanently strip media from the original messages so
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
-                        self._strip_image_content_inplace(original_messages)
+                        self._strip_media_content_inplace(original_messages)
                     return result
                 return response
 

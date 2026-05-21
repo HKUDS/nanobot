@@ -190,6 +190,10 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        input_limits: Any = None,
+        supports_vision: bool | None = None,
+        supports_audio: bool | None = None,
+        supports_video: bool | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -227,6 +231,10 @@ class AgentLoop:
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
+        self.input_limits = input_limits or _tc.input_limits
+        self._supports_vision = supports_vision
+        self._supports_audio = supports_audio
+        self._supports_video = supports_video
         self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
         if (
             image_generation_provider_config is not None
@@ -240,7 +248,7 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, input_limits=self.input_limits)
         self.sessions = session_manager or SessionManager(workspace)
         self._webui_turns = WebuiTurnCoordinator(
             bus=self.bus,
@@ -366,6 +374,10 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            input_limits=config.tools.input_limits,
+            supports_vision=defaults.supports_vision(defaults.model),
+            supports_audio=defaults.supports_audio(defaults.model),
+            supports_video=defaults.supports_video(defaults.model),
             **extra,
         )
 
@@ -594,6 +606,9 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_summary=pending_summary,
             session_metadata=session.metadata,
+            supports_vision=self._supports_vision,
+            supports_audio=self._supports_audio,
+            supports_video=self._supports_video,
         )
 
     async def _dispatch_command_inline(
@@ -1059,6 +1074,9 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_summary=pending,
             session_metadata=session.metadata,
+            supports_vision=self._supports_vision,
+            supports_audio=self._supports_audio,
+            supports_video=self._supports_video,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
@@ -1402,6 +1420,10 @@ class AgentLoop:
             ).startswith("data:image/"):
                 path = (block.get("_meta") or {}).get("path", "")
                 filtered.append({"type": "text", "text": image_placeholder_text(path)})
+                continue
+
+            if block.get("type") in ("input_audio", "video_url"):
+                filtered.append(LLMProvider._media_placeholder(block["type"], block))
                 continue
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):

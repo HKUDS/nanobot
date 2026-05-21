@@ -27,10 +27,11 @@ def test_extract_post_content_supports_post_wrapper_shape() -> None:
         }
     }
 
-    text, image_keys = _extract_post_content(payload)
+    text, image_keys, media_items = _extract_post_content(payload)
 
     assert text == "日报 完成"
     assert image_keys == ["img_1"]
+    assert media_items == []
 
 
 def test_extract_post_content_keeps_direct_shape_behavior() -> None:
@@ -45,10 +46,29 @@ def test_extract_post_content_keeps_direct_shape_behavior() -> None:
         ],
     }
 
-    text, image_keys = _extract_post_content(payload)
+    text, image_keys, media_items = _extract_post_content(payload)
 
     assert text == "Daily report"
     assert image_keys == ["img_a", "img_b"]
+    assert media_items == []
+
+
+def test_extract_post_content_extracts_media_tags() -> None:
+    payload = {
+        "title": "Video",
+        "content": [
+            [
+                {"tag": "text", "text": "see this"},
+                {"tag": "media", "file_key": "vid_1"},
+            ]
+        ],
+    }
+
+    text, image_keys, media_items = _extract_post_content(payload)
+
+    assert text == "Video see this"
+    assert image_keys == []
+    assert media_items == [{"tag": "media", "file_key": "vid_1"}]
 
 
 def test_register_optional_event_keeps_builder_when_method_missing() -> None:
