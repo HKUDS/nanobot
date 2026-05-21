@@ -348,6 +348,11 @@ async def test_gemini_requires_api_key() -> None:
         await client.generate(prompt="draw", model="imagen-4.0-generate-001")
 
 
+def test_gemini_image_client_uses_native_api_base_by_default() -> None:
+    client = GeminiImageGenerationClient(api_key="AIza-test")
+    assert client.api_base == "https://generativelanguage.googleapis.com/v1beta"
+
+
 @pytest.mark.asyncio
 async def test_gemini_no_images_raises() -> None:
     fake = FakeClient(FakeResponse({"candidates": [{"content": {"parts": [{"text": "sorry"}]}}]}))
@@ -388,6 +393,17 @@ async def test_minimax_payload_and_response_with_reference_image(tmp_path: Path)
     assert body["aspect_ratio"] == "21:9"
     assert body["subject_reference"][0]["type"] == "character"
     assert body["subject_reference"][0]["image_file"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_minimax_base64_response_uses_detected_mime() -> None:
+    raw_b64 = base64.b64encode(JPEG_BYTES).decode("ascii")
+    fake = FakeClient(FakeResponse({"data": {"image_base64": [raw_b64]}}))
+    client = MiniMaxImageGenerationClient(api_key="sk-mm-test", client=fake)  # type: ignore[arg-type]
+
+    response = await client.generate(prompt="draw", model="image-01")
+
+    assert response.images == [f"data:image/jpeg;base64,{raw_b64}"]
 
 
 # ---------------------------------------------------------------------------

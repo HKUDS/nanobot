@@ -449,6 +449,12 @@ def test_gemma_routes_to_gemini_provider() -> None:
     assert "gemma" in spec.keywords
 
 
+def test_gemini_spec_keeps_openai_compat_base() -> None:
+    spec = find_by_name("gemini")
+    assert spec is not None
+    assert spec.default_api_base == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
 async def test_openrouter_sets_default_attribution_headers() -> None:
     spec = find_by_name("openrouter")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_cls:
