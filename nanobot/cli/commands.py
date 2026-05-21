@@ -222,7 +222,7 @@ def _init_prompt_session() -> None:
         multiline=True,  # Enter submits (single line mode)
         vi_mode=True,
         editing_mode=EditingMode.VI,     
-        prompt_continuation=lambda width, line_no, x: f"{line_no:>3}│ "  # ← line number
+        prompt_continuation=lambda width, line_no, x: f"{(line_no+1):>3}│ "  # ← line number
     )
 
 
