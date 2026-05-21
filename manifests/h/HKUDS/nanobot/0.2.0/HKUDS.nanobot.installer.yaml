@@ -1,0 +1,15 @@
+# Winget installer manifest for nanobot-ai
+# Distributed via PyPI — installed using `uv tool install` or `pip install`.
+
+PackageIdentifier: HKUDS.nanobot
+PackageVersion: 0.2.0
+InstallerType: pip
+Installers:
+  - Architecture: x64
+    InstallerType: pip
+    InstallerUrl: https://pypi.org/project/nanobot-ai/0.2.0/
+    # Generate the actual SHA256 from the wheel before submission:
+    #   curl -sL https://files.pythonhosted.org/packages/.../nanobot_ai-0.2.0-py3-none-any.whl | sha256sum
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+ManifestType: installer
+ManifestVersion: 1.9.0

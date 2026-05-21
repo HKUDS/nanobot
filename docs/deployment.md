@@ -240,14 +240,14 @@ New-NetFirewallRule -DisplayName "Nanobot API" -Direction Inbound -LocalPort 890
 
 ### Docker on Windows
 
-Nanobot runs in Docker via Docker Desktop (WSL2 backend). The Dockerfile is Linux-based; use the Linux instructions above. Config is stored in the mounted volume:
+Nanobot runs in Docker via Docker Desktop (WSL2 backend). The Dockerfile is Linux-based; use the Linux instructions above. Windows native Docker containers (nanoserver) are not currently supported — the Linux image works seamlessly through Docker Desktop's WSL2 integration.
+
+> **Note:** On Windows, nanobot stores config in `%APPDATA%\nanobot` by default. The Docker path still uses `~/.nanobot` inside the container.
 
 ```powershell
 # The ~ path works in PowerShell via Docker Desktop
 docker run -v "$HOME/.nanobot:/home/nanobot/.nanobot" -p 18790:18790 nanobot gateway
 ```
-
-> **Note:** On Windows, nanobot stores config in `%APPDATA%\nanobot` by default. The Docker path still uses `~/.nanobot` inside the container.
 
 ### Windows Tips
 

@@ -167,8 +167,34 @@ def _init_prompt_session() -> None:
             mode = ctypes.c_ulong()
             if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
                 _SAVED_TERM_ATTRS = mode.value
+                # Enable ANSI VT processing if not already set (needed for
+                # rich/colored output on older Windows consoles).
+                vt_flag = 0x0004  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+                if not (mode.value & vt_flag):
+                    new_mode = ctypes.c_ulong(mode.value | vt_flag)
+                    kernel32.SetConsoleMode(handle, new_mode)
         except Exception:
             pass
+
+        # Check if Windows long path support is enabled (registry key).
+        if sys.platform == "win32":
+            try:
+                import winreg
+
+                key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SYSTEM\CurrentControlSet\Control\FileSystem",
+                )
+                value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+                winreg.CloseKey(key)
+                if value != 1:
+                    console.print(
+                        "[yellow]Warning:[/yellow] Windows long path support (260-char limit) is not enabled.\n"
+                        'Fix: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem"'
+                        " /v LongPathsEnabled /t REG_DWORD /d 1 /f"
+                    )
+            except Exception:
+                pass  # Key doesn't exist or no access — skip silently
     else:
         with suppress(Exception):
             import termios

@@ -101,6 +101,10 @@ class WebSocketConfig(Base):
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    # Windows Named Pipe transport (alternative to TCP for local IPC).
+    # When enabled on Windows, the server binds to \\.\pipe\nanobot
+    # instead of a TCP socket.  Not yet wired — see TODO in start().
+    use_pipe: bool = False
 
     @field_validator("path")
     @classmethod
@@ -1313,6 +1317,19 @@ class WebSocketChannel(BaseChannel):
                 self.config.port,
                 _normalize_config_path(self.config.token_issue_path),
             )
+
+        # TODO: Named pipe transport for Windows local IPC.
+        # When use_pipe=True and sys.platform == "win32", replace the TCP
+        # server above with a named pipe server bound to \\.\pipe\nanobot.
+        # Approach: use ctypes (CreateNamedPipeW / ConnectNamedPipe /
+        # ReadFile / WriteFile) or pywin32 to create a pipe, then wrap the
+        # handle with asyncio.ProactorEventLoop (via
+        # asyncio.ProactorReadPipeTransport / WritePipeTransport).  The
+        # WebSocket handshake would need to run over the raw pipe stream
+        # instead of the websockets library's built-in serve().  A simpler
+        # alternative: front the TCP server with a named pipe via a
+        # lightweight proxy (netsh portproxy or a small asyncio bridge).
+        # The config field is in place; wiring it in is a future PR.
 
         async def runner() -> None:
             async with serve(

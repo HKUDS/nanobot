@@ -22,15 +22,15 @@
 
 This fork tracks upstream closely and layers on Windows-native improvements:
 
-- **Windows-first shell handling** — configurable shell (`cmd.exe`, PowerShell, WSL), proper `PATHEXT` resolution, and Job Object process groups for clean subprocess teardown
+- **Windows-first shell handling** — configurable shell (`cmd.exe`, PowerShell, WSL), `PATHEXT` passthrough so Windows subprocesses resolve `.ps1`, `.bat`, `.cmd` scripts correctly, and Job Object process groups for clean subprocess teardown
 - **Device path hardening** — blocks `\\?\` and UNC device paths from sandbox escape
 - **Console restore on exit** — terminal settings are restored even after crashes
 - **Cross-platform path handling** — all internal paths work correctly on both Windows and Unix
 - **Platform-aware prompts** — the agent adapts its instructions based on the host OS
-- **winget manifest** — ready-to-submit package manifest for the Windows Package Manager
+- **winget manifest** — ready-to-submit three-file package manifest for the Windows Package Manager (see `manifests/h/HKUDS/nanobot/0.2.0/`)
 - **Windows deployment docs** — NSSM service, Task Scheduler, firewall rules, long-path support, and corporate proxy setup
 
-See [docs/deployment.md](./docs/deployment.md) for the full Windows deployment guide and [manifests/](./manifests/) for the winget manifest.
+See [docs/deployment.md](./docs/deployment.md) for the full Windows deployment guide and [manifests/](./manifests/h/HKUDS/nanobot/0.2.0/) for the winget manifest.
 
 ## News
 
@@ -93,6 +93,9 @@ Optionally pin a provider and model:
 ```bash
 nanobot agent
 ```
+
+> [!TIP]
+> Using **Windows Terminal**? Merge [`windows-terminal-profile.json`](./windows-terminal-profile.json) into your `settings.json` `profiles.list` for a dedicated nanobot tab.
 
 - Different LLM providers, web search, MCP, security settings: [Configuration](./docs/configuration.md)
 - Chat apps (Telegram, Discord, Slack, etc.): [Chat Apps](./docs/chat-apps.md)

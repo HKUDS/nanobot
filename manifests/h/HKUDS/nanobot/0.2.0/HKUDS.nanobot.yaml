@@ -1,0 +1,7 @@
+# Winget version manifest for nanobot-ai
+
+PackageIdentifier: HKUDS.nanobot
+PackageVersion: 0.2.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.9.0

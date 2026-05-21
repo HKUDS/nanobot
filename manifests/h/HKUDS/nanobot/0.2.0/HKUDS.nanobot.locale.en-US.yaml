@@ -1,11 +1,9 @@
-# Winget manifest for nanobot-ai
+# Winget default locale manifest for nanobot-ai
 # Submit to: https://github.com/microsoft/winget-pkgs
 # Package ID: HKUDS.nanobot
-# This manifest uses the Python installer approach — the package is distributed via PyPI
-# and installed using `uv tool install` or `pip install`.
 
 PackageIdentifier: HKUDS.nanobot
-PackageVersion: 0.1.5.2
+PackageVersion: 0.2.0
 PackageName: nanobot
 PackageUrl: https://github.com/HKUDS/nanobot
 Publisher: HKUDS
