@@ -13,6 +13,7 @@ from nanobot.providers.image_generation import (
     GeneratedImageResponse,
     ImageGenerationError,
     MiniMaxImageGenerationClient,
+    OllamaImageGenerationClient,
     OpenRouterImageGenerationClient,
     StepFunImageGenerationClient,
 )
@@ -131,6 +132,54 @@ async def test_openrouter_image_generation_requires_api_key() -> None:
 
     with pytest.raises(ImageGenerationError, match="API key"):
         await client.generate(prompt="draw", model="model")
+
+
+@pytest.mark.asyncio
+async def test_ollama_image_generation_payload_and_response() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    fake = FakeClient(FakeResponse({"image": raw_b64}))
+    client = OllamaImageGenerationClient(
+        api_key="ollama-test",
+        api_base="http://localhost:11434/v1/",
+        extra_headers={"X-Test": "1"},
+        extra_body={"seed": 123},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="a sunset",
+        model="x/z-image-turbo",
+        aspect_ratio="16:9",
+        image_size="1K",
+    )
+
+    assert response.images == [PNG_DATA_URL]
+    assert response.content == ""
+
+    call = fake.calls[0]
+    assert call["url"] == "http://localhost:11434/api/generate"
+    assert call["headers"]["Authorization"] == "Bearer ollama-test"
+    assert call["headers"]["X-Test"] == "1"
+    body = call["json"]
+    assert body["model"] == "x/z-image-turbo"
+    assert body["prompt"] == "a sunset"
+    assert body["width"] == 1024
+    assert body["height"] == 576
+    assert body["steps"] == 0
+    assert body["stream"] is False
+    assert body["seed"] == 123
+
+
+@pytest.mark.asyncio
+async def test_ollama_image_generation_rejects_reference_images() -> None:
+    client = OllamaImageGenerationClient(api_key=None)
+
+    with pytest.raises(ImageGenerationError, match="reference images"):
+        await client.generate(
+            prompt="edit this",
+            model="x/z-image-turbo",
+            reference_images=["ref.png"],
+        )
 
 
 @pytest.mark.asyncio
