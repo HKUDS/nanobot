@@ -601,6 +601,10 @@ class OpenAICompatProvider(LLMProvider):
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
+            # Moonshot rejects requests carrying both 'reasoning_effort' and
+            # 'thinking'.  The native 'thinking' param already encodes the
+            # user's intent, so drop the redundant wire-level kwarg.
+            kwargs.pop("reasoning_effort", None)
 
         # Model-level thinking injection for MiMo thinking-capable models.
         # Same shape as Kimi: gateway providers (OpenRouter, etc.) lack the
