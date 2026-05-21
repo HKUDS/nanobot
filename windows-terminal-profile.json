@@ -1,7 +1,7 @@
 {
   "name": "nanobot",
   "commandline": "nanobot agent",
-  "icon": "https://raw.githubusercontent.com/launchswitch/nanobot-for-windows/main/images/nanobot_icon.png",
+  "icon": "https://raw.githubusercontent.com/launchswitch/nanobot-for-windows/main/images/nanobot_logo.png",
   "startingDirectory": "%APPDATA%\\nanobot",
   "font": {
     "face": "Cascadia Mono"

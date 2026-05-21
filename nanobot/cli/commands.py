@@ -154,6 +154,34 @@ def _restore_terminal() -> None:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
+def _check_long_path_support() -> None:
+    """Warn about LongPathsEnabled only when a relevant path exceeds 200 chars."""
+    try:
+        cwd = os.getcwd()
+        appdata = os.environ.get("APPDATA", "")
+        nanobot_dir = os.path.join(appdata, "nanobot") if appdata else ""
+        paths_to_check = [cwd, nanobot_dir]
+        if not any(len(p) > 200 for p in paths_to_check if p):
+            return
+
+        import winreg
+
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        )
+        value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+        winreg.CloseKey(key)
+        if value != 1:
+            console.print(
+                "[yellow]Warning:[/yellow] Windows long path support (260-char limit) is not enabled.\n"
+                'Fix: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem"'
+                " /v LongPathsEnabled /t REG_DWORD /d 1 /f"
+            )
+    except Exception:
+        pass  # Key doesn't exist or no access — skip silently
+
+
 def _init_prompt_session() -> None:
     """Create the prompt_toolkit session with persistent file history."""
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
@@ -177,24 +205,7 @@ def _init_prompt_session() -> None:
             pass
 
         # Check if Windows long path support is enabled (registry key).
-        if sys.platform == "win32":
-            try:
-                import winreg
-
-                key = winreg.OpenKey(
-                    winreg.HKEY_LOCAL_MACHINE,
-                    r"SYSTEM\CurrentControlSet\Control\FileSystem",
-                )
-                value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
-                winreg.CloseKey(key)
-                if value != 1:
-                    console.print(
-                        "[yellow]Warning:[/yellow] Windows long path support (260-char limit) is not enabled.\n"
-                        'Fix: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem"'
-                        " /v LongPathsEnabled /t REG_DWORD /d 1 /f"
-                    )
-            except Exception:
-                pass  # Key doesn't exist or no access — skip silently
+        _check_long_path_support()
     else:
         with suppress(Exception):
             import termios
