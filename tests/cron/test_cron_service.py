@@ -117,6 +117,51 @@ async def test_execute_job_records_run_history(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_job_persists_running_claim_before_callback_returns(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def on_job(_job) -> None:
+        started.set()
+        await release.wait()
+
+    service = CronService(store_path, on_job=on_job)
+    job = service.add_job(
+        name="claim",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+
+    task = asyncio.create_task(service.run_job(job.id))
+    await started.wait()
+
+    raw = json.loads(store_path.read_text())
+    state = raw["jobs"][0]["state"]
+    assert state["lastStatus"] == "running"
+    assert state["lastRunAtMs"] is not None
+    assert state["nextRunAtMs"] is not None
+    assert state["nextRunAtMs"] > state["lastRunAtMs"]
+
+    observer = CronService(store_path)
+    in_flight = observer.get_job(job.id)
+    assert in_flight is not None
+    assert in_flight.state.last_status == "running"
+    assert in_flight.state.last_run_at_ms is not None
+    assert in_flight.state.next_run_at_ms is not None
+    assert in_flight.state.next_run_at_ms > in_flight.state.last_run_at_ms
+
+    release.set()
+    assert await task is True
+
+    completed = service.get_job(job.id)
+    assert completed is not None
+    assert completed.state.last_status == "ok"
+    assert len(completed.state.run_history) == 1
+    assert completed.state.run_history[0].status == "ok"
+
+
+@pytest.mark.asyncio
 async def test_run_history_records_errors(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
 
