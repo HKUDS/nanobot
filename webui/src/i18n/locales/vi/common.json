@@ -224,6 +224,7 @@
     "fallbackTitle": "Trò chuyện {{id}}",
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
+    "showMore": "Hiển thị thêm {{count}}",
     "actions": "Tác vụ cho cuộc trò chuyện {{title}}",
     "activity": {
       "running": "Agent running",

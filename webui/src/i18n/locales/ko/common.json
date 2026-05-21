@@ -224,6 +224,7 @@
     "fallbackTitle": "채팅 {{id}}",
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
+    "showMore": "{{count}}개 더 보기",
     "actions": "{{title}} 채팅 작업",
     "activity": {
       "running": "Agent running",

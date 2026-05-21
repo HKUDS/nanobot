@@ -1,4 +1,10 @@
 import {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
   Archive,
   ArchiveRestore,
   MoreHorizontal,
@@ -18,6 +24,9 @@ import {
 import { deriveTitle, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
+
+const INITIAL_VISIBLE_SESSIONS = 160;
+const VISIBLE_SESSIONS_INCREMENT = 160;
 
 interface ChatListProps {
   sessions: ChatSummary[];
@@ -42,7 +51,7 @@ interface ChatListProps {
   emptyLabel?: string;
 }
 
-export function ChatList({
+export const ChatList = memo(function ChatList({
   sessions,
   activeKey,
   onSelect,
@@ -65,6 +74,52 @@ export function ChatList({
   emptyLabel,
 }: ChatListProps) {
   const { t } = useTranslation();
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
+  const labels = useMemo(() => ({
+    pinned: t("chat.groups.pinned"),
+    all: t("chat.groups.all"),
+    today: t("chat.groups.today"),
+    yesterday: t("chat.groups.yesterday"),
+    earlier: t("chat.groups.earlier"),
+    archived: t("chat.groups.archived"),
+    fallbackTitle: t("chat.newChat"),
+  }), [t]);
+  const groups = useMemo(
+    () => groupSessions(sessions, labels, {
+      pinnedKeys,
+      archivedKeys,
+      titleOverrides,
+      showArchived,
+      sort,
+    }),
+    [
+      archivedKeys,
+      labels,
+      pinnedKeys,
+      sessions,
+      showArchived,
+      sort,
+      titleOverrides,
+    ],
+  );
+  const limitedGroups = useMemo(
+    () => limitGroups(groups, visibleLimit, activeKey),
+    [activeKey, groups, visibleLimit],
+  );
+  const totalSessionCount = useMemo(
+    () => groups.reduce((total, group) => total + group.sessions.length, 0),
+    [groups],
+  );
+  const visibleSessionCount = useMemo(
+    () => limitedGroups.reduce((total, group) => total + group.sessions.length, 0),
+    [limitedGroups],
+  );
+  const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
+
+  useEffect(() => {
+    setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
+  }, [showArchived, sort]);
+
   if (loading && sessions.length === 0) {
     return (
       <div className="px-3 py-6 text-[12px] text-muted-foreground">
@@ -81,21 +136,6 @@ export function ChatList({
     );
   }
 
-  const groups = groupSessions(sessions, {
-    pinned: t("chat.groups.pinned"),
-    all: t("chat.groups.all"),
-    today: t("chat.groups.today"),
-    yesterday: t("chat.groups.yesterday"),
-    earlier: t("chat.groups.earlier"),
-    archived: t("chat.groups.archived"),
-    fallbackTitle: t("chat.newChat"),
-  }, {
-    pinnedKeys,
-    archivedKeys,
-    titleOverrides,
-    showArchived,
-    sort,
-  });
   const pinned = new Set(pinnedKeys);
   const archived = new Set(archivedKeys);
   const running = new Set(runningChatIds);
@@ -105,7 +145,7 @@ export function ChatList({
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain">
       <div className="min-w-0 space-y-3 px-2 py-1.5">
-        {groups.map((group) => (
+        {limitedGroups.map((group) => (
           <section key={group.label} aria-label={group.label}>
             <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
               {group.label}
@@ -228,10 +268,25 @@ export function ChatList({
             </ul>
           </section>
         ))}
+        {hiddenSessionCount > 0 ? (
+          <div className="px-2 pb-2 pt-1">
+            <button
+              type="button"
+              onClick={() =>
+                setVisibleLimit((limit) =>
+                  Math.min(totalSessionCount, limit + VISIBLE_SESSIONS_INCREMENT),
+                )
+              }
+              className="h-8 w-full rounded-full text-[12px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/65 hover:text-sidebar-foreground"
+            >
+              {t("chat.showMore", { count: hiddenSessionCount })}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
-}
+});
 
 function SessionActivityIndicator({
   state,
@@ -364,6 +419,45 @@ function groupSessions(
     });
   }
   return groups;
+}
+
+function limitGroups(
+  groups: Array<{ label: string; sessions: ChatSummary[] }>,
+  limit: number,
+  activeKey: string | null,
+): Array<{ label: string; sessions: ChatSummary[] }> {
+  let remaining = Math.max(0, limit);
+  let activeVisible = !activeKey;
+  const out: Array<{ label: string; sessions: ChatSummary[] }> = [];
+
+  for (const group of groups) {
+    const visible = remaining > 0
+      ? group.sessions.slice(0, remaining)
+      : [];
+    remaining -= visible.length;
+    if (activeKey && visible.some((session) => session.key === activeKey)) {
+      activeVisible = true;
+    }
+    if (visible.length > 0) {
+      out.push({ label: group.label, sessions: visible });
+    }
+  }
+
+  if (activeVisible || !activeKey) return out;
+
+  for (const group of groups) {
+    const active = group.sessions.find((session) => session.key === activeKey);
+    if (!active) continue;
+    const existing = out.find((item) => item.label === group.label);
+    if (existing) {
+      existing.sessions = [...existing.sessions, active];
+    } else {
+      out.push({ label: group.label, sessions: [active] });
+    }
+    return out;
+  }
+
+  return out;
 }
 
 function sortSessions(

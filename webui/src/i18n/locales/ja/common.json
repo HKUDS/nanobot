@@ -224,6 +224,7 @@
     "fallbackTitle": "チャット {{id}}",
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
+    "showMore": "さらに {{count}} 件表示",
     "actions": "「{{title}}」のチャット操作",
     "activity": {
       "running": "Agent running",

@@ -224,6 +224,7 @@
     "fallbackTitle": "Discussion {{id}}",
     "loading": "Chargement…",
     "noSessions": "Aucune session pour le moment.",
+    "showMore": "Afficher {{count}} de plus",
     "actions": "Actions de la discussion {{title}}",
     "activity": {
       "running": "Agent running",

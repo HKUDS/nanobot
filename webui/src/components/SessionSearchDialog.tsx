@@ -37,13 +37,16 @@ export function SessionSearchDialog({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const results = useMemo(() => {
+  const sessionResults = useMemo(() => {
+    if (!open) return [];
     if (!normalizedQuery) return sessions;
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
     return sessions.filter((session) =>
       sessionMatchesTerms(session, terms, titleOverrides[session.key]),
     );
-  }, [normalizedQuery, sessions, titleOverrides]);
+  }, [normalizedQuery, open, sessions, titleOverrides]);
+  const itemCount = sessionResults.length;
+  const shortcutLabel = useMemo(getSearchShortcutLabel, []);
 
   useEffect(() => {
     if (!open) return;
@@ -58,9 +61,9 @@ export function SessionSearchDialog({
 
   useEffect(() => {
     setHighlightedIndex((index) =>
-      results.length === 0 ? 0 : Math.min(index, results.length - 1),
+      itemCount === 0 ? 0 : Math.min(index, itemCount - 1),
     );
-  }, [results.length]);
+  }, [itemCount]);
 
   const handleSelect = (key: string) => {
     onOpenChange(false);
@@ -71,17 +74,19 @@ export function SessionSearchDialog({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((index) =>
-        results.length === 0 ? 0 : Math.min(index + 1, results.length - 1),
+        itemCount === 0 ? 0 : (index + 1) % itemCount,
       );
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setHighlightedIndex((index) => Math.max(index - 1, 0));
+      setHighlightedIndex((index) =>
+        itemCount === 0 ? 0 : (index - 1 + itemCount) % itemCount,
+      );
       return;
     }
     if (event.key === "Enter") {
-      const highlighted = results[highlightedIndex];
+      const highlighted = sessionResults[highlightedIndex];
       if (!highlighted) return;
       event.preventDefault();
       handleSelect(highlighted.key);
@@ -125,70 +130,75 @@ export function SessionSearchDialog({
             aria-label={t("sidebar.searchAria")}
             className="h-full min-w-0 flex-1 bg-transparent text-[15px] font-medium text-foreground outline-none placeholder:text-muted-foreground/75"
           />
+          <kbd className="hidden h-6 shrink-0 items-center rounded-md border border-border/70 bg-muted/60 px-2 text-[11px] font-medium text-muted-foreground sm:inline-flex">
+            {shortcutLabel}
+          </kbd>
         </div>
 
         <div className="min-h-0 overflow-y-auto overscroll-contain p-2">
-          <div className="px-2 pb-1.5 pt-1 text-[12px] font-medium text-muted-foreground/70">
-            {sectionLabel}
-          </div>
+          <section>
+            <div className="px-2 pb-1.5 pt-1 text-[12px] font-medium text-muted-foreground/70">
+              {sectionLabel}
+            </div>
 
-          {loading && sessions.length === 0 ? (
-            <div className="px-3 py-7 text-[13px] text-muted-foreground">
-              {t("chat.loading")}
-            </div>
-          ) : results.length === 0 ? (
-            <div className="px-3 py-7 text-[13px] text-muted-foreground">
-              {emptyLabel}
-            </div>
-          ) : (
-            <ul className="space-y-1">
-              {results.map((session, index) => {
-                const title = titleOverrides[session.key]?.trim() ||
-                  session.title?.trim() ||
-                  deriveTitle(session.preview, t("chat.newChat"));
-                const preview = session.preview.trim();
-                const showPreview =
-                  preview.length > 0 &&
-                  preview.toLowerCase() !== title.trim().toLowerCase();
-                const highlighted = index === highlightedIndex;
-                const active = session.key === activeKey;
-                return (
-                  <li key={session.key}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(session.key)}
-                      onMouseEnter={() => setHighlightedIndex(index)}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "flex min-h-12 w-full min-w-0 rounded-xl px-3 py-2.5 text-left transition-colors",
-                        highlighted
-                          ? "bg-accent text-accent-foreground"
-                          : "text-popover-foreground hover:bg-accent/75 hover:text-accent-foreground",
-                      )}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-medium leading-5">
-                          {title}
-                        </span>
-                        {showPreview ? (
-                          <span
-                            className={cn(
-                              "block truncate text-[12px] leading-4",
-                              highlighted
-                                ? "text-accent-foreground/70"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {preview}
+            {loading && sessions.length === 0 ? (
+              <div className="px-3 py-7 text-[13px] text-muted-foreground">
+                {t("chat.loading")}
+              </div>
+            ) : sessionResults.length === 0 ? (
+              <div className="px-3 py-7 text-[13px] text-muted-foreground">
+                {emptyLabel}
+              </div>
+            ) : (
+              <ul className="space-y-1">
+                {sessionResults.map((session, index) => {
+                  const title = titleOverrides[session.key]?.trim() ||
+                    session.title?.trim() ||
+                    deriveTitle(session.preview, t("chat.newChat"));
+                  const preview = session.preview.trim();
+                  const showPreview =
+                    preview.length > 0 &&
+                    preview.toLowerCase() !== title.trim().toLowerCase();
+                  const highlighted = index === highlightedIndex;
+                  const active = session.key === activeKey;
+                  return (
+                    <li key={session.key}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelect(session.key)}
+                        onMouseEnter={() => setHighlightedIndex(index)}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex min-h-12 w-full min-w-0 rounded-xl px-3 py-2.5 text-left transition-colors",
+                          highlighted
+                            ? "bg-accent text-accent-foreground"
+                            : "text-popover-foreground hover:bg-accent/75 hover:text-accent-foreground",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-medium leading-5">
+                            {title}
                           </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                          {showPreview ? (
+                            <span
+                              className={cn(
+                                "block truncate text-[12px] leading-4",
+                                highlighted
+                                  ? "text-accent-foreground/70"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {preview}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
         </div>
       </DialogContent>
     </Dialog>
@@ -210,4 +220,14 @@ function sessionMatchesTerms(
     .toLowerCase();
 
   return terms.every((term) => haystack.includes(term));
+}
+
+function getSearchShortcutLabel() {
+  if (typeof navigator === "undefined") return "Ctrl K";
+  const platform = navigator.platform.toLowerCase();
+  const apple =
+    platform.includes("mac") ||
+    platform.includes("iphone") ||
+    platform.includes("ipad");
+  return apple ? "⌘K" : "Ctrl K";
 }

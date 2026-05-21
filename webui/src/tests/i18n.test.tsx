@@ -78,6 +78,7 @@ describe("webui i18n", () => {
       const common = resource.common;
       expect(common.app.system.restarting).toBeTruthy();
       expect(common.sidebar.settings).toBeTruthy();
+      expect(common.chat.showMore).toBeTruthy();
       expect(common.settings.sidebar.title).toBeTruthy();
       expect(common.settings.backToChat).toBeTruthy();
       for (const key of SETTINGS_NAV_KEYS) {

@@ -565,6 +565,21 @@ function Shell({
     setSessionSearchOpen(true);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const plainCommandK =
+        (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
+      if (!plainCommandK) return;
+      if (event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      onOpenSessionSearch();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onOpenSessionSearch]);
+
   const onSelectSearchResult = useCallback(
     (key: string) => {
       setSessionSearchOpen(false);
@@ -776,17 +791,15 @@ function Shell({
           </Sheet>
         ) : null}
 
-        {showMainSidebar ? (
-          <SessionSearchDialog
-            open={sessionSearchOpen}
-            onOpenChange={setSessionSearchOpen}
-            sessions={sessions}
-            activeKey={activeKey}
-            loading={loading}
-            titleOverrides={sidebarState.title_overrides}
-            onSelect={onSelectSearchResult}
-          />
-        ) : null}
+        <SessionSearchDialog
+          open={sessionSearchOpen}
+          onOpenChange={setSessionSearchOpen}
+          sessions={sessions}
+          activeKey={activeKey}
+          loading={loading}
+          titleOverrides={sidebarState.title_overrides}
+          onSelect={onSelectSearchResult}
+        />
 
         <main className="relative flex h-full min-w-0 flex-1 flex-col">
           <div

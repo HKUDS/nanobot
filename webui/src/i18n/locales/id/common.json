@@ -224,6 +224,7 @@
     "fallbackTitle": "Obrolan {{id}}",
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
+    "showMore": "Tampilkan {{count}} lagi",
     "actions": "Aksi obrolan untuk {{title}}",
     "activity": {
       "running": "Agent running",

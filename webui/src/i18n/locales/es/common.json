@@ -224,6 +224,7 @@
     "fallbackTitle": "Chat {{id}}",
     "loading": "Cargando…",
     "noSessions": "Todavía no hay sesiones.",
+    "showMore": "Mostrar {{count}} más",
     "actions": "Acciones del chat {{title}}",
     "activity": {
       "running": "Agent running",

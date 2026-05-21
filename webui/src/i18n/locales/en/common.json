@@ -271,6 +271,7 @@
     "fallbackTitle": "Chat {{id}}",
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
+    "showMore": "Show {{count}} more",
     "actions": "Chat actions for {{title}}",
     "activity": {
       "running": "Agent running",

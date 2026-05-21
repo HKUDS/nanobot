@@ -259,6 +259,7 @@
     "fallbackTitle": "对话 {{id}}",
     "loading": "加载中…",
     "noSessions": "还没有会话。",
+    "showMore": "再显示 {{count}} 个",
     "actions": "“{{title}}” 的会话操作",
     "activity": {
       "running": "Agent 正在运行",
