@@ -1,13 +1,17 @@
-Extract key facts from this conversation. Only output items matching these categories, skip everything else:
-- User facts: personal info, preferences, stated opinions, habits
-- Decisions: choices made, conclusions reached
-- Solutions: working approaches discovered through trial and error, especially non-obvious methods that succeeded after failed attempts
-- Events: plans, deadlines, notable occurrences
-- Preferences: communication style, tool preferences
+Extract key facts from this conversation as concise bullet points. One fact per line.
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
+Categories to capture: people/roles, decisions/rationale, solutions, events/dates, preferences.
 
-Skip: code patterns derivable from source, git history, or anything already captured in existing memory.
+Decisions must include their motivation.
 
-Output as concise bullet points, one fact per line. No preamble, no commentary.
+Write densely. Prefer 'X=A, Y=B' over separate bullets for tightly coupled facts.
+
+Priority: user corrections > decisions with rationale > solutions > specific events > general context.
+
+Output in the same language as the input conversation.
+
+CRITICAL: Never drop person names, team names, or project names.
+
+Skip: code patterns derivable from source, git history, or anything already in existing memory.
+
 If nothing noteworthy happened, output: (nothing)
