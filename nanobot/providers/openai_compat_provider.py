@@ -633,6 +633,14 @@ class OpenAICompatProvider(LLMProvider):
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
 
+            # Moonshot rejects requests that carry both 'reasoning_effort'
+            # and the native 'thinking' param.  We already expressed the
+            # user's intent via the provider-native shape, so drop the
+            # redundant wire-level kwarg.  Only kimi models need this —
+            # Xiaomi's API accepts both params.
+            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+                kwargs.pop("reasoning_effort", None)
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
