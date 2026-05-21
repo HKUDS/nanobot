@@ -32,7 +32,7 @@ def _mimo_spec():
 
 
 def _openrouter_spec():
-    """Return the registered OpenRouter ProviderSpec (no thinking_style)."""
+    """Return the registered OpenRouter ProviderSpec."""
     specs = {s.name: s for s in PROVIDERS}
     return specs["openrouter"]
 
@@ -75,6 +75,13 @@ def test_xiaomi_mimo_uses_thinking_type_style():
     assert spec.thinking_style == "thinking_type"
     assert spec.backend == "openai_compat"
     assert spec.default_api_base == "https://api.xiaomimimo.com/v1"
+
+
+def test_openrouter_declares_gateway_reasoning_style():
+    """OpenRouter uses its own reasoning.effort field for routed thinking models."""
+    spec = _openrouter_spec()
+    assert spec.thinking_style == ""
+    assert spec.gateway_reasoning_style == "reasoning_effort"
 
 
 # ---------------------------------------------------------------------------

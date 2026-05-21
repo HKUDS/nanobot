@@ -71,6 +71,11 @@ class ProviderSpec:
     # "reasoning_split" — {"reasoning_split": true/false}  (MiniMax)
     thinking_style: str = ""
 
+    # Gateway-native reasoning control to pair with model-level thinking styles.
+    # "reasoning_effort" — {"reasoning": {"effort": <none|minimal|...>}}
+    #                      (OpenRouter)
+    gateway_reasoning_style: str = ""
+
     # When True, treat the "reasoning" response field as formal content
     # when "content" is empty.  Only set this for providers (e.g. StepFun)
     # whose API returns the actual answer in "reasoning" instead of "content".
@@ -142,6 +147,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="openrouter",
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
+        gateway_reasoning_style="reasoning_effort",
     ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
