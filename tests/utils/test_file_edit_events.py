@@ -5,12 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nanobot.utils.file_edit_events import (
+    StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_start_event,
     line_diff_stats,
     prepare_file_edit_tracker,
     read_file_snapshot,
-    StreamingFileEditTracker,
 )
 
 
@@ -304,6 +304,43 @@ def test_streaming_tracker_applies_canonical_call_id_to_final_tool(tmp_path: Pat
         )
         tracker.apply_final_call_ids([final])
         assert final.id == "idx:0"
+
+    asyncio.run(run())
+
+
+def test_streaming_tracker_does_not_restore_duplicate_canonical_ids(tmp_path: Path) -> None:
+    events: list[dict] = []
+
+    async def emit(batch: list[dict]) -> None:
+        events.extend(batch)
+
+    async def run() -> None:
+        tracker = StreamingFileEditTracker(workspace=tmp_path, tools={}, emit=emit)
+        await tracker.update({
+            "index": 0,
+            "call_id": "call_dup",
+            "name": "write_file",
+            "arguments_delta": '{"path":"a.md","content":"one\\n"}',
+        })
+        await tracker.update({
+            "index": 1,
+            "call_id": "call_dup",
+            "name": "write_file",
+            "arguments_delta": '{"path":"b.md","content":"two\\n"}',
+        })
+        final_a = SimpleNamespace(
+            id="call_dup",
+            name="write_file",
+            arguments={"path": "a.md", "content": "one\n"},
+        )
+        final_b = SimpleNamespace(
+            id="call_unique",
+            name="write_file",
+            arguments={"path": "b.md", "content": "two\n"},
+        )
+        tracker.apply_final_call_ids([final_a, final_b])
+        assert final_a.id == "call_dup"
+        assert final_b.id == "call_unique"
 
     asyncio.run(run())
 
