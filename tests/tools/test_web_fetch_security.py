@@ -6,10 +6,14 @@ import json
 import socket
 from unittest.mock import patch
 
+import httpx
 import pytest
 
+from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import WebFetchConfig
+
+_REAL_GETADDRINFO = socket.getaddrinfo
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -54,6 +58,7 @@ async def test_web_fetch_result_contains_untrusted_flag():
         url = "https://example.com/page"
         text = fake_html
         headers = {"content-type": "text/html"}
+        is_redirect = False
         def raise_for_status(self): pass
         def json(self): return {}
 
@@ -95,6 +100,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         url = "https://example.com/page"
         text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
         headers = {"content-type": "text/html"}
+        is_redirect = False
 
         def raise_for_status(self):
             return None
@@ -113,7 +119,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
             seen_headers.append(headers or {})
             return FakeStreamResponse()
 
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, **kwargs):
             seen_headers.append(headers or {})
             return FakeResponse()
 
@@ -133,43 +139,83 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
-    tool = WebFetchTool()
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
 
-    class FakeStreamResponse:
-        headers = {"content-type": "image/png"}
-        url = "http://127.0.0.1/secret.png"
-        content = b"\x89PNG\r\n\x1a\n"
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://example.com/image.png":
+            return httpx.Response(
+                302,
+                headers={"Location": "http://127.0.0.1/secret.png"},
+                request=request,
+            )
+        if str(request.url) == "http://127.0.0.1/secret.png":
+            return httpx.Response(
+                200,
+                headers={"content-type": "image/png"},
+                content=b"\x89PNG\r\n\x1a\n",
+                request=request,
+            )
+        return httpx.Response(404, request=request)
 
-        async def __aenter__(self):
-            return self
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def aread(self):
-            return self.content
-
-        def raise_for_status(self):
-            return None
-
-    class FakeClient:
+    class TransportAsyncClient(real_async_client):
         def __init__(self, *args, **kwargs):
-            pass
+            kwargs.pop("proxy", None)
+            super().__init__(*args, transport=transport, **kwargs)
 
-        async def __aenter__(self):
-            return self
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
+    def resolve_public_start_only(hostname, port, family=0, type_=0):
+        if hostname == "example.com":
+            return _fake_resolve_public(hostname, port, family, type_)
+        return _REAL_GETADDRINFO(hostname, port, family, type_)
 
-        def stream(self, method, url, headers=None):
-            return FakeStreamResponse()
-
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
-
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+    with patch("nanobot.security.network.socket.getaddrinfo", resolve_public_start_only):
         result = await tool.execute(url="https://example.com/image.png")
 
     data = json.loads(result)
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if str(request.url) == "https://attacker.example/start":
+            return httpx.Response(
+                302,
+                headers={"Location": "http://127.0.0.1:8765/metadata"},
+                request=request,
+            )
+        if str(request.url) == "http://127.0.0.1:8765/metadata":
+            return httpx.Response(200, content=b"internal secret", request=request)
+        return httpx.Response(404, request=request)
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    class TransportAsyncClient(real_async_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(web_module.httpx, "AsyncClient", TransportAsyncClient)
+
+    def resolve_public_start_only(hostname, port, family=0, type_=0):
+        if hostname == "attacker.example":
+            return _fake_resolve_public(hostname, port, family, type_)
+        return _REAL_GETADDRINFO(hostname, port, family, type_)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", resolve_public_start_only):
+        result = await tool.execute(url="https://attacker.example/start")
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "redirect blocked" in data["error"].lower()
+    assert requested == ["https://attacker.example/start"]
