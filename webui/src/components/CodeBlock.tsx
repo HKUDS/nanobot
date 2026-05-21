@@ -1,44 +1,75 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  oneDark,
-  oneLight,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
 
+import { useThemeValue } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 
 interface CodeBlockProps {
   language?: string;
   code: string;
   className?: string;
+  highlight?: boolean;
 }
 
-/** Read dark mode straight from the DOM — stays in sync with Tailwind's `dark:`. */
-function useIsDark() {
-  const [isDark, setIsDark] = useState(() =>
-    typeof document !== "undefined"
-      ? document.documentElement.classList.contains("dark")
-      : true,
+interface HighlightedCodeProps {
+  language?: string;
+  code: string;
+  isDark: boolean;
+}
+
+const LazyHighlightedCode = lazy(async () => {
+  const [
+    { default: SyntaxHighlighter },
+    { default: oneDark },
+    { default: oneLight },
+  ] = await Promise.all([
+    import("react-syntax-highlighter/dist/esm/prism-async-light"),
+    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
+    import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
+  ]);
+
+  return {
+    default({ language, code, isDark }: HighlightedCodeProps) {
+      return (
+        <SyntaxHighlighter
+          language={language}
+          style={isDark ? oneDark : oneLight}
+          customStyle={{
+            margin: 0,
+            padding: "1rem",
+            fontSize: "0.875rem",
+            lineHeight: 1.6,
+          }}
+          PreTag="pre"
+          wrapLongLines
+        >
+          {code}
+        </SyntaxHighlighter>
+      );
+    },
+  };
+});
+
+function PlainCodeFallback({ code }: { code: string }) {
+  return (
+    <pre
+      className="m-0 overflow-x-auto whitespace-pre-wrap p-4 font-mono text-sm leading-[1.6]"
+    >
+      <code>{code}</code>
+    </pre>
   );
-
-  useEffect(() => {
-    const el = document.documentElement;
-    const observer = new MutationObserver(() => {
-      setIsDark(el.classList.contains("dark"));
-    });
-    observer.observe(el, { attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-
-  return isDark;
 }
 
-export function CodeBlock({ language, code, className }: CodeBlockProps) {
+export function CodeBlock({
+  language,
+  code,
+  className,
+  highlight = true,
+}: CodeBlockProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
-  const isDark = useIsDark();
+  const isDark = useThemeValue() === "dark";
 
   const onCopy = useCallback(() => {
     if (!navigator.clipboard) return;
@@ -86,20 +117,13 @@ export function CodeBlock({ language, code, className }: CodeBlockProps) {
           <span>{copied ? t("code.copied") : t("code.copy")}</span>
         </button>
       </div>
-      <SyntaxHighlighter
-        language={language}
-        style={isDark ? oneDark : oneLight}
-        customStyle={{
-          margin: 0,
-          padding: "1rem",
-          fontSize: "0.875rem",
-          lineHeight: 1.6,
-        }}
-        PreTag="pre"
-        wrapLongLines
-      >
-        {code}
-      </SyntaxHighlighter>
+      {highlight ? (
+        <Suspense fallback={<PlainCodeFallback code={code} />}>
+          <LazyHighlightedCode language={language} code={code} isDark={isDark} />
+        </Suspense>
+      ) : (
+        <PlainCodeFallback code={code} />
+      )}
     </div>
   );
 }

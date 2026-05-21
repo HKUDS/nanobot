@@ -9,6 +9,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import (
     build_help_text,
     builtin_command_palette,
+    cmd_goal,
     cmd_model,
     register_builtin_commands,
 )
@@ -52,6 +53,13 @@ def _make_loop(tmp_path) -> AgentLoop:
 def _ctx(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
+
+
+def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
+    return CommandContext(
+        msg=msg, session=MagicMock(), key=msg.session_key, raw=raw, args=args, loop=loop,
+    )
 
 
 @pytest.mark.asyncio
@@ -136,3 +144,49 @@ def test_model_command_in_help_and_palette() -> None:
 
     assert any(item["command"] == "/model" and item["arg_hint"] == "[preset]" for item in palette)
     assert "/model [preset]" in build_help_text()
+
+
+@pytest.mark.asyncio
+async def test_goal_command_shows_usage_without_args(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    out = await cmd_goal(_ctx(loop, "/goal"))
+    assert out is not None
+    assert "Usage: /goal" in out.content
+
+
+@pytest.mark.asyncio
+async def test_goal_command_rejects_mid_turn_without_session(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    out = await cmd_goal(_ctx(loop, "/goal do work", args="do work"))
+    assert out is not None
+    assert "/stop" in out.content
+
+
+@pytest.mark.asyncio
+async def test_goal_command_rewrites_to_agent_prompt(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
+    out = await cmd_goal(ctx)
+    assert out is None
+    assert "audit the repo" in ctx.msg.content
+    assert "long_task" in ctx.msg.content
+    assert ctx.msg.metadata.get("original_command") == "/goal"
+    assert ctx.msg.metadata.get("original_content") == "/goal audit the repo"
+    assert isinstance(ctx.msg.metadata.get("goal_started_at"), int | float)
+
+
+@pytest.mark.asyncio
+async def test_goal_command_registered_on_router(tmp_path) -> None:
+    router = CommandRouter()
+    register_builtin_commands(router)
+    loop = _make_loop(tmp_path)
+    ctx = _ctx_session(loop, "/goal ship it", args="ship it")
+    out = await router.dispatch(ctx)
+    assert out is None
+    assert "ship it" in ctx.msg.content
+
+
+def test_goal_command_in_help_and_palette() -> None:
+    palette = builtin_command_palette()
+    assert any(item["command"] == "/goal" and item["arg_hint"] == "<goal>" for item in palette)
+    assert "/goal <goal>" in build_help_text()

@@ -1,12 +1,12 @@
 """Message tool for sending messages to users."""
 
-import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
@@ -24,13 +24,15 @@ from nanobot.config.paths import get_workspace_path
         ),
         chat_id=StringSchema(
             "Optional target chat/user ID for cross-channel/proactive delivery. "
+            "On WebSocket/WebUI turns: omit chat_id to use the server's conversation id "
+            "(never pass client_id values like anon-…). "
             "Do not set this to the current runtime chat for a normal reply."
         ),
         media=ArraySchema(
             StringSchema(""),
             description=(
-                "Optional list of existing file paths to attach for proactive or cross-channel delivery. "
-                "Do not use this to resend generate_image outputs in the current chat."
+                "Optional list of existing file paths to attach. "
+                "Use artifact paths returned by generate_image here when delivering generated images."
             ),
         ),
         buttons=ArraySchema(
@@ -50,11 +52,19 @@ class MessageTool(Tool, ContextAware):
         default_chat_id: str = "",
         default_message_id: str | None = None,
         workspace: str | Path | None = None,
+        restrict_to_workspace: bool = False,
     ):
         self._send_callback = send_callback
-        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
-        self._default_channel: ContextVar[str] = ContextVar("message_default_channel", default=default_channel)
-        self._default_chat_id: ContextVar[str] = ContextVar("message_default_chat_id", default=default_chat_id)
+        self._workspace = (
+            Path(workspace).expanduser() if workspace is not None else get_workspace_path()
+        )
+        self._restrict_to_workspace = restrict_to_workspace
+        self._default_channel: ContextVar[str] = ContextVar(
+            "message_default_channel", default=default_channel
+        )
+        self._default_chat_id: ContextVar[str] = ContextVar(
+            "message_default_chat_id", default=default_chat_id
+        )
         self._default_message_id: ContextVar[str | None] = ContextVar(
             "message_default_message_id",
             default=default_message_id,
@@ -64,6 +74,10 @@ class MessageTool(Tool, ContextAware):
             default={},
         )
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
+        self._turn_delivered_media_var: ContextVar[tuple[str, ...]] = ContextVar(
+            "message_turn_delivered_media",
+            default=(),
+        )
         self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
             "message_record_channel_delivery",
             default=False,
@@ -72,7 +86,11 @@ class MessageTool(Tool, ContextAware):
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
-        return cls(send_callback=send_callback, workspace=ctx.workspace)
+        return cls(
+            send_callback=send_callback,
+            workspace=ctx.workspace,
+            restrict_to_workspace=ctx.config.restrict_to_workspace,
+        )
 
     def set_context(self, ctx: RequestContext) -> None:
         """Set the current message context."""
@@ -88,6 +106,11 @@ class MessageTool(Tool, ContextAware):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+        self._turn_delivered_media_var.set(())
+
+    def turn_delivered_media_paths(self) -> list[str]:
+        """Absolute paths attached via this tool to the active chat in the current turn."""
+        return list(self._turn_delivered_media_var.get())
 
     def set_record_channel_delivery(self, active: bool):
         """Mark tool-sent messages as proactive channel deliveries."""
@@ -117,11 +140,25 @@ class MessageTool(Tool, ContextAware):
             "Do not use this for the normal reply in the current chat: answer naturally instead. "
             "If channel/chat_id would target the current runtime conversation, do not call this tool "
             "unless the user explicitly asked you to proactively send an existing file attachment. "
-            "When generate_image creates images in the current chat, the final assistant reply "
-            "automatically attaches them; do not call message just to announce or resend them. "
+            "When generate_image creates images in the current chat, use the message tool "
+            "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
+
+    def _resolve_media(self, media: list[str]) -> list[str]:
+        """Resolve local media attachments and enforce workspace restriction when enabled."""
+        resolved: list[str] = []
+        allowed_dir = self._workspace if self._restrict_to_workspace else None
+        for p in media:
+            if p.startswith(("http://", "https://")):
+                resolved.append(p)
+            elif not self._restrict_to_workspace:
+                path = Path(p).expanduser()
+                resolved.append(p if path.is_absolute() else str(self._workspace / path))
+            else:
+                resolved.append(str(resolve_workspace_path(p, self._workspace, allowed_dir)))
+        return resolved
 
     async def execute(
         self,
@@ -131,9 +168,10 @@ class MessageTool(Tool, ContextAware):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
 
         if buttons is not None:
@@ -145,6 +183,20 @@ class MessageTool(Tool, ContextAware):
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
+        explicit_chat_id = chat_id
+        if (
+            default_channel == "websocket"
+            and channel == "websocket"
+            and explicit_chat_id is not None
+            and str(explicit_chat_id).strip() != ""
+            and str(explicit_chat_id).strip() != str(default_chat_id).strip()
+        ):
+            return (
+                "Error: chat_id does not match the active WebSocket conversation. "
+                "Omit chat_id (and usually channel) so delivery uses the current "
+                "conversation id from context — WebSocket client_id strings "
+                "(e.g. anon-…) are not chat ids."
+            )
         chat_id = chat_id or default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
@@ -164,13 +216,10 @@ class MessageTool(Tool, ContextAware):
             return "Error: Message sending not configured"
 
         if media:
-            resolved = []
-            for p in media:
-                if p.startswith(("http://", "https://")) or os.path.isabs(p):
-                    resolved.append(p)
-                else:
-                    resolved.append(str(self._workspace / p))
-            media = resolved
+            try:
+                media = self._resolve_media(media)
+            except (OSError, PermissionError, ValueError) as e:
+                return f"Error: media path is not allowed: {str(e)}"
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
@@ -191,6 +240,9 @@ class MessageTool(Tool, ContextAware):
             await self._send_callback(msg)
             if channel == default_channel and chat_id == default_chat_id:
                 self._sent_in_turn = True
+                if media:
+                    prev = self._turn_delivered_media_var.get()
+                    self._turn_delivered_media_var.set(prev + tuple(str(p) for p in media))
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"

@@ -88,6 +88,48 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
   });
 
+  it("shows turn run timer when runStartedAt is set", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date((1_000 + 125) * 1000));
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={1000}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/Running/);
+    expect(status).toHaveTextContent(/2:05/);
+
+    vi.useRealTimers();
+  });
+
+  it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {
+    const longObjective =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789GoalTail";
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        goalState={{
+          active: true,
+          objective: longObjective,
+          ui_summary: "Short summary for strip",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show full goal" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Goal" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Short summary for strip");
+    expect(dialog).toHaveTextContent(longObjective);
+  });
+
   it("opens a slash command palette and inserts the selected command", () => {
     const onSend = vi.fn();
     render(

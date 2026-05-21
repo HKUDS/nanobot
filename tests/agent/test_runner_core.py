@@ -134,6 +134,50 @@ async def test_runner_times_out_hung_llm_request():
 
 
 @pytest.mark.asyncio
+async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    streamed: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await asyncio.sleep(0.08)
+        await on_content_delta("still ")
+        await asyncio.sleep(0.08)
+        await on_content_delta("alive")
+        return LLMResponse(content="still alive", tool_calls=[])
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    provider.chat_with_retry = AsyncMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class StreamingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+        async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+            streamed.append(delta)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "think for a while"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=StreamingHook(),
+        llm_timeout_s=0.01,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "still alive"
+    assert streamed == ["still ", "alive"]
+    provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

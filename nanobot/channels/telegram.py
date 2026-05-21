@@ -261,11 +261,20 @@ class TelegramChannel(BaseChannel):
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
         BotCommand("history", "Show recent conversation messages"),
+        BotCommand("goal", "Start a sustained objective (long-running task)"),
+        BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
+        BotCommand("model", "Switch runtime model preset"),
         BotCommand("dream", "Run Dream memory consolidation now"),
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("help", "Show available commands"),
     ]
+
+    # Regex for slash commands routed to AgentLoop via ``_forward_command``.
+    # Hyphenated ``dream-*`` commands stay on a separate handler (below).
+    TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
+        r"^/(?:new|stop|restart|status|dream|history|goal|pairing|model)(?:@\w+)?(?:\s+.*)?$"
+    )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -354,7 +363,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(MessageHandler(filters.Regex(r"^/start(?:@\w+)?$"), self._on_start))
         self._app.add_handler(
             MessageHandler(
-                filters.Regex(r"^/(new|stop|restart|status|dream)(?:@\w+)?(?:\s+.*)?$"),
+                filters.Regex(TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE),
                 self._forward_command,
             )
         )
@@ -1011,6 +1020,7 @@ class TelegramChannel(BaseChannel):
             content=content,
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
+            is_dm=message.chat.type == "private",
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

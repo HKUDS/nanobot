@@ -6,8 +6,6 @@ The feature is disabled by default. Enable it in `~/.nanobot/config.json`, confi
 
 ## Quick Setup
 
-OpenRouter example:
-
 ```json
 {
   "providers": {
@@ -19,34 +17,13 @@ OpenRouter example:
     "imageGeneration": {
       "enabled": true,
       "provider": "openrouter",
-      "model": "openai/gpt-5.4-image-2",
-      "defaultAspectRatio": "1:1",
-      "defaultImageSize": "1K"
+      "model": "openai/gpt-5.4-image-2"
     }
   }
 }
 ```
 
-AIHubMix example:
-
-```json
-{
-  "providers": {
-    "aihubmix": {
-      "apiKey": "${AIHUBMIX_API_KEY}"
-    }
-  },
-  "tools": {
-    "imageGeneration": {
-      "enabled": true,
-      "provider": "aihubmix",
-      "model": "gpt-image-2-free",
-      "defaultAspectRatio": "1:1",
-      "defaultImageSize": "1K"
-    }
-  }
-}
-```
+See [Provider Notes](#provider-notes) for AIHubMix, MiniMax, and Gemini configuration examples.
 
 > [!TIP]
 > Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
@@ -69,7 +46,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Currently `openrouter` and `aihubmix` are supported |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini`, `stepfun` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -139,6 +116,110 @@ Configure:
 
 `quality: low` is optional. It can make free image models faster and less likely to time out, but it is not required for correctness.
 
+### MiniMax
+
+MiniMax `image-01` supports text-to-image and reference-image (subject reference) edits. Supported aspect ratios are `1:1`, `16:9`, `4:3`, `3:2`, `2:3`, `3:4`, `9:16`, and `21:9`.
+
+```json
+{
+  "providers": {
+    "minimax": {
+      "apiKey": "${MINIMAX_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "minimax",
+      "model": "image-01",
+      "defaultAspectRatio": "1:1"
+    }
+  }
+}
+```
+
+### Gemini
+
+nanobot supports two Gemini image generation model families via Google's Generative Language API:
+
+| Model | Endpoint | Reference images |
+|-------|----------|-----------------|
+| `imagen-4.0-generate-001` | `:predict` | Not supported by this integration |
+| `gemini-2.5-flash-image` | `:generateContent` | Supported |
+
+For reference-image edits, use a Gemini Flash image model:
+
+```json
+{
+  "providers": {
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-image"
+    }
+  }
+}
+```
+
+Imagen 4 supports the aspect ratios `1:1`, `9:16`, `16:9`, `3:4`, and `4:3`. Unsupported ratios are ignored and the model uses its default. The `defaultImageSize` setting has no effect on Gemini models; sizing is controlled by `defaultAspectRatio` only. Reference images passed with an Imagen model are ignored (with a warning logged).
+
+### StepFun
+
+StepFun (阶跃星辰) `step-image-edit-2` supports text-to-image generation.  The `step-1x-medium` variant additionally supports **style-reference** image edits, where a reference image guides the visual style of the output.
+
+Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`.  Sizes are specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1280x800`, `800x1280`).
+
+```json
+{
+  "providers": {
+    "stepfun": {
+      "apiKey": "${STEPFUN_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "stepfun",
+      "model": "step-image-edit-2"
+    }
+  }
+}
+```
+
+> [!NOTE]
+> The StepFun provider reuses the existing `providers.stepfun` config block (the same one used for StepFun's LLM API).  Set `providers.stepfun.apiKey` once and it is shared between text and image generation.
+>
+> When `step-image-edit-2` is used, `reference_images` are ignored (the model does not support style reference).  Switch to `step-1x-medium` to use reference-image-guided generation.
+
+#### StepPlan (Subscription)
+
+StepPlan is StepFun's subscription tier and uses a different API base URL. The image generation endpoint path is the same — just override `apiBase`:
+
+```json
+{
+  "providers": {
+    "stepfun": {
+      "apiKey": "${STEPFUN_API_KEY}",
+      "apiBase": "https://api.stepfun.com/step_plan/v1"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "stepfun",
+      "model": "step-image-edit-2"
+    }
+  }
+}
+```
+
+`apiBase` takes precedence over the registry default, so with the StepPlan base URL configured, image requests are sent to `https://api.stepfun.com/step_plan/v1/images/generations` — the same path prefix used for LLM calls. The API key is shared with the standard StepFun provider.
+
 ## Artifacts
 
 Generated images are stored under the active nanobot instance's media directory:
@@ -193,7 +274,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter` or `aihubmix` |
+| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, `gemini`, or `stepfun` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |

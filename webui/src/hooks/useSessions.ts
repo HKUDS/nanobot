@@ -5,39 +5,13 @@ import i18n from "@/i18n";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
-  fetchSessionMessages,
+  fetchWebuiThread,
   listSessions,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
-import { toMediaAttachment } from "@/lib/media";
-import { formatToolCallTrace } from "@/lib/tool-traces";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-
-type HistoryMessage = Awaited<ReturnType<typeof fetchSessionMessages>>["messages"][number];
-
-function reasoningFromHistory(message: HistoryMessage): string | undefined {
-  if (typeof message.reasoning_content === "string" && message.reasoning_content.trim()) {
-    return message.reasoning_content;
-  }
-  if (!Array.isArray(message.thinking_blocks)) return undefined;
-  const parts = message.thinking_blocks
-    .map((block) => {
-      if (!block || typeof block !== "object") return "";
-      const thinking = (block as { thinking?: unknown }).thinking;
-      return typeof thinking === "string" ? thinking.trim() : "";
-    })
-    .filter(Boolean);
-  return parts.length > 0 ? parts.join("\n\n") : undefined;
-}
-
-function toolTracesFromHistory(message: HistoryMessage): string[] {
-  if (!Array.isArray(message.tool_calls)) return [];
-  return message.tool_calls
-    .map(formatToolCallTrace)
-    .filter((trace): trace is string => !!trace);
-}
 
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
 export function useSessions(): {
@@ -53,13 +27,25 @@ export function useSessions(): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
+  const optimisticKeysRef = useRef<Set<string>>(new Set());
   tokenRef.current = token;
 
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
       const rows = await listSessions(tokenRef.current);
-      setSessions(rows);
+      const serverKeys = new Set(rows.map((row) => row.key));
+      setSessions((prev) => [
+        ...rows,
+        ...prev.filter(
+          (session) =>
+            optimisticKeysRef.current.has(session.key) &&
+            !serverKeys.has(session.key),
+        ),
+      ]);
+      for (const key of Array.from(optimisticKeysRef.current)) {
+        if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
+      }
       setError(null);
     } catch (e) {
       const msg =
@@ -83,6 +69,7 @@ export function useSessions(): {
   const createChat = useCallback(async (): Promise<string> => {
     const chatId = await client.newChat();
     const key = `websocket:${chatId}`;
+    optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
     // authoritative row once the server persists the session.
     setSessions((prev) => [
@@ -103,6 +90,7 @@ export function useSessions(): {
   const deleteChat = useCallback(
     async (key: string) => {
       await apiDeleteSession(tokenRef.current, key);
+      optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
     },
     [],
@@ -118,8 +106,7 @@ export function useSessionHistory(key: string | null): {
   error: string | null;
   refresh: () => void;
   version: number;
-  /** ``true`` when the last persisted assistant turn has ``tool_calls`` but no
-   *  final text yet — the model was still processing when the page loaded. */
+  /** ``true`` when the replayed transcript ends with a trace row (turn still in flight). */
   hasPendingToolCalls: boolean;
 } {
   const { token } = useClient();
@@ -170,58 +157,26 @@ export function useSessionHistory(key: string | null): {
         });
     (async () => {
       try {
-        const body = await fetchSessionMessages(token, key);
+        const body = await fetchWebuiThread(token, key);
         if (cancelled) return;
-        const ui: UIMessage[] = body.messages.flatMap((m, idx) => {
-          if (m.role !== "user" && m.role !== "assistant") return [];
-          if (typeof m.content !== "string") return [];
-          // Hydrate signed media URLs into generic UI attachments. Image-only
-          // user turns still populate the legacy ``images`` slot so the
-          // existing optimistic-send and lightbox paths remain unchanged.
-          const media =
-            Array.isArray(m.media_urls) && m.media_urls.length > 0
-              ? m.media_urls.map((mu) => toMediaAttachment(mu))
-              : undefined;
-          const images =
-            m.role === "user" && media?.every((item) => item.kind === "image")
-              ? media.map((item) => ({ url: item.url, name: item.name }))
-              : undefined;
-          const row: UIMessage = {
-            id: `hist-${idx}`,
-            role: m.role,
-            content: m.content,
-            createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
-            ...(images ? { images } : {}),
-            ...(media ? { media } : {}),
-            ...(m.role === "assistant" && reasoningFromHistory(m)
-              ? { reasoning: reasoningFromHistory(m), reasoningStreaming: false }
-              : {}),
-          };
-          const traces = m.role === "assistant" ? toolTracesFromHistory(m) : [];
-          if (traces.length === 0) {
-            return row.content.trim() || row.media?.length ? [row] : [];
-          }
-          return [
-            ...(row.content.trim() || row.reasoning || row.media?.length ? [row] : []),
-            {
-              id: `hist-${idx}-tools`,
-              role: "tool" as const,
-              kind: "trace" as const,
-              content: traces[traces.length - 1],
-              traces,
-              createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
-            },
-          ];
-        });
-        // Tool result rows can trail the assistant tool-call row while the turn
-        // is still running, so check the last conversational row.
-        const lastRaw = [...body.messages]
-          .reverse()
-          .find((m) => m.role === "user" || m.role === "assistant");
-        const hasPending =
-          lastRaw?.role === "assistant" &&
-          Array.isArray(lastRaw.tool_calls) &&
-          lastRaw.tool_calls.length > 0;
+        if (!body?.messages?.length) {
+          setState((prev) => ({
+            key,
+            messages: [],
+            loading: false,
+            error: null,
+            hasPendingToolCalls: false,
+            version: prev.key === key ? prev.version + 1 : 1,
+          }));
+          return;
+        }
+        const ui: UIMessage[] = body.messages.map((m, idx) => ({
+          ...m,
+          id: m.id ?? `hist-${idx}`,
+          createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
+        }));
+        const last = ui[ui.length - 1];
+        const hasPending = last?.kind === "trace";
         setState((prev) => ({
           key,
           messages: ui,
@@ -232,8 +187,6 @@ export function useSessionHistory(key: string | null): {
         }));
       } catch (e) {
         if (cancelled) return;
-        // A 404 just means the session hasn't been persisted yet (brand-new
-        // chat, first message not sent). That's a normal state, not an error.
         if (e instanceof ApiError && e.status === 404) {
           setState((prev) => ({
             key,

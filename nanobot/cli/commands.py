@@ -91,6 +91,8 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+_REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
+_REASONING_FLUSH_CHARS = 60
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -242,6 +244,35 @@ def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None, render
         target.print(f"  [dim]↳ {text}[/dim]")
 
 
+class _ReasoningBuffer:
+    def __init__(self) -> None:
+        self._text = ""
+
+    def add(self, text: str) -> str | None:
+        if not text:
+            return None
+        self._text += text
+        if self._should_flush(text):
+            return self.flush()
+        return None
+
+    def flush(self) -> str | None:
+        text = self._text.strip()
+        self._text = ""
+        return text or None
+
+    def clear(self) -> None:
+        self._text = ""
+
+    def _should_flush(self, text: str) -> bool:
+        stripped = text.rstrip()
+        return (
+            "\n" in text
+            or stripped.endswith(_REASONING_SENTENCE_ENDINGS)
+            or len(self._text) >= _REASONING_FLUSH_CHARS
+        )
+
+
 def _print_cli_reasoning(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
     """Print reasoning/thinking content in a distinct style."""
     if not text.strip():
@@ -252,6 +283,16 @@ def _print_cli_reasoning(text: str, thinking: ThinkingSpinner | None, renderer: 
         if renderer:
             renderer.ensure_header()
         target.print(f"[dim italic]✻ {text}[/dim italic]")
+
+
+def _flush_cli_reasoning(
+    reasoning_buffer: _ReasoningBuffer,
+    thinking: ThinkingSpinner | None,
+    renderer: StreamRenderer | None = None,
+) -> None:
+    text = reasoning_buffer.flush()
+    if text:
+        _print_cli_reasoning(text, thinking, renderer)
 
 
 async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
@@ -272,6 +313,7 @@ async def _maybe_print_interactive_progress(
     thinking: ThinkingSpinner | None,
     channels_config: Any,
     renderer: StreamRenderer | None = None,
+    reasoning_buffer: _ReasoningBuffer | None = None,
 ) -> bool:
     metadata = msg.metadata or {}
     if metadata.get("_retry_wait"):
@@ -281,12 +323,24 @@ async def _maybe_print_interactive_progress(
     if not metadata.get("_progress"):
         return False
 
+    reasoning_buffer = reasoning_buffer or _ReasoningBuffer()
+
+    if metadata.get("_reasoning_end"):
+        if channels_config and not channels_config.show_reasoning:
+            reasoning_buffer.clear()
+        else:
+            _flush_cli_reasoning(reasoning_buffer, thinking, renderer)
+        return True
+
     is_tool_hint = metadata.get("_tool_hint", False)
     is_reasoning = metadata.get("_reasoning", False) or metadata.get("_reasoning_delta", False)
     if is_reasoning:
         if channels_config and not channels_config.show_reasoning:
+            reasoning_buffer.clear()
             return True
-        _print_cli_reasoning(msg.content, thinking, renderer)
+        text = reasoning_buffer.add(msg.content)
+        if text:
+            _print_cli_reasoning(text, thinking, renderer)
         return True
     if channels_config and is_tool_hint and not channels_config.send_tool_hints:
         return True
@@ -566,6 +620,7 @@ def serve(
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
+    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -585,10 +640,7 @@ def serve(
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
-            image_generation_provider_configs={
-                "openrouter": runtime_config.providers.openrouter,
-                "aihubmix": runtime_config.providers.aihubmix,
-            },
+            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -668,6 +720,7 @@ def _run_gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     port = port if port is not None else config.gateway.port
@@ -698,10 +751,7 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs={
-            "openrouter": config.providers.openrouter,
-            "aihubmix": config.providers.aihubmix,
-        },
+        image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=load_provider_snapshot,
         runtime_model_publisher=lambda model, preset: publish_runtime_model_update(
             bus,
@@ -829,9 +879,21 @@ def _run_gateway(
 
     cron.on_job = on_cron_job
 
+    def _webui_runtime_model_name() -> str | None:
+        model = getattr(agent, "model", None)
+        if isinstance(model, str):
+            stripped = model.strip()
+            return stripped or None
+        return None
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
-    channels = ChannelManager(config, bus, session_manager=session_manager)
+    channels = ChannelManager(
+        config,
+        bus,
+        session_manager=session_manager,
+        webui_runtime_model_name=_webui_runtime_model_name,
+    )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -902,8 +964,7 @@ def _run_gateway(
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=agent.provider,
-        model=agent.model,
+        llm_runtime=agent.llm_runtime,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
@@ -1057,6 +1118,7 @@ def agent(
 
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
+    from nanobot.providers.image_generation import image_gen_provider_configs
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
@@ -1080,6 +1142,7 @@ def agent(
         agent_loop = AgentLoop.from_config(
             config, bus,
             cron_service=cron,
+            image_generation_provider_configs=image_gen_provider_configs(config),
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -1095,12 +1158,25 @@ def agent(
     _thinking: ThinkingSpinner | None = None
 
     def _make_progress(renderer: StreamRenderer | None = None):
+        reasoning_buffer = _ReasoningBuffer()
+
         async def _cli_progress(content: str, *, tool_hint: bool = False, reasoning: bool = False, **_kwargs: Any) -> None:
             ch = agent_loop.channels_config
+
+            if _kwargs.get("reasoning_end"):
+                if ch and not ch.show_reasoning:
+                    reasoning_buffer.clear()
+                else:
+                    _flush_cli_reasoning(reasoning_buffer, _thinking, renderer)
+                return
+
             if reasoning:
                 if ch and not ch.show_reasoning:
+                    reasoning_buffer.clear()
                     return
-                _print_cli_reasoning(content, _thinking, renderer)
+                text = reasoning_buffer.add(content)
+                if text:
+                    _print_cli_reasoning(text, _thinking, renderer)
                 return
             if ch and tool_hint and not ch.send_tool_hints:
                 return
@@ -1171,6 +1247,7 @@ def agent(
             turn_done.set()
             turn_response: list[tuple[str, dict]] = []
             renderer: StreamRenderer | None = None
+            reasoning_buffer = _ReasoningBuffer()
 
             async def _consume_outbound():
                 while True:
@@ -1196,6 +1273,7 @@ def agent(
                             renderer,
                             agent_loop.channels_config,
                             renderer,
+                            reasoning_buffer,
                         ):
                             continue
 
@@ -1236,6 +1314,7 @@ def agent(
 
                         turn_done.clear()
                         turn_response.clear()
+                        reasoning_buffer.clear()
                         renderer = StreamRenderer(
                             render_markdown=markdown,
                             bot_name=config.agents.defaults.bot_name,

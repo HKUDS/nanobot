@@ -16,19 +16,8 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-import httpx
 import json_repair
 from loguru import logger
-
-if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
-    from langfuse.openai import AsyncOpenAI
-else:
-    if os.environ.get("LANGFUSE_SECRET_KEY"):
-        logger.warning(
-            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
-            "install with `pip install langfuse` to enable tracing"
-        )
-    from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses import (
@@ -39,7 +28,14 @@ from nanobot.providers.openai_responses import (
 )
 
 if TYPE_CHECKING:
+    from openai import AsyncOpenAI as AsyncOpenAIType
+
     from nanobot.providers.registry import ProviderSpec
+
+# Module-level placeholder — set lazily by _ensure_client on first real
+# use, or replaced by tests via ``patch(...)``.  Kept as a plain name so
+# that ``unittest.mock.patch`` can find and replace it.
+AsyncOpenAI: Any = None
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
@@ -58,6 +54,15 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
     "k2.6-code-preview",
+})
+# Thinking-capable MiMo models per Xiaomi docs (see
+# tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
+# because it does not support thinking.
+_MIMO_THINKING_MODELS: frozenset[str] = frozenset({
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "mimo-v2-pro",
+    "mimo-v2-omni",
 })
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 
@@ -86,6 +91,22 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     if name in _KIMI_THINKING_MODELS:
         return True
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
+        return True
+    return False
+
+
+def _is_mimo_thinking_model(model_name: str) -> bool:
+    """Return True if model_name refers to a MiMo thinking-capable model.
+
+    Mirrors _is_kimi_thinking_model: gateway providers (e.g. OpenRouter
+    routing ``xiaomi/mimo-v2.5-pro``) have no ``thinking_style`` on their
+    spec, so the spec-driven branch in _build_kwargs misses them. The
+    model-name path catches those cases.
+    """
+    name = model_name.lower()
+    if name in _MIMO_THINKING_MODELS:
+        return True
+    if "/" in name and name.rsplit("/", 1)[1] in _MIMO_THINKING_MODELS:
         return True
     return False
 
@@ -277,42 +298,75 @@ class OpenAICompatProvider(LLMProvider):
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
         self._effective_base = effective_base
-        default_headers = {"x-session-affinity": uuid.uuid4().hex}
+        self._default_headers = {"x-session-affinity": uuid.uuid4().hex}
         if _uses_openrouter_attribution(spec, effective_base):
-            default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
+            self._default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
         if extra_headers:
-            default_headers.update(extra_headers)
+            self._default_headers.update(extra_headers)
+        self._api_key_for_client = api_key or "no-key"
+        self._is_local = _is_local_endpoint(spec, effective_base)
 
-        # Local model servers (Ollama, llama.cpp, vLLM) often close idle
-        # HTTP connections before the client-side keepalive expires.  When
-        # two LLM calls happen seconds apart (e.g. heartbeat _decide then
-        # process_direct), the second call may grab a now-dead pooled
-        # connection, causing a transient APIConnectionError on every first
-        # attempt.  Disabling keepalive for local endpoints avoids this by
-        # opening a fresh connection for each request, which is cheap on a
-        # LAN.  Cloud providers benefit from keepalive, so we leave the
-        # default pool settings for them.
-        timeout_s = _openai_compat_timeout_s()
-        http_client: httpx.AsyncClient | None = None
-        if _is_local_endpoint(spec, effective_base):
-            http_client = httpx.AsyncClient(
-                limits=httpx.Limits(keepalive_expiry=0),
-                timeout=timeout_s,
-            )
-
-        self._client = AsyncOpenAI(
-            api_key=api_key or "no-key",
-            base_url=effective_base,
-            default_headers=default_headers,
-            max_retries=0,
-            timeout=timeout_s,
-            http_client=http_client,
-        )
+        # Lazy-init: the OpenAI client and its httpx transport are expensive
+        # to create (~700 ms on Windows). Defer until first use.
+        self._client: AsyncOpenAIType | None = None
+        self._client_lock = asyncio.Lock()
 
         # Responses API circuit breaker: skip after repeated failures,
         # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.
         self._responses_failures: dict[str, int] = {}
         self._responses_tripped_at: dict[str, float] = {}
+
+    def _build_client(self) -> None:
+        """Create the OpenAI client using the current module-level AsyncOpenAI."""
+        import httpx
+
+        timeout_s = _openai_compat_timeout_s()
+        http_client: httpx.AsyncClient | None = None
+        if self._is_local:
+            # Local model servers (Ollama, llama.cpp, vLLM) often close idle
+            # HTTP connections before the client-side keepalive expires. When
+            # two LLM calls happen seconds apart (e.g. heartbeat _decide then
+            # process_direct), the second call may grab a now-dead pooled
+            # connection, causing a transient APIConnectionError on every first
+            # attempt. Disabling keepalive for local endpoints avoids this by
+            # opening a fresh connection for each request, which is cheap on a
+            # LAN. Cloud providers benefit from keepalive, so we leave the
+            # default pool settings for them.
+            http_client = httpx.AsyncClient(
+                limits=httpx.Limits(keepalive_expiry=0),
+                timeout=timeout_s,
+            )
+        self._client = AsyncOpenAI(
+            api_key=self._api_key_for_client,
+            base_url=self._effective_base,
+            default_headers=self._default_headers,
+            max_retries=0,
+            timeout=timeout_s,
+            http_client=http_client,
+        )
+
+    async def _ensure_client(self):
+        """Return the shared OpenAI client, creating it on first call."""
+        if self._client is not None:
+            return self._client
+        async with self._client_lock:
+            if self._client is not None:
+                return self._client
+            global AsyncOpenAI
+            if AsyncOpenAI is None:
+                if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+                    from langfuse.openai import AsyncOpenAI as _AsyncOpenAI
+                else:
+                    if os.environ.get("LANGFUSE_SECRET_KEY"):
+                        logger.warning(
+                            "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+                            "install with `pip install langfuse` to enable tracing"
+                        )
+                    from openai import AsyncOpenAI as _AsyncOpenAI
+                AsyncOpenAI = _AsyncOpenAI
+
+            self._build_client()
+            return self._client
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
         """Set environment variables based on provider spec."""
@@ -548,6 +602,19 @@ class OpenAICompatProvider(LLMProvider):
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
 
+        # Model-level thinking injection for MiMo thinking-capable models.
+        # Same shape as Kimi: gateway providers (OpenRouter, etc.) lack the
+        # xiaomi_mimo spec's thinking_style, so the spec-driven branch above
+        # misses them — match by model name to catch "xiaomi/mimo-v2.5-pro"
+        # and friends. (Direct xiaomi_mimo requests are also covered here;
+        # both branches write the same payload, so the dict update is a
+        # safe no-op for already-handled cases.)
+        if reasoning_effort is not None and _is_mimo_thinking_model(model_name):
+            thinking_enabled = semantic_effort not in ("none", "minimal")
+            kwargs.setdefault("extra_body", {}).update(
+                {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            )
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
@@ -559,7 +626,11 @@ class OpenAICompatProvider(LLMProvider):
         explicit_thinking = (
             reasoning_effort is not None
             and semantic_effort not in ("none", "minimal")
-            and ((spec and spec.thinking_style) or _is_kimi_thinking_model(model_name))
+            and (
+                (spec and spec.thinking_style)
+                or _is_kimi_thinking_model(model_name)
+                or _is_mimo_thinking_model(model_name)
+            )
         )
         implicit_deepseek_thinking = (
             spec is not None
@@ -957,6 +1028,21 @@ class OpenAICompatProvider(LLMProvider):
             if fn_prov:
                 buf["fn_prov"] = fn_prov
 
+        def _accum_legacy_function_call(function_call: Any) -> None:
+            """Accumulate legacy ``delta.function_call`` streaming chunks."""
+            if not function_call:
+                return
+            buf = tc_bufs.setdefault(0, {
+                "id": "", "name": "", "arguments": "",
+                "extra_content": None, "prov": None, "fn_prov": None,
+            })
+            fn_name = _get(function_call, "name")
+            if fn_name:
+                buf["name"] = str(fn_name)
+            fn_args = _get(function_call, "arguments")
+            if fn_args:
+                buf["arguments"] += str(fn_args)
+
         for chunk in chunks:
             if isinstance(chunk, str):
                 content_parts.append(chunk)
@@ -987,6 +1073,7 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
+                _accum_legacy_function_call(delta.get("function_call"))
                 usage = cls._extract_usage(chunk_map) or usage
                 continue
 
@@ -1005,8 +1092,19 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning = getattr(delta, "reasoning", None)
                 if reasoning:
                     reasoning_parts.append(reasoning)
-            for tc in (delta.tool_calls or []) if delta else []:
+            for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
+            if delta:
+                _accum_legacy_function_call(getattr(delta, "function_call", None))
+
+        # Some providers (e.g. Zhipu/GLM) reuse the same tool_call id for
+        # parallel tool calls in streaming mode. Deduplicate before building
+        # the response so downstream tool messages don't collide.
+        _seen_tc_ids: set[str] = set()
+        for b in tc_bufs.values():
+            if not b["id"] or b["id"] in _seen_tc_ids:
+                b["id"] = _short_tool_id()
+            _seen_tc_ids.add(b["id"])
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -1122,6 +1220,7 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
+        await self._ensure_client()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1160,7 +1259,10 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        await self._ensure_client()
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             if self._should_use_responses_api(model, reasoning_effort):
@@ -1183,9 +1285,16 @@ class OpenAICompatProvider(LLMProvider):
                             except StopAsyncIteration:
                                 break
 
-                    content, tool_calls, finish_reason, usage, reasoning_content = await consume_sdk_stream(
+                    (
+                        content,
+                        tool_calls,
+                        finish_reason,
+                        usage,
+                        reasoning_content,
+                    ) = await consume_sdk_stream(
                         _timed_stream(),
                         on_content_delta,
+                        on_tool_call_delta=on_tool_call_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
                     return LLMResponse(
@@ -1209,6 +1318,12 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
+            if self._spec and self._spec.name == "zhipu" and tools and on_tool_call_delta:
+                # Z.AI/GLM keeps streaming tool-call arguments behind an
+                # explicit provider flag.  Pass it through the OpenAI SDK's
+                # extra_body escape hatch so the usual delta.tool_calls path
+                # can surface live file-edit progress.
+                kwargs.setdefault("extra_body", {})["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
             stream = await self._client.chat.completions.create(**kwargs)
@@ -1223,10 +1338,41 @@ class OpenAICompatProvider(LLMProvider):
                 except StopAsyncIteration:
                     break
                 chunks.append(chunk)
-                if on_content_delta and chunk.choices:
-                    text = getattr(chunk.choices[0].delta, "content", None)
-                    if text:
-                        await on_content_delta(text)
+                if chunk.choices:
+                    delta_obj = chunk.choices[0].delta
+                    if on_content_delta:
+                        text = getattr(delta_obj, "content", None)
+                        if text:
+                            await on_content_delta(text)
+                    if on_thinking_delta:
+                        reasoning = getattr(delta_obj, "reasoning_content", None) or getattr(
+                            delta_obj, "reasoning", None,
+                        )
+                        r_text = self._extract_text_content(reasoning)
+                        if r_text:
+                            await on_thinking_delta(r_text)
+                    if on_tool_call_delta:
+                        for idx, tool_delta in enumerate(
+                            getattr(delta_obj, "tool_calls", None) or []
+                        ):
+                            fn = _get(tool_delta, "function")
+                            tool_index = _get(tool_delta, "index")
+                            await on_tool_call_delta({
+                                "index": tool_index if tool_index is not None else idx,
+                                "call_id": str(_get(tool_delta, "id") or ""),
+                                "name": str(_get(fn, "name") or "") if fn is not None else "",
+                                "arguments_delta": (
+                                    str(_get(fn, "arguments") or "") if fn is not None else ""
+                                ),
+                            })
+                        function_call = getattr(delta_obj, "function_call", None)
+                        if function_call:
+                            await on_tool_call_delta({
+                                "index": 0,
+                                "call_id": "",
+                                "name": str(_get(function_call, "name") or ""),
+                                "arguments_delta": str(_get(function_call, "arguments") or ""),
+                            })
             return self._parse_chunks(chunks)
         except asyncio.TimeoutError:
             return LLMResponse(

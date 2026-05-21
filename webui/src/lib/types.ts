@@ -40,6 +40,10 @@ export interface UIMessage {
   /** For trace rows: each individual hint line, so consecutive hints can
    * render as a single collapsible group. */
   traces?: string[];
+  /** Activity rows: explicit file edits emitted by edit tools. */
+  fileEdits?: UIFileEdit[];
+  /** Activity rows created during the same agent phase share one collapsible block. */
+  activitySegmentId?: string;
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
@@ -51,6 +55,21 @@ export interface UIMessage {
   /** True while ``reasoning_delta`` frames are still arriving for this turn.
    * Drives the shimmer header on ``ReasoningBubble``. */
   reasoningStreaming?: boolean;
+  /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
+  latencyMs?: number;
+}
+
+/** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
+export interface AgentUIBlob {
+  kind: string;
+  data?: unknown;
+}
+
+/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
+export interface GoalStateWsPayload {
+  active: boolean;
+  ui_summary?: string;
+  objective?: string;
 }
 
 export interface ToolProgressEvent {
@@ -65,6 +84,22 @@ export interface ToolProgressEvent {
   embeds?: unknown[];
 }
 
+export interface UIFileEdit {
+  version?: number;
+  call_id: string;
+  tool: string;
+  path: string;
+  absolute_path?: string;
+  phase?: "start" | "end" | "error" | string;
+  added: number;
+  deleted: number;
+  approximate?: boolean;
+  status: "editing" | "done" | "error";
+  binary?: boolean;
+  error?: string;
+  pending?: boolean;
+}
+
 export interface ChatSummary {
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;
@@ -75,6 +110,30 @@ export interface ChatSummary {
   updatedAt: string | null;
   title?: string;
   preview: string;
+  /** Unix epoch seconds when this session currently has a turn in flight. */
+  runStartedAt?: number | null;
+}
+
+export type SidebarDensity = "comfortable" | "compact";
+export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc";
+
+export interface SidebarViewState {
+  density: SidebarDensity;
+  show_previews: boolean;
+  show_timestamps: boolean;
+  show_archived: boolean;
+  sort: SidebarSortMode;
+}
+
+export interface SidebarStatePayload {
+  schema_version: number;
+  pinned_keys: string[];
+  archived_keys: string[];
+  title_overrides: Record<string, string>;
+  tags_by_key: Record<string, string[]>;
+  collapsed_groups: Record<string, boolean>;
+  view: SidebarViewState;
+  updated_at?: string | null;
 }
 
 export interface BootstrapResponse {
@@ -90,11 +149,33 @@ export interface SettingsPayload {
     provider: string;
     resolved_provider: string | null;
     has_api_key: boolean;
+    model_preset: string | null;
+    max_tokens: number;
+    context_window_tokens: number;
+    temperature: number;
+    reasoning_effort: string | null;
+    timezone: string;
+    bot_name: string;
+    bot_icon: string;
+    tool_hint_max_length: number;
   };
+  model_presets: Array<{
+    name: string;
+    label: string;
+    active: boolean;
+    is_default: boolean;
+    model: string;
+    provider: string;
+    max_tokens: number;
+    context_window_tokens: number;
+    temperature: number;
+    reasoning_effort: string | null;
+  }>;
   providers: Array<{
     name: string;
     label: string;
     configured: boolean;
+    api_key_required?: boolean;
     api_key_hint?: string | null;
     api_base?: string | null;
     default_api_base?: string | null;
@@ -103,21 +184,82 @@ export interface SettingsPayload {
     provider: string;
     api_key_hint?: string | null;
     base_url?: string | null;
+    max_results: number;
+    timeout: number;
     providers: Array<{
       name: string;
       label: string;
       credential: "none" | "api_key" | "base_url";
     }>;
   };
+  web: {
+    enable: boolean;
+    proxy?: string | null;
+    user_agent?: string | null;
+    search: {
+      max_results: number;
+      timeout: number;
+    };
+    fetch: {
+      use_jina_reader: boolean;
+    };
+  };
+  image_generation: {
+    enabled: boolean;
+    provider: string;
+    provider_configured: boolean;
+    model: string;
+    default_aspect_ratio: string;
+    default_image_size: string;
+    max_images_per_turn: number;
+    save_dir: string;
+    providers: Array<{
+      name: string;
+      label: string;
+      configured: boolean;
+      api_key_hint?: string | null;
+      api_base?: string | null;
+      default_api_base?: string | null;
+    }>;
+  };
   runtime: {
     config_path: string;
+    workspace_path: string;
+    gateway_host: string;
+    gateway_port: number;
+    heartbeat: {
+      enabled: boolean;
+      interval_s: number;
+      keep_recent_messages: number;
+    };
+    dream: {
+      schedule: string;
+      max_batch_size: number;
+      max_iterations: number;
+      annotate_line_ages: boolean;
+    };
+    unified_session: boolean;
+  };
+  advanced: {
+    restrict_to_workspace: boolean;
+    ssrf_whitelist_count: number;
+    mcp_server_count: number;
+    exec_enabled: boolean;
+    exec_sandbox?: string | null;
+    exec_path_append_set: boolean;
   };
   requires_restart: boolean;
+  restart_required_sections?: Array<"runtime" | "web" | "image">;
 }
 
 export interface SettingsUpdate {
   model?: string;
   provider?: string;
+  modelPreset?: string | null;
+  timezone?: string;
+  botName?: string;
+  botIcon?: string;
+  toolHintMaxLength?: number;
 }
 
 export interface ProviderSettingsUpdate {
@@ -130,6 +272,18 @@ export interface WebSearchSettingsUpdate {
   provider: string;
   apiKey?: string;
   baseUrl?: string;
+  maxResults?: number;
+  timeout?: number;
+  useJinaReader?: boolean;
+}
+
+export interface ImageGenerationSettingsUpdate {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  defaultAspectRatio: string;
+  defaultImageSize: string;
+  maxImagesPerTurn: number;
 }
 
 export interface SlashCommand {
@@ -162,6 +316,15 @@ export type InboundEvent =
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress" | "reasoning";
+      /** Server-measured turn wall time when this frame finishes an assistant reply. */
+      latency_ms?: number;
+      /** Optional structured payload on progress frames (channel-specific). */
+      agent_ui?: AgentUIBlob;
+    }
+  | {
+      event: "file_edit";
+      chat_id: string;
+      edits: UIFileEdit[];
     }
   | {
       event: "delta";
@@ -190,8 +353,27 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
     }
-  | { event: "turn_end"; chat_id: string }
-  | { event: "session_updated"; chat_id: string }
+  | {
+      event: "turn_end";
+      chat_id: string;
+      latency_ms?: number;
+      /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
+      goal_state?: GoalStateWsPayload;
+    }
+  | {
+      event: "goal_status";
+      chat_id: string;
+      /** Turn executing (user message through agent loop). */
+      status: "running" | "idle";
+      /** Server ``time.time()`` when ``status`` is ``running``. */
+      started_at?: number;
+    }
+  | {
+      event: "goal_state";
+      chat_id: string;
+      goal_state: GoalStateWsPayload;
+    }
+  | { event: "session_updated"; chat_id: string; scope?: "metadata" | "thread" | string }
   | { event: "error"; chat_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
@@ -210,6 +392,14 @@ export interface OutboundMedia {
 export interface OutboundImageGeneration {
   enabled: true;
   aspect_ratio?: string | null;
+}
+
+/** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
+export interface WebuiThreadPersistedPayload {
+  schemaVersion: number;
+  sessionKey?: string;
+  savedAt?: string;
+  messages: UIMessage[];
 }
 
 export type Outbound =

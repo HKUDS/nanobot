@@ -70,6 +70,72 @@ async def test_reasoning_delta_displayed_when_show_reasoning_enabled():
 
 
 @pytest.mark.asyncio
+async def test_reasoning_delta_buffers_until_sentence_boundary():
+    calls: list[str] = []
+    channels_config = SimpleNamespace(
+        send_progress=True, send_tool_hints=False, show_reasoning=True,
+    )
+    reasoning_buffer = commands._ReasoningBuffer()
+
+    with patch("nanobot.cli.commands._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+        first = await commands._maybe_print_interactive_progress(
+            SimpleNamespace(
+                content="The",
+                metadata={"_progress": True, "_reasoning_delta": True},
+            ),
+            None,
+            channels_config,
+            reasoning_buffer=reasoning_buffer,
+        )
+        second = await commands._maybe_print_interactive_progress(
+            SimpleNamespace(
+                content=" user asked.",
+                metadata={"_progress": True, "_reasoning_delta": True},
+            ),
+            None,
+            channels_config,
+            reasoning_buffer=reasoning_buffer,
+        )
+
+    assert first is True
+    assert second is True
+    assert calls == ["The user asked."]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_end_flushes_buffered_delta():
+    calls: list[str] = []
+    channels_config = SimpleNamespace(
+        send_progress=True, send_tool_hints=False, show_reasoning=True,
+    )
+    reasoning_buffer = commands._ReasoningBuffer()
+
+    with patch("nanobot.cli.commands._print_cli_reasoning", side_effect=lambda t, th, r=None: calls.append(t)):
+        delta = await commands._maybe_print_interactive_progress(
+            SimpleNamespace(
+                content="The user asked",
+                metadata={"_progress": True, "_reasoning_delta": True},
+            ),
+            None,
+            channels_config,
+            reasoning_buffer=reasoning_buffer,
+        )
+        end = await commands._maybe_print_interactive_progress(
+            SimpleNamespace(
+                content="",
+                metadata={"_progress": True, "_reasoning_end": True},
+            ),
+            None,
+            channels_config,
+            reasoning_buffer=reasoning_buffer,
+        )
+
+    assert delta is True
+    assert end is True
+    assert calls == ["The user asked"]
+
+
+@pytest.mark.asyncio
 async def test_reasoning_hidden_when_show_reasoning_disabled():
     """Reasoning content should be suppressed when show_reasoning is False."""
     channels_config = SimpleNamespace(

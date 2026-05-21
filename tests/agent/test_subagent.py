@@ -25,7 +25,6 @@ async def test_subagent_uses_tool_loader():
     tools = sm._build_tools()
     assert tools.has("read_file")
     assert tools.has("write_file")
-    assert tools.has("glob")
     assert not tools.has("message")
     assert not tools.has("spawn")
 

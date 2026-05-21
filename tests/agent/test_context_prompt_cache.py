@@ -87,6 +87,24 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_runtime_context_appended_after_user_content(tmp_path) -> None:
+    """User content must precede runtime context for prompt-cache prefix stability."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="hello world",
+        channel="cli",
+        chat_id="direct",
+    )
+
+    content = messages[-1]["content"]
+    user_pos = content.find("hello world")
+    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+    assert user_pos < tag_pos, "user content must precede runtime context for prefix stability"
+
+
 def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
     """Sender ID should be included in runtime context when provided."""
     workspace = _make_workspace(tmp_path)
@@ -296,8 +314,8 @@ def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) 
     prompt = builder.build_system_prompt(channel="slack")
 
     assert "Do not use the 'message' tool for normal replies in the current chat" in prompt
-    assert "the runtime attaches those artifacts to the final assistant reply automatically" in prompt
-    assert "do not call 'message' just to announce or resend them" in prompt
+    assert "When 'generate_image' creates images" in prompt
+    assert "call 'message' with the artifact paths in the 'media' parameter" in prompt
     assert "Wait for the tool results, then answer once" in prompt
 
 

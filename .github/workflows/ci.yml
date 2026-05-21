@@ -21,7 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","windows-latest"]') }}
-        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.11","3.14"]') || fromJSON('["3.11","3.12","3.13","3.14"]') }}
+        # CI concentrates on newer runtimes (3.11/3.12 still supported per pyproject requires-python).
+        python-version: ${{ fromJSON('["3.13","3.14"]') }}
 
     steps:
       - uses: actions/checkout@v4

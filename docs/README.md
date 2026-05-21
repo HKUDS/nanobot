@@ -15,6 +15,7 @@ Start here for setup, everyday usage, and deployment.
 | Agent social network | [`agent-social-network.md`](./agent-social-network.md) | Join external agent communities from nanobot |
 | Configuration | [`configuration.md`](./configuration.md) | Providers, tools, channels, MCP, and runtime settings |
 | Image generation | [`image-generation.md`](./image-generation.md) | Configure image providers, WebUI image mode, and generated artifacts |
+| WebUI | [`../webui/README.md`](../webui/README.md) | Open the bundled browser UI; LAN access; Vite dev server for contributors |
 | Multiple instances | [`multiple-instances.md`](./multiple-instances.md) | Run isolated bots with separate configs and workspaces |
 | CLI reference | [`cli-reference.md`](./cli-reference.md) | Core CLI commands and common entrypoints |
 | In-chat commands | [`chat-commands.md`](./chat-commands.md) | Slash commands and periodic task behavior |

@@ -454,6 +454,56 @@ class TestConsumeSdkStream:
         assert tool_calls[0].arguments == {"city": "SF"}
 
     @pytest.mark.asyncio
+    async def test_tool_call_argument_delta_callback(self):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "write_file"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        ev2 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='{"path":"a.txt","content":"',
+        )
+        ev3 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='hello\\n',
+        )
+        ev4 = MagicMock(
+            type="response.function_call_arguments.done",
+            call_id="c1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done = MagicMock(
+            type="function_call",
+            call_id="c1",
+            id="fc1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done.name = "write_file"
+        ev5 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev6 = MagicMock(type="response.completed", response=resp_obj)
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for e in [ev1, ev2, ev3, ev4, ev5, ev6]:
+                yield e
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=cb)
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments_delta": '{"path":"a.txt","content":"',
+            },
+            {"call_id": "c1", "name": "write_file", "arguments_delta": "hello\\n"},
+        ]
+
+    @pytest.mark.asyncio
     async def test_usage_extracted(self):
         usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
         resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
