@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
+from prompt_toolkit.enums import EditingMode
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -188,7 +189,10 @@ def _init_prompt_session() -> None:
     _PROMPT_SESSION = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        multiline=False,  # Enter submits (single line mode)
+        multiline=True,  # Enter submits (single line mode)
+        vi_mode=True,
+        editing_mode=EditingMode.VI,     
+        prompt_continuation=lambda width, line_no, x: f"{line_no:>3}│ "  # ← line number
     )
 
 
