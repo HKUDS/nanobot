@@ -414,7 +414,8 @@ class ExecTool(Tool):
             )
         shell_program = shell_program or shutil.which("bash") or "/bin/bash"
         args = [shell_program]
-        if login and Path(shell_program).name in {"bash", "zsh"}:
+        shell_name = Path(shell_program).name.lower()
+        if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
             args.append("-l")
         args.extend(["-c", command])
         return await asyncio.create_subprocess_exec(

@@ -37,7 +37,10 @@ def test_exec_keeps_one_shot_behavior_without_yield_time_ms(tmp_path):
 def test_exec_accepts_command_aliases(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir="/")
-        return await tool.execute(cmd="pwd", workdir=str(tmp_path))
+        return await tool.execute(
+            cmd=_python_command("import os; print(os.getcwd())"),
+            workdir=str(tmp_path),
+        )
 
     result = asyncio.run(run())
 
