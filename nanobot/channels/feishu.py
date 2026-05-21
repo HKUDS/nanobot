@@ -256,7 +256,7 @@ class FeishuConfig(Base):
     done_emoji: str | None = None  # Emoji to show when task is completed (e.g., "DONE", "OK")
     tool_hint_prefix: str = "\U0001f527"  # Prefix for inline tool hints (default: 🔧)
     group_policy: Literal["open", "mention"] = "mention"
-    group_debounce_seconds: float = Field(default=1.5, ge=0.0)
+    group_debounce_seconds: float = Field(default=0.0, ge=0.0)
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
     domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark

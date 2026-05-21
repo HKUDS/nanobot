@@ -250,7 +250,7 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
-    group_debounce_seconds: float = Field(default=1.5, ge=0.0)
+    group_debounce_seconds: float = Field(default=0.0, ge=0.0)
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
