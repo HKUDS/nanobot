@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.sandbox import wrap_command
-from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
@@ -33,8 +33,29 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
+class ApprovalRule(Base):
+    """A single approval rule that maps a command pattern to a policy.
+
+    Policies:
+      - ``auto``: bypass deny-pattern checks for matching commands
+      - ``ask``:  return a confirmation prompt instead of hard-blocking
+      - ``deny``: hard-block regardless of other settings
+    """
+
+    pattern: str
+    policy: str = "ask"  # auto | ask | deny
+
+    @field_validator("policy")
+    @classmethod
+    def validate_policy(cls, v):
+        if v not in {"auto", "ask", "deny"}:
+            raise ValueError(f"Invalid policy: {v}, must be one of auto/ask/deny")
+        return v
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
+
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
@@ -42,6 +63,9 @@ class ExecToolConfig(Base):
     allowed_env_keys: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
+    enable_user_confirmation: bool = False
+    safe_binaries: list[str] = Field(default_factory=list)
+    approval_rules: list[ApprovalRule] = Field(default_factory=list)
 
 
 @tool_parameters(
@@ -56,6 +80,14 @@ class ExecToolConfig(Base):
             ),
             minimum=1,
             maximum=600,
+        ),
+        confirmed=BooleanSchema(
+            description=(
+                "Set to true to confirm execution of a command that was "
+                "previously blocked and returned with a NEEDS_CONFIRMATION "
+                "prompt. The user must explicitly approve before you set this."
+            ),
+            default=False,
         ),
         required=["command"],
     )
@@ -86,6 +118,9 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            enable_user_confirmation=cfg.enable_user_confirmation,
+            safe_binaries=cfg.safe_binaries,
+            approval_rules=cfg.approval_rules,
         )
 
     def __init__(
@@ -98,6 +133,9 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
+        enable_user_confirmation: bool = False,
+        safe_binaries: list[str] | None = None,
+        approval_rules: list[ApprovalRule] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -125,6 +163,13 @@ class ExecTool(Tool):
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
+        self.enable_user_confirmation = enable_user_confirmation
+        self.safe_binaries = safe_binaries or []
+        self.approval_rules = approval_rules or []
+        # Pending command state for user confirmation flow.
+        self._pending_command: str | None = None
+        self._pending_cwd: str | None = None
+        self._pending_timeout: int | None = None
 
     @property
     def name(self) -> str:
@@ -162,7 +207,7 @@ class ExecTool(Tool):
 
     async def execute(
         self, command: str, working_dir: str | None = None,
-        timeout: int | None = None, **kwargs: Any,
+        timeout: int | None = None, confirmed: bool = False, **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
 
@@ -186,10 +231,50 @@ class ExecTool(Tool):
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
 
+        # --- User confirmation flow ---
+        # If the user confirmed a previously pending command, execute it
+        # directly (skip the guard for that specific command).
+        if confirmed and self._pending_command is not None:
+            saved_cmd = self._pending_command
+            saved_cwd = self._pending_cwd
+            saved_timeout = self._pending_timeout
+            self._pending_command = None
+            self._pending_cwd = None
+            self._pending_timeout = None
+            # Only execute if the confirmed command matches the current one.
+            if command.strip() == saved_cmd.strip():
+                logger.info("exec: user confirmed pending command: {}", saved_cmd)
+                return await self._run_command(saved_cmd, saved_cwd or cwd, saved_timeout or timeout)
+            # Mismatch: the confirmed command differs from the pending one.
+            logger.warning("exec: confirmed command mismatch, pending={!r}, current={!r}", saved_cmd, command)
+            # Fall through to normal guard check for the new command.
+
         guard_error = self._guard_command(command, cwd)
         if guard_error:
+            # If user confirmation is enabled and the block is from a deny
+            # pattern (not a hard policy like SSRF or workspace boundary),
+            # return a confirmation prompt instead of a hard block.
+            if self.enable_user_confirmation and "deny pattern" in guard_error:
+                self._pending_command = command
+                self._pending_cwd = cwd
+                self._pending_timeout = timeout
+                logger.info("exec: command needs user confirmation: {}", command)
+                return (
+                    f"NEEDS_CONFIRMATION: {command}\n\n"
+                    "This command was blocked by the safety guard because it "
+                    "matches a dangerous pattern. If you want to proceed, "
+                    "tell the user what the command does and ask for their "
+                    "explicit approval. If they approve, re-run the exec tool "
+                    "with confirmed=true."
+                )
             return guard_error
 
+        return await self._run_command(command, cwd, timeout)
+
+    async def _run_command(
+        self, command: str, cwd: str, timeout: int | None = None,
+    ) -> str:
+        """Execute *command* in *cwd* after all guard checks have passed."""
         if self.sandbox:
             if _IS_WINDOWS:
                 logger.warning(
@@ -344,24 +429,73 @@ class ExecTool(Tool):
                 env[key] = val
         return env
 
+    def _match_approval_policy(self, command: str) -> str | None:
+        """Return the approval policy for *command*, or None if no rule matches.
+
+        Checks approval_rules first (first match wins), then safe_binaries.
+        Returns one of ``"auto"``, ``"ask"``, ``"deny"``, or ``None``.
+        """
+        lower = command.strip().lower()
+
+        # 1. Check explicit approval_rules (first match wins).
+        for rule in self.approval_rules:
+            if re.search(rule.pattern, lower):
+                return rule.policy
+
+        # 2. Check safe_binaries — commands starting with a safe binary
+        #    are auto-approved.
+        if self.safe_binaries:
+            first_token = lower.split()[0] if lower.split() else ""
+            # Strip common path prefix to get the binary name.
+            binary_name = first_token.rsplit("/", 1)[-1]
+            if binary_name in self.safe_binaries:
+                return "auto"
+
+        return None
+
+    @staticmethod
+    def _check_user_confirmation(response: str) -> bool:
+        """Return True if *response* is an affirmative confirmation."""
+        affirmative = {"yes", "y", "ok", "approve", "同意", "是的", "执行吧"}
+        normalized = response.strip().lower()
+        if normalized in affirmative:
+            return True
+        # Only check multi-character keywords in substring to avoid
+        # false positives (e.g. "deny" contains "y").
+        return any(kw in normalized for kw in affirmative if len(kw) > 1)
+
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
 
-        # allow_patterns take priority over deny_patterns so that users can
-        # exempt specific commands (e.g. "rm -rf" inside a build directory)
-        # from the hardcoded deny list via configuration.
-        explicitly_allowed = bool(self.allow_patterns) and any(
-            re.search(p, lower) for p in self.allow_patterns
-        )
-        if not explicitly_allowed:
-            for pattern in self.deny_patterns:
-                if re.search(pattern, lower):
-                    return "Error: Command blocked by deny pattern filter"
+        # --- Approval rules take highest priority ---
+        policy = self._match_approval_policy(cmd)
+        if policy == "auto":
+            # Explicitly auto-approved — skip all deny checks.
+            logger.info("exec: command auto-approved by approval rule: {}", cmd)
+        elif policy == "deny":
+            logger.warning("exec: command blocked by approval policy (deny): {}", cmd)
+            return "Error: Command blocked by approval policy"
+        else:
+            # No matching approval rule (or policy="ask").
+            # allow_patterns take priority over deny_patterns so that users can
+            # exempt specific commands (e.g. "rm -rf" inside a build directory)
+            # from the hardcoded deny list via configuration.
+            explicitly_allowed = bool(self.allow_patterns) and any(
+                re.search(p, lower) for p in self.allow_patterns
+            )
+            if not explicitly_allowed:
+                for pattern in self.deny_patterns:
+                    if re.search(pattern, lower):
+                        logger.warning("exec: command blocked by deny pattern: {} (matched: {})", cmd, pattern)
+                        return "Error: Command blocked by deny pattern filter"
 
-            if self.allow_patterns:
-                return "Error: Command blocked by allowlist filter (not in allowlist)"
+                if self.allow_patterns:
+                    logger.warning("exec: command blocked by allowlist filter: {}", cmd)
+                    return "Error: Command blocked by allowlist filter (not in allowlist)"
+            else:
+                logger.info("exec: command allowed by allow_patterns: {}", cmd)
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):
