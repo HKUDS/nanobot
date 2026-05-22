@@ -446,9 +446,9 @@ Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
 </details>
 
 <details>
-<summary><b>Manifest (local / Any OpenAI-compatible API / Any Anthropic-compatible API / OpenAI-compatible)</b></summary>
+<summary><b>Manifest (OpenAI-compatible / Anthropic-compatible)</b></summary>
 
-[Manifest](https://manifest.build) is an open-source LLM router that cuts inference costs through smart routing across 16+ providers. You get full control over which model handles each request. Route by complexity tier, task-specificity (coding, web browsing, etc.) and custom tiers. API keys start with `mnfst_`.
+[Manifest](https://manifest.build) is an open-source LLM router that cuts inference costs through smart routing across 16+ providers. Route by complexity tier, task-specificity (coding, web browsing, etc.) and custom tiers. API keys start with `mnfst_`.
 
 **1. Get an API key** at [manifest.build](https://manifest.build) or self-host with Docker.
 
@@ -462,11 +462,14 @@ Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
   },
   "agents": {
     "defaults": {
+      "provider": "manifest",
       "model": "auto"
     }
   }
 }
 ```
+
+Set `model` to `auto` to use the routing rules configured in your Manifest dashboard (tiers, task-specificity, provider priorities).
 
 > Self-hosted users: set `"apiBase": "http://localhost:2099/v1"` in the manifest provider config.
 
