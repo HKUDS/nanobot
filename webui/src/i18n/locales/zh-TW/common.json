@@ -9,6 +9,18 @@
       "title": "無法連線到 nanobot",
       "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
     },
+    "auth": {
+      "title": "需要驗證",
+      "hint": "輸入 gateway 設定中 tokenIssueSecret 配置的密鑰。",
+      "placeholder": "密碼",
+      "submit": "連線",
+      "invalid": "密碼無效，請再試一次。"
+    },
+    "account": {
+      "section": "帳戶",
+      "logoutHint": "中斷此瀏覽器與 gateway 的連線。",
+      "logout": "登出"
+    },
     "system": {
       "section": "系統",
       "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
@@ -27,9 +39,13 @@
     }
   },
   "sidebar": {
+    "navigation": "側邊欄導覽",
+    "globalActions": "全域操作",
     "collapse": "收合側邊欄",
     "toggleTheme": "切換主題",
+    "home": "首頁",
     "newChat": "新增對話",
+    "searchAria": "搜尋",
     "viewOptions": "檢視",
     "compactList": "緊湊列表",
     "showPreviews": "顯示預覽",
@@ -38,17 +54,16 @@
     "sortUpdated": "最近更新",
     "sortCreated": "最近建立",
     "sortTitle": "標題 A-Z",
+    "searchPlaceholder": "搜尋",
+    "searchResults": "搜尋結果",
+    "noSearchResults": "沒有符合的對話。",
     "recent": "最近對話",
     "refreshSessions": "重新整理會話",
     "settings": "設定",
     "language": {
       "label": "語言",
       "ariaLabel": "切換語言"
-    },
-    "searchAria": "搜尋",
-    "searchPlaceholder": "搜尋",
-    "searchResults": "搜尋結果",
-    "noSearchResults": "沒有符合的對話。"
+    }
   },
   "settings": {
     "backToChat": "返回對話",
@@ -75,10 +90,13 @@
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
+      "imageGeneration": "圖片生成",
+      "imageDefaults": "預設值",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
       "safety": "Safety",
+      "capabilities": "功能",
       "integrations": "Integrations"
     },
     "rows": {
@@ -91,6 +109,7 @@
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
+      "pendingChanges": "待處理變更",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -99,6 +118,15 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "imageGeneration": "圖片生成",
+      "imageProvider": "圖片服務商",
+      "imageProviderStatus": "服務商狀態",
+      "imageProviderBase": "服務商位址",
+      "imageModel": "圖片模型",
+      "defaultAspectRatio": "預設比例",
+      "defaultImageSize": "預設尺寸",
+      "maxImagesPerTurn": "每輪最多圖片數",
+      "imageSaveDir": "儲存目錄",
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
@@ -129,6 +157,13 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "當已設定圖片服務商時，在對話中開放 generate_image。",
+      "imageProvider": "選擇 generate_image 使用的登錄服務商。",
+      "imageProviderStatus": "圖片生成會重用「服務商」中的憑證。",
+      "imageModel": "傳送給所選圖片服務商的模型名稱。",
+      "defaultAspectRatio": "當提示詞未指定長寬比時使用。",
+      "defaultImageSize": "傳送給支援此功能的服務商的尺寸提示。",
+      "maxImagesPerTurn": "單次 generate_image 請求的上限。",
       "botName": "Shown in runtime surfaces that use the configured bot identity.",
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
@@ -141,8 +176,8 @@
       "notAvailable": "不可用",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready",
+      "restartPending": "等待重新啟動",
+      "ready": "就緒",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -150,13 +185,19 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready"
     },
     "status": {
       "loading": "正在載入設定...",
       "loadError": "無法載入設定",
       "unsaved": "有未儲存的變更。",
-      "savedRestart": "已儲存。重新啟動 nanobot 後生效。"
+      "upToDate": "已是最新。",
+      "savedRestart": "已儲存。重新啟動 nanobot 後生效。",
+      "restartAfterSaving": "儲存變更後，可在準備好時重新啟動。",
+      "savedRestartApply": "已儲存，可在準備好時重新啟動。",
+      "imageProviderRestart": "圖片服務商變更已儲存，可在準備好時重新啟動。"
     },
     "actions": {
       "save": "儲存",
@@ -213,11 +254,19 @@
       "configuredCount": "{{count}} configured",
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
+      "imageGeneration": "圖片生成",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "選擇服務商",
+      "selectAspect": "選擇比例",
+      "selectSize": "選擇尺寸",
+      "configureProvider": "設定服務商",
+      "missingCredential": "啟用圖片生成前，請先設定此服務商。"
     }
   },
   "chat": {
@@ -268,7 +317,6 @@
   "thread": {
     "loadingConversation": "正在載入對話…",
     "empty": {
-      "description": "你可以提問、延續本地工作，或是開始新的執行緒。",
       "greeting": "我可以幫你做什麼？",
       "quickActions": {
         "plan": {
@@ -321,10 +369,14 @@
           "title": "編輯圖片",
           "prompt": "幫我編輯一張圖片。先請我上傳或指定要編輯的圖片，然後生成編輯後的結果。"
         }
-      }
+      },
+      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
     },
     "header": {
-      "toggleSidebar": "切換側邊欄"
+      "toggleSidebar": "切換側邊欄",
+      "newChat": "開始新對話",
+      "toggleTheme": "從頂部切換主題",
+      "settings": "開啟設定"
     },
     "composer": {
       "placeholderThread": "輸入訊息…",
@@ -338,6 +390,7 @@
       "goalStateFallback": "目標",
       "goalStateExpandAria": "查看完整目標",
       "goalStateSheetTitle": "目標",
+      "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
       "attachImage": "附加圖片",
@@ -356,16 +409,11 @@
           "16_9": "寬螢幕 16:9"
         }
       },
-      "encoding": "處理中…",
-      "remove": "移除附件",
-      "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
-      "imageRejected": {
-        "unsupported_type": "不支援的檔案類型",
-        "too_many_images": "每則訊息最多 {{max}} 張圖片",
-        "magic_mismatch": "檔案看起來不像真正的圖片",
-        "decode_failed": "無法解碼這張圖片",
-        "too_large": "圖片太大，請換一張小一點的",
-        "io": "無法讀取這個檔案"
+      "tools": {
+        "search": "搜尋",
+        "reason": "推理",
+        "deepResearch": "深度研究",
+        "voice": "語音輸入"
       },
       "slash": {
         "ariaLabel": "斜線命令",
@@ -416,7 +464,17 @@
           }
         }
       },
-      "goalStateCloseAria": "關閉目標"
+      "encoding": "處理中…",
+      "remove": "移除附件",
+      "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
+      "imageRejected": {
+        "unsupported_type": "不支援的檔案類型",
+        "too_many_images": "每則訊息最多 {{max}} 張圖片",
+        "magic_mismatch": "檔案看起來不像真正的圖片",
+        "decode_failed": "無法解碼這張圖片",
+        "too_large": "圖片太大，請換一張小一點的",
+        "io": "無法讀取這個檔案"
+      }
     },
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息"
@@ -438,6 +496,8 @@
     "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
     "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
     "imageAttachment": "圖片附件",
+    "copyReply": "複製回覆",
+    "copiedReply": "已複製回覆",
     "turnLatencyTitle": "本輪耗時（端到端）"
   },
   "lightbox": {

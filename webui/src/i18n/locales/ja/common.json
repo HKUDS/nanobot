@@ -9,6 +9,18 @@
       "title": "nanobot に接続できませんでした",
       "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
+    "auth": {
+      "title": "認証が必要です",
+      "hint": "gateway 設定の tokenIssueSecret に指定されたシークレットを入力してください。",
+      "placeholder": "パスワード",
+      "submit": "接続",
+      "invalid": "パスワードが無効です。もう一度お試しください。"
+    },
+    "account": {
+      "section": "アカウント",
+      "logoutHint": "このブラウザーを gateway から切断します。",
+      "logout": "サインアウト"
+    },
     "system": {
       "section": "システム",
       "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
@@ -27,9 +39,13 @@
     }
   },
   "sidebar": {
+    "navigation": "サイドバーのナビゲーション",
+    "globalActions": "グローバル操作",
     "collapse": "サイドバーを閉じる",
     "toggleTheme": "テーマを切り替える",
+    "home": "ホーム",
     "newChat": "新しいチャット",
+    "searchAria": "検索",
     "viewOptions": "View",
     "compactList": "Compact list",
     "showPreviews": "Show previews",
@@ -38,17 +54,16 @@
     "sortUpdated": "Recently updated",
     "sortCreated": "Recently created",
     "sortTitle": "Title A-Z",
+    "searchPlaceholder": "検索",
+    "searchResults": "検索結果",
+    "noSearchResults": "一致するチャットはありません。",
     "recent": "最近のチャット",
     "refreshSessions": "セッションを更新",
     "settings": "設定",
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
-    },
-    "searchAria": "検索",
-    "searchPlaceholder": "検索",
-    "searchResults": "検索結果",
-    "noSearchResults": "一致するチャットはありません。"
+    }
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -75,10 +90,13 @@
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
+      "imageGeneration": "画像生成",
+      "imageDefaults": "既定値",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
       "safety": "Safety",
+      "capabilities": "機能",
       "integrations": "Integrations"
     },
     "rows": {
@@ -91,6 +109,7 @@
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
+      "pendingChanges": "保留中の変更",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -99,6 +118,15 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "imageGeneration": "画像生成",
+      "imageProvider": "画像プロバイダー",
+      "imageProviderStatus": "プロバイダーの状態",
+      "imageProviderBase": "プロバイダーのベース URL",
+      "imageModel": "画像モデル",
+      "defaultAspectRatio": "既定の比率",
+      "defaultImageSize": "既定のサイズ",
+      "maxImagesPerTurn": "1 ターンあたりの最大画像数",
+      "imageSaveDir": "保存先ディレクトリ",
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
@@ -129,6 +157,13 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "設定済みの画像プロバイダーが利用できる場合、チャットで generate_image を有効にします。",
+      "imageProvider": "generate_image で使用する登録済みプロバイダーを選択します。",
+      "imageProviderStatus": "画像生成は「プロバイダー」の認証情報を再利用します。",
+      "imageModel": "選択した画像プロバイダーへ送信するモデル名です。",
+      "defaultAspectRatio": "プロンプトでアスペクト比が指定されていない場合に使用します。",
+      "defaultImageSize": "対応しているプロバイダーへ送信するサイズ指定です。",
+      "maxImagesPerTurn": "1 回の generate_image リクエストで生成できる画像数の上限です。",
       "botName": "Shown in runtime surfaces that use the configured bot identity.",
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
@@ -141,8 +176,8 @@
       "notAvailable": "利用不可",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready",
+      "restartPending": "再起動待ち",
+      "ready": "準備完了",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -150,13 +185,19 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready"
     },
     "status": {
       "loading": "設定を読み込んでいます...",
       "loadError": "設定を読み込めませんでした",
       "unsaved": "未保存の変更があります。",
-      "savedRestart": "保存しました。反映するには nanobot を再起動してください。"
+      "upToDate": "最新です。",
+      "savedRestart": "保存しました。反映するには nanobot を再起動してください。",
+      "restartAfterSaving": "変更を保存してから、準備ができたら再起動してください。",
+      "savedRestartApply": "保存しました。準備ができたら再起動してください。",
+      "imageProviderRestart": "画像プロバイダーの変更を保存しました。準備ができたら再起動してください。"
     },
     "actions": {
       "save": "保存",
@@ -213,11 +254,19 @@
       "configuredCount": "{{count}} configured",
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
+      "imageGeneration": "画像生成",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "プロバイダーを選択",
+      "selectAspect": "比率を選択",
+      "selectSize": "サイズを選択",
+      "configureProvider": "プロバイダーを設定",
+      "missingCredential": "画像生成を有効にする前に、このプロバイダーを設定してください。"
     }
   },
   "chat": {
@@ -268,7 +317,6 @@
   "thread": {
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。",
       "greeting": "何をお手伝いしましょうか？",
       "quickActions": {
         "plan": {
@@ -321,10 +369,14 @@
           "title": "画像を編集",
           "prompt": "画像編集を手伝ってください。まず編集する画像のアップロードまたは指定を求め、その後に編集後の結果を生成してください。"
         }
-      }
+      },
+      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。"
     },
     "header": {
-      "toggleSidebar": "サイドバーを切り替える"
+      "toggleSidebar": "サイドバーを切り替える",
+      "newChat": "新しいチャットを開始",
+      "toggleTheme": "ヘッダーからテーマを切り替える",
+      "settings": "設定を開く"
     },
     "composer": {
       "placeholderThread": "メッセージを入力…",
@@ -338,6 +390,7 @@
       "goalStateFallback": "目標",
       "goalStateExpandAria": "目標の全文を表示",
       "goalStateSheetTitle": "目標",
+      "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
       "attachImage": "画像を添付",
@@ -356,16 +409,11 @@
           "16_9": "ワイド 16:9"
         }
       },
-      "encoding": "処理中…",
-      "remove": "添付を削除",
-      "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
-      "imageRejected": {
-        "unsupported_type": "対応していないファイル形式です",
-        "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
-        "magic_mismatch": "画像ファイルではないようです",
-        "decode_failed": "この画像をデコードできません",
-        "too_large": "画像が大きすぎます。小さいものを選んでください",
-        "io": "このファイルを読み込めません"
+      "tools": {
+        "search": "検索",
+        "reason": "推論",
+        "deepResearch": "詳細調査",
+        "voice": "音声入力"
       },
       "slash": {
         "ariaLabel": "スラッシュコマンド",
@@ -416,7 +464,17 @@
           }
         }
       },
-      "goalStateCloseAria": "目標を閉じる"
+      "encoding": "処理中…",
+      "remove": "添付を削除",
+      "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
+      "imageRejected": {
+        "unsupported_type": "対応していないファイル形式です",
+        "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
+        "magic_mismatch": "画像ファイルではないようです",
+        "decode_failed": "この画像をデコードできません",
+        "too_large": "画像が大きすぎます。小さいものを選んでください",
+        "io": "このファイルを読み込めません"
+      }
     },
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む"
@@ -438,6 +496,8 @@
     "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
     "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
     "imageAttachment": "画像の添付",
+    "copyReply": "返信をコピー",
+    "copiedReply": "返信をコピーしました",
     "turnLatencyTitle": "応答時間（全行程）"
   },
   "lightbox": {
