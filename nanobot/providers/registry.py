@@ -236,6 +236,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
     ),
 
+    # Manifest: intelligent LLM router with automatic model selection
+    ProviderSpec(
+        name="manifest",
+        keywords=("manifest",),
+        env_key="MANIFEST_API_KEY",
+        display_name="Manifest",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="mnfst_",
+        detect_by_base_keyword="manifest",
+        default_api_base="https://app.manifest.build/v1",
+        strip_model_prefix=True,
+    ),
 
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: native Anthropic SDK
