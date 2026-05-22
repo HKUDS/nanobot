@@ -618,9 +618,13 @@ class Consolidator:
         """Available input token budget for consolidation LLM."""
         return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
 
-    def _truncate_to_token_budget(self, text: str) -> str:
-        """Truncate text so it fits within the consolidation LLM's token budget."""
-        budget = self._input_token_budget
+    def _truncate_to_token_budget(self, text: str, reserve_tokens: int = 0) -> str:
+        """Truncate text so it fits within the consolidation LLM's token budget.
+
+        reserve_tokens: additional tokens to reserve for dedup context or other
+        overhead that will be appended after truncation.
+        """
+        budget = self._input_token_budget - reserve_tokens
         if budget <= 0:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
         try:
@@ -641,7 +645,30 @@ class Consolidator:
             return None
         try:
             formatted = MemoryStore._format_messages(messages)
-            formatted = self._truncate_to_token_budget(formatted)
+
+            # Inject current memory context for dedup-aware summarization.
+            memory_preview = self.store.read_memory()[:4000]
+            user_preview = self.store.read_user()[:2000]
+            dedup_context = ""
+            if memory_preview:
+                dedup_context += f"\n\n## Current MEMORY.md (for dedup)\n{memory_preview}"
+            if user_preview:
+                dedup_context += f"\n\n## Current USER.md (for dedup)\n{user_preview}"
+
+            # Reserve token budget for dedup_context so the total prompt does not
+            # exceed the LLM context window.
+            reserve_tokens = 0
+            if dedup_context:
+                try:
+                    enc = tiktoken.get_encoding("cl100k_base")
+                    reserve_tokens = len(enc.encode(dedup_context)) + 100
+                except Exception:
+                    reserve_tokens = len(dedup_context) // 4 + 100
+
+            formatted = self._truncate_to_token_budget(
+                formatted, reserve_tokens=reserve_tokens
+            )
+
             response = await self.provider.chat_with_retry(
                 model=self.model,
                 messages=[
@@ -652,7 +679,7 @@ class Consolidator:
                             strip=True,
                         ),
                     },
-                    {"role": "user", "content": formatted},
+                    {"role": "user", "content": formatted + dedup_context},
                 ],
                 tools=None,
                 tool_choice=None,
@@ -907,6 +934,7 @@ class Dream:
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.tools.apply_patch import ApplyPatchTool
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
@@ -924,6 +952,7 @@ class Dream:
             file_states=file_states,
         ))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
+        tools.register(ApplyPatchTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
         # write_file resolves relative paths from workspace root, but can only
         # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
