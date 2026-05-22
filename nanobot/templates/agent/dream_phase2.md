@@ -1,6 +1,8 @@
 Update memory files based on the analysis below.
 - [FILE] entries: add the described content to the appropriate file (use the →TARGET routing)
 - [FILE-REMOVE] entries: delete the corresponding content from memory files
+  - To remove a line: use apply_patch Update File with the exact line prefixed by `-`
+  - To remove an entire file: use apply_patch Delete File
 - [SKILL] entries: create a new skill under skills/<name>/SKILL.md using write_file
 
 ## Routing rules (→TARGET tells you which file)

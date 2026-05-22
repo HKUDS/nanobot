@@ -5,7 +5,7 @@ You have THREE tasks:
 
 Output one line per finding:
 [FILE] atomic fact →TARGET #DECAY
-[FILE-REMOVE] reason for removal
+[FILE-REMOVE] exact content to remove (copy the line verbatim from the file)
 [SKILL] kebab-case-name: one-line description of the reusable pattern
 
 Targets (where the fact belongs — choose one):
