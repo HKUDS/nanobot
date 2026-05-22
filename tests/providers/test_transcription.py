@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from nanobot.providers.transcription import GroqTranscriptionProvider, OpenAITranscriptionProvider
+from nanobot.providers.transcription import (
+    GroqTranscriptionProvider,
+    OpenAITranscriptionProvider,
+    _resolve_transcription_url,
+)
 
 
 @pytest.fixture
@@ -290,3 +294,37 @@ async def test_retries_on_every_advertised_transient_exception(
         result = await provider.transcribe(audio_file)
     assert result == "recovered"
     assert post.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# apiBase normalization (#3637): a chat-style base must not be POSTed verbatim
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_transcription_url_falls_back_to_default() -> None:
+    default = "https://api.openai.com/v1/audio/transcriptions"
+    assert _resolve_transcription_url(None, default) == default
+    assert _resolve_transcription_url("", default) == default
+
+
+def test_resolve_transcription_url_appends_path_to_chat_style_base() -> None:
+    assert (
+        _resolve_transcription_url("https://api.groq.com/openai/v1", "https://x/audio/transcriptions")
+        == "https://api.groq.com/openai/v1/audio/transcriptions"
+    )
+    # Trailing slash must not produce a doubled separator.
+    assert (
+        _resolve_transcription_url("https://api.groq.com/openai/v1/", "https://x/audio/transcriptions")
+        == "https://api.groq.com/openai/v1/audio/transcriptions"
+    )
+
+
+def test_resolve_transcription_url_keeps_full_endpoint() -> None:
+    full = "https://api.groq.com/openai/v1/audio/transcriptions"
+    assert _resolve_transcription_url(full, "https://x/audio/transcriptions") == full
+
+
+def test_groq_provider_normalizes_chat_style_api_base() -> None:
+    """Regression for #3637: apiBase set to the v1 base resolves to the audio endpoint."""
+    provider = GroqTranscriptionProvider(api_key="gsk-test", api_base="https://api.groq.com/openai/v1")
+    assert provider.api_url == "https://api.groq.com/openai/v1/audio/transcriptions"
