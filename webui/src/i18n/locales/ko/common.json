@@ -9,6 +9,18 @@
       "title": "nanobot에 연결할 수 없습니다",
       "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
     },
+    "auth": {
+      "title": "인증이 필요합니다",
+      "hint": "gateway 설정의 tokenIssueSecret에 구성된 비밀 값을 입력하세요.",
+      "placeholder": "비밀번호",
+      "submit": "연결",
+      "invalid": "비밀번호가 올바르지 않습니다. 다시 시도하세요."
+    },
+    "account": {
+      "section": "계정",
+      "logoutHint": "이 브라우저를 gateway에서 연결 해제합니다.",
+      "logout": "로그아웃"
+    },
     "system": {
       "section": "시스템",
       "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
@@ -27,9 +39,13 @@
     }
   },
   "sidebar": {
+    "navigation": "사이드바 탐색",
+    "globalActions": "전역 작업",
     "collapse": "사이드바 접기",
     "toggleTheme": "테마 전환",
+    "home": "홈",
     "newChat": "새 채팅",
+    "searchAria": "검색",
     "viewOptions": "View",
     "compactList": "Compact list",
     "showPreviews": "Show previews",
@@ -38,17 +54,16 @@
     "sortUpdated": "Recently updated",
     "sortCreated": "Recently created",
     "sortTitle": "Title A-Z",
+    "searchPlaceholder": "검색",
+    "searchResults": "결과",
+    "noSearchResults": "일치하는 채팅이 없습니다.",
     "recent": "최근 대화",
     "refreshSessions": "세션 새로고침",
     "settings": "설정",
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
-    },
-    "searchAria": "검색",
-    "searchPlaceholder": "검색",
-    "searchResults": "결과",
-    "noSearchResults": "일치하는 채팅이 없습니다."
+    }
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -75,10 +90,13 @@
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
+      "imageGeneration": "이미지 생성",
+      "imageDefaults": "기본값",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
       "safety": "Safety",
+      "capabilities": "기능",
       "integrations": "Integrations"
     },
     "rows": {
@@ -91,6 +109,7 @@
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
+      "pendingChanges": "대기 중인 변경 사항",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -99,6 +118,15 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "imageGeneration": "이미지 생성",
+      "imageProvider": "이미지 제공자",
+      "imageProviderStatus": "제공자 상태",
+      "imageProviderBase": "제공자 기준 주소",
+      "imageModel": "이미지 모델",
+      "defaultAspectRatio": "기본 비율",
+      "defaultImageSize": "기본 크기",
+      "maxImagesPerTurn": "턴당 최대 이미지 수",
+      "imageSaveDir": "저장 디렉터리",
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
@@ -129,6 +157,13 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "구성된 이미지 제공자를 사용할 수 있을 때 채팅에서 generate_image를 노출합니다.",
+      "imageProvider": "generate_image가 사용할 레지스트리 제공자를 선택합니다.",
+      "imageProviderStatus": "이미지 생성은 Providers의 제공자 자격 증명을 재사용합니다.",
+      "imageModel": "선택한 이미지 제공자에 보낼 모델 이름입니다.",
+      "defaultAspectRatio": "프롬프트에서 가로세로 비율을 선택하지 않았을 때 사용됩니다.",
+      "defaultImageSize": "지원하는 제공자에게 보내는 크기 힌트입니다.",
+      "maxImagesPerTurn": "한 번의 generate_image 요청에 대한 상한입니다.",
       "botName": "Shown in runtime surfaces that use the configured bot identity.",
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
@@ -141,8 +176,8 @@
       "notAvailable": "사용할 수 없음",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready",
+      "restartPending": "재시작 대기 중",
+      "ready": "준비됨",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -150,13 +185,19 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready"
     },
     "status": {
       "loading": "설정을 불러오는 중...",
       "loadError": "설정을 불러올 수 없습니다",
       "unsaved": "저장되지 않은 변경 사항이 있습니다.",
-      "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요."
+      "upToDate": "최신 상태입니다.",
+      "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요.",
+      "restartAfterSaving": "변경 사항을 저장한 뒤 준비되면 재시작하세요.",
+      "savedRestartApply": "저장되었습니다. 준비되면 재시작하세요.",
+      "imageProviderRestart": "이미지 제공자 변경 사항이 저장되었습니다. 준비되면 재시작하세요."
     },
     "actions": {
       "save": "저장",
@@ -213,18 +254,25 @@
       "configuredCount": "{{count}} configured",
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
+      "imageGeneration": "이미지 생성",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "제공자 선택",
+      "selectAspect": "비율 선택",
+      "selectSize": "크기 선택",
+      "configureProvider": "제공자 구성",
+      "missingCredential": "이미지 생성을 활성화하기 전에 이 제공자를 구성하세요."
     }
   },
   "chat": {
     "fallbackTitle": "채팅 {{id}}",
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
-    "showMore": "{{count}}개 더 보기",
     "actions": "{{title}} 채팅 작업",
     "activity": {
       "running": "Agent running",
@@ -269,7 +317,6 @@
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다.",
       "greeting": "무엇을 도와드릴까요?",
       "quickActions": {
         "plan": {
@@ -322,10 +369,14 @@
           "title": "이미지 편집",
           "prompt": "이미지 편집을 도와주세요. 먼저 편집할 이미지를 업로드하거나 지정하게 한 뒤, 편집된 결과를 생성해 주세요."
         }
-      }
+      },
+      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다."
     },
     "header": {
-      "toggleSidebar": "사이드바 전환"
+      "toggleSidebar": "사이드바 전환",
+      "newChat": "새 채팅 시작",
+      "toggleTheme": "헤더에서 테마 전환",
+      "settings": "설정 열기"
     },
     "composer": {
       "placeholderThread": "메시지를 입력하세요…",
@@ -339,6 +390,7 @@
       "goalStateFallback": "목표",
       "goalStateExpandAria": "전체 목표 보기",
       "goalStateSheetTitle": "목표",
+      "goalStateCloseAria": "목표 닫기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "attachImage": "이미지 첨부",
@@ -357,16 +409,11 @@
           "16_9": "와이드 16:9"
         }
       },
-      "encoding": "처리 중…",
-      "remove": "첨부 제거",
-      "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
-      "imageRejected": {
-        "unsupported_type": "지원하지 않는 파일 형식입니다",
-        "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
-        "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
-        "decode_failed": "이 이미지를 디코딩할 수 없습니다",
-        "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
-        "io": "이 파일을 읽을 수 없습니다"
+      "tools": {
+        "search": "검색",
+        "reason": "추론",
+        "deepResearch": "심층 조사",
+        "voice": "음성 입력"
       },
       "slash": {
         "ariaLabel": "슬래시 명령",
@@ -417,7 +464,17 @@
           }
         }
       },
-      "goalStateCloseAria": "목표 닫기"
+      "encoding": "처리 중…",
+      "remove": "첨부 제거",
+      "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
+      "imageRejected": {
+        "unsupported_type": "지원하지 않는 파일 형식입니다",
+        "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
+        "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
+        "decode_failed": "이 이미지를 디코딩할 수 없습니다",
+        "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
+        "io": "이 파일을 읽을 수 없습니다"
+      }
     },
     "scrollToBottom": "맨 아래로 스크롤",
     "loadEarlier": "이전 메시지 불러오기"
@@ -439,6 +496,8 @@
     "agentActivityLiveSummary": "진행 중… · {{reasoning}}단계 · 도구 호출 {{tools}}회",
     "agentActivityLiveToolsOnly": "진행 중… · 도구 호출 {{tools}}회",
     "imageAttachment": "이미지 첨부",
+    "copyReply": "답변 복사",
+    "copiedReply": "답변이 복사됨",
     "turnLatencyTitle": "응답 시간(엔드투엔드)"
   },
   "lightbox": {

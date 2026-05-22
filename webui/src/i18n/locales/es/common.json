@@ -9,6 +9,18 @@
       "title": "No se pudo conectar con nanobot",
       "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
+    "auth": {
+      "title": "Autenticación requerida",
+      "hint": "Introduce el secreto configurado como tokenIssueSecret en la configuración del gateway.",
+      "placeholder": "Contraseña",
+      "submit": "Conectar",
+      "invalid": "Contraseña no válida. Inténtalo de nuevo."
+    },
+    "account": {
+      "section": "Cuenta",
+      "logoutHint": "Desconecta este navegador del gateway.",
+      "logout": "Cerrar sesión"
+    },
     "system": {
       "section": "Sistema",
       "restartHint": "Reinicia nanobot para aplicar los cambios de ejecución.",
@@ -27,9 +39,13 @@
     }
   },
   "sidebar": {
+    "navigation": "Navegación de la barra lateral",
+    "globalActions": "Acciones globales",
     "collapse": "Contraer barra lateral",
     "toggleTheme": "Cambiar tema",
+    "home": "Inicio",
     "newChat": "Nuevo chat",
+    "searchAria": "Buscar",
     "viewOptions": "View",
     "compactList": "Compact list",
     "showPreviews": "Show previews",
@@ -38,17 +54,16 @@
     "sortUpdated": "Recently updated",
     "sortCreated": "Recently created",
     "sortTitle": "Title A-Z",
+    "searchPlaceholder": "Buscar",
+    "searchResults": "Resultados",
+    "noSearchResults": "No hay chats coincidentes.",
     "recent": "Recientes",
     "refreshSessions": "Actualizar sesiones",
     "settings": "Configuración",
     "language": {
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
-    },
-    "searchAria": "Buscar",
-    "searchPlaceholder": "Buscar",
-    "searchResults": "Resultados",
-    "noSearchResults": "No hay chats coincidentes."
+    }
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -75,10 +90,13 @@
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
+      "imageGeneration": "Generación de imágenes",
+      "imageDefaults": "Valores predeterminados",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
       "safety": "Safety",
+      "capabilities": "Capacidades",
       "integrations": "Integrations"
     },
     "rows": {
@@ -91,6 +109,7 @@
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
+      "pendingChanges": "Cambios pendientes",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -99,6 +118,15 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "imageGeneration": "Generación de imágenes",
+      "imageProvider": "Proveedor de imágenes",
+      "imageProviderStatus": "Estado del proveedor",
+      "imageProviderBase": "Base del proveedor",
+      "imageModel": "Modelo de imagen",
+      "defaultAspectRatio": "Relación predeterminada",
+      "defaultImageSize": "Tamaño predeterminado",
+      "maxImagesPerTurn": "Máximo de imágenes por turno",
+      "imageSaveDir": "Directorio de guardado",
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
@@ -129,6 +157,13 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "Expone generate_image en los chats cuando hay un proveedor de imágenes configurado disponible.",
+      "imageProvider": "Elige el proveedor del registro que usará generate_image.",
+      "imageProviderStatus": "La generación de imágenes reutiliza las credenciales de Proveedores.",
+      "imageModel": "Nombre del modelo enviado al proveedor de imágenes seleccionado.",
+      "defaultAspectRatio": "Se usa cuando el prompt no elige una relación de aspecto.",
+      "defaultImageSize": "Sugerencia de tamaño enviada a los proveedores que la admiten.",
+      "maxImagesPerTurn": "Límite superior para una solicitud generate_image.",
       "botName": "Shown in runtime surfaces that use the configured bot identity.",
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
@@ -141,8 +176,8 @@
       "notAvailable": "No disponible",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready",
+      "restartPending": "Reinicio pendiente",
+      "ready": "Listo",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -150,13 +185,19 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready"
     },
     "status": {
       "loading": "Cargando configuración...",
       "loadError": "No se pudo cargar la configuración",
       "unsaved": "Hay cambios sin guardar.",
-      "savedRestart": "Guardado. Reinicia nanobot para aplicar."
+      "upToDate": "Actualizado.",
+      "savedRestart": "Guardado. Reinicia nanobot para aplicar.",
+      "restartAfterSaving": "Guarda los cambios y reinicia cuando estés listo.",
+      "savedRestartApply": "Guardado. Reinicia cuando estés listo.",
+      "imageProviderRestart": "Cambios del proveedor de imágenes guardados. Reinicia cuando estés listo."
     },
     "actions": {
       "save": "Guardar",
@@ -213,18 +254,25 @@
       "configuredCount": "{{count}} configured",
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
+      "imageGeneration": "Generación de imágenes",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "Seleccionar proveedor",
+      "selectAspect": "Seleccionar relación",
+      "selectSize": "Seleccionar tamaño",
+      "configureProvider": "Configurar proveedor",
+      "missingCredential": "Configura este proveedor antes de activar la generación de imágenes."
     }
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
     "loading": "Cargando…",
     "noSessions": "Todavía no hay sesiones.",
-    "showMore": "Mostrar {{count}} más",
     "actions": "Acciones del chat {{title}}",
     "activity": {
       "running": "Agent running",
@@ -269,7 +317,6 @@
   "thread": {
     "loadingConversation": "Cargando conversación…",
     "empty": {
-      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo.",
       "greeting": "¿Qué puedo hacer por ti?",
       "quickActions": {
         "plan": {
@@ -322,10 +369,14 @@
           "title": "Editar una imagen",
           "prompt": "Ayúdame a editar una imagen. Primero pídeme que suba o indique la imagen, y luego genera el resultado editado."
         }
-      }
+      },
+      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo."
     },
     "header": {
-      "toggleSidebar": "Mostrar u ocultar la barra lateral"
+      "toggleSidebar": "Mostrar u ocultar la barra lateral",
+      "newChat": "Iniciar un chat nuevo",
+      "toggleTheme": "Cambiar tema desde el encabezado",
+      "settings": "Abrir configuración"
     },
     "composer": {
       "placeholderThread": "Escribe tu mensaje…",
@@ -339,6 +390,7 @@
       "goalStateFallback": "Objetivo",
       "goalStateExpandAria": "Ver objetivo completo",
       "goalStateSheetTitle": "Objetivo",
+      "goalStateCloseAria": "Cerrar objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",
@@ -357,16 +409,11 @@
           "16_9": "Panorámico 16:9"
         }
       },
-      "encoding": "Procesando…",
-      "remove": "Quitar adjunto",
-      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
-      "imageRejected": {
-        "unsupported_type": "Tipo de archivo no compatible",
-        "too_many_images": "Máximo {{max}} imágenes por mensaje",
-        "magic_mismatch": "El archivo no parece una imagen real",
-        "decode_failed": "No se pudo decodificar esta imagen",
-        "too_large": "Imagen demasiado grande — prueba una más pequeña",
-        "io": "No se pudo leer este archivo"
+      "tools": {
+        "search": "Buscar",
+        "reason": "Razonar",
+        "deepResearch": "Investigación profunda",
+        "voice": "Entrada de voz"
       },
       "slash": {
         "ariaLabel": "Comandos slash",
@@ -417,7 +464,17 @@
           }
         }
       },
-      "goalStateCloseAria": "Cerrar objetivo"
+      "encoding": "Procesando…",
+      "remove": "Quitar adjunto",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipo de archivo no compatible",
+        "too_many_images": "Máximo {{max}} imágenes por mensaje",
+        "magic_mismatch": "El archivo no parece una imagen real",
+        "decode_failed": "No se pudo decodificar esta imagen",
+        "too_large": "Imagen demasiado grande — prueba una más pequeña",
+        "io": "No se pudo leer este archivo"
+      }
     },
     "scrollToBottom": "Desplazarse al final",
     "loadEarlier": "Cargar mensajes anteriores"
@@ -439,6 +496,8 @@
     "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
     "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
     "imageAttachment": "Imagen adjunta",
+    "copyReply": "Copiar respuesta",
+    "copiedReply": "Respuesta copiada",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)"
   },
   "lightbox": {
