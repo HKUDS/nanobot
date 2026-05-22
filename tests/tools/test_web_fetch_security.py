@@ -86,6 +86,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         raise AssertionError("Jina Reader should be skipped when disabled")
 
     class FakeStreamResponse:
+        status_code = 200
         headers = {"content-type": "text/html"}
         url = "https://example.com/page"
 
@@ -94,6 +95,9 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
+
+        async def aread(self):
+            raise AssertionError("non-image prefetch body should not be read")
 
     class FakeResponse:
         status_code = 200
@@ -115,7 +119,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        def stream(self, method, url, headers=None):
+        def stream(self, method, url, headers=None, **kwargs):
             seen_headers.append(headers or {})
             return FakeStreamResponse()
 
@@ -135,6 +139,68 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         "nanobot-test-agent",
         "nanobot-test-agent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_blocks_private_redirect_before_readability_request(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    requested: list[str] = []
+
+    class FakeStreamResponse:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        url = "https://attacker.example/start"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            raise AssertionError("non-image prefetch body should not be read")
+
+    class FakeRedirectResponse:
+        status_code = 302
+        headers = {"location": "http://127.0.0.1:8765/metadata"}
+        url = "https://attacker.example/start"
+
+        async def aclose(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, **kwargs):
+            return FakeStreamResponse()
+
+        async def get(self, url, headers=None, **kwargs):
+            requested.append(url)
+            if url == "http://127.0.0.1:8765/metadata":
+                raise AssertionError("private redirect target should not be requested")
+            return FakeRedirectResponse()
+
+    monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
+
+    def resolve_public_start_only(hostname, port, family=0, type_=0):
+        if hostname == "attacker.example":
+            return _fake_resolve_public(hostname, port, family, type_)
+        return _REAL_GETADDRINFO(hostname, port, family, type_)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", resolve_public_start_only):
+        result = await tool.execute(url="https://attacker.example/start")
+
+    data = json.loads(result)
+    assert "error" in data
+    assert "redirect blocked" in data["error"].lower()
+    assert requested == ["https://attacker.example/start"]
 
 
 @pytest.mark.asyncio
