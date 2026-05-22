@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.shell import ApprovalRule, ExecTool, ExecToolConfig
 
 
@@ -27,10 +28,10 @@ def test_approval_rule_explicit_policy():
 def test_approval_rule_invalid_policy_raises_error():
     """Invalid policy should raise validation error."""
     from pydantic import ValidationError
-    
+
     with pytest.raises(ValidationError) as excinfo:
         ApprovalRule(pattern=r"rm\s+-rf", policy="invalid")
-    
+
     assert "Invalid policy: invalid, must be one of auto/ask/deny" in str(excinfo.value)
 
 
@@ -245,27 +246,47 @@ def test_disabled_confirmation_maintains_backward_compatibility():
 
 
 # ---------------------------------------------------------------------------
-# Pending command state
+# Per-session pending state
 # ---------------------------------------------------------------------------
 
 
-def test_pending_command_state_management():
-    """Tool should correctly manage pending command state."""
+def _set_session(tool: ExecTool, session_key: str) -> None:
+    """Helper: set the session context on a tool instance."""
+    tool.set_context(RequestContext(
+        channel="test", chat_id="test", session_key=session_key,
+    ))
+
+
+def test_pending_state_is_per_session():
+    """Different sessions should have independent pending states."""
     tool = ExecTool(enable_user_confirmation=True)
-    assert tool._pending_command is None
 
-    tool._pending_command = "rm -rf /tmp/build"
-    tool._pending_cwd = "/tmp"
-    tool._pending_timeout = 60
+    # Session A triggers a pending command
+    _set_session(tool, "session_a")
+    tool._pending["session_a"] = tool._pending.get("session_a")  # no-op, just verify dict works
+    from nanobot.agent.tools.shell import _PendingCommand
+    tool._pending["session_a"] = _PendingCommand(
+        command="rm -rf /tmp/a", cwd="/tmp", timeout=60,
+    )
 
-    assert tool._pending_command == "rm -rf /tmp/build"
-    assert tool._pending_cwd == "/tmp"
+    # Session B triggers a different pending command
+    _set_session(tool, "session_b")
+    tool._pending["session_b"] = _PendingCommand(
+        command="rm -rf /tmp/b", cwd="/tmp", timeout=60,
+    )
 
-    tool._pending_command = None
-    tool._pending_cwd = None
-    tool._pending_timeout = None
+    # Both pending states coexist
+    assert tool._pending["session_a"].command == "rm -rf /tmp/a"
+    assert tool._pending["session_b"].command == "rm -rf /tmp/b"
 
-    assert tool._pending_command is None
+
+def test_pending_state_default_key_when_no_session():
+    """Without a session key, _default is used."""
+    tool = ExecTool(enable_user_confirmation=True)
+    assert tool._session_key is None
+    # execute() uses "_default" when _session_key is None
+    session_key = tool._session_key or "_default"
+    assert session_key == "_default"
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +301,10 @@ async def test_execute_with_confirmation_returns_needs_confirmation():
     result = await tool.execute("rm -rf /tmp/build")
     assert result.startswith("NEEDS_CONFIRMATION:")
     assert "rm -rf /tmp/build" in result
-    assert tool._pending_command == "rm -rf /tmp/build"
-    assert tool._pending_cwd is not None
+    # Pending state stored in per-session dict
+    session_key = tool._session_key or "_default"
+    assert session_key in tool._pending
+    assert tool._pending[session_key].command == "rm -rf /tmp/build"
 
 
 @pytest.mark.asyncio
@@ -290,7 +313,7 @@ async def test_execute_without_confirmation_blocks_deny():
     tool = ExecTool(enable_user_confirmation=False)
     result = await tool.execute("rm -rf /tmp/build")
     assert "deny pattern" in result.lower()
-    assert tool._pending_command is None
+    assert len(tool._pending) == 0
 
 
 @pytest.mark.asyncio
@@ -298,31 +321,50 @@ async def test_execute_confirmed_runs_pending_command():
     """With confirmed=True, execute() runs the pending command directly."""
     tool = ExecTool(enable_user_confirmation=True)
     await tool.execute("rm -rf /tmp/build")
-    assert tool._pending_command is not None
+    session_key = tool._session_key or "_default"
+    assert session_key in tool._pending
 
     result = await tool.execute("rm -rf /tmp/build", confirmed=True)
     assert "deny pattern" not in result.lower()
     assert "NEEDS_CONFIRMATION" not in result
-    assert tool._pending_command is None
+    assert session_key not in tool._pending
 
 
 @pytest.mark.asyncio
-async def test_execute_confirmed_mismatch_falls_through():
-    """If confirmed command doesn't match pending, fall through to guard."""
+async def test_execute_confirmed_mismatch_preserves_pending():
+    """If confirmed command doesn't match pending, fall through to guard.
+
+    The new command goes through normal guard checks. If it also needs
+    confirmation, it overwrites the pending state (which is expected —
+    the most recent blocked command is what the user will be asked about).
+    If it's a safe command, the original pending stays intact.
+    """
     tool = ExecTool(enable_user_confirmation=True)
     await tool.execute("rm -rf /tmp/build")
-    assert tool._pending_command is not None
+    session_key = tool._session_key or "_default"
+    assert session_key in tool._pending
 
+    # Mismatched confirmed command also hits deny pattern → overwrites pending
     result = await tool.execute("rm -rf /tmp/other", confirmed=True)
-    # Pending was cleared; new command hits guard (either deny or NEEDS_CONFIRMATION)
-    assert "deny pattern" in result.lower() or "NEEDS_CONFIRMATION" in result
+    assert "NEEDS_CONFIRMATION" in result
+    assert tool._pending[session_key].command == "rm -rf /tmp/other"
+
+    # A safe command with confirmed=True should not disturb pending
+    tool2 = ExecTool(enable_user_confirmation=True)
+    await tool2.execute("rm -rf /tmp/build")
+    session_key2 = tool2._session_key or "_default"
+    result2 = await tool2.execute("echo hello", confirmed=True)
+    assert "Exit code" in result2
+    # Original pending is still intact because echo didn't overwrite it
+    assert tool2._pending[session_key2].command == "rm -rf /tmp/build"
 
 
 @pytest.mark.asyncio
 async def test_execute_confirmed_without_pending_falls_through():
     """confirmed=True with no pending command should fall through to normal guard."""
     tool = ExecTool(enable_user_confirmation=True)
-    assert tool._pending_command is None
+    session_key = tool._session_key or "_default"
+    assert session_key not in tool._pending
 
     result = await tool.execute("rm -rf /tmp/build", confirmed=True)
     # No pending command, so confirmed is ignored; hits normal guard
@@ -355,7 +397,8 @@ async def test_execute_deny_approval_rule_hard_blocks():
     result = await tool.execute("rm -rf /")
     assert "blocked by approval policy" in result.lower()
     assert "NEEDS_CONFIRMATION" not in result
-    assert tool._pending_command is None
+    session_key = tool._session_key or "_default"
+    assert session_key not in tool._pending
 
 
 @pytest.mark.asyncio
@@ -387,3 +430,30 @@ async def test_execute_safe_binary_bypasses_guard():
     result = await tool.execute("echo hello")
     assert "Exit code" in result
     assert "NEEDS_CONFIRMATION" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_cross_session_isolation():
+    """Pending commands from different sessions should not interfere."""
+    tool = ExecTool(enable_user_confirmation=True)
+
+    # Session A triggers NEEDS_CONFIRMATION
+    _set_session(tool, "session_a")
+    result_a = await tool.execute("rm -rf /tmp/a")
+    assert "NEEDS_CONFIRMATION" in result_a
+    assert "session_a" in tool._pending
+
+    # Session B triggers a different NEEDS_CONFIRMATION
+    _set_session(tool, "session_b")
+    result_b = await tool.execute("rm -rf /tmp/b")
+    assert "NEEDS_CONFIRMATION" in result_b
+    assert "session_b" in tool._pending
+
+    # Session A's pending is still intact
+    assert tool._pending["session_a"].command == "rm -rf /tmp/a"
+
+    # Session B confirms its command — should not affect session A
+    result_b2 = await tool.execute("rm -rf /tmp/b", confirmed=True)
+    assert "NEEDS_CONFIRMATION" not in result_b2
+    assert "session_b" not in tool._pending
+    assert "session_a" in tool._pending

@@ -11,10 +11,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from dataclasses import dataclass
+
 from loguru import logger
 from pydantic import Field, field_validator
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
@@ -31,6 +34,14 @@ _WORKSPACE_BOUNDARY_NOTE = (
     "resource, tell them you cannot reach it under the current "
     "restrict_to_workspace policy and ask how to proceed."
 )
+
+
+@dataclass
+class _PendingCommand:
+    """Per-session pending command awaiting user confirmation."""
+    command: str
+    cwd: str
+    timeout: int | None = None
 
 
 class ApprovalRule(Base):
@@ -166,10 +177,11 @@ class ExecTool(Tool):
         self.enable_user_confirmation = enable_user_confirmation
         self.safe_binaries = safe_binaries or []
         self.approval_rules = approval_rules or []
-        # Pending command state for user confirmation flow.
-        self._pending_command: str | None = None
-        self._pending_cwd: str | None = None
-        self._pending_timeout: int | None = None
+        # Per-session pending command state for user confirmation flow.
+        # Keyed by session_key to avoid cross-session interference.
+        self._pending: dict[str, _PendingCommand] = {}
+        # Current session context, updated via set_context().
+        self._session_key: str | None = None
 
     @property
     def name(self) -> str:
@@ -205,6 +217,10 @@ class ExecTool(Tool):
     def exclusive(self) -> bool:
         return True
 
+    def set_context(self, ctx: RequestContext) -> None:
+        """Receive per-request routing context from AgentLoop."""
+        self._session_key = ctx.session_key
+
     async def execute(
         self, command: str, working_dir: str | None = None,
         timeout: int | None = None, confirmed: bool = False, **kwargs: Any,
@@ -234,19 +250,22 @@ class ExecTool(Tool):
         # --- User confirmation flow ---
         # If the user confirmed a previously pending command, execute it
         # directly (skip the guard for that specific command).
-        if confirmed and self._pending_command is not None:
-            saved_cmd = self._pending_command
-            saved_cwd = self._pending_cwd
-            saved_timeout = self._pending_timeout
-            self._pending_command = None
-            self._pending_cwd = None
-            self._pending_timeout = None
-            # Only execute if the confirmed command matches the current one.
-            if command.strip() == saved_cmd.strip():
-                logger.info("exec: user confirmed pending command: {}", saved_cmd)
-                return await self._run_command(saved_cmd, saved_cwd or cwd, saved_timeout or timeout)
+        session_key = self._session_key or "_default"
+        pending = self._pending.get(session_key)
+        if confirmed and pending is not None:
+            # Only execute if the confirmed command matches the pending one.
+            if command.strip() == pending.command.strip():
+                logger.info("exec: user confirmed pending command: {}", pending.command)
+                self._pending.pop(session_key, None)
+                return await self._run_command(
+                    pending.command, pending.cwd, pending.timeout or timeout,
+                )
             # Mismatch: the confirmed command differs from the pending one.
-            logger.warning("exec: confirmed command mismatch, pending={!r}, current={!r}", saved_cmd, command)
+            # Keep the original pending intact so it can still be confirmed.
+            logger.warning(
+                "exec: confirmed command mismatch, pending={!r}, current={!r}",
+                pending.command, command,
+            )
             # Fall through to normal guard check for the new command.
 
         guard_error = self._guard_command(command, cwd)
@@ -255,9 +274,9 @@ class ExecTool(Tool):
             # pattern (not a hard policy like SSRF or workspace boundary),
             # return a confirmation prompt instead of a hard block.
             if self.enable_user_confirmation and "deny pattern" in guard_error:
-                self._pending_command = command
-                self._pending_cwd = cwd
-                self._pending_timeout = timeout
+                self._pending[session_key] = _PendingCommand(
+                    command=command, cwd=cwd, timeout=timeout,
+                )
                 logger.info("exec: command needs user confirmation: {}", command)
                 return (
                     f"NEEDS_CONFIRMATION: {command}\n\n"

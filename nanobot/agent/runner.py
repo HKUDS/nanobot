@@ -933,6 +933,10 @@ class AgentRunner:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
 
+        if isinstance(result, str) and result.startswith("NEEDS_CONFIRMATION"):
+            detail = result.replace("\n", " ").strip()[:120]
+            return result, {"name": tool_call.name, "status": "needs_confirmation", "detail": detail}, None
+
         if file_edit_tracker is not None and progress_callback is not None:
             await invoke_file_edit_progress(
                 progress_callback,
