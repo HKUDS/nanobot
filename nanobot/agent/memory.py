@@ -1120,6 +1120,9 @@ class Dream:
             )
             analysis = phase1_response.content or ""
             logger.debug("Dream Phase 1 analysis ({} chars): {}", len(analysis), analysis[:500])
+            if phase1_response.finish_reason == "error":
+                logger.warning("Dream Phase 1 returned error: {}", analysis)
+                return False
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
