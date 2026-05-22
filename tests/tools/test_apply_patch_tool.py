@@ -46,6 +46,25 @@ def test_apply_patch_edits_add_new_file(tmp_path):
     assert (tmp_path / "config.py").read_text() == "DEBUG = True\n"
 
 
+def test_apply_patch_edits_preserves_new_file_trailing_blank_lines(tmp_path):
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "notes.txt",
+                    "action": "add",
+                    "new_text": "one\n\n",
+                }
+            ]
+        )
+    )
+
+    assert "add notes.txt" in result
+    assert (tmp_path / "notes.txt").read_text() == "one\n\n"
+
+
 def test_apply_patch_edits_add_to_existing_file(tmp_path):
     target = tmp_path / "log.py"
     target.write_text("import logging\n\nlogger = logging.getLogger(__name__)\n")
@@ -110,6 +129,28 @@ def test_apply_patch_edits_delete_entire_file(tmp_path):
 
     assert "delete obsolete.txt" in result
     assert not target.exists()
+
+
+def test_apply_patch_edits_delete_substring_with_surrounding_whitespace(tmp_path):
+    target = tmp_path / "keep_whitespace.txt"
+    target.write_text("  token  \n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "keep_whitespace.txt",
+                    "action": "delete",
+                    "old_text": "token",
+                }
+            ]
+        )
+    )
+
+    assert "update keep_whitespace.txt" in result
+    assert target.exists()
+    assert target.read_text() == "    \n"
 
 
 def test_apply_patch_edits_batch_multiple_files(tmp_path):
@@ -220,10 +261,46 @@ def test_apply_patch_edits_rejects_absolute_and_parent_paths(tmp_path):
             ]
         )
     )
+    windows_absolute = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": r"C:\owned.txt",
+                    "action": "add",
+                    "new_text": "nope",
+                }
+            ]
+        )
+    )
+    windows_parent = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": r"..\owned.txt",
+                    "action": "add",
+                    "new_text": "nope",
+                }
+            ]
+        )
+    )
 
     assert "must be relative" in absolute
     assert "must not contain '..'" in parent
+    assert "must be relative" in windows_absolute
+    assert "must not contain '..'" in windows_parent
     assert not (tmp_path.parent / "owned.txt").exists()
+
+
+def test_apply_patch_edits_reports_invalid_edit_shapes(tmp_path):
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    missing_path = asyncio.run(tool.execute(edits=[{"action": "add", "new_text": "x"}]))
+    missing_action = asyncio.run(tool.execute(edits=[{"path": "x.txt", "new_text": "x"}]))
+    non_object = asyncio.run(tool.execute(edits=["not an object"]))  # type: ignore[list-item]
+
+    assert "path required for edit" in missing_path
+    assert "action required for edit: x.txt" in missing_action
+    assert "each edit must be an object" in non_object
 
 
 def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):

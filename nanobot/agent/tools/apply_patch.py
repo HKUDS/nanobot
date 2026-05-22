@@ -31,7 +31,7 @@ class _PatchError(ValueError):
     pass
 
 
-_ABSOLUTE_WINDOWS_RE = re.compile(r"^[A-Za-z]:[\/]")
+_ABSOLUTE_WINDOWS_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def _validate_relative_path(path: str) -> str:
@@ -42,7 +42,7 @@ def _validate_relative_path(path: str) -> str:
         raise _PatchError(f"patch path contains a null byte: {path!r}")
     if normalized.startswith(("~", "/", "\\")) or _ABSOLUTE_WINDOWS_RE.match(normalized):
         raise _PatchError(f"patch path must be relative: {path}")
-    if any(part == ".." for part in re.split(r"[\/]+", normalized)):
+    if any(part == ".." for part in re.split(r"[\\/]+", normalized)):
         raise _PatchError(f"patch path must not contain '..': {path}")
     return normalized
 
@@ -109,6 +109,7 @@ def _format_summary(summary: _PatchSummary) -> str:
             description="Validate and summarize the patch without writing files.",
             default=False,
         ),
+        required=["edits"],
     )
 )
 class ApplyPatchTool(_FsTool):
@@ -143,8 +144,15 @@ class ApplyPatchTool(_FsTool):
             summaries: list[_PatchSummary] = []
 
             for edit in edits:
-                path = _validate_relative_path(edit["path"])
-                action = edit["action"]
+                if not isinstance(edit, dict):
+                    raise _PatchError("each edit must be an object")
+                raw_path = edit.get("path")
+                if not isinstance(raw_path, str):
+                    raise _PatchError("path required for edit")
+                path = _validate_relative_path(raw_path)
+                action = edit.get("action")
+                if not isinstance(action, str):
+                    raise _PatchError(f"action required for edit: {path}")
                 source = self._resolve(path)
 
                 if action == "add":
@@ -179,7 +187,9 @@ class ApplyPatchTool(_FsTool):
                         added, deleted = _line_diff_stats(content, new_norm)
                         action_name = "update"
                     else:
-                        new_norm = _lines_to_text(new_text.splitlines())
+                        new_norm = new_text.replace("\r\n", "\n")
+                        if new_norm and not new_norm.endswith("\n"):
+                            new_norm += "\n"
                         writes[source] = new_norm
                         deletes.discard(source)
                         added = _text_line_count(new_norm)
@@ -274,7 +284,7 @@ class ApplyPatchTool(_FsTool):
                     if norm_content.find(norm_old, pos + 1) >= 0:
                         raise _PatchError(f"old_text appears multiple times in {path}")
 
-                    if norm_old.strip() == norm_content.strip():
+                    if norm_old == norm_content:
                         deletes.add(source)
                         writes.pop(source, None)
                         added, deleted = 0, _text_line_count(content)
