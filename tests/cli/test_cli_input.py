@@ -1,4 +1,6 @@
 import asyncio
+from contextlib import nullcontext
+from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -96,6 +98,66 @@ def test_print_cli_progress_line_pauses_spinner_before_printing():
     assert order == ["start", "stop", "print", "start", "stop"]
 
 
+def test_thinking_spinner_clears_status_line_when_paused():
+    """Stopping the spinner should erase its transient line before output."""
+    stream = StringIO()
+    stream.isatty = lambda: True  # type: ignore[method-assign]
+    mock_console = MagicMock()
+    mock_console.file = stream
+    spinner = MagicMock()
+    mock_console.status.return_value = spinner
+
+    thinking = stream_mod.ThinkingSpinner(console=mock_console)
+    with thinking:
+        with thinking.pause():
+            pass
+
+    assert "\r\x1b[2K" in stream.getvalue()
+
+
+def test_stream_renderer_stops_spinner_even_after_header_printed():
+    """A later answer delta must stop the spinner even when header already exists."""
+    stream = StringIO()
+    stream.isatty = lambda: True  # type: ignore[method-assign]
+    mock_console = MagicMock()
+    mock_console.file = stream
+    spinner = MagicMock()
+    mock_console.status.return_value = spinner
+
+    with patch.object(stream_mod, "_make_console", return_value=mock_console):
+        renderer = stream_mod.StreamRenderer(show_spinner=True)
+        renderer._header_printed = True
+        renderer.ensure_header()
+
+    spinner.stop.assert_called_once()
+    assert "\r\x1b[2K" in stream.getvalue()
+
+
+def test_print_cli_progress_line_opens_renderer_header_before_trace():
+    """Trace lines should appear under the assistant header, not under You."""
+    order: list[str] = []
+    renderer = MagicMock()
+    renderer.console.print.side_effect = lambda *_args, **_kwargs: order.append("print")
+    renderer.ensure_header.side_effect = lambda: order.append("header")
+    renderer.pause_spinner.return_value = nullcontext()
+
+    commands._print_cli_progress_line("tool running", None, renderer)
+
+    assert order == ["header", "print"]
+
+
+def test_print_cli_progress_line_stops_live_before_trace():
+    """A trace line should not leak the current transient Live frame."""
+    mock_live = MagicMock()
+    renderer = stream_mod.StreamRenderer(show_spinner=False)
+    renderer._live = mock_live
+
+    commands._print_cli_progress_line("tool running", None, renderer)
+
+    mock_live.stop.assert_called_once()
+    assert renderer._live is None
+
+
 @pytest.mark.asyncio
 async def test_print_interactive_progress_line_pauses_spinner_before_printing():
     """Interactive progress output should also pause spinner cleanly."""
@@ -156,15 +218,63 @@ def test_stream_renderer_stop_for_input_stops_spinner():
     # Create renderer with mocked console
     with patch.object(stream_mod, "_make_console", return_value=mock_console):
         renderer = stream_mod.StreamRenderer(show_spinner=True)
-        
+
         # Verify spinner started
         spinner.start.assert_called_once()
-        
+
         # Stop for input
         renderer.stop_for_input()
-        
+
         # Verify spinner stopped
         spinner.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_on_end_writes_final_content_to_stdout_after_stopping_live():
+    """on_end should stop Live (transient erases it) then print final content to stdout."""
+    mock_live = MagicMock()
+    mock_console = MagicMock()
+    mock_console.capture.return_value.__enter__ = MagicMock(
+        return_value=MagicMock(get=lambda: "final output\n")
+    )
+    mock_console.capture.return_value.__exit__ = MagicMock(return_value=False)
+
+    with patch.object(stream_mod, "_make_console", return_value=mock_console):
+        renderer = stream_mod.StreamRenderer(show_spinner=False)
+        renderer._live = mock_live
+        renderer._buf = "final output"
+
+        written: list[str] = []
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.write = lambda s: written.append(s)
+            mock_stdout.flush = MagicMock()
+            await renderer.on_end()
+
+    mock_live.stop.assert_called_once()
+    assert renderer._live is None
+    assert written == ["final output\n"]
+
+
+@pytest.mark.asyncio
+async def test_on_end_resuming_clears_buffer_and_restarts_spinner():
+    """on_end(resuming=True) should reset state for the next iteration."""
+    spinner = MagicMock()
+    mock_console = MagicMock()
+    mock_console.status.return_value = spinner
+    mock_console.capture.return_value.__enter__ = MagicMock(
+        return_value=MagicMock(get=lambda: "")
+    )
+    mock_console.capture.return_value.__exit__ = MagicMock(return_value=False)
+
+    with patch.object(stream_mod, "_make_console", return_value=mock_console):
+        renderer = stream_mod.StreamRenderer(show_spinner=True)
+        renderer._buf = "some content"
+
+        await renderer.on_end(resuming=True)
+
+    assert renderer._buf == ""
+    # Spinner should have been restarted (start called twice: __init__ + resuming)
+    assert spinner.start.call_count == 2
 
 
 def test_make_console_force_terminal_when_stdout_is_tty():

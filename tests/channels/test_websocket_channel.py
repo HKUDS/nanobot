@@ -13,7 +13,8 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import (
     WebSocketChannel,
     WebSocketConfig,
@@ -25,9 +26,11 @@ from nanobot.channels.websocket import (
     _parse_inbound_payload,
     _parse_query,
     _parse_request_path,
+    publish_runtime_model_update,
 )
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.webui.settings_api import settings_payload
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -168,6 +171,40 @@ def test_issue_route_secret_matches_empty_secret() -> None:
 
 
 @pytest.mark.asyncio
+async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.channel == "websocket"
+    assert msg.chat_id == "chat-1"
+    assert msg.metadata["webui"] is True
+    assert msg.metadata["_wants_stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_plain_websocket_message_does_not_mark_webui(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "custom-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello"},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert "webui" not in msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_send_delivers_json_message_with_media_and_reply() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -188,11 +225,46 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
     payload = json.loads(mock_ws.send.call_args[0][0])
     assert payload["event"] == "message"
     assert payload["chat_id"] == "chat-1"
-    assert payload["text"] == "hello\n\n1. Yes\n2. No"
-    assert payload["button_prompt"] == "hello"
+    assert payload["text"] == "hello"
     assert payload["reply_to"] == "m1"
     assert payload["media"] == ["/tmp/a.png"]
-    assert payload["buttons"] == [["Yes", "No"]]
+
+
+@pytest.mark.asyncio
+async def test_send_broadcasts_runtime_model_updates() -> None:
+    bus = MessageBus()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    publish_runtime_model_update(bus, "openai/gpt-4.1", "fast")
+    await channel.send(bus.outbound.get_nowait())
+
+    payload = json.loads(mock_ws.send.call_args[0][0])
+    assert payload["event"] == "runtime_model_updated"
+    assert payload["model_name"] == "openai/gpt-4.1"
+    assert payload["model_preset"] == "fast"
+
+
+@pytest.mark.asyncio
+async def test_runtime_model_update_publisher_uses_websocket_outbound_event() -> None:
+    bus = MessageBus()
+
+    publish_runtime_model_update(
+        bus,
+        "openai/gpt-4.1",
+        "fast",
+    )
+
+    event = bus.outbound.get_nowait()
+    assert event.channel == "websocket"
+    assert event.chat_id == "*"
+    assert event.content == ""
+    assert event.metadata == {
+        "_runtime_model_updated": True,
+        "model": "openai/gpt-4.1",
+        "model_preset": "fast",
+    }
 
 
 @pytest.mark.asyncio
@@ -252,6 +324,127 @@ async def test_send_removes_connection_on_connection_closed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_progress_includes_structured_tool_events() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content='search "hermes"',
+        metadata={
+            "_progress": True,
+            "_tool_hint": True,
+            "_tool_events": [
+                {
+                    "version": 1,
+                    "phase": "start",
+                    "call_id": "call-1",
+                    "name": "web_search",
+                    "arguments": {"query": "hermes", "count": 8},
+                    "result": None,
+                    "error": None,
+                    "files": [],
+                    "embeds": [],
+                }
+            ],
+        },
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload["event"] == "message"
+    assert payload["kind"] == "tool_hint"
+    assert payload["tool_events"] == [
+        {
+            "version": 1,
+            "phase": "start",
+            "call_id": "call-1",
+            "name": "web_search",
+            "arguments": {"query": "hermes", "count": 8},
+            "result": None,
+            "error": None,
+            "files": [],
+            "embeds": [],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_file_edit_progress_uses_file_edit_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={
+            "_progress": True,
+            "_file_edit_events": [
+                {
+                    "version": 1,
+                    "phase": "start",
+                    "call_id": "call-1",
+                    "tool": "write_file",
+                    "path": "src/app.py",
+                    "added": 12,
+                    "deleted": 2,
+                    "approximate": True,
+                    "status": "editing",
+                }
+            ],
+        },
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload == {
+        "event": "file_edit",
+        "chat_id": "chat-1",
+        "edits": [
+            {
+                "version": 1,
+                "phase": "start",
+                "call_id": "call-1",
+                "tool": "write_file",
+                "path": "src/app.py",
+                "added": 12,
+                "deleted": 2,
+                "approximate": True,
+                "status": "editing",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_progress_includes_agent_ui_blob() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    blob = {
+        "kind": "panel",
+        "data": {"version": 1, "event": "tick", "id": "r1"},
+    }
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="progress · panel",
+        metadata={"_progress": True, OUTBOUND_META_AGENT_UI: blob},
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload["event"] == "message"
+    assert payload["kind"] == "progress"
+    assert payload["agent_ui"] == blob
+
+
+@pytest.mark.asyncio
 async def test_send_delta_removes_connection_on_connection_closed() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus)
@@ -288,6 +481,87 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_reasoning_delta_emits_streaming_frame() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_reasoning_delta(
+        "chat-1",
+        "step-by-step thinking",
+        {"_reasoning_delta": True, "_stream_id": "r1"},
+    )
+
+    mock_ws.send.assert_awaited_once()
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload["event"] == "reasoning_delta"
+    assert payload["chat_id"] == "chat-1"
+    assert payload["text"] == "step-by-step thinking"
+    assert payload["stream_id"] == "r1"
+
+
+@pytest.mark.asyncio
+async def test_send_reasoning_end_emits_close_frame() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_reasoning_end("chat-1", {"_reasoning_end": True, "_stream_id": "r1"})
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload == {"event": "reasoning_end", "chat_id": "chat-1", "stream_id": "r1"}
+
+
+@pytest.mark.asyncio
+async def test_send_reasoning_one_shot_expands_to_delta_plus_end() -> None:
+    """``send_reasoning`` is back-compat for hooks that haven't migrated:
+    the base implementation must produce one delta and one end so the
+    WebUI sees the same shape either way."""
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_reasoning(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="thinking",
+        metadata={"_reasoning": True},
+    ))
+
+    assert mock_ws.send.await_count == 2
+    first = json.loads(mock_ws.send.call_args_list[0][0][0])
+    second = json.loads(mock_ws.send.call_args_list[1][0][0])
+    assert first["event"] == "reasoning_delta"
+    assert first["text"] == "thinking"
+    assert second["event"] == "reasoning_end"
+
+
+@pytest.mark.asyncio
+async def test_send_reasoning_delta_drops_empty_chunks() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_reasoning_delta("chat-1", "", {"_reasoning_delta": True})
+
+    mock_ws.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_reasoning_without_subscribers_is_noop() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+
+    await channel.send_reasoning_delta("unattached", "thinking", None)
+    await channel.send_reasoning_end("unattached", None)
+    # No subscribers, no exception, no send.
+
+
+@pytest.mark.asyncio
 async def test_send_turn_end_emits_turn_end_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -304,6 +578,253 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body == {"event": "turn_end", "chat_id": "chat-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_turn_end_includes_latency_ms_when_present() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True, "latency_ms": 1500},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+
+
+@pytest.mark.asyncio
+async def test_send_turn_end_includes_goal_state_when_present() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    blob = {"active": True, "ui_summary": "Explore codebase"}
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True, "goal_state": blob},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
+
+
+@pytest.mark.asyncio
+async def test_send_goal_status_running_emits_event_with_started_at() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={
+            "_goal_status": True,
+            "goal_status": "running",
+            "started_at": 1_700_000_000.5,
+        },
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {
+        "event": "goal_status",
+        "chat_id": "chat-1",
+        "status": "running",
+        "started_at": 1_700_000_000.5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_goal_status_idle_omits_started_at() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={
+            "_goal_status": True,
+            "goal_status": "idle",
+            "goal_started_at": 99.0,
+        },
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "goal_status", "chat_id": "chat-1", "status": "idle"}
+
+
+@pytest.mark.asyncio
+async def test_send_goal_state_emits_blob_per_chat() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_a = AsyncMock()
+    mock_b = AsyncMock()
+    channel._attach(mock_a, "chat-a")
+    channel._attach(mock_b, "chat-b")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-a",
+        content="",
+        metadata={
+            "_goal_state_sync": True,
+            "goal_state": {"active": True, "ui_summary": "A"},
+        },
+    ))
+
+    mock_a.send.assert_awaited_once()
+    mock_b.send.assert_not_called()
+    body = json.loads(mock_a.send.await_args.args[0])
+    assert body == {
+        "event": "goal_state",
+        "chat_id": "chat-a",
+        "goal_state": {"active": True, "ui_summary": "A"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_noop_without_session_manager() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    channel._session_manager = None
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    sm = MagicMock()
+    sm.read_session_file.return_value = None
+    channel._session_manager = sm
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    sm = MagicMock()
+    sm.read_session_file.return_value = {
+        "metadata": {
+            "goal_state": {
+                "status": "active",
+                "objective": "finish docs",
+                "ui_summary": "Docs",
+            },
+        },
+        "messages": [],
+    }
+    channel._session_manager = sm
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body["event"] == "goal_state"
+    assert body["chat_id"] == "chat-1"
+    assert body["goal_state"]["active"] is True
+    assert body["goal_state"]["objective"] == "finish docs"
+    assert body["goal_state"]["ui_summary"] == "Docs"
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_turn_run_wall_clock_skips_when_no_active_turn() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    from nanobot.session import webui_turns as wth
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    await channel._maybe_push_turn_run_wall_clock("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_turn_run_wall_clock_replays_running() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    from nanobot.session import webui_turns as wth
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    try:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        await channel._maybe_push_turn_run_wall_clock("chat-1")
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("chat-1", None)
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {
+        "event": "goal_status",
+        "chat_id": "chat-1",
+        "status": "running",
+        "started_at": 1_700_000_000.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_session_updated_emits_session_updated_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_session_updated": True},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "session_updated", "chat_id": "chat-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_session_updated_includes_scope_when_present() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_session_updated": True, "_session_update_scope": "metadata"},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "session_updated", "chat_id": "chat-1", "scope": "metadata"}
 
 
 @pytest.mark.asyncio
@@ -471,6 +992,13 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     config = Config()
     config.agents.defaults.model = "openai/gpt-4o"
     config.providers.openai.api_key = "secret-key"
+    config.model_presets["deep"] = ModelPresetConfig(
+        model="anthropic/claude-opus-4-5",
+        provider="anthropic",
+        reasoning_effort="high",
+    )
+    config.tools.web.search.provider = "brave"
+    config.tools.web.search.api_key = "brave-secret"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -489,22 +1017,225 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         body = settings.json()
         assert body["agent"]["model"] == "openai/gpt-4o"
         assert body["agent"]["provider"] == "openai"
-        assert {"name": "auto", "label": "Auto"} in body["providers"]
+        assert body["agent"]["model_preset"] == "default"
+        assert body["agent"]["max_tokens"] == 8192
+        assert body["agent"]["timezone"] == "UTC"
+        assert body["agent"]["tool_hint_max_length"] == 40
+        presets = {preset["name"]: preset for preset in body["model_presets"]}
+        assert presets["default"]["active"] is True
+        assert presets["deep"]["reasoning_effort"] == "high"
+        providers = {provider["name"]: provider for provider in body["providers"]}
+        assert providers["openai"]["configured"] is True
+        assert providers["openai"]["api_key_hint"] == "secr••••-key"
+        assert providers["azure_openai"]["api_key_required"] is True
+        assert providers["openrouter"]["configured"] is False
+        assert providers["openrouter"]["api_key_required"] is True
+        assert providers["skywork"]["label"] == "Skywork"
+        assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/agent/v1"
+        assert providers["ant_ling"]["label"] == "Ant Ling"
+        assert providers["ant_ling"]["default_api_base"] == "https://api.ant-ling.com/v1"
+        assert providers["atomic_chat"]["configured"] is False
+        assert providers["atomic_chat"]["api_key_required"] is False
+        assert providers["atomic_chat"]["default_api_base"] == "http://localhost:1337/v1"
         assert body["agent"]["has_api_key"] is True
+        assert body["web_search"]["provider"] == "brave"
+        assert body["web_search"]["api_key_hint"] == "brav••••cret"
+        assert body["web_search"]["max_results"] == 5
+        assert body["web"]["fetch"]["use_jina_reader"] is True
+        search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
+        assert search_providers["duckduckgo"]["credential"] == "none"
+        assert search_providers["searxng"]["credential"] == "base_url"
+        assert body["image_generation"]["enabled"] is False
+        assert body["image_generation"]["provider"] == "openrouter"
+        assert body["image_generation"]["provider_configured"] is False
+        assert body["image_generation"]["default_aspect_ratio"] == "1:1"
+        image_providers = {
+            provider["name"]: provider
+            for provider in body["image_generation"]["providers"]
+        }
+        assert image_providers["openrouter"]["label"] == "OpenRouter"
+        assert image_providers["openrouter"]["configured"] is False
+        assert image_providers["gemini"]["label"] == "Gemini"
+        assert body["runtime"]["config_path"] == str(config_path)
+        workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
+        assert workspace_path.endswith("/.nanobot/workspace")
+        assert body["runtime"]["gateway_port"] == 18790
+        assert body["advanced"]["exec_enabled"] is True
+        assert body["advanced"]["mcp_server_count"] == 0
+        assert body["restart_required_sections"] == []
         assert "secret-key" not in settings.text
+        assert "brave-secret" not in settings.text
+
+        provider_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/provider/update?provider=openrouter"
+            "&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert provider_updated.status_code == 200
+        provider_body = provider_updated.json()
+        assert provider_body["requires_restart"] is False
+        provider_rows = {provider["name"]: provider for provider in provider_body["providers"]}
+        assert provider_rows["openrouter"]["configured"] is True
+        assert provider_body["image_generation"]["provider_configured"] is True
+        assert "sk-or-test" not in provider_updated.text
+
+        local_provider_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/provider/update?provider=atomic_chat"
+            "&api_base=http%3A%2F%2Flocalhost%3A1337%2Fv1",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert local_provider_updated.status_code == 200
+        local_provider_body = local_provider_updated.json()
+        local_provider_rows = {
+            provider["name"]: provider for provider in local_provider_body["providers"]
+        }
+        assert local_provider_rows["atomic_chat"]["configured"] is True
+        assert "localhost:1337" in local_provider_updated.text
 
         updated = await _http_get(
             "http://127.0.0.1:"
-            f"{port}/api/settings/update?model=openrouter/test"
-            "&provider=openrouter",
+            f"{port}/api/settings/update?model=atomic_chat/test"
+            "&provider=atomic_chat&timezone=Asia%2FShanghai"
+            "&bot_name=Nano&bot_icon=N&tool_hint_max_length=120",
             headers={"Authorization": "Bearer tok"},
         )
         assert updated.status_code == 200
-        assert updated.json()["requires_restart"] is True
+        updated_body = updated.json()
+        assert updated_body["requires_restart"] is True
+        assert updated_body["restart_required_sections"] == ["runtime"]
+
+        preset_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/update?model_preset=deep",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert preset_updated.status_code == 200
+        assert preset_updated.json()["agent"]["model"] == "anthropic/claude-opus-4-5"
+
+        bad_preset = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/update?model_preset=missing",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert bad_preset.status_code == 400
+
+        search_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/web-search/update?provider=searxng"
+            "&base_url=https%3A%2F%2Fsearch.example.com"
+            "&max_results=8&timeout=45&use_jina_reader=false",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert search_updated.status_code == 200
+        search_body = search_updated.json()
+        assert search_body["requires_restart"] is True
+        assert search_body["restart_required_sections"] == ["runtime", "web"]
+        assert search_body["web_search"]["provider"] == "searxng"
+        assert search_body["web_search"]["api_key_hint"] is None
+        assert search_body["web_search"]["base_url"] == "https://search.example.com"
+        assert search_body["web_search"]["max_results"] == 8
+        assert search_body["web"]["fetch"]["use_jina_reader"] is False
+
+        image_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/image-generation/update?enabled=true"
+            "&provider=openrouter&model=openai%2Fgpt-image-1"
+            "&default_aspect_ratio=16%3A9&default_image_size=2K"
+            "&max_images_per_turn=3",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert image_updated.status_code == 200
+        image_body = image_updated.json()
+        assert image_body["requires_restart"] is True
+        assert image_body["restart_required_sections"] == ["image", "runtime", "web"]
+        assert image_body["image_generation"]["enabled"] is True
+        assert image_body["image_generation"]["model"] == "openai/gpt-image-1"
+        assert image_body["image_generation"]["default_aspect_ratio"] == "16:9"
+        assert image_body["image_generation"]["default_image_size"] == "2K"
+        assert image_body["image_generation"]["max_images_per_turn"] == 3
+
+        image_provider_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/provider/update?provider=openrouter"
+            "&api_key=sk-or-next&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert image_provider_updated.status_code == 200
+        assert image_provider_updated.json()["requires_restart"] is True
+        assert image_provider_updated.json()["restart_required_sections"] == [
+            "image",
+            "runtime",
+            "web",
+        ]
+        assert "sk-or-next" not in image_provider_updated.text
+
+        bad_web = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/web-search/update?provider=duckduckgo&max_results=99",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert bad_web.status_code == 400
+
+        bad_image = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/image-generation/update?provider=missing",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert bad_image.status_code == 400
 
         saved = load_config(config_path)
-        assert saved.agents.defaults.model == "openrouter/test"
-        assert saved.agents.defaults.provider == "openrouter"
+        assert saved.agents.defaults.model == "atomic_chat/test"
+        assert saved.agents.defaults.provider == "atomic_chat"
+        assert saved.agents.defaults.model_preset == "deep"
+        assert saved.agents.defaults.timezone == "Asia/Shanghai"
+        assert saved.agents.defaults.bot_name == "Nano"
+        assert saved.agents.defaults.bot_icon == "N"
+        assert saved.agents.defaults.tool_hint_max_length == 120
+        assert saved.providers.openrouter.api_key == "sk-or-next"
+        assert saved.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+        assert saved.providers.atomic_chat.api_base == "http://localhost:1337/v1"
+        assert saved.tools.web.search.provider == "searxng"
+        assert saved.tools.web.search.api_key == ""
+        assert saved.tools.web.search.base_url == "https://search.example.com"
+        assert saved.tools.web.search.max_results == 8
+        assert saved.tools.web.search.timeout == 45
+        assert saved.tools.web.fetch.use_jina_reader is False
+        assert saved.tools.image_generation.enabled is True
+        assert saved.tools.image_generation.provider == "openrouter"
+        assert saved.tools.image_generation.model == "openai/gpt-image-1"
+        assert saved.tools.image_generation.default_aspect_ratio == "16:9"
+        assert saved.tools.image_generation.default_image_size == "2K"
+        assert saved.tools.image_generation.max_images_per_turn == 3
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> None:
+    port = 29892
+    channel = _ch(bus, port=port)
+    channel._api_tokens["tok"] = time.monotonic() + 300
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        denied = await _http_get(f"http://127.0.0.1:{port}/api/commands")
+        assert denied.status_code == 401
+
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/commands",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        commands = {row["command"]: row for row in body["commands"]}
+        assert commands["/stop"]["title"] == "Stop current task"
+        assert commands["/history"]["arg_hint"] == "[n]"
+        assert all("description" in row for row in body["commands"])
     finally:
         await channel.stop()
         await server_task
@@ -521,7 +1252,7 @@ def test_settings_payload_normalizes_camel_case_provider(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    body = _ch(bus)._settings_payload()
+    body = settings_payload()
 
     assert body["agent"]["provider"] == "minimax_anthropic"
 
@@ -938,6 +1669,54 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
+def test_sessions_list_includes_active_run_started_at() -> None:
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.session import webui_turns as wth
+
+    bus = MagicMock()
+    channel = _ch(bus)
+    channel._api_tokens["tok"] = time.monotonic() + 300.0
+    channel._session_manager = MagicMock()
+    channel._session_manager.list_sessions.return_value = [
+        {
+            "key": "websocket:chat-1",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+            "title": "Running",
+            "preview": "work",
+            "path": "/private/path",
+        },
+        {
+            "key": "cli:chat-2",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+        },
+    ]
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    try:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
+        resp = channel._handle_sessions_list(req)
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["sessions"] == [
+        {
+            "key": "websocket:chat-1",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+            "title": "Running",
+            "preview": "work",
+            "run_started_at": 1_700_000_000.0,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -956,3 +1735,28 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
 )
 def test_is_valid_chat_id(value: Any, expected: bool) -> None:
     assert _is_valid_chat_id(value) is expected
+
+
+def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:c1"
+    append_transcript_object(key, {"event": "user", "chat_id": "c1", "text": "hi"})
+    bus = MagicMock()
+    channel = _ch(bus)
+    channel._api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel._handle_webui_thread_get(req, enc)
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["sessionKey"] == key
+    assert len(body["messages"]) == 1
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["content"] == "hi"

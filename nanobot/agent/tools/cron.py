@@ -1,10 +1,13 @@
 """Cron tool for scheduling reminders and tasks."""
 
+from __future__ import annotations
+
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -52,7 +55,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
 
 
 @tool_parameters(_CRON_PARAMETERS)
-class CronTool(Tool):
+class CronTool(Tool, ContextAware):
     """Tool to schedule reminders and recurring tasks."""
 
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
@@ -64,15 +67,20 @@ class CronTool(Tool):
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(
-        self, channel: str, chat_id: str,
-        metadata: dict | None = None, session_key: str | None = None,
-    ) -> None:
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.cron_service is not None
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
+
+    def set_context(self, ctx: RequestContext) -> None:
         """Set the current session context for delivery."""
-        self._channel.set(channel)
-        self._chat_id.set(chat_id)
-        self._metadata.set(metadata or {})
-        self._session_key.set(session_key or f"{channel}:{chat_id}")
+        self._channel.set(ctx.channel)
+        self._chat_id.set(ctx.chat_id)
+        self._metadata.set(ctx.metadata)
+        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""

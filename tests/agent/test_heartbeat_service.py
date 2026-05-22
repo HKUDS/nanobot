@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.heartbeat.service import HeartbeatService
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 class DummyProvider(LLMProvider):
@@ -11,9 +12,11 @@ class DummyProvider(LLMProvider):
         super().__init__()
         self._responses = list(responses)
         self.calls = 0
+        self.models: list[str | None] = []
 
     async def chat(self, *args, **kwargs) -> LLMResponse:
         self.calls += 1
+        self.models.append(kwargs.get("model"))
         if self._responses:
             return self._responses.pop(0)
         return LLMResponse(content="", tool_calls=[])
@@ -215,6 +218,51 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
     assert notified == []
 
 
+def test_tick_uses_runtime_provider_and_model(tmp_path, monkeypatch) -> None:
+    """Preset changes must apply to heartbeat decision and post-run evaluation."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check runtime model", encoding="utf-8")
+
+    runtime_provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check runtime model"},
+                )
+            ],
+        ),
+    ])
+    runtime_model = "openai/gpt-4.1"
+
+    executed: list[str] = []
+    evaluated: list[tuple[LLMProvider, str]] = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "runtime model produced a user-facing update"
+
+    async def _eval_capture(response, tasks, provider, model):
+        evaluated.append((provider, model))
+        return False
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        llm_runtime=lambda: LLMRuntime(runtime_provider, runtime_model),
+        on_execute=_on_execute,
+    )
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_capture)
+
+    asyncio.run(service._tick())
+
+    assert runtime_provider.calls == 1
+    assert runtime_provider.models == [runtime_model]
+    assert executed == ["check runtime model"]
+    assert evaluated == [(runtime_provider, runtime_model)]
+
+
 @pytest.mark.asyncio
 async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatch) -> None:
     provider = DummyProvider([
@@ -286,4 +334,3 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
-

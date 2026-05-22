@@ -3,7 +3,6 @@
 import os
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -452,6 +451,39 @@ async def test_process_text_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_enter_chat_ignores_unauthorized_user_before_welcome() -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["allowed"]), MessageBus())
+    client = _FakeWeComClient()
+    channel._client = client
+    channel.config.welcome_message = "hello"
+
+    await channel._on_enter_chat(_FakeFrame(body={"chatid": "blocked"}))
+
+    client.reply_welcome.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_message_ignores_unauthorized_sender_before_download() -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["allowed"]), MessageBus())
+    client = _FakeWeComClient()
+    channel._client = client
+    channel._handle_message = AsyncMock()
+
+    frame = _FakeFrame(body={
+        "msgid": "msg_blocked",
+        "chatid": "chat1",
+        "from": {"userid": "blocked"},
+        "image": {"url": "https://example.com/img.png", "aeskey": "key123"},
+    })
+
+    await channel._process_message(frame, "image")
+
+    client.download_file.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
+    assert channel.bus.inbound_size == 0
+
+
+@pytest.mark.asyncio
 async def test_process_image_message() -> None:
     """Image message: download success → media_paths non-empty."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
@@ -518,6 +550,26 @@ async def test_process_file_message() -> None:
         p = os.path.join(os.path.dirname(saved), "report.pdf")
         if os.path.exists(p):
             os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_process_file_message_uses_sdk_filename_when_name_missing(tmp_path: Path) -> None:
+    """Without `file.name`, fall back to SDK fname instead of saving as 'unknown' (#3737)."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    client = _FakeWeComClient()
+    client.download_file.return_value = (b"%PDF-1.4 fake", "real_name.pdf")
+    channel._client = client
+
+    with patch("nanobot.channels.wecom.get_media_dir", return_value=tmp_path):
+        frame = _FakeFrame(body={
+            "msgid": "msg_file_2", "chatid": "chat1", "from": {"userid": "user1"},
+            "file": {"url": "https://example.com/x", "aeskey": "key456"},
+        })
+        await channel._process_message(frame, "file")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.media == [str(tmp_path / "real_name.pdf")]
+    assert "[file: real_name.pdf]" in msg.content
 
 
 @pytest.mark.asyncio

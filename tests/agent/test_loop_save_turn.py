@@ -8,7 +8,18 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.session.manager import Session
+from nanobot.providers.base import LLMResponse
+from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.webui_turns import (
+    TITLE_GENERATION_MAX_TOKENS,
+    TITLE_GENERATION_REASONING_EFFORT,
+    WEBUI_SESSION_METADATA_KEY,
+    WEBUI_TITLE_METADATA_KEY,
+    WebuiTurnCoordinator,
+    maybe_generate_webui_title,
+)
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _mk_loop() -> AgentLoop:
@@ -22,7 +33,149 @@ def _mk_loop() -> AgentLoop:
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+
+def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    runtime = loop.llm_runtime()
+
+    assert runtime.provider is loop.provider
+    assert runtime.model == "test-model"
+
+    next_provider = MagicMock()
+    loop.provider = next_provider
+    loop.model = "next-model"
+    runtime = loop.llm_runtime()
+
+    assert runtime.provider is next_provider
+    assert runtime.model == "next-model"
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("websocket:chat-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:chat-title",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is True
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
+    loop.provider.chat_with_retry.assert_awaited_once()
+    assert loop.provider.chat_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
+    assert (
+        loop.provider.chat_with_retry.await_args.kwargs["reasoning_effort"]
+        == TITLE_GENERATION_REASONING_EFFORT
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="Plain websocket title", finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("websocket:custom-client")
+    session.add_message("user", "hello from a custom websocket client")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:custom-client",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:command-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "/model deep", _command=True)
+    session.add_message(
+        "assistant",
+        "Switched model preset to `deep`.\n- Model: `deepseek-v4-pro`",
+        _command=True,
+    )
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:command-title",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
+
+
+def test_webui_title_update_uses_captured_llm_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bus = MessageBus()
+    sessions = SessionManager(tmp_path)
+    scheduled: list[object] = []
+    captured: dict[str, object] = {}
+
+    async def fake_title_after_turn(**kwargs: object) -> bool:
+        captured.update(kwargs)
+        return False
+
+    monkeypatch.setattr(
+        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+        fake_title_after_turn,
+    )
+    coordinator = WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sessions,
+        schedule_background=lambda coro: scheduled.append(coro),
+    )
+    provider = MagicMock()
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="chat1",
+        content="say hello",
+        metadata={"webui": True},
+    )
+
+    coordinator.capture_title_context(
+        "websocket:chat1",
+        msg,
+        LLMRuntime(provider, "turn-model"),
+    )
+    asyncio.run(coordinator.handle_turn_end(
+        msg,
+        session_key="websocket:chat1",
+        latency_ms=None,
+    ))
+
+    assert len(scheduled) == 1
+    asyncio.run(scheduled[0])  # type: ignore[arg-type]
+
+    assert captured["provider"] is provider
+    assert captured["model"] == "turn-model"
 
 
 def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:
@@ -48,8 +201,8 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
         [{
             "role": "user",
             "content": [
-                {"type": "text", "text": runtime},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/feishu/photo.jpg"}},
+                {"type": "text", "text": runtime},
             ],
         }],
         skip=0,
@@ -67,13 +220,47 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
         [{
             "role": "user",
             "content": [
-                {"type": "text", "text": runtime},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                {"type": "text", "text": runtime},
             ],
         }],
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+
+
+def test_save_turn_strips_runtime_context_suffix_from_string() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:suffix-strip")
+    runtime = (
+        ContextBuilder._RUNTIME_CONTEXT_TAG
+        + "\nCurrent Time: now\n"
+        + ContextBuilder._RUNTIME_CONTEXT_END
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "user", "content": f"hello world\n\n{runtime}"}],
+        skip=0,
+    )
+    assert session.messages[0]["content"] == "hello world"
+
+
+def test_save_turn_skips_string_user_when_only_runtime_context_suffix() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:suffix-only")
+    runtime = (
+        ContextBuilder._RUNTIME_CONTEXT_TAG
+        + "\nCurrent Time: now\n"
+        + ContextBuilder._RUNTIME_CONTEXT_END
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "user", "content": runtime}],
+        skip=0,
+    )
+    assert session.messages == []
 
 
 def test_save_turn_keeps_tool_results_under_16k() -> None:
@@ -88,6 +275,25 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+def test_save_turn_stamps_latency_on_last_assistant() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:latency")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "assistant", "content": "hello", "tool_calls": [{"id": "c1"}]},
+            {"role": "assistant", "content": "final answer"},
+        ],
+        skip=0,
+        turn_latency_ms=12345,
+    )
+
+    assert session.messages[-1]["role"] == "assistant"
+    assert session.messages[-1]["content"] == "final answer"
+    assert session.messages[-1]["latency_ms"] == 12345
 
 
 def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
@@ -385,6 +591,58 @@ async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path:
     assert result.chat_id == "thread-777"
     assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
     assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
+
+
+@pytest.mark.asyncio
+async def test_process_message_uses_explicit_session_metadata_for_goal_context(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    chat_session = loop.sessions.get_or_create("websocket:chat-with-goal")
+    chat_session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "This chat goal must not leak into heartbeat.",
+    }
+    loop.sessions.save(chat_session)
+    system_session = loop.sessions.get_or_create("heartbeat")
+    system_session.metadata = {}
+    loop.sessions.save(system_session)
+
+    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + heartbeat"},
+        ]
+    )
+    loop._run_agent_loop = AsyncMock(return_value=(  # type: ignore[method-assign]
+        "ok",
+        [],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + heartbeat"},
+            {"role": "assistant", "content": "ok"},
+        ],
+        "stop",
+        False,
+    ))
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="heartbeat",
+            chat_id="chat-with-goal",
+            content="heartbeat work",
+        ),
+        session_key="heartbeat",
+    )
+
+    assert result is not None
+    assert result.content == "ok"
+    kwargs = loop.context.build_messages.call_args.kwargs
+    assert kwargs["chat_id"] == "chat-with-goal"
+    assert kwargs["session_metadata"] is system_session.metadata
+    assert GOAL_STATE_KEY not in kwargs["session_metadata"]
 
 
 def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:

@@ -3,6 +3,8 @@ import subprocess
 import sys
 from typing import Any
 
+import pytest
+
 from nanobot.agent.tools import (
     ArraySchema,
     IntegerSchema,
@@ -15,6 +17,7 @@ from nanobot.agent.tools import (
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.security.network import configure_ssrf_whitelist
 
 
 class SampleTool(Tool):
@@ -216,6 +219,39 @@ def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
     cmd = ".venv/bin/python script.py"
     paths = ExecTool._extract_absolute_paths(cmd)
     assert "/bin/python" not in paths
+
+
+def test_exec_extract_absolute_paths_ignores_urls() -> None:
+    cmd = 'curl -s -o /dev/null -w "%{http_code}" https://www.google.com'
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert paths == ["/dev/null"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'curl -s -o /dev/null -w "%{http_code}" https://www.google.com',
+        'wget -q -O - http://example.com 2>&1 | head -c 100',
+        'python3 -c "import urllib.request; print(urllib.request.urlopen(\'http://example.com\').read()[:100])"',
+    ],
+)
+def test_exec_guard_allows_public_urls(tmp_path, command: str) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(command, str(tmp_path))
+    assert error is None
+
+
+def test_exec_guard_allows_whitelisted_internal_urls(tmp_path) -> None:
+    configure_ssrf_whitelist(["10.10.10.0/24"])
+    try:
+        tool = ExecTool(restrict_to_workspace=True)
+        error = tool._guard_command(
+            'curl -s -H "Authorization: Bearer ..." http://10.10.10.3:8123/api/',
+            str(tmp_path),
+        )
+        assert error is None
+    finally:
+        configure_ssrf_whitelist([])
 
 
 def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:

@@ -169,7 +169,7 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
                 "conv-valid": {"updated_at": now - 60},
                 "conv-webchat": {"updated_at": now - 60},
                 "conv-group": {"updated_at": now - 60},
-                "conv-stale": {"updated_at": now - msteams_module.MSTEAMS_REF_TTL_S - 1},
+                "conv-stale": {"updated_at": now - 30 * 24 * 60 * 60 - 1},
             },
             indent=2,
         ),
@@ -835,7 +835,7 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
     ch = make_channel()
     errors = []
     monkeypatch.setattr(msteams_module, "MSTEAMS_AVAILABLE", False)
-    monkeypatch.setattr(msteams_module.logger, "error", lambda message, *args: errors.append(message.format(*args)))
+    monkeypatch.setattr(ch.logger, "error", lambda message, *args: errors.append(message.format(*args)))
 
     await ch.start()
 

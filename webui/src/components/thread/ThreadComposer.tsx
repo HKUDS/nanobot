@@ -1,17 +1,34 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+
+import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
+  Activity,
   ArrowUp,
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
+  History,
   ImageIcon,
   Loader2,
-  Paperclip,
+  Plus,
+  RotateCw,
+  Sparkles,
+  Square,
+  SquarePen,
+  Target,
+  Undo2,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -23,7 +40,8 @@ import {
   MAX_IMAGES_PER_MESSAGE,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
-import type { SendImage } from "@/hooks/useNanobotStream";
+import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import type { SlashCommand, GoalStateWsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -37,12 +55,312 @@ function formatBytes(n: number): string {
 }
 
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendImage[]) => void;
+  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void;
   disabled?: boolean;
   placeholder?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
   variant?: "thread" | "hero";
+  slashCommands?: SlashCommand[];
+  imageMode?: boolean;
+  onImageModeChange?: (enabled: boolean) => void;
+  onStop?: () => void;
+  /** Unix seconds from server; turn elapsed timer above input while set. */
+  runStartedAt?: number | null;
+  /** Sustained objective for this chat (WebSocket ``goal_state``). */
+  goalState?: GoalStateWsPayload;
+}
+
+const COMMAND_ICONS: Record<string, LucideIcon> = {
+  activity: Activity,
+  "book-open": BookOpen,
+  "circle-help": CircleHelp,
+  history: History,
+  "rotate-cw": RotateCw,
+  sparkles: Sparkles,
+  square: Square,
+  "square-pen": SquarePen,
+  "undo-2": Undo2,
+};
+
+type ImageAspectRatio = "auto" | "1:1" | "3:4" | "9:16" | "4:3" | "16:9";
+
+const IMAGE_ASPECT_RATIOS: ImageAspectRatio[] = ["auto", "1:1", "3:4", "9:16", "4:3", "16:9"];
+const SLASH_PALETTE_GAP_PX = 8;
+const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
+const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
+const SLASH_PALETTE_CHROME_PX = 64;
+
+type SlashPalettePlacement = "above" | "below";
+
+interface SlashPaletteLayout {
+  placement: SlashPalettePlacement;
+  maxHeight: number;
+}
+
+function slashCommandI18nKey(command: string): string {
+  return command.replace(/^\//, "").replace(/-/g, "_");
+}
+
+function scrollNearestOverflowParent(target: EventTarget | null, deltaY: number) {
+  if (!(target instanceof Element) || deltaY === 0) return;
+  let el: HTMLElement | null = target.parentElement;
+  while (el) {
+    const style = window.getComputedStyle(el);
+    const canScroll = /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
+    if (canScroll) {
+      el.scrollTop += deltaY;
+      return;
+    }
+    el = el.parentElement;
+  }
+}
+
+function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = window.innerHeight;
+  let parent = el.parentElement;
+
+  while (parent) {
+    const style = window.getComputedStyle(parent);
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+      const rect = parent.getBoundingClientRect();
+      top = Math.max(top, rect.top);
+      bottom = Math.min(bottom, rect.bottom);
+    }
+    parent = parent.parentElement;
+  }
+
+  return { top, bottom };
+}
+
+function goalStateStripPreview(
+  goal: GoalStateWsPayload | undefined,
+  t: (key: string) => string,
+): string | null {
+  if (!goal?.active) return null;
+  const summary = goal.ui_summary?.trim();
+  if (summary) return summary;
+  const obj = goal.objective?.trim();
+  if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
+  return t("thread.composer.goalStateFallback");
+}
+
+const GOAL_PANEL_VIEWPORT_TOP_PAD = 20;
+const GOAL_PANEL_GAP_ABOVE_STRIP_PX = 10;
+const GOAL_PANEL_MIN_HEIGHT_PX = 112;
+const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
+
+function measureGoalPanelMaxCssHeight(stripTopY: number): number {
+  const spaceAboveStrip =
+    stripTopY - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
+  return Math.min(
+    Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
+    Math.floor(window.innerHeight * GOAL_PANEL_MAX_VIEWPORT_RATIO),
+  );
+}
+
+function buildGoalMarkdownBody(summary: string, objective: string): string {
+  const s = summary.trim();
+  const o = objective.trim();
+  if (s && o) return `${s}\n\n---\n\n${o}`;
+  return o || s;
+}
+
+function RunElapsedStrip({
+  startedAt,
+  goalState,
+}: {
+  startedAt: number | null;
+  goalState?: GoalStateWsPayload;
+}) {
+  const { t } = useTranslation();
+  const [goalPanelOpen, setGoalPanelOpen] = useState(false);
+  const [, setTick] = useState(0);
+  const stripWrapperRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const expandToggleRef = useRef<HTMLButtonElement>(null);
+  const [panelMaxPx, setPanelMaxPx] = useState(280);
+
+  useEffect(() => {
+    if (startedAt == null) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+
+  const showTimer = startedAt != null;
+  const stripLabel = goalStateStripPreview(goalState, t);
+  const showGoal = !!stripLabel?.trim();
+  if (!showTimer && !showGoal) return null;
+
+  const objectiveFull = goalState?.objective?.trim() ?? "";
+  const summaryFull = goalState?.ui_summary?.trim() ?? "";
+  const canExpandGoal = !!(goalState?.active && (objectiveFull || summaryFull));
+
+  const markdownBody =
+    objectiveFull || summaryFull
+      ? buildGoalMarkdownBody(summaryFull, objectiveFull)
+      : "";
+
+  useLayoutEffect(() => {
+    if (!goalPanelOpen) return;
+
+    function relayout(): void {
+      const el = stripWrapperRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setPanelMaxPx(measureGoalPanelMaxCssHeight(top));
+    }
+
+    relayout();
+
+    preloadMarkdownText();
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => relayout())
+        : null;
+    if (stripWrapperRef.current && ro) {
+      ro.observe(stripWrapperRef.current);
+    }
+    window.addEventListener("resize", relayout);
+    window.addEventListener("scroll", relayout, true);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", relayout);
+      window.removeEventListener("scroll", relayout, true);
+    };
+  }, [goalPanelOpen]);
+
+  useEffect(() => {
+    if (!goalPanelOpen) return;
+
+    function onPointerDown(ev: MouseEvent): void {
+      const target = ev.target as Node | null;
+      if (!target) return;
+      if (panelRef.current?.contains(target)) return;
+      if (expandToggleRef.current?.contains(target)) return;
+      setGoalPanelOpen(false);
+    }
+
+    function onKey(ev: KeyboardEvent): void {
+      if (ev.key === "Escape") setGoalPanelOpen(false);
+    }
+
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [goalPanelOpen]);
+
+  const elapsed =
+    startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
+  const m = Math.floor(elapsed / 60);
+  const sec = elapsed % 60;
+  const shortElapsed = m > 0 ? `${m}:${sec.toString().padStart(2, "0")}` : `${sec}s`;
+  const timerTitle = showTimer
+    ? t("thread.composer.runRuntimeTitle", { elapsed: shortElapsed })
+    : null;
+
+  const ariaParts = [timerTitle, showGoal ? stripLabel : null].filter(Boolean);
+  const ariaLabel = ariaParts.join(" · ");
+
+  return (
+    <div ref={stripWrapperRef} className="relative z-30">
+      {goalPanelOpen && canExpandGoal && markdownBody ? (
+        <div
+          ref={panelRef}
+          id="nanobot-goal-panel-root"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="nanobot-goal-panel-title"
+          tabIndex={-1}
+          className={cn(
+            "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
+            "rounded-2xl border border-black/[0.08] bg-card shadow-[0_12px_40px_rgba(15,23,42,0.14)]",
+            "backdrop-blur-sm dark:border-white/[0.1] dark:shadow-[0_16px_48px_rgba(0,0,0,0.45)]",
+          )}
+          style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
+        >
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
+            <h2
+              id="nanobot-goal-panel-title"
+              className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
+            >
+              {t("thread.composer.goalStateSheetTitle")}
+            </h2>
+            <button
+              type="button"
+              className={cn(
+                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                "text-muted-foreground transition-colors hover:bg-muted/65 hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+              aria-label={t("thread.composer.goalStateCloseAria")}
+              onClick={() => setGoalPanelOpen(false)}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+          <div
+            id="nanobot-goal-panel-scroll"
+            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
+          >
+            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
+              {markdownBody}
+            </MarkdownText>
+          </div>
+        </div>
+      ) : null}
+      <div
+        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+        role="status"
+        aria-label={ariaLabel}
+      >
+        {showTimer ? (
+          <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
+        ) : (
+          <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
+        )}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+          {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
+          {timerTitle && showGoal ? (
+            <span className="shrink-0 text-muted-foreground/45" aria-hidden>
+              ·
+            </span>
+          ) : null}
+          {showGoal ? (
+            <span className="truncate">
+              {t("thread.composer.goalStateStrip", { label: stripLabel })}
+            </span>
+          ) : null}
+        </span>
+        {canExpandGoal ? (
+          <button
+            ref={expandToggleRef}
+            type="button"
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+              "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            aria-expanded={goalPanelOpen}
+            aria-controls={goalPanelOpen ? "nanobot-goal-panel-root" : undefined}
+            aria-label={t("thread.composer.goalStateExpandAria")}
+            title={t("thread.composer.goalStateExpandAria")}
+            onClick={() => setGoalPanelOpen((o) => !o)}
+          >
+            {goalPanelOpen ? (
+              <ChevronDown className="h-4 w-4" aria-hidden />
+            ) : (
+              <ChevronUp className="h-4 w-4" aria-hidden />
+            )}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function ThreadComposer({
@@ -52,17 +370,42 @@ export function ThreadComposer({
   isStreaming = false,
   modelLabel = null,
   variant = "thread",
+  slashCommands = [],
+  imageMode: controlledImageMode,
+  onImageModeChange,
+  onStop,
+  runStartedAt = null,
+  goalState,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [uncontrolledImageMode, setUncontrolledImageMode] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("auto");
+  const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
+  const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const setImageMode = useCallback(
+    (enabled: boolean) => {
+      if (controlledImageMode === undefined) {
+        setUncontrolledImageMode(enabled);
+      }
+      onImageModeChange?.(enabled);
+    },
+    [controlledImageMode, onImageModeChange],
+  );
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
-    : placeholder ?? t("thread.composer.placeholderThread");
+    : imageMode
+      ? t("thread.composer.imageMode.placeholder")
+      : placeholder ?? t("thread.composer.placeholderThread");
 
   const { images, enqueue, remove, clear, encoding, full } =
     useAttachedImages();
@@ -119,6 +462,152 @@ export function ThreadComposer({
     && !hasErrors
     && (value.trim().length > 0 || readyImages.length > 0);
 
+  const slashQuery = useMemo(() => {
+    if (disabled || slashMenuDismissed || !value.startsWith("/")) return null;
+    const commandToken = value.slice(1);
+    if (/\s/.test(commandToken)) return null;
+    return commandToken.toLowerCase();
+  }, [disabled, slashMenuDismissed, value]);
+
+  const filteredSlashCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    return slashCommands
+      .filter((command) => {
+        const haystack = [
+          command.command,
+          command.title,
+          command.description,
+          command.argHint ?? "",
+          t(`thread.composer.slash.commands.${slashCommandI18nKey(command.command)}.title`, {
+            defaultValue: "",
+          }),
+          t(`thread.composer.slash.commands.${slashCommandI18nKey(command.command)}.description`, {
+            defaultValue: "",
+          }),
+        ].join(" ").toLowerCase();
+        return haystack.includes(slashQuery);
+      })
+      .slice(0, 8);
+  }, [slashCommands, slashQuery, t]);
+
+  const showSlashMenu = filteredSlashCommands.length > 0;
+  const [slashPaletteLayout, setSlashPaletteLayout] = useState<SlashPaletteLayout>({
+    placement: "above",
+    maxHeight: SLASH_PALETTE_MAX_HEIGHT_PX,
+  });
+
+  useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    if (selectedCommandIndex >= filteredSlashCommands.length) {
+      setSelectedCommandIndex(0);
+    }
+  }, [filteredSlashCommands.length, selectedCommandIndex]);
+
+  useEffect(() => {
+    if (!showSlashMenu) return;
+
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && formRef.current?.contains(target)) return;
+      setSlashMenuDismissed(true);
+    };
+
+    document.addEventListener("pointerdown", dismissOnPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown, true);
+    };
+  }, [showSlashMenu]);
+
+  useLayoutEffect(() => {
+    if (!showSlashMenu) return;
+
+    const updateLayout = () => {
+      const form = formRef.current;
+      if (!form) return;
+      const rect = form.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+
+      const bounds = getVisibleBounds(form);
+      const spaceAbove = Math.max(0, rect.top - bounds.top - SLASH_PALETTE_GAP_PX);
+      const spaceBelow = Math.max(0, bounds.bottom - rect.bottom - SLASH_PALETTE_GAP_PX);
+      const placement: SlashPalettePlacement =
+        spaceAbove >= SLASH_PALETTE_MIN_HEIGHT_PX || spaceAbove >= spaceBelow
+          ? "above"
+          : "below";
+      const available = placement === "above" ? spaceAbove : spaceBelow;
+      const maxHeight = Math.min(SLASH_PALETTE_MAX_HEIGHT_PX, available);
+
+      setSlashPaletteLayout((current) =>
+        current.placement === placement && current.maxHeight === maxHeight
+          ? current
+          : { placement, maxHeight },
+      );
+    };
+
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
+    document.addEventListener("scroll", updateLayout, true);
+    return () => {
+      window.removeEventListener("resize", updateLayout);
+      document.removeEventListener("scroll", updateLayout, true);
+    };
+  }, [filteredSlashCommands.length, showSlashMenu]);
+
+  useEffect(() => {
+    if (!aspectMenuOpen) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && aspectControlRef.current?.contains(target)) return;
+      setAspectMenuOpen(false);
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAspectMenuOpen(false);
+        textareaRef.current?.focus();
+      }
+    };
+    const closeOnScroll = () => setAspectMenuOpen(false);
+    const closeOnWheel = (event: WheelEvent) => {
+      setAspectMenuOpen(false);
+      scrollNearestOverflowParent(event.target, event.deltaY);
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown, true);
+    document.addEventListener("keydown", closeOnKeyDown);
+    document.addEventListener("scroll", closeOnScroll, true);
+    document.addEventListener("wheel", closeOnWheel, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown, true);
+      document.removeEventListener("keydown", closeOnKeyDown);
+      document.removeEventListener("scroll", closeOnScroll, true);
+      document.removeEventListener("wheel", closeOnWheel, true);
+    };
+  }, [aspectMenuOpen]);
+
+  const resizeTextarea = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+      el.focus();
+    });
+  }, []);
+
+  const chooseSlashCommand = useCallback(
+    (command: SlashCommand) => {
+      setValue(command.argHint ? `${command.command} ` : command.command);
+      setSlashMenuDismissed(true);
+      setInlineError(null);
+      resizeTextarea();
+    },
+    [resizeTextarea],
+  );
+
   const submit = useCallback(() => {
     if (!canSend) return;
     const trimmed = value.trim();
@@ -136,22 +625,49 @@ export function ThreadComposer({
             preview: { url: img.dataUrl, name: img.file.name },
           }))
         : undefined;
-    onSend(trimmed, payload);
+    const options: SendOptions | undefined = imageMode
+      ? {
+          imageGeneration: {
+            enabled: true,
+            aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
+          },
+        }
+      : undefined;
+    onSend(trimmed, payload, options);
     setValue("");
     setInlineError(null);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.style.height = "auto";
-        el.focus();
-      }
-    });
-  }, [canSend, clear, onSend, readyImages, value]);
+    setSlashMenuDismissed(false);
+    resizeTextarea();
+  }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedCommandIndex((idx) => (idx + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedCommandIndex(
+          (idx) => (idx - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        chooseSlashCommand(filteredSlashCommands[selectedCommandIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuDismissed(true);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
@@ -202,9 +718,11 @@ export function ThreadComposer({
   );
 
   const attachButtonDisabled = disabled || full;
+  const showStopButton = isStreaming && !!onStop;
 
   return (
     <form
+      ref={formRef}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -213,17 +731,29 @@ export function ThreadComposer({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={cn("w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
+      className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
+      {showSlashMenu ? (
+        <SlashCommandPalette
+          commands={filteredSlashCommands}
+          selectedIndex={selectedCommandIndex}
+          layout={slashPaletteLayout}
+          isHero={isHero}
+          onHover={setSelectedCommandIndex}
+          onChoose={chooseSlashCommand}
+        />
+      ) : null}
       <div
         className={cn(
-          "relative mx-auto flex w-full flex-col overflow-hidden transition-all duration-200",
+          "relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[40rem] rounded-[24px] border border-border/75 bg-card shadow-[0_10px_30px_rgba(0,0,0,0.10)]"
-            : "max-w-[49.5rem] rounded-[16px] border border-border/70 bg-card",
+            ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
+            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
+          goalState?.active &&
+            "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
         {images.length > 0 ? (
@@ -254,10 +784,16 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
+        {runStartedAt != null || goalState?.active ? (
+          <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
+        ) : null}
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setSlashMenuDismissed(false);
+          }}
           onInput={onInput}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -268,9 +804,9 @@ export function ThreadComposer({
           className={cn(
             "w-full resize-none bg-transparent",
             isHero
-              ? "min-h-[96px] px-4 pb-2 pt-4 text-[15px] leading-6"
-              : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm",
-            "placeholder:text-muted-foreground",
+              ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
+              : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
+            "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",
           )}
@@ -289,7 +825,7 @@ export function ThreadComposer({
         <div
           className={cn(
             "flex items-center justify-between gap-2",
-            isHero ? "px-3.5 pb-3.5" : "px-3 pb-2",
+            isHero ? "px-4 pb-4" : "px-3 pb-2",
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
@@ -310,18 +846,75 @@ export function ThreadComposer({
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "rounded-full text-muted-foreground hover:text-foreground",
-                isHero ? "h-8.5 w-8.5" : "h-7.5 w-7.5",
+                isHero
+                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                  : "h-7.5 w-7.5 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
               )}
             >
-              <Paperclip className={cn(isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+              <Plus className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
             </Button>
+            <div ref={aspectControlRef} className="relative flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={disabled}
+                aria-pressed={imageMode}
+                aria-label={t("thread.composer.imageMode.toggle")}
+                onClick={() => {
+                  setImageMode(!imageMode);
+                  setAspectMenuOpen(false);
+                  textareaRef.current?.focus();
+                }}
+                className={cn(
+                  "rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  imageMode
+                    ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
+                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                )}
+              >
+                <ImageIcon className={cn("mr-1.5", isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+                {t("thread.composer.imageMode.label")}
+              </Button>
+              {imageMode ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-haspopup="listbox"
+                  aria-expanded={aspectMenuOpen}
+                  aria-label={t("thread.composer.imageMode.aspectAria")}
+                  onClick={() => setAspectMenuOpen((open) => !open)}
+                  className={cn(
+                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
+                    isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  )}
+                >
+                  <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
+                  <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
+                </Button>
+              ) : null}
+              {imageMode && aspectMenuOpen ? (
+                <ImageAspectMenu
+                  selected={imageAspectRatio}
+                  isHero={isHero}
+                  onSelect={(ratio) => {
+                    setImageAspectRatio(ratio);
+                    setAspectMenuOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                />
+              ) : null}
+            </div>
             {modelLabel ? (
               <span
                 title={modelLabel}
                 className={cn(
                   "inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1",
                   "border-foreground/10 bg-foreground/[0.035] font-medium text-foreground/80",
-                  isHero ? "text-[11px]" : "text-[10.5px]",
+                  isHero
+                    ? "max-w-[13rem] text-[12px] shadow-[0_2px_8px_rgba(15,23,42,0.04)]"
+                    : "max-w-[10rem] text-[10.5px] shadow-[0_2px_8px_rgba(15,23,42,0.035)]",
                 )}
               >
                 <span
@@ -331,23 +924,33 @@ export function ThreadComposer({
                 <span className="truncate">{modelLabel}</span>
               </span>
             ) : null}
-            <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">
-              {t("thread.composer.sendHint")}
-            </span>
+            {!isHero ? (
+              <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">
+                {t("thread.composer.sendHint")}
+              </span>
+            ) : null}
           </div>
-          <span className="sm:hidden" aria-hidden />
+          <span className={cn(isHero ? "hidden" : "sm:hidden")} aria-hidden />
           <Button
-            type="submit"
+            type={showStopButton ? "button" : "submit"}
             size="icon"
-            disabled={!canSend}
-            aria-label={t("thread.composer.send")}
+            disabled={showStopButton ? disabled : !canSend}
+            aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
+            onClick={showStopButton ? onStop : undefined}
             className={cn(
-              "rounded-full border border-border/70 bg-secondary/85 text-secondary-foreground shadow-none transition-transform hover:bg-accent",
-              isHero ? "h-8.5 w-8.5" : "h-7.5 w-7.5",
-              canSend && "hover:scale-[1.03] active:scale-95",
+              "rounded-full transition-transform",
+              showStopButton
+                ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                : isHero
+                  ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
+                  : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
+              isHero ? "" : "h-7.5 w-7.5",
+              (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
             )}
           >
-            {isStreaming ? (
+            {showStopButton ? (
+              <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-2.5 w-2.5")} />
+            ) : isStreaming ? (
               <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4", "animate-spin")} />
             ) : (
               <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4")} />
@@ -356,6 +959,167 @@ export function ThreadComposer({
         </div>
       </div>
     </form>
+  );
+}
+
+interface SlashCommandPaletteProps {
+  commands: SlashCommand[];
+  selectedIndex: number;
+  layout: SlashPaletteLayout;
+  isHero: boolean;
+  onHover: (index: number) => void;
+  onChoose: (command: SlashCommand) => void;
+}
+
+function ImageAspectMenu({
+  selected,
+  isHero,
+  onSelect,
+}: {
+  selected: ImageAspectRatio;
+  isHero: boolean;
+  onSelect: (ratio: ImageAspectRatio) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="listbox"
+      aria-label={t("thread.composer.imageMode.aspectAria")}
+      className={cn(
+        "absolute left-0 z-30 w-44 overflow-hidden rounded-[16px] border",
+        isHero ? "top-full mt-2" : "bottom-full mb-2",
+        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_16px_45px_rgba(15,23,42,0.16)]",
+        "dark:border-white/10 dark:shadow-[0_18px_45px_rgba(0,0,0,0.42)]",
+        isHero ? "text-[12px]" : "text-[11.5px]",
+      )}
+    >
+      <div className="px-2 pb-1 pt-1 font-medium text-muted-foreground/70">
+        {t("thread.composer.imageMode.aspectLabel")}
+      </div>
+      {IMAGE_ASPECT_RATIOS.map((ratio) => {
+        const label = t(`thread.composer.imageMode.aspect.${ratio.replace(":", "_")}`);
+        return (
+          <button
+            key={ratio}
+            type="button"
+            role="option"
+            aria-selected={selected === ratio}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(ratio);
+            }}
+            className={cn(
+              "flex w-full items-center justify-between rounded-[11px] px-2.5 py-2 text-left transition-colors",
+              selected === ratio
+                ? "bg-primary/10 text-foreground"
+                : "text-foreground/86 hover:bg-accent/55",
+            )}
+          >
+            <span>{label}</span>
+            {selected === ratio ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SlashCommandPalette({
+  commands,
+  selectedIndex,
+  layout,
+  isHero,
+  onHover,
+  onChoose,
+}: SlashCommandPaletteProps) {
+  const { t } = useTranslation();
+  const listMaxHeight = Math.max(
+    0,
+    layout.maxHeight - SLASH_PALETTE_CHROME_PX,
+  );
+  return (
+    <div
+      role="listbox"
+      aria-label={t("thread.composer.slash.ariaLabel")}
+      style={{ maxHeight: layout.maxHeight }}
+      className={cn(
+        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[18px] border",
+        layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
+        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]",
+        "dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]",
+        isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
+      )}
+    >
+      <div className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground/70">
+        {t("thread.composer.slash.label")}
+      </div>
+      <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
+        {commands.map((command, index) => {
+          const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
+          const selected = index === selectedIndex;
+          const commandKey = slashCommandI18nKey(command.command);
+          const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
+            defaultValue: command.title,
+          });
+          const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
+            defaultValue: command.description,
+          });
+          return (
+            <button
+              key={command.command}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              onMouseEnter={() => onHover(index)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChoose(command);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-[13px] px-3 py-2.5 text-left transition-colors",
+                selected
+                  ? "bg-primary/10 text-foreground"
+                  : "text-foreground/86 hover:bg-accent/55",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border",
+                  selected
+                    ? "border-primary/25 bg-primary/12 text-primary"
+                    : "border-border/65 bg-muted/45 text-muted-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="font-mono text-[13px] font-semibold text-foreground">
+                    {command.command}
+                  </span>
+                  {command.argHint ? (
+                    <span className="font-mono text-[12px] text-muted-foreground">
+                      {command.argHint}
+                    </span>
+                  ) : null}
+                  <span className="truncate text-[13px] font-medium">
+                    {title}
+                  </span>
+                </span>
+                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                  {description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2 px-2 pt-1.5 text-[10.5px] text-muted-foreground/70">
+        <span>{t("thread.composer.slash.navigateHint")}</span>
+        <span>{t("thread.composer.slash.selectHint")}</span>
+        <span>{t("thread.composer.slash.closeHint")}</span>
+      </div>
+    </div>
   );
 }
 

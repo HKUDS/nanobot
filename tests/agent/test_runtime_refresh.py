@@ -47,3 +47,28 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert loop.dream.provider is new_provider
     assert loop.dream.model == "new-model"
     assert loop.dream._runner.provider is new_provider
+
+
+def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
+    old_provider = _provider("old-model")
+    new_provider = _provider("new-model", max_tokens=456)
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model="old-model",
+        context_window_tokens=1000,
+        provider_snapshot_loader=lambda: ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+
+    runtime = loop.llm_runtime()
+
+    assert runtime.provider is new_provider
+    assert runtime.model == "new-model"
+    assert loop.provider is new_provider
+    assert loop.runner.provider is new_provider

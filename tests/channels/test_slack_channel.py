@@ -234,13 +234,13 @@ async def test_send_renders_buttons_on_last_message_chunk() -> None:
                 "type": "button",
                 "text": {"type": "plain_text", "text": "Yes"},
                 "value": "Yes",
-                "action_id": "ask_user_Yes",
+                "action_id": "btn_Yes",
             },
             {
                 "type": "button",
                 "text": {"type": "plain_text", "text": "No"},
                 "value": "No",
-                "action_id": "ask_user_No",
+                "action_id": "btn_No",
             },
         ],
     }

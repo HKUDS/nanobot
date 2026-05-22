@@ -238,6 +238,9 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
 | `is_running` | Returns `self._running`. |
 | `login(force=False)` | Perform interactive login (e.g. QR code scan). Returns `True` if already authenticated or login succeeds. Override in subclasses that support interactive login. |
+| `send_reasoning_delta(chat_id, delta, metadata?)` | Optional hook for streamed model reasoning/thinking content. Default is no-op. |
+| `send_reasoning_end(chat_id, metadata?)` | Optional hook marking the end of a reasoning block. Default is no-op. |
+| `send_reasoning(msg)` | Optional one-shot reasoning fallback. Default translates to `send_reasoning_delta()` + `send_reasoning_end()`. |
 
 ### Optional (streaming)
 
@@ -349,6 +352,112 @@ When `streaming` is `false` (default) or omitted, only `send()` is called — no
 |-------------------|-------------|
 | `async send_delta(chat_id, delta, metadata?)` | Override to handle streaming chunks. No-op by default. |
 | `supports_streaming` (property) | Returns `True` when config has `streaming: true` **and** subclass overrides `send_delta`. |
+
+## Progress, Tool Hints, and Reasoning
+
+Besides normal assistant text, nanobot can emit low-emphasis trace blocks. These are intended for UI affordances like status rows, collapsible "used tools" groups, or reasoning/thinking blocks. Platforms that do not have a good place for them can ignore them safely.
+
+### Progress and Tool Hints
+
+Progress and tool hints arrive through the normal `send(msg)` path. Check `msg.metadata` before rendering:
+
+```python
+async def send(self, msg: OutboundMessage) -> None:
+    meta = msg.metadata or {}
+
+    if meta.get("_tool_hint"):
+        # A short tool breadcrumb, e.g. read_file("config.json")
+        await self._send_trace(msg.chat_id, msg.content, kind="tool")
+        return
+
+    if meta.get("_progress"):
+        # Generic non-final status, e.g. "Thinking..." or "Running command..."
+        await self._send_trace(msg.chat_id, msg.content, kind="progress")
+        return
+
+    await self._send_message(msg.chat_id, msg.content, media=msg.media)
+```
+
+Tool hints are off by default for most channels. Users can enable them globally or per channel:
+
+```json
+{
+  "channels": {
+    "sendToolHints": true,
+    "webhook": {
+      "enabled": true,
+      "sendToolHints": true
+    }
+  }
+}
+```
+
+### Reasoning Blocks
+
+Reasoning is delivered through dedicated optional hooks, not `send()`. Override `send_reasoning_delta()` and `send_reasoning_end()` if your platform can show model reasoning as a subdued/collapsible block. The default implementation is a no-op, so unsupported channels simply drop reasoning content.
+
+```python
+class WebhookChannel(BaseChannel):
+    name = "webhook"
+    display_name = "Webhook"
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
+        super().__init__(config, bus)
+        self._reasoning_buffers: dict[str, str] = {}
+
+    async def send_reasoning_delta(
+        self,
+        chat_id: str,
+        delta: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        meta = metadata or {}
+        stream_id = str(meta.get("_stream_id") or chat_id)
+        self._reasoning_buffers[stream_id] = self._reasoning_buffers.get(stream_id, "") + delta
+        await self._update_reasoning_block(chat_id, self._reasoning_buffers[stream_id], final=False)
+
+    async def send_reasoning_end(
+        self,
+        chat_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        meta = metadata or {}
+        stream_id = str(meta.get("_stream_id") or chat_id)
+        text = self._reasoning_buffers.pop(stream_id, "")
+        if text:
+            await self._update_reasoning_block(chat_id, text, final=True)
+```
+
+**Reasoning metadata flags:**
+
+| Flag | Meaning |
+|------|---------|
+| `_reasoning_delta: True` | A reasoning/thinking chunk; `delta` contains the new text. |
+| `_reasoning_end: True` | The current reasoning block is complete; `delta` is empty. |
+| `_reasoning: True` | Legacy one-shot reasoning. `BaseChannel.send_reasoning()` converts it to delta + end. |
+| `_stream_id` | Stable id for this assistant turn/segment. Use it to key buffers instead of only `chat_id`. |
+
+Reasoning visibility is controlled by `showReasoning` globally or per channel:
+
+```json
+{
+  "channels": {
+    "showReasoning": true,
+    "webhook": {
+      "enabled": true,
+      "showReasoning": true
+    }
+  }
+}
+```
+
+Recommended rendering:
+
+- Render tool hints and progress as trace/status UI, not as normal assistant replies.
+- Render reasoning with lower visual emphasis and collapse it after completion when the platform supports that.
+- Keep reasoning separate from final answer text. A final answer still arrives through `send()` or `send_delta()`.
 
 ## Config
 
