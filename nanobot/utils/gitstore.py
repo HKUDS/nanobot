@@ -19,7 +19,8 @@ class CommitInfo:
 
     def format(self, diff: str = "") -> str:
         """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
+        summary = self.message.splitlines()[0] if self.message else "(no message)"
+        header = f"## {summary}\n`{self.sha}` — {self.timestamp}\n"
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"

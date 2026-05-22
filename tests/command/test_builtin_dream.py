@@ -55,7 +55,11 @@ def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int
 
 @pytest.mark.asyncio
 async def test_dream_log_latest_is_more_user_friendly() -> None:
-    commit = CommitInfo(sha="abcd1234", message="dream: 2026-04-04, 2 change(s)", timestamp="2026-04-04 12:00")
+    commit = CommitInfo(
+        sha="abcd1234",
+        message="dream: 2026-04-04, 2 change(s)\n\n[ADD] fact A →USER #permanent\n[REMOVE] →MEMORY: old fact",
+        timestamp="2026-04-04 12:00",
+    )
     diff = (
         "diff --git a/SOUL.md b/SOUL.md\n"
         "--- a/SOUL.md\n"
@@ -71,7 +75,11 @@ async def test_dream_log_latest_is_more_user_friendly() -> None:
     assert "## Dream Update" in out.content
     assert "Here is the latest Dream memory change." in out.content
     assert "- Commit: `abcd1234`" in out.content
+    assert "- Summary: dream: 2026-04-04, 2 change(s)" in out.content
     assert "- Changed files: `SOUL.md`" in out.content
+    assert "### Analysis" in out.content
+    assert "[ADD] fact A →USER #permanent" in out.content
+    assert "[REMOVE] →MEMORY: old fact" in out.content
     assert "Use `/dream-restore abcd1234` to undo this change." in out.content
     assert "```diff" in out.content
 
@@ -94,6 +102,26 @@ async def test_dream_log_before_first_run_is_clear() -> None:
 
     assert "Dream has not run yet." in out.content
     assert "Run `/dream`" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_with_empty_commit_message() -> None:
+    commit = CommitInfo(sha="abcd1234", message="", timestamp="2026-04-04 12:00")
+    diff = (
+        "diff --git a/SOUL.md b/SOUL.md\n"
+        "--- a/SOUL.md\n"
+        "+++ b/SOUL.md\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    git = _FakeGit(commits=[commit], diff_map={commit.sha: (commit, diff)})
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "## Dream Update" in out.content
+    assert "- Commit: `abcd1234`" in out.content
+    assert "- Summary:" not in out.content  # no summary when message is empty
 
 
 @pytest.mark.asyncio

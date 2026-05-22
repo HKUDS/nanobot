@@ -355,10 +355,19 @@ def _format_changed_files(diff: str) -> str:
 
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
     files_line = _format_changed_files(diff)
-    # Show the first line of the commit message as a human-readable summary.
-    from loguru import logger
-    logger.debug("_format_dream_log_content: commit.type={} commit.sha={} commit.message={!r}", type(commit).__name__, getattr(commit, "sha", "?"), getattr(commit, "message", "?"))
-    msg_summary = commit.message.splitlines()[0] if commit.message else ""
+    msg_lines = commit.message.splitlines() if commit.message else []
+    msg_summary = msg_lines[0] if msg_lines else ""
+    # Body lines: everything after the first blank line in the commit message
+    msg_body = []
+    in_body = False
+    for line in msg_lines[1:]:
+        if not in_body:
+            if not line:
+                in_body = True
+            continue
+        msg_body.append(line)
+    body_text = "\n".join(msg_body).strip()
+
     lines = [
         "## Dream Update",
         "",
@@ -369,6 +378,8 @@ def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = 
         f"- Summary: {msg_summary}" if msg_summary else "",
         f"- Changed files: {files_line}",
     ]
+    if body_text:
+        lines.extend(["", "### Analysis", "", body_text])
     if diff:
         lines.extend([
             "",
@@ -394,7 +405,8 @@ def _format_dream_restore_list(commits: list) -> str:
         "",
     ]
     for c in commits:
-        lines.append(f"- `{c.sha}` {c.timestamp} - {c.message.splitlines()[0]}")
+        summary = c.message.splitlines()[0] if c.message else "(no message)"
+        lines.append(f"- `{c.sha}` {c.timestamp} - {summary}")
     lines.extend([
         "",
         "Preview a version with `/dream-log <sha>` before restoring it.",
