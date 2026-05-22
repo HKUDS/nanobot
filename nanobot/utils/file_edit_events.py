@@ -215,26 +215,24 @@ def _resolve_apply_patch_paths(
 ) -> list[Path]:
     if not isinstance(params, dict):
         return []
-    patch = params.get("patch")
-    if not isinstance(patch, str) or not patch.strip():
+    edits = params.get("edits")
+    if not isinstance(edits, list) or not edits:
         return []
     if params.get("dry_run") is True:
         return []
-    try:
-        from nanobot.agent.tools.apply_patch import _parse_patch
-
-        ops = _parse_patch(patch)
-    except Exception:
-        return []
 
     resolved: list[Path] = []
-    for op in ops:
-        for raw_path in (op.path, op.new_path):
-            if not raw_path:
-                continue
-            path = _resolve_raw_file_edit_path(tool, workspace, raw_path)
-            if path is not None:
-                resolved.append(path)
+    seen: set[Path] = set()
+    for edit in edits:
+        if not isinstance(edit, dict):
+            continue
+        raw_path = edit.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            continue
+        path = _resolve_raw_file_edit_path(tool, workspace, raw_path)
+        if path is not None and path not in seen:
+            seen.add(path)
+            resolved.append(path)
     return resolved
 
 
@@ -438,16 +436,34 @@ class StreamingFileEditTracker:
     async def _update_apply_patch(self, state: _StreamingFileEditState) -> None:
         if _json_bool_true(state.arguments, "dry_run"):
             return
-        patch = _extract_json_string_prefix(state.arguments, "patch")
-        if not patch:
-            return
         tool = self._tools.get("apply_patch") if hasattr(self._tools, "get") else None
         events: list[dict[str, Any]] = []
         now = time.monotonic()
-        for raw_path, added, deleted, delete_file in _streaming_apply_patch_stats(patch):
+
+        path_matches = list(re.finditer(r'"path"\s*:\s*"([^"]+)"', state.arguments))
+        if not path_matches:
+            return
+
+        for i, m in enumerate(path_matches):
+            raw_path = m.group(1)
             path = _resolve_raw_file_edit_path(tool, self._workspace, raw_path)
             if path is None:
                 continue
+
+            segment_start = m.start()
+            segment_end = path_matches[i + 1].start() if i + 1 < len(path_matches) else len(state.arguments)
+            segment = state.arguments[segment_start:segment_end]
+
+            action_match = re.search(r'"action"\s*:\s*"(replace|add|delete)"', segment)
+            action = action_match.group(1) if action_match else "replace"
+
+            old_text = _extract_json_string_prefix(segment, "old_text") or ""
+            new_text = _extract_json_string_prefix(segment, "new_text") or ""
+
+            added = _text_line_count(new_text) if action in ("replace", "add") else 0
+            deleted = _text_line_count(old_text) if action in ("replace", "delete") else 0
+            delete_file = action == "delete"
+
             file_state = state.patch_files.get(raw_path)
             if file_state is None:
                 tracker = FileEditTracker(
@@ -779,9 +795,10 @@ class _StreamingFileEditState:
             arguments = getattr(tool_call, "arguments", None)
             if not isinstance(arguments, dict):
                 return False
-            patch = arguments.get("patch")
-            streamed_patch = _extract_complete_json_string(self.arguments, "patch")
-            return isinstance(patch, str) and streamed_patch == patch
+            edits = arguments.get("edits")
+            if not isinstance(edits, list):
+                return False
+            return '"edits"' in self.arguments
         arguments = getattr(tool_call, "arguments", None)
         if not isinstance(arguments, dict):
             return False
@@ -847,65 +864,6 @@ def _extract_json_string_prefix(source: str, key: str) -> str | None:
         out.append(ch)
         i += 1
     return "".join(out)
-
-
-def _streaming_apply_patch_stats(patch: str) -> list[tuple[str, int, int, bool]]:
-    stats: dict[str, list[Any]] = {}
-    order: list[str] = []
-    current: str | None = None
-
-    def ensure(path: str, *, delete_file: bool = False) -> list[Any]:
-        if path not in stats:
-            stats[path] = [0, 0, False]
-            order.append(path)
-        if delete_file:
-            stats[path][2] = True
-        return stats[path]
-
-    lines = patch.splitlines()
-    tail = ""
-    if patch and not patch.endswith(("\n", "\r")) and lines:
-        tail = lines.pop()
-
-    for line in lines:
-        if line.startswith("*** Add File: "):
-            current = line[len("*** Add File: "):].strip()
-            if current:
-                ensure(current)
-            continue
-        if line.startswith("*** Update File: "):
-            current = line[len("*** Update File: "):].strip()
-            if current:
-                ensure(current)
-            continue
-        if line.startswith("*** Delete File: "):
-            current = line[len("*** Delete File: "):].strip()
-            if current:
-                ensure(current, delete_file=True)
-            continue
-        if line.startswith("*** Move to: "):
-            moved = line[len("*** Move to: "):].strip()
-            if moved:
-                current = moved
-                ensure(current)
-            continue
-        if line.startswith("*** "):
-            current = None
-            continue
-        if not current:
-            continue
-        if line.startswith("+") and not line.startswith("+++"):
-            ensure(current)[0] += 1
-        elif line.startswith("-") and not line.startswith("---"):
-            ensure(current)[1] += 1
-
-    if current and tail:
-        if tail.startswith("+") and not tail.startswith("+++"):
-            ensure(current)[0] += 1
-        elif tail.startswith("-") and not tail.startswith("---"):
-            ensure(current)[1] += 1
-
-    return [(path, int(stats[path][0]), int(stats[path][1]), bool(stats[path][2])) for path in order]
 
 
 def _extract_complete_json_string(source: str, key: str) -> str | None:
