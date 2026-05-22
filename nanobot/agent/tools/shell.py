@@ -46,7 +46,7 @@ _WORKSPACE_BOUNDARY_NOTE = (
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
     enable: bool = True
-    timeout: int = 60
+    timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
     path_append: str = ""
     sandbox: str = ""
     allowed_env_keys: list[str] = Field(default_factory=list)
@@ -59,7 +59,7 @@ class _PreparedCommand:
     command: str
     cwd: str
     env: dict[str, str]
-    timeout: int
+    timeout: int | None
     shell_program: str | None
     login: bool
 
@@ -324,6 +324,20 @@ class ExecTool(Tool):
         except Exception as exc:
             return f"Error executing command: {exc}"
 
+    def _resolve_timeout(self, timeout: int | None) -> int | None:
+        """Resolve the effective hard timeout in seconds (None = no limit).
+
+        A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
+        the LLM cannot request unbounded execution. The config-level default
+        (self.timeout) may exceed that cap, and 0 disables the limit entirely
+        for trusted long-running tasks (#3595).
+        """
+        if timeout:
+            return min(timeout, self._MAX_TIMEOUT)
+        if self.timeout and self.timeout > 0:
+            return self.timeout
+        return None
+
     def _prepare_command(
         self,
         command: str,
@@ -369,7 +383,7 @@ class ExecTool(Tool):
                 command = wrap_command(self.sandbox, command, workspace, cwd)
                 cwd = str(Path(workspace).resolve())
 
-        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+        effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
         if self.path_append:

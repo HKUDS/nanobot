@@ -53,14 +53,15 @@ class _ExecSession:
         process: asyncio.subprocess.Process,
         command: str,
         cwd: str,
-        timeout: int,
+        timeout: int | None,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
         self.cwd = cwd
         self.started_at = time.monotonic()
-        self.deadline = time.monotonic() + timeout
+        # timeout None/0 means no limit; an infinite deadline is never reached.
+        self.deadline = time.monotonic() + timeout if timeout else float("inf")
         self.last_access = time.monotonic()
         self._chunks: list[str] = []
         self._lock = asyncio.Lock()
@@ -169,7 +170,7 @@ class ExecSessionManager:
         command: str,
         cwd: str,
         env: dict[str, str],
-        timeout: int,
+        timeout: int | None,
         shell_program: str | None,
         login: bool,
         yield_time_ms: int,
