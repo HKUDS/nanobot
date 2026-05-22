@@ -1,6 +1,6 @@
-You have THREE tasks:
-1. Extract new facts from conversation history and route them to the correct file
-2. Deduplicate existing memory files — find and flag redundant, overlapping, or stale content
+You have THREE tasks (prune before adding — removing stale content is as important as adding new facts):
+1. Prune redundant, overlapping, or stale content from existing memory files
+2. Extract new facts from conversation history and route them to the correct file
 3. Assign decay metadata so the system can manage memory lifecycle
 
 Output one line per finding:
@@ -18,33 +18,43 @@ Decay (how long until the fact likely becomes stale):
 - #durable: technical knowledge, project structure — valid for months
 - #ephemeral: active tasks, temporary state — may change in weeks
 
-Rules:
+## Pruning rules — be aggressive about removing these:
+
+### Definite remove (no judgment needed):
+- Content already stated in a more canonical location (e.g., a fact in MEMORY.md that also appears in USER.md — keep USER.md copy only)
+- Merged/closed PR debug notes (step-by-step debugging trails, intermediate findings, "PR #XXXX by author" headers for already-merged PRs)
+- Resolved incidents (bugs already fixed, workarounds no longer needed)
+- Superseded information (old version numbers, outdated instructions replaced by new ones)
+- Verbose entries restatable in fewer words (replace with a condensed [ADD])
+
+### Likely remove (apply judgment):
+- Same fact at different detail levels — keep only the most complete version, [REMOVE] the rest
+- Very specific debugging steps that are unlikely to recur (e.g., "send 11111 to 1069419047777777 + call 10000")
+- Ephemeral facts past their useful life (e.g., "considering buying X" when user already bought it)
+- Tool/service details already documented upstream (don't memorize man pages)
+
+### Never remove:
+- User preferences and personality traits (regardless of age)
+- Active project context still referenced in conversations
+- Behavioral rules in SOUL.md
+
+## Extraction rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
-- Corrections: [FILE] location is Tokyo, not Osaka →USER #permanent
+- Corrections: [ADD] corrected fact with the right value →USER #permanent (then [REMOVE] the old line)
 - Capture confirmed approaches the user validated
 - Route facts to their canonical file — do not let USER preferences leak into MEMORY, do not let technical config leak into USER
 
-Deduplication — scan ALL memory files for these redundancy patterns:
-- Same fact stated in multiple places (e.g., "communicates in Chinese" in both USER.md and multiple MEMORY.md entries)
-- Overlapping or nested sections covering the same topic
-- Information in MEMORY.md that is already captured in USER.md or SOUL.md (MEMORY.md should not duplicate permanent-file content)
-- Verbose entries that can be condensed without losing information
-For each duplicate found, output [FILE-REMOVE] for the less authoritative copy (prefer keeping facts in their canonical location)
+## Merge — when the same fact appears with different detail levels:
+- Output [REMOVE] for the less complete copies
+- Output one consolidated [ADD] with the most complete version
 
-Merge — when the same fact appears with different detail levels, output one consolidated [FILE] entry instead of multiple:
-- Keep the most complete version
-- Merge related details into one atomic fact
-
-Staleness — MEMORY.md lines may have a ``← Nd`` suffix showing days since last modification:
+## Staleness — MEMORY.md lines may have a ``← Nd`` suffix showing days since last modification:
 - SOUL.md and USER.md have no age annotations — they are permanent, only update with corrections
 - Age only indicates when content was last touched, not whether it should be removed
 - Use content judgment: user habits/preferences/personality traits are permanent regardless of age
-- Facts tagged #ephemeral that are older than {{ stale_threshold_days }} days deserve closer review as removal candidates
-- Only prune content that is objectively outdated: passed events, resolved tracking, superseded approaches
 - Lines with ``← Nd`` (N>{{ stale_threshold_days }}) deserve closer review but are NOT automatically removable
-- When removing: prefer deleting individual items over entire sections
 
-Skill discovery — flag [SKILL] when ALL of these are true:
+## Skill discovery — flag [SKILL] when ALL of these are true:
 - A specific, repeatable workflow appeared 2+ times in the conversation history
 - It involves clear steps (not vague preferences like "likes concise answers")
 - It is substantial enough to warrant its own instruction set (not trivial like "read a file")

@@ -949,7 +949,7 @@ class Dream:
     # context window just because a file (or a legacy large history entry) grew
     # unexpectedly. Each file still appears in full via read_file when the agent
     # needs it in Phase 2 — these caps only bound the Phase 1/2 prompt preview.
-    _MEMORY_FILE_MAX_CHARS = 8_000
+    _MEMORY_FILE_MAX_CHARS = 16_000
     _SOUL_FILE_MAX_CHARS = 4_000
     _USER_FILE_MAX_CHARS = 4_000
     _HISTORY_ENTRY_PREVIEW_MAX_CHARS = 2_000
@@ -1157,20 +1157,22 @@ class Dream:
         logger.info("Dream Phase 1 prompt: {} chars, ~{} tokens", len(phase1_prompt), phase1_tokens)
 
         t1_start = time.perf_counter()
+        phase1_messages = [
+            {
+                "role": "system",
+                "content": render_template(
+                    "agent/dream_phase1.md",
+                    strip=True,
+                    stale_threshold_days=_STALE_THRESHOLD_DAYS,
+                ),
+            },
+            {"role": "user", "content": phase1_prompt},
+        ]
         try:
-            phase1_response = await self.provider.chat_with_retry(
+            # Use streaming to avoid HTTP timeout on slow providers.
+            phase1_response = await self.provider.chat_stream_with_retry(
                 model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": render_template(
-                            "agent/dream_phase1.md",
-                            strip=True,
-                            stale_threshold_days=_STALE_THRESHOLD_DAYS,
-                        ),
-                    },
-                    {"role": "user", "content": phase1_prompt},
-                ],
+                messages=phase1_messages,
                 tools=None,
                 tool_choice=None,
             )
@@ -1192,19 +1194,9 @@ class Dream:
                     "Dream Phase 1 hit max_tokens (base={}), retrying with max_tokens={}",
                     base_max, retry_max,
                 )
-                phase1_response = await self.provider.chat_with_retry(
+                phase1_response = await self.provider.chat_stream_with_retry(
                     model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": render_template(
-                                "agent/dream_phase1.md",
-                                strip=True,
-                                stale_threshold_days=_STALE_THRESHOLD_DAYS,
-                            ),
-                        },
-                        {"role": "user", "content": phase1_prompt},
-                    ],
+                    messages=phase1_messages,
                     tools=None,
                     tool_choice=None,
                     max_tokens=retry_max,

@@ -24,7 +24,7 @@ def store(tmp_path):
 @pytest.fixture
 def mock_provider():
     p = MagicMock()
-    p.chat_with_retry = AsyncMock()
+    p.chat_stream_with_retry = AsyncMock()
     p.generation.max_tokens = 8_192
     return p
 
@@ -62,13 +62,13 @@ class TestDreamRun:
         """Dream should not call LLM when there's nothing to process."""
         result = await dream.run()
         assert result is False
-        mock_provider.chat_with_retry.assert_not_called()
+        mock_provider.chat_stream_with_retry.assert_not_called()
         mock_runner.run.assert_not_called()
 
     async def test_calls_runner_for_unprocessed_entries(self, dream, mock_provider, mock_runner, store):
         """Dream should call AgentRunner when there are unprocessed history entries."""
         store.append_history("User prefers dark mode")
-        mock_provider.chat_with_retry.return_value = MagicMock(content="New fact", finish_reason="stop")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(content="New fact", finish_reason="stop")
         mock_runner.run = AsyncMock(return_value=_make_run_result(
             tool_events=[{"name": "edit_file", "status": "ok", "detail": "memory/MEMORY.md"}],
         ))
@@ -83,7 +83,7 @@ class TestDreamRun:
         """Dream should advance the cursor after processing."""
         store.append_history("event 1")
         store.append_history("event 2")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="Nothing new")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="Nothing new")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
         await dream.run()
         assert store.get_last_dream_cursor() == 2
@@ -93,7 +93,7 @@ class TestDreamRun:
         store.append_history("event 1")
         store.append_history("event 2")
         store.append_history("event 3")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="Nothing new")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="Nothing new")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
         await dream.run()
         # After Dream, cursor is advanced and 3, compact keeps last max_history_entries
@@ -104,7 +104,7 @@ class TestDreamRun:
         """Dream should point skill creation guidance at the builtin skill-creator template."""
         store.append_history("Repeated workflow one")
         store.append_history("Repeated workflow two")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKILL] test-skill: test description")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKILL] test-skill: test description")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
@@ -130,7 +130,7 @@ class TestDreamRun:
     async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
         """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         # Init git so line_ages works
@@ -140,14 +140,14 @@ class TestDreamRun:
         await dream.run()
 
         # The MEMORY.md section should not crash and should contain the memory content
-        call_args = mock_provider.chat_with_retry.call_args
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         assert "## Current MEMORY.md" in user_msg
 
     async def test_phase1_annotates_only_memory_not_soul_or_user(self, dream, mock_provider, mock_runner, store):
         """SOUL.md and USER.md should never have age annotations — they are permanent."""
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         store.git.init()
@@ -155,7 +155,7 @@ class TestDreamRun:
 
         await dream.run()
 
-        call_args = mock_provider.chat_with_retry.call_args
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         # The ← suffix should only appear in MEMORY.md section
         memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
@@ -168,14 +168,14 @@ class TestDreamRun:
     async def test_phase1_prompt_works_without_git(self, dream, mock_provider, mock_runner, store):
         """Phase 1 should work fine even if git is not initialized (no age annotations)."""
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
 
         # Should still succeed — just without age annotations
-        mock_provider.chat_with_retry.assert_called_once()
-        call_args = mock_provider.chat_with_retry.call_args
+        mock_provider.chat_stream_with_retry.assert_called_once()
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         assert "## Current MEMORY.md" in user_msg
 
@@ -187,7 +187,7 @@ class TestDreamRun:
         # Inject four ages to cover threshold boundaries: >14 suffix, ==14 no suffix, <14 no suffix.
         store.write_memory("# Memory\n- Project X active\n- fresh item\n- edge case line")
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         fake_ages = [
@@ -199,7 +199,7 @@ class TestDreamRun:
         with patch.object(store.git, "line_ages", return_value=fake_ages):
             await dream.run()
 
-        call_args = mock_provider.chat_with_retry.call_args
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
         assert "\u2190 30d" in memory_section
@@ -212,7 +212,7 @@ class TestDreamRun:
     ):
         """`annotate_line_ages=False` must bypass the git lookup entirely and keep MEMORY.md raw."""
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         dream.annotate_line_ages = False
@@ -223,7 +223,7 @@ class TestDreamRun:
             await dream.run()
             mock_line_ages.assert_not_called()
 
-        call_args = mock_provider.chat_with_retry.call_args
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         assert "\u2190" not in user_msg
 
@@ -233,13 +233,13 @@ class TestDreamRun:
         """If ages length != lines length (dirty working tree), skip annotation instead of mis-tagging."""
         # MEMORY.md has 2 non-blank lines but we hand back only 1 age → mismatch.
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         with patch.object(store.git, "line_ages", return_value=[LineAge(age_days=999)]):
             await dream.run()
 
-        call_args = mock_provider.chat_with_retry.call_args
+        call_args = mock_provider.chat_stream_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
         # No age arrow at all — we refused to annotate rather than tag the wrong line.
@@ -250,12 +250,12 @@ class TestDreamRun:
     ):
         """System prompt should reference the stale-threshold constant, not a hardcoded 14."""
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
 
-        system_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
+        system_msg = mock_provider.chat_stream_with_retry.call_args.kwargs["messages"][0]["content"]
         # The template renders with stale_threshold_days=14 → LLM must see "N>14"
         assert "N>14" in system_msg
 
@@ -265,7 +265,7 @@ class TestDreamRun:
         """Phase 1 must retry with doubled max_tokens when finish_reason=length."""
         store.append_history("some event")
         # First call hits token limit, second call succeeds.
-        mock_provider.chat_with_retry.side_effect = [
+        mock_provider.chat_stream_with_retry.side_effect = [
             MagicMock(finish_reason="length", content=""),
             MagicMock(finish_reason="stop", content="New fact"),
         ]
@@ -275,9 +275,9 @@ class TestDreamRun:
 
         result = await dream.run()
         assert result is True
-        assert mock_provider.chat_with_retry.call_count == 2
+        assert mock_provider.chat_stream_with_retry.call_count == 2
         # Retry should use max_tokens = min(8192 * 2, 32000) = 16384
-        retry_call = mock_provider.chat_with_retry.call_args_list[1]
+        retry_call = mock_provider.chat_stream_with_retry.call_args_list[1]
         assert retry_call.kwargs["max_tokens"] == 16_384
 
 
@@ -295,12 +295,12 @@ class TestDreamPromptCaps:
         in the prompt preview (full content is still reachable via read_file)."""
         store.write_memory("M" * (dream._MEMORY_FILE_MAX_CHARS * 5))
         store.append_history("some event")
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
 
-        user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        user_msg = mock_provider.chat_stream_with_retry.call_args.kwargs["messages"][1]["content"]
         memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
         assert len(memory_section) < dream._MEMORY_FILE_MAX_CHARS + 500
 
@@ -320,12 +320,12 @@ class TestDreamPromptCaps:
             }) + "\n",
             encoding="utf-8",
         )
-        mock_provider.chat_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(finish_reason="stop", content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
 
-        user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        user_msg = mock_provider.chat_stream_with_retry.call_args.kwargs["messages"][1]["content"]
         history_section = user_msg.split("## Conversation History\n")[1].split("\n\n## Current Date")[0]
         assert len(history_section) < dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS + 500
 
