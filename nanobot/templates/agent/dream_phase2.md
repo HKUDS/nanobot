@@ -43,7 +43,7 @@ Do NOT guess paths.
 - Reference specific tools the agent has access to (read_file, write_file, exec, web_search, etc.)
 - Skills are instruction sets, not code — do not include implementation code
 
-## MECE for skills
+## Skill vs MEMORY.md boundary
 - SKILL.md = reusable workflow template (steps, syntax reminders, output format, examples)
 - MEMORY.md = concrete config values, credentials, paths, infrastructure details
 - Keep concrete values in MEMORY.md; skill should use placeholders or reference MEMORY.md entries
