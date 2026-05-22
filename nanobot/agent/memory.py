@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import weakref
 from contextlib import suppress
 from datetime import datetime
@@ -21,6 +22,13 @@ try:
     _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
 except Exception:  # pragma: no cover
     _TIKTOKEN_ENC = None
+
+
+def _estimate_tokens(text: str) -> int:
+    """Approximate token count for a text string."""
+    if _TIKTOKEN_ENC is not None:
+        return len(_TIKTOKEN_ENC.encode(text))
+    return len(text) // 4
 
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
@@ -648,8 +656,13 @@ class Consolidator:
         """
         if not messages:
             return None
+        t_start = time.perf_counter()
         try:
             formatted = MemoryStore._format_messages(messages)
+            logger.debug(
+                "Consolidator: {} messages, formatted={} chars",
+                len(messages), len(formatted),
+            )
 
             # Inject current memory context for dedup-aware summarization.
             # Char limits assume ~1 token/char for English; CJK content may
@@ -674,12 +687,27 @@ class Consolidator:
             # If dedup_context alone would exhaust the budget, drop it rather than
             # sending a truncated message + oversized context that risks overflow.
             if self._input_token_budget <= reserve_tokens:
+                logger.warning(
+                    "Consolidator: dedup_context ({} tokens) exceeds budget ({}), dropping it",
+                    reserve_tokens, self._input_token_budget,
+                )
                 dedup_context = ""
                 reserve_tokens = 0
+            else:
+                logger.debug(
+                    "Consolidator: dedup_context={} chars, reserve_tokens={}",
+                    len(dedup_context), reserve_tokens,
+                )
 
+            formatted_before = len(formatted)
             formatted = self._truncate_to_token_budget(
                 formatted, reserve_tokens=reserve_tokens
             )
+            if len(formatted) < formatted_before:
+                logger.warning(
+                    "Consolidator: truncated formatted messages from {} to {} chars",
+                    formatted_before, len(formatted),
+                )
 
             response = await self.provider.chat_with_retry(
                 model=self.model,
@@ -696,13 +724,26 @@ class Consolidator:
                 tools=None,
                 tool_choice=None,
             )
+            elapsed = time.perf_counter() - t_start
             if response.finish_reason == "error":
+                logger.warning(
+                    "Consolidator LLM error after {:.1f}s: {}",
+                    elapsed, response.content,
+                )
                 raise RuntimeError(f"LLM returned error: {response.content}")
             summary = response.content or "[no summary]"
+            logger.info(
+                "Consolidator: {} entries → {} chars summary in {:.1f}s",
+                len(messages), len(summary), elapsed,
+            )
             self.store.append_history(summary, max_chars=_ARCHIVE_SUMMARY_MAX_CHARS)
             return summary
         except Exception:
-            logger.warning("Consolidation LLM call failed, raw-dumping to history")
+            elapsed = time.perf_counter() - t_start
+            logger.warning(
+                "Consolidation LLM call failed after {:.1f}s, raw-dumping to history",
+                elapsed,
+            )
             self.store.raw_archive(messages)
             return None
 
@@ -908,10 +949,10 @@ class Dream:
     # context window just because a file (or a legacy large history entry) grew
     # unexpectedly. Each file still appears in full via read_file when the agent
     # needs it in Phase 2 — these caps only bound the Phase 1/2 prompt preview.
-    _MEMORY_FILE_MAX_CHARS = 32_000
-    _SOUL_FILE_MAX_CHARS = 16_000
-    _USER_FILE_MAX_CHARS = 16_000
-    _HISTORY_ENTRY_PREVIEW_MAX_CHARS = 4_000
+    _MEMORY_FILE_MAX_CHARS = 8_000
+    _SOUL_FILE_MAX_CHARS = 4_000
+    _USER_FILE_MAX_CHARS = 4_000
+    _HISTORY_ENTRY_PREVIEW_MAX_CHARS = 2_000
 
     def __init__(
         self,
@@ -1062,6 +1103,11 @@ class Dream:
             "Dream: processing {} entries (cursor {}→{}), batch={}",
             len(entries), last_cursor, batch[-1]["cursor"], len(batch),
         )
+        for i, e in enumerate(batch):
+            logger.debug(
+                "Dream batch[{}] cursor={} ts={} content={} chars",
+                i, e["cursor"], e["timestamp"], len(e["content"]),
+            )
 
         # Build history text for LLM — cap each entry so a legacy oversized
         # record (e.g. pre-#3412 raw_archive dump) can't blow up the prompt.
@@ -1096,11 +1142,21 @@ class Dream:
             f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
         )
 
+        logger.info(
+            "Dream file context: MEMORY.md={} chars ({} lines), SOUL.md={} chars ({} lines), USER.md={} chars ({} lines)",
+            len(current_memory), current_memory.count("\n"),
+            len(current_soul), current_soul.count("\n"),
+            len(current_user), current_user.count("\n"),
+        )
+
         # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
         phase1_prompt = (
             f"## Conversation History\n{history_text}\n\n{file_context}"
         )
+        phase1_tokens = _estimate_tokens(phase1_prompt)
+        logger.info("Dream Phase 1 prompt: {} chars, ~{} tokens", len(phase1_prompt), phase1_tokens)
 
+        t1_start = time.perf_counter()
         try:
             phase1_response = await self.provider.chat_with_retry(
                 model=self.model,
@@ -1118,13 +1174,21 @@ class Dream:
                 tools=None,
                 tool_choice=None,
             )
+            t1_elapsed = time.perf_counter() - t1_start
             analysis = phase1_response.content or ""
+            logger.info(
+                "Dream Phase 1 complete in {:.1f}s: {} chars, finish_reason={}",
+                t1_elapsed, len(analysis), phase1_response.finish_reason,
+            )
             logger.debug("Dream Phase 1 analysis ({} chars): {}", len(analysis), analysis[:500])
-            if phase1_response.finish_reason == "error":
-                logger.warning("Dream Phase 1 returned error: {}", analysis)
+            if phase1_response.finish_reason != "stop":
+                logger.warning(
+                    "Dream Phase 1 finish_reason={}: {}",
+                    phase1_response.finish_reason, analysis,
+                )
                 return False
         except Exception:
-            logger.exception("Dream Phase 1 failed")
+            logger.exception("Dream Phase 1 failed after {:.1f}s", time.perf_counter() - t1_start)
             return False
 
         # Phase 2: Delegate to AgentRunner with read_file / edit_file
@@ -1136,6 +1200,8 @@ class Dream:
                 + "\n".join(f"- {s}" for s in existing_skills)
             )
         phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}{skills_section}"
+        phase2_tokens = _estimate_tokens(phase2_prompt)
+        logger.info("Dream Phase 2 prompt: {} chars, ~{} tokens", len(phase2_prompt), phase2_tokens)
 
         tools = self._tools
         skill_creator_path = BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"
@@ -1151,6 +1217,7 @@ class Dream:
             {"role": "user", "content": phase2_prompt},
         ]
 
+        t2_start = time.perf_counter()
         try:
             result = await self._runner.run(AgentRunSpec(
                 initial_messages=messages,
@@ -1160,14 +1227,18 @@ class Dream:
                 max_tool_result_chars=self.max_tool_result_chars,
                 fail_on_tool_error=False,
             ))
-            logger.debug(
-                "Dream Phase 2 complete: stop_reason={}, tool_events={}",
-                result.stop_reason, len(result.tool_events),
+            t2_elapsed = time.perf_counter() - t2_start
+            logger.info(
+                "Dream Phase 2 complete in {:.1f}s: stop_reason={}, tool_events={}",
+                t2_elapsed, result.stop_reason, len(result.tool_events),
             )
             for ev in (result.tool_events or []):
-                logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
+                logger.info(
+                    "Dream tool_event: name={}, status={}, detail={}",
+                    ev.get("name"), ev.get("status"), ev.get("detail", "")[:200],
+                )
         except Exception:
-            logger.exception("Dream Phase 2 failed")
+            logger.exception("Dream Phase 2 failed after {:.1f}s", time.perf_counter() - t2_start)
             result = None
 
         # Build changelog from tool events

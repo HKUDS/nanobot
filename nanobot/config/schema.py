@@ -52,8 +52,7 @@ class DreamConfig(Base):
         default=None,
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
     )  # Optional Dream-specific model override
-    max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
-    # Bumped from 10 to 15 in #3212 (exp002: +30% dedup, no accuracy loss; >15 plateaus).
+    max_batch_size: int = Field(default=5, ge=1)  # Max history entries per run
     max_iterations: int = Field(default=15, ge=1)  # Max tool calls per Phase 2
     # Per-line git-blame age annotation in Phase 1 prompt (see #3212). Default
     # on — set to False to feed MEMORY.md raw if a specific LLM reacts poorly
