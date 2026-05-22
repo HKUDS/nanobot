@@ -141,6 +141,75 @@ async def test_sessions_routes_require_bearer_token(
 
 
 @pytest.mark.asyncio
+async def test_cli_apps_routes_require_token_and_return_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.cli_apps_payload",
+        lambda: {
+            "apps": [
+                {
+                    "name": "gimp",
+                    "display_name": "GIMP",
+                    "category": "image",
+                    "description": "Image editing",
+                    "requires": "Python",
+                    "source": "harness",
+                    "entry_point": "cli-anything-gimp",
+                    "install_supported": True,
+                    "installed": False,
+                    "available": False,
+                    "status": "not_installed",
+                    "logo_url": None,
+                    "brand_color": None,
+                    "skill_installed": False,
+                }
+            ],
+            "installed_count": 0,
+            "catalog_updated_at": "2026-04-18",
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.cli_apps_action",
+        lambda action, query: {
+            "apps": [],
+            "installed_count": 1,
+            "catalog_updated_at": "2026-04-18",
+            "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
+        },
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29912)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29912/api/settings/cli-apps")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29912/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29912/api/settings/cli-apps",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        assert catalog.json()["apps"][0]["name"] == "gimp"
+
+        installed = await _http_get(
+            "http://127.0.0.1:29912/api/settings/cli-apps/install?name=gimp",
+            headers=auth,
+        )
+        assert installed.status_code == 200
+        assert installed.json()["last_action"]["message"] == "install:gimp"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
     bus: MagicMock, tmp_path: Path
 ) -> None:

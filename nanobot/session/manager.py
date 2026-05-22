@@ -165,6 +165,23 @@ class Session:
                     image_placeholder_text(p) for p in media if isinstance(p, str) and p
                 )
                 content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            cli_apps = message.get("cli_apps")
+            if role == "user" and isinstance(cli_apps, list) and cli_apps and isinstance(content, str):
+                cli_lines: list[str] = []
+                for item in cli_apps[:8]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or "").strip().lower()
+                    if not name:
+                        continue
+                    entry = str(item.get("entry_point") or "unknown").strip() or "unknown"
+                    cli_lines.append(
+                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry}; "
+                        f"skill=skills/cli-app-{name}/SKILL.md]"
+                    )
+                if cli_lines:
+                    breadcrumbs = "\n".join(cli_lines)
+                    content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             if include_timestamps:
                 content = self._annotate_message_time(message, content)
             if role == "assistant" and isinstance(content, str) and not content.strip():

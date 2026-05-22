@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -8,16 +9,18 @@ import {
 import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Sparkles, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
-import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
+import type { CliAppInfo, UICliAppAttachment, UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
   /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
   showAssistantCopyAction?: boolean;
+  cliApps?: CliAppInfo[];
 }
 
 /**
@@ -32,11 +35,16 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   showAssistantCopyAction = true,
+  cliApps = [],
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
   const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
+  const mentionCliApps = useMemo(
+    () => mergeCliMentionApps(cliApps, message.cliApps),
+    [cliApps, message.cliApps],
+  );
 
   useEffect(() => {
     return () => {
@@ -88,7 +96,7 @@ export function MessageBubble({
               "text-left text-[16px]/[1.75] whitespace-pre-wrap break-words",
             )}
           >
-            {message.content}
+            <CliAppMentionText text={message.content} cliApps={mentionCliApps} />
           </p>
         ) : null}
       </div>
@@ -156,6 +164,36 @@ export function MessageBubble({
       )}
     </div>
   );
+}
+
+function mergeCliMentionApps(
+  cliApps: CliAppInfo[],
+  attachments: UICliAppAttachment[] | undefined,
+): CliAppInfo[] {
+  if (!attachments?.length) return cliApps;
+  const byName = new Map(cliApps.map((app) => [app.name.toLowerCase(), app]));
+  for (const attachment of attachments) {
+    const name = attachment.name?.trim();
+    if (!name) continue;
+    const existing = byName.get(name.toLowerCase());
+    byName.set(name.toLowerCase(), {
+      name,
+      display_name: attachment.display_name || existing?.display_name || name,
+      category: attachment.category || existing?.category || "cli",
+      description: existing?.description || "",
+      requires: existing?.requires || "",
+      source: existing?.source || "attached",
+      entry_point: attachment.entry_point || existing?.entry_point || "",
+      install_supported: existing?.install_supported ?? true,
+      installed: true,
+      available: existing?.available ?? true,
+      status: existing?.status || "installed",
+      logo_url: attachment.logo_url ?? existing?.logo_url ?? null,
+      brand_color: attachment.brand_color ?? existing?.brand_color ?? null,
+      skill_installed: existing?.skill_installed ?? true,
+    });
+  }
+  return Array.from(byName.values());
 }
 
 function MessageMedia({

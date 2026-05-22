@@ -727,6 +727,8 @@ describe("App layout", () => {
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
+    expect(screen.getByText("Brand logos")).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.getByText("AI")).toBeInTheDocument();
     const modelInput = screen.getByDisplayValue("openai/gpt-4o");
@@ -739,6 +741,8 @@ describe("App layout", () => {
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Providers" }));
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
+    expect(screen.getByText(/Product names, logos, and brands/)).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByText("OpenAI"));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));

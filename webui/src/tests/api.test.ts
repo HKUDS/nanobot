@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
+  fetchCliApps,
   fetchSidebarState,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
+  runCliAppAction,
   updateSidebarState,
   updateImageGenerationSettings,
   updateProviderSettings,
@@ -110,6 +112,33 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/image-generation/update?enabled=true&provider=openrouter&model=openai%2Fgpt-5.4-image-2&default_aspect_ratio=16%3A9&default_image_size=2K&max_images_per_turn=3",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads CLI Apps catalog and serializes actions", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        apps: [],
+        installed_count: 0,
+        catalog_updated_at: "2026-04-18",
+      }),
+    } as Response);
+
+    await expect(fetchCliApps("tok")).resolves.toMatchObject({ apps: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await runCliAppAction("tok", "install", "gimp");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps/install?name=gimp",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

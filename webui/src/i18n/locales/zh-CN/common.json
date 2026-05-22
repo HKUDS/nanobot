@@ -68,6 +68,7 @@
       "providers": "提供商",
       "image": "图片",
       "web": "网页",
+      "cliApps": "CLI 应用",
       "runtime": "运行时",
       "advanced": "高级"
     },
@@ -82,6 +83,7 @@
       "imageDefaults": "默认值",
       "webSearch": "网页搜索",
       "webBehavior": "行为",
+      "cliApps": "CLI 应用",
       "identity": "身份",
       "safety": "安全",
       "capabilities": "能力",
@@ -103,6 +105,7 @@
       "density": "密度",
       "activityMode": "活动细节",
       "codeWrap": "代码换行",
+      "brandLogos": "品牌 Logo",
       "maxResults": "最大结果数",
       "timeout": "超时",
       "jinaReader": "Jina Reader",
@@ -129,6 +132,8 @@
       "ssrfWhitelist": "SSRF 白名单",
       "mcpServers": "MCP 服务器",
       "pathAppend": "PATH 追加",
+      "cliAppsCatalog": "目录",
+      "cliAppsFilter": "筛选",
       "configurationDocs": "配置文档"
     },
     "help": {
@@ -142,6 +147,7 @@
       "density": "仅保存在当前浏览器。",
       "activityMode": "选择默认显示多少 agent 活动细节。",
       "codeWrap": "让较小屏幕上的长代码行更易读。",
+      "brandLogos": "在设置页显示第三方服务商和 CLI 的 Logo。",
       "maxResults": "每次 web_search 返回的结果数量。",
       "timeout": "搜索服务商请求超时秒数。",
       "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
@@ -156,7 +162,40 @@
       "botIcon": "显示在 bot 名称旁的短 emoji 或文本。",
       "timezone": "运行时上下文和计划任务使用的 IANA 时区。",
       "toolHintMaxLength": "工具进度提示显示的最大字符数。",
+      "cliAppsCatalog": "只安装 nanobot 在本机调用应用时需要的 CLI 适配层，不触碰应用本体。",
+      "cliAppsFilter": "按应用、分类或能力搜索。",
       "advancedReadOnly": "高级安全控制在 WebUI 中只读；需要时请谨慎编辑 config.json。"
+    },
+    "cliApps": {
+      "allCategories": "全部分类",
+      "availableCount": "{{count}} 个应用",
+      "installedCount": "已安装 {{count}} 个 CLI",
+      "summary": "CLI 已安装 {{installed}} / {{total}}",
+      "filterAll": "全部",
+      "filterInstalled": "已装 CLI",
+      "filterNotInstalled": "未装 CLI",
+      "searchPlaceholder": "搜索 CLI",
+      "loading": "正在加载 CLI 应用...",
+      "empty": "没有匹配的 CLI 应用。",
+      "statusInstalled": "CLI 已安装",
+      "statusMissing": "缺失",
+      "statusAvailable": "可用",
+      "statusUnsupported": "暂不支持",
+      "statusNotInstalled": "CLI 未安装",
+      "requires": "依赖",
+      "test": "测试 CLI",
+      "update": "更新 CLI",
+      "uninstall": "卸载 CLI",
+      "install": "安装 CLI",
+      "readyTitle": "@{{name}} 已就绪",
+      "readyStatus": "就绪",
+      "readyTry": "试试 @{{name}}",
+      "readyCopied": "已复制",
+      "readyPrompt": "用 @{{name}} 看看这个 CLI 能做什么。",
+      "openChat": "回到对话",
+      "unsupported": "暂不支持",
+      "unavailable": "不可用",
+      "noDescription": "暂无描述。"
     },
     "values": {
       "light": "浅色",
@@ -246,6 +285,9 @@
     "providers": {
       "searchPlaceholder": "搜索服务商",
       "noMatches": "没有匹配的服务商。"
+    },
+    "legal": {
+      "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
     },
     "image": {
       "selectProvider": "选择服务商",
@@ -449,6 +491,10 @@
           }
         }
       },
+      "mentions": {
+        "ariaLabel": "CLI 应用",
+        "label": "CLI 应用"
+      },
       "encoding": "处理中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",
@@ -481,6 +527,15 @@
     "agentActivityToolsOnly": "{{tools}} 次工具调用",
     "agentActivityLiveSummary": "进行中… · {{reasoning}} 步 · {{tools}} 次工具调用",
     "agentActivityLiveToolsOnly": "进行中… · {{tools}} 次工具调用",
+    "cliActivityRunningOne": "正在运行 CLI @{{name}}",
+    "cliActivityRanOne": "已运行 CLI @{{name}}",
+    "cliActivityFailedOne": "CLI 调用失败 @{{name}}",
+    "cliActivityRunningMany": "正在运行 {{count}} 个 CLI",
+    "cliActivityRanMany": "已运行 {{count}} 个 CLI",
+    "cliActivityFailedMany": "{{count}} 个 CLI 调用失败",
+    "cliRunRunning": "正在运行 CLI",
+    "cliRunRan": "已运行 CLI",
+    "cliRunFailed": "CLI 调用失败",
     "imageAttachment": "图片附件",
     "copyReply": "复制回复",
     "copiedReply": "已复制回复",

@@ -91,6 +91,7 @@ def test_discover_finds_concrete_tools():
     class_names = {cls.__name__ for cls in discovered}
     assert "ApplyPatchTool" in class_names
     assert "ExecTool" in class_names
+    assert "CliAppsTool" in class_names
     assert "MessageTool" in class_names
     assert "SpawnTool" in class_names
     assert "WriteStdinTool" in class_names
@@ -366,6 +367,7 @@ def test_config_defaults():
     assert config.tools.my.enable is True
     assert config.tools.my.allow_set is False
     assert config.tools.image_generation.enabled is False
+    assert config.tools.cli_apps.enable is True
     assert config.tools.restrict_to_workspace is False
 
 

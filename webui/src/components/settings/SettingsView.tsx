@@ -32,6 +32,8 @@ import {
   Loader2,
   LogOut,
   Moon,
+  Package,
+  PlayCircle,
   Orbit,
   Palette,
   Pencil,
@@ -41,6 +43,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Triangle,
   Waves,
   Zap,
@@ -59,6 +62,8 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   fetchSettings,
+  fetchCliApps,
+  runCliAppAction,
   updateImageGenerationSettings,
   updateProviderSettings,
   updateSettings,
@@ -67,6 +72,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 import type {
+  CliAppInfo,
+  CliAppsPayload,
   ImageGenerationSettingsUpdate,
   SettingsPayload,
   WebSearchSettingsUpdate,
@@ -79,6 +86,7 @@ type SettingsSectionKey =
   | "providers"
   | "image"
   | "web"
+  | "cliApps"
   | "runtime"
   | "advanced";
 
@@ -89,6 +97,7 @@ interface LocalPreferences {
   density: LocalDensity;
   activityMode: LocalActivityMode;
   codeWrap: boolean;
+  brandLogos: boolean;
 }
 
 interface AgentSettingsDraft {
@@ -110,6 +119,7 @@ const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
+  brandLogos: true,
 };
 
 const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
@@ -146,6 +156,7 @@ function readLocalPreferences(): LocalPreferences {
       density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
+      brandLogos: parsed.brandLogos !== false,
     };
   } catch {
     return DEFAULT_LOCAL_PREFS;
@@ -177,8 +188,11 @@ export function SettingsView({
   const { t } = useTranslation();
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
+  const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
@@ -186,6 +200,12 @@ export function SettingsView({
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("overview");
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
+  const [cliAppsQuery, setCliAppsQuery] = useState("");
+  const [cliAppsCategory, setCliAppsCategory] = useState("all");
+  const [cliAppsInstallFilter, setCliAppsInstallFilter] = useState<"all" | "installed" | "notInstalled">("all");
+  const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
+  const [cliAppsError, setCliAppsError] = useState<string | null>(null);
+  const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
@@ -284,6 +304,27 @@ export function SettingsView({
       cancelled = true;
     };
   }, [applyPayload, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCliAppsLoading(true);
+    fetchCliApps(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setCliApps(payload);
+          setCliAppsError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setCliAppsError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setCliAppsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   useEffect(() => {
     try {
@@ -574,6 +615,26 @@ export function SettingsView({
     });
   };
 
+  const handleCliAppAction = async (
+    action: "install" | "update" | "uninstall" | "test",
+    name: string,
+  ) => {
+    const key = `${action}:${name}`;
+    setCliAppsAction(key);
+    setCliAppsMessage(null);
+    setCliAppsError(null);
+    try {
+      const payload = await runCliAppAction(token, action, name);
+      setCliApps(payload);
+      setCliAppsMessage(payload.last_action?.message ?? null);
+      setCliAppsFocusName(action === "uninstall" ? null : name);
+    } catch (err) {
+      setCliAppsError((err as Error).message);
+    } finally {
+      setCliAppsAction(null);
+    }
+  };
+
   const renderSection = () => {
     if (!settings) return null;
     switch (activeSection) {
@@ -618,6 +679,7 @@ export function SettingsView({
             editingProviderKeys={editingProviderKeys}
             providerSaving={providerSaving}
             query={providerQuery}
+            showBrandLogos={localPrefs.brandLogos}
             onQueryChange={setProviderQuery}
             onToggleProvider={handleToggleProvider}
             onToggleProviderKey={toggleProviderKeyVisibility}
@@ -675,6 +737,26 @@ export function SettingsView({
             onRestart={onRestart}
             isRestarting={isRestarting}
             requiresRestartPending={pendingRestartSections.web}
+          />
+        );
+      case "cliApps":
+        return (
+          <CliAppsSettings
+            payload={cliApps}
+            loading={cliAppsLoading}
+            query={cliAppsQuery}
+            category={cliAppsCategory}
+            installFilter={cliAppsInstallFilter}
+            actionKey={cliAppsAction}
+            message={cliAppsMessage}
+            error={cliAppsError}
+            focusName={cliAppsFocusName}
+            showBrandLogos={localPrefs.brandLogos}
+            onQueryChange={setCliAppsQuery}
+            onCategoryChange={setCliAppsCategory}
+            onInstallFilterChange={setCliAppsInstallFilter}
+            onAction={handleCliAppAction}
+            onBackToChat={onBackToChat}
           />
         );
       case "runtime":
@@ -752,6 +834,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "providers", icon: KeyRound, fallback: "Providers" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
+  { key: "cliApps", icon: Package, fallback: "CLI Apps" },
   { key: "runtime", icon: Server, fallback: "Runtime" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
@@ -1077,6 +1160,16 @@ function AppearanceSettings({
               label={localPrefs.codeWrap ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.brandLogos", "Brand logos")}
+            description={tx("settings.help.brandLogos", "Show third-party provider and CLI logos in Settings.")}
+          >
+            <ToggleButton
+              checked={localPrefs.brandLogos}
+              onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
+              label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>
@@ -1211,6 +1304,7 @@ function ProvidersSettings({
   editingProviderKeys,
   providerSaving,
   query,
+  showBrandLogos,
   onQueryChange,
   onToggleProvider,
   onToggleProviderKey,
@@ -1229,6 +1323,7 @@ function ProvidersSettings({
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
   query: string;
+  showBrandLogos: boolean;
   onQueryChange: (query: string) => void;
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
@@ -1272,7 +1367,10 @@ function ProvidersSettings({
           className="flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
         >
           <span className="flex min-w-0 items-center gap-3">
-            <ProviderIcon provider={provider.name} />
+            <ProviderIcon
+              provider={provider.name}
+              showBrandLogos={showBrandLogos}
+            />
             <span className="min-w-0">
               <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
                 {provider.label}
@@ -1437,6 +1535,7 @@ function ProvidersSettings({
       >
         {filteredUnconfigured.map(renderProviderRow)}
       </ProviderSection>
+      <ThirdPartyBrandNotice />
     </div>
   );
 }
@@ -1831,6 +1930,383 @@ function WebSettings({
   );
 }
 
+function CliAppsSettings({
+  payload,
+  loading,
+  query,
+  category,
+  installFilter,
+  actionKey,
+  message,
+  error,
+  focusName,
+  showBrandLogos,
+  onQueryChange,
+  onCategoryChange,
+  onInstallFilterChange,
+  onAction,
+  onBackToChat,
+}: {
+  payload: CliAppsPayload | null;
+  loading: boolean;
+  query: string;
+  category: string;
+  installFilter: "all" | "installed" | "notInstalled";
+  actionKey: string | null;
+  message: string | null;
+  error: string | null;
+  focusName: string | null;
+  showBrandLogos: boolean;
+  onQueryChange: (value: string) => void;
+  onCategoryChange: (value: string) => void;
+  onInstallFilterChange: (value: "all" | "installed" | "notInstalled") => void;
+  onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+  onBackToChat: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const apps = payload?.apps ?? [];
+  const categories = useMemo(
+    () => ["all", ...Array.from(new Set(apps.map((app) => app.category))).sort()],
+    [apps],
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredApps = apps.filter((app) => {
+    const categoryMatch = category === "all" || app.category === category;
+    if (!categoryMatch) return false;
+    if (installFilter === "installed" && !app.installed) return false;
+    if (installFilter === "notInstalled" && app.installed) return false;
+    if (!normalizedQuery) return true;
+    return (
+      app.display_name.toLowerCase().includes(normalizedQuery) ||
+      app.name.toLowerCase().includes(normalizedQuery) ||
+      app.description.toLowerCase().includes(normalizedQuery) ||
+      app.category.toLowerCase().includes(normalizedQuery)
+    );
+  });
+  const categoryLabel =
+    category === "all"
+      ? tx("settings.cliApps.allCategories", "All categories")
+      : category;
+  const installFilterOptions = [
+    { value: "all", label: tx("settings.cliApps.filterAll", "All") },
+    { value: "installed", label: tx("settings.cliApps.filterInstalled", "Installed CLIs") },
+    { value: "notInstalled", label: tx("settings.cliApps.filterNotInstalled", "Not installed") },
+  ];
+  const focusedApp = focusName
+    ? apps.find((app) => app.name === focusName && app.installed)
+    : null;
+  const visibleStatusMessage = error || (!focusedApp ? message : null);
+
+  return (
+    <div className="space-y-5">
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <SettingsSectionTitle>{tx("settings.sections.cliApps", "CLI Apps")}</SettingsSectionTitle>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {tx("settings.cliApps.summary", "{{installed}} of {{total}} CLIs installed")
+                .replace("{{installed}}", String(payload?.installed_count ?? 0))
+                .replace("{{total}}", String(apps.length))}
+            </p>
+          </div>
+          <SegmentedControl
+            value={installFilter}
+            options={installFilterOptions}
+            onChange={(value) => onInstallFilterChange(value as "all" | "installed" | "notInstalled")}
+          />
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder={tx("settings.cliApps.searchPlaceholder", "Search CLIs")}
+              className="h-10 w-full rounded-full border-border/65 bg-card/80 pl-9 text-[13px] shadow-sm sm:max-w-[320px]"
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-10 justify-between rounded-full bg-card/80 px-4">
+                <span className="max-w-[180px] truncate">{categoryLabel}</span>
+                <ChevronDown className="ml-2 h-3.5 w-3.5" aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-[320px] overflow-y-auto">
+              {categories.map((item) => (
+                <DropdownMenuItem key={item} onClick={() => onCategoryChange(item)}>
+                  {item === "all" ? tx("settings.cliApps.allCategories", "All categories") : item}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </section>
+
+      {visibleStatusMessage ? (
+        <div
+          className={cn(
+            "rounded-[10px] border px-3.5 py-2.5 text-[12.5px]",
+            error
+              ? "border-destructive/20 bg-destructive/5 text-destructive"
+              : "border-border/55 bg-muted/35 text-muted-foreground",
+          )}
+        >
+          {visibleStatusMessage}
+        </div>
+      ) : null}
+
+      {focusedApp ? (
+        <CliAppReadyPanel
+          app={focusedApp}
+          showBrandLogos={showBrandLogos}
+          onBackToChat={onBackToChat}
+        />
+      ) : null}
+
+      {loading ? (
+        <div className="flex h-36 items-center justify-center rounded-[8px] border border-border/45 bg-card/82 text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+          {tx("settings.cliApps.loading", "Loading CLI Apps...")}
+        </div>
+      ) : (
+        <section>
+          <div className="grid gap-2">
+            {filteredApps.map((app) => (
+              <CliAppCard
+                key={app.name}
+                app={app}
+                actionKey={actionKey}
+                showBrandLogos={showBrandLogos}
+                onAction={onAction}
+              />
+            ))}
+          </div>
+          {!filteredApps.length ? (
+            <div className="rounded-[8px] border border-border/45 bg-card/82 px-4 py-8 text-center text-sm text-muted-foreground">
+              {tx("settings.cliApps.empty", "No CLI Apps match this filter.")}
+            </div>
+          ) : null}
+        </section>
+      )}
+      <ThirdPartyBrandNotice />
+    </div>
+  );
+}
+
+function CliAppReadyPanel({
+  app,
+  showBrandLogos,
+  onBackToChat,
+}: {
+  app: CliAppInfo;
+  showBrandLogos: boolean;
+  onBackToChat: () => void;
+}) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const prompt = t("settings.cliApps.readyPrompt", {
+    name: app.name,
+    defaultValue: "Use @{{name}} to inspect what this CLI can do.",
+  });
+  const copyPrompt = () => {
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
+  };
+
+  return (
+    <section
+      className={cn(
+        "rounded-[12px] border border-border/55 bg-card/88 px-4 py-3",
+        "shadow-[0_8px_26px_rgba(15,23,42,0.055)]",
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
+              {app.display_name}
+            </h3>
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
+              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-300" aria-hidden />
+              {t("settings.cliApps.readyStatus", { defaultValue: "Ready" })}
+            </span>
+          </div>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+            <span className="font-mono">@{app.name}</span>
+            <span aria-hidden>·</span>
+            <span className="truncate font-mono">{app.entry_point || app.name}</span>
+            <span aria-hidden>·</span>
+            <span>{app.category}</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={copyPrompt}
+            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+          >
+            {copied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : null}
+            {copied
+              ? t("settings.cliApps.readyCopied", { defaultValue: "Copied" })
+              : t("settings.cliApps.readyTry", { name: app.name, defaultValue: "Try @{{name}}" })}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onBackToChat}
+            className="h-8 rounded-full px-3 text-[12px] font-semibold"
+          >
+            {t("settings.cliApps.openChat", { defaultValue: "Open chat" })}
+            <ChevronRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CliAppCard({
+  app,
+  actionKey,
+  showBrandLogos,
+  onAction,
+}: {
+  app: CliAppInfo;
+  actionKey: string | null;
+  showBrandLogos: boolean;
+  onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const installBusy = actionKey === `install:${app.name}`;
+  const updateBusy = actionKey === `update:${app.name}`;
+  const uninstallBusy = actionKey === `uninstall:${app.name}`;
+  const testBusy = actionKey === `test:${app.name}`;
+  const busy = installBusy || updateBusy || uninstallBusy || testBusy;
+
+  return (
+    <article className="flex min-w-0 items-center gap-3 rounded-[8px] border border-border/45 bg-card/82 px-4 py-3 shadow-[0_6px_22px_rgba(15,23,42,0.045)]">
+      <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
+            {app.display_name}
+          </h3>
+          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
+            {app.category}
+          </span>
+        </div>
+        <div className="mt-0.5 truncate text-[12px] text-muted-foreground">
+          {app.entry_point || app.name}
+        </div>
+        <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground">
+          {app.requires
+            ? `${tx("settings.cliApps.requires", "Requires")}: ${app.requires}`
+            : app.description || tx("settings.cliApps.noDescription", "No description available.")}
+        </p>
+      </div>
+      <div className="shrink-0">
+        {app.installed ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                className="h-8 rounded-full border-emerald-500/20 bg-emerald-500/10 px-3 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-500/12 dark:text-emerald-300"
+              >
+                {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+                {tx("settings.cliApps.statusInstalled", "CLI installed")}
+                <ChevronDown className="ml-1.5 h-3 w-3" aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
+                <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
+                {tx("settings.cliApps.test", "Test CLI")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
+                <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
+                {tx("settings.cliApps.update", "Update CLI")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={busy} onClick={() => onAction("uninstall", app.name)}>
+                <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                {tx("settings.cliApps.uninstall", "Uninstall CLI")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : app.install_supported ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onAction("install", app.name)}
+            className="h-8 rounded-full px-4 text-[12px] font-semibold"
+          >
+            {installBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {tx("settings.cliApps.install", "Install CLI")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled
+            className="h-8 rounded-full px-3 text-[12px] font-semibold"
+          >
+            {tx("settings.cliApps.unavailable", "Unavailable")}
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const bg = app.brand_color || "hsl(var(--muted))";
+  const initials = app.display_name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || app.name.slice(0, 2).toUpperCase();
+  if (showBrandLogos && app.logo_url && !failed) {
+    return (
+      <span
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-border/45 bg-background"
+        style={{ boxShadow: `inset 0 0 0 1px ${app.brand_color ?? "transparent"}22` }}
+      >
+        <img
+          src={app.logo_url}
+          alt=""
+          className="h-6 w-6 object-contain"
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] text-[13px] font-semibold text-white"
+      style={{ backgroundColor: bg }}
+    >
+      {initials}
+    </span>
+  );
+}
+
 function RuntimeSettings({
   form,
   setForm,
@@ -2079,6 +2555,18 @@ function ByokEmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+function ThirdPartyBrandNotice() {
+  const { t } = useTranslation();
+  return (
+    <p className="px-1 text-[11.5px] leading-5 text-muted-foreground/75">
+      {t("settings.legal.thirdPartyBrands", {
+        defaultValue:
+          "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
+      })}
+    </p>
+  );
+}
+
 function orderUnconfiguredProviders(
   providers: SettingsPayload["providers"],
 ): SettingsPayload["providers"] {
@@ -2126,6 +2614,63 @@ function providerLabel(
   return providers.find((provider) => provider.name === value)?.label ?? value;
 }
 
+interface ProviderBrand {
+  logoUrl: string;
+  color: string;
+  initials: string;
+}
+
+function faviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+}
+
+const PROVIDER_BRAND_ALIASES: Record<string, string> = {
+  byteplus_coding_plan: "byteplus",
+  minimax_anthropic: "minimax",
+  openai_codex: "openai",
+  volcengine_coding_plan: "volcengine",
+};
+
+const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
+  aihubmix: { logoUrl: faviconUrl("aihubmix.com"), color: "#111827", initials: "AH" },
+  ant_ling: { logoUrl: faviconUrl("ant-ling.com"), color: "#7C3AED", initials: "AL" },
+  anthropic: { logoUrl: faviconUrl("anthropic.com"), color: "#D97757", initials: "A" },
+  atomic_chat: { logoUrl: faviconUrl("atomic.chat"), color: "#111827", initials: "AC" },
+  azure_openai: { logoUrl: faviconUrl("azure.microsoft.com"), color: "#0078D4", initials: "AZ" },
+  bedrock: { logoUrl: faviconUrl("aws.amazon.com"), color: "#FF9900", initials: "AWS" },
+  byteplus: { logoUrl: faviconUrl("byteplus.com"), color: "#325CFF", initials: "BP" },
+  dashscope: { logoUrl: faviconUrl("dashscope.aliyun.com"), color: "#FF6A00", initials: "DS" },
+  deepseek: { logoUrl: faviconUrl("deepseek.com"), color: "#4D6BFE", initials: "DS" },
+  gemini: { logoUrl: faviconUrl("gemini.google.com"), color: "#4285F4", initials: "G" },
+  github_copilot: { logoUrl: faviconUrl("github.com"), color: "#24292F", initials: "GH" },
+  groq: { logoUrl: faviconUrl("groq.com"), color: "#F55036", initials: "GQ" },
+  huggingface: { logoUrl: faviconUrl("huggingface.co"), color: "#FF9D00", initials: "HF" },
+  lm_studio: { logoUrl: faviconUrl("lmstudio.ai"), color: "#111827", initials: "LM" },
+  longcat: { logoUrl: faviconUrl("longcat.chat"), color: "#111827", initials: "LC" },
+  minimax: { logoUrl: faviconUrl("minimax.io"), color: "#111827", initials: "MM" },
+  mistral: { logoUrl: faviconUrl("mistral.ai"), color: "#FA520F", initials: "M" },
+  moonshot: { logoUrl: faviconUrl("moonshot.ai"), color: "#111827", initials: "MS" },
+  novita: { logoUrl: faviconUrl("novita.ai"), color: "#7C3AED", initials: "N" },
+  nvidia: { logoUrl: faviconUrl("nvidia.com"), color: "#76B900", initials: "NV" },
+  ollama: { logoUrl: faviconUrl("ollama.com"), color: "#111827", initials: "O" },
+  openai: { logoUrl: faviconUrl("openai.com"), color: "#111827", initials: "AI" },
+  openrouter: { logoUrl: faviconUrl("openrouter.ai"), color: "#111827", initials: "OR" },
+  ovms: { logoUrl: faviconUrl("openvino.ai"), color: "#0071C5", initials: "OV" },
+  qianfan: { logoUrl: faviconUrl("cloud.baidu.com"), color: "#2932E1", initials: "QF" },
+  siliconflow: { logoUrl: faviconUrl("siliconflow.cn"), color: "#111827", initials: "SF" },
+  skywork: { logoUrl: faviconUrl("skywork.ai"), color: "#5B5BF6", initials: "SW" },
+  stepfun: { logoUrl: faviconUrl("stepfun.com"), color: "#2F6BFF", initials: "SF" },
+  volcengine: { logoUrl: faviconUrl("volcengine.com"), color: "#1664FF", initials: "VE" },
+  vllm: { logoUrl: faviconUrl("vllm.ai"), color: "#2563EB", initials: "VL" },
+  xiaomi_mimo: { logoUrl: faviconUrl("xiaomimimo.com"), color: "#FF6900", initials: "MI" },
+  zhipu: { logoUrl: faviconUrl("bigmodel.cn"), color: "#155EEF", initials: "Z" },
+};
+
+function providerBrand(provider: string): ProviderBrand | null {
+  const key = PROVIDER_BRAND_ALIASES[provider] ?? provider;
+  return PROVIDER_BRANDS[key] ?? null;
+}
+
 const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
@@ -2160,8 +2705,44 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   nvidia: Zap,
 };
 
-function ProviderIcon({ provider }: { provider: string }) {
+function ProviderIcon({
+  provider,
+  showBrandLogos,
+}: {
+  provider: string;
+  showBrandLogos: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
+  if (showBrandLogos && brand?.logoUrl && !failed) {
+    return (
+      <span
+        data-testid={`provider-logo-${provider}`}
+        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[14px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]"
+        style={{ boxShadow: `inset 0 0 0 1px ${brand.color}22` }}
+      >
+        <img
+          src={brand.logoUrl}
+          alt=""
+          className="h-6 w-6 object-contain"
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+  if (showBrandLogos && brand) {
+    return (
+      <span
+        data-testid={`provider-logo-fallback-${provider}`}
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] text-[11px] font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.18)]"
+        style={{ backgroundColor: brand.color }}
+        aria-hidden
+      >
+        {brand.initials}
+      </span>
+    );
+  }
   return (
     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)] dark:bg-muted/70">
       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />

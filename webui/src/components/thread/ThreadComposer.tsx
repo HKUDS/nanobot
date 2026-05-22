@@ -10,8 +10,15 @@ import {
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
+  CliAppMentionToken,
+  cliAppInitials,
+  splitCliAppMentionSegments,
+  type CliAppMentionSegment,
+} from "@/components/CliAppMentionText";
+import {
   Activity,
   ArrowUp,
+  AtSign,
   BookOpen,
   Check,
   ChevronDown,
@@ -41,7 +48,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
-import type { SlashCommand, GoalStateWsPayload } from "@/lib/types";
+import type { CliAppInfo, GoalStateWsPayload, OutboundCliAppMention, SlashCommand } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -62,6 +69,7 @@ interface ThreadComposerProps {
   modelLabel?: string | null;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  cliApps?: CliAppInfo[];
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
   onStop?: () => void;
@@ -96,6 +104,12 @@ type SlashPalettePlacement = "above" | "below";
 interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
   maxHeight: number;
+}
+
+interface CliAppMentionQuery {
+  query: string;
+  start: number;
+  end: number;
 }
 
 function slashCommandI18nKey(command: string): string {
@@ -165,6 +179,17 @@ function buildGoalMarkdownBody(summary: string, objective: string): string {
   const o = objective.trim();
   if (s && o) return `${s}\n\n---\n\n${o}`;
   return o || s;
+}
+
+function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
+  return {
+    name: app.name,
+    display_name: app.display_name,
+    category: app.category,
+    entry_point: app.entry_point,
+    logo_url: app.logo_url ?? null,
+    brand_color: app.brand_color ?? null,
+  };
 }
 
 function RunElapsedStrip({
@@ -371,6 +396,7 @@ export function ThreadComposer({
   modelLabel = null,
   variant = "thread",
   slashCommands = [],
+  cliApps = [],
   imageMode: controlledImageMode,
   onImageModeChange,
   onStop,
@@ -382,6 +408,9 @@ export function ThreadComposer({
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
+  const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
+  const [cursorPosition, setCursorPosition] = useState(0);
   const [uncontrolledImageMode, setUncontrolledImageMode] = useState(false);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("auto");
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
@@ -491,6 +520,52 @@ export function ThreadComposer({
   }, [slashCommands, slashQuery, t]);
 
   const showSlashMenu = filteredSlashCommands.length > 0;
+  const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
+    if (disabled || cliAppMenuDismissed) return null;
+    const caret = Math.min(Math.max(cursorPosition, 0), value.length);
+    const beforeCaret = value.slice(0, caret);
+    const match = /(?:^|\s)@([a-z0-9_-]*)$/i.exec(beforeCaret);
+    if (!match) return null;
+    const query = match[1].toLowerCase();
+    return {
+      query,
+      start: caret - query.length - 1,
+      end: caret,
+    };
+  }, [cliAppMenuDismissed, cursorPosition, disabled, value]);
+
+  const filteredCliApps = useMemo(() => {
+    if (!cliAppMention) return [];
+    return cliApps
+      .filter((app) => app.installed)
+      .filter((app) => {
+        const haystack = [
+          app.name,
+          app.display_name,
+          app.category,
+          app.description,
+          app.entry_point,
+        ].join(" ").toLowerCase();
+        return haystack.includes(cliAppMention.query);
+      })
+      .slice(0, 8);
+  }, [cliAppMention, cliApps]);
+
+  const showCliAppMenu = filteredCliApps.length > 0;
+  const showAnyPalette = showSlashMenu || showCliAppMenu;
+  const mentionSegments = useMemo(
+    () => splitCliAppMentionSegments(value, cliApps),
+    [cliApps, value],
+  );
+  const hasCliMentionDecorations = mentionSegments.some((segment) => segment.kind === "cli");
+  const activeCliMentionApps = useMemo(() => {
+    const seen = new Set<string>();
+    return mentionSegments.flatMap((segment) => {
+      if (segment.kind !== "cli" || seen.has(segment.app.name)) return [];
+      seen.add(segment.app.name);
+      return [segment.app];
+    });
+  }, [mentionSegments]);
   const [slashPaletteLayout, setSlashPaletteLayout] = useState<SlashPaletteLayout>({
     placement: "above",
     maxHeight: SLASH_PALETTE_MAX_HEIGHT_PX,
@@ -501,28 +576,39 @@ export function ThreadComposer({
   }, [slashQuery]);
 
   useEffect(() => {
+    setSelectedCliAppIndex(0);
+  }, [cliAppMention?.query]);
+
+  useEffect(() => {
     if (selectedCommandIndex >= filteredSlashCommands.length) {
       setSelectedCommandIndex(0);
     }
   }, [filteredSlashCommands.length, selectedCommandIndex]);
 
   useEffect(() => {
-    if (!showSlashMenu) return;
+    if (selectedCliAppIndex >= filteredCliApps.length) {
+      setSelectedCliAppIndex(0);
+    }
+  }, [filteredCliApps.length, selectedCliAppIndex]);
+
+  useEffect(() => {
+    if (!showAnyPalette) return;
 
     const dismissOnPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && formRef.current?.contains(target)) return;
       setSlashMenuDismissed(true);
+      setCliAppMenuDismissed(true);
     };
 
     document.addEventListener("pointerdown", dismissOnPointerDown, true);
     return () => {
       document.removeEventListener("pointerdown", dismissOnPointerDown, true);
     };
-  }, [showSlashMenu]);
+  }, [showAnyPalette]);
 
   useLayoutEffect(() => {
-    if (!showSlashMenu) return;
+    if (!showAnyPalette) return;
 
     const updateLayout = () => {
       const form = formRef.current;
@@ -554,7 +640,7 @@ export function ThreadComposer({
       window.removeEventListener("resize", updateLayout);
       document.removeEventListener("scroll", updateLayout, true);
     };
-  }, [filteredSlashCommands.length, showSlashMenu]);
+  }, [filteredCliApps.length, filteredSlashCommands.length, showAnyPalette]);
 
   useEffect(() => {
     if (!aspectMenuOpen) return;
@@ -602,10 +688,34 @@ export function ThreadComposer({
     (command: SlashCommand) => {
       setValue(command.argHint ? `${command.command} ` : command.command);
       setSlashMenuDismissed(true);
+      setCliAppMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
     },
     [resizeTextarea],
+  );
+
+  const chooseCliApp = useCallback(
+    (app: CliAppInfo) => {
+      if (!cliAppMention) return;
+      const suffix = value.slice(cliAppMention.end);
+      const mention = `@${app.name}${suffix.startsWith(" ") ? "" : " "}`;
+      const next = `${value.slice(0, cliAppMention.start)}${mention}${suffix}`;
+      const nextCursor = cliAppMention.start + mention.length;
+      setValue(next);
+      setCursorPosition(nextCursor);
+      setCliAppMenuDismissed(true);
+      setSlashMenuDismissed(false);
+      setInlineError(null);
+      resizeTextarea();
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [cliAppMention, resizeTextarea, value],
   );
 
   const submit = useCallback(() => {
@@ -625,14 +735,21 @@ export function ThreadComposer({
             preview: { url: img.dataUrl, name: img.file.name },
           }))
         : undefined;
-    const options: SendOptions | undefined = imageMode
-      ? {
-          imageGeneration: {
-            enabled: true,
-            aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
-          },
-        }
-      : undefined;
+    const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
+    const options: SendOptions | undefined =
+      imageMode || attachedCliApps.length > 0
+        ? {
+            ...(imageMode
+              ? {
+                  imageGeneration: {
+                    enabled: true,
+                    aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
+                  },
+                }
+              : {}),
+            ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
+          }
+        : undefined;
     onSend(trimmed, payload, options);
     setValue("");
     setInlineError(null);
@@ -640,10 +757,36 @@ export function ThreadComposer({
     // preview here without affecting the rendered message.
     clear();
     setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
     resizeTextarea();
-  }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
+  }, [activeCliMentionApps, canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (showCliAppMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedCliAppIndex((idx) => (idx + 1) % filteredCliApps.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedCliAppIndex(
+          (idx) => (idx - 1 + filteredCliApps.length) % filteredCliApps.length,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        chooseCliApp(filteredCliApps[selectedCliAppIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setCliAppMenuDismissed(true);
+        return;
+      }
+    }
     if (showSlashMenu) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -719,6 +862,12 @@ export function ThreadComposer({
 
   const attachButtonDisabled = disabled || full;
   const showStopButton = isStreaming && !!onStop;
+  const inputTextClasses = cn(
+    "w-full resize-none bg-transparent",
+    isHero
+      ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
+      : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
+  );
 
   return (
     <form
@@ -741,6 +890,16 @@ export function ThreadComposer({
           isHero={isHero}
           onHover={setSelectedCommandIndex}
           onChoose={chooseSlashCommand}
+        />
+      ) : null}
+      {showCliAppMenu ? (
+        <CliAppMentionPalette
+          apps={filteredCliApps}
+          selectedIndex={selectedCliAppIndex}
+          layout={slashPaletteLayout}
+          isHero={isHero}
+          onHover={setSelectedCliAppIndex}
+          onChoose={chooseCliApp}
         />
       ) : null}
       <div
@@ -787,30 +946,42 @@ export function ThreadComposer({
         {runStartedAt != null || goalState?.active ? (
           <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setSlashMenuDismissed(false);
-          }}
-          onInput={onInput}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          rows={1}
-          placeholder={resolvedPlaceholder}
-          disabled={disabled}
-          aria-label={t("thread.composer.inputAria")}
-          className={cn(
-            "w-full resize-none bg-transparent",
-            isHero
-              ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
-              : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
-            "placeholder:text-muted-foreground/70",
-            "focus:outline-none focus-visible:outline-none",
-            "disabled:cursor-not-allowed",
-          )}
-        />
+        <div className="relative">
+          {hasCliMentionDecorations ? (
+            <ComposerCliMentionOverlay
+              segments={mentionSegments}
+              isHero={isHero}
+              className={inputTextClasses}
+            />
+          ) : null}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setSlashMenuDismissed(false);
+              setCliAppMenuDismissed(false);
+              setCursorPosition(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onInput={onInput}
+            onKeyDown={onKeyDown}
+            onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onPaste={onPaste}
+            rows={1}
+            placeholder={resolvedPlaceholder}
+            disabled={disabled}
+            aria-label={t("thread.composer.inputAria")}
+            className={cn(
+              inputTextClasses,
+              "relative z-10 caret-foreground placeholder:text-muted-foreground/70",
+              "focus:outline-none focus-visible:outline-none",
+              "disabled:cursor-not-allowed",
+              hasCliMentionDecorations && "text-transparent selection:bg-primary/20",
+            )}
+          />
+        </div>
         {inlineError ? (
           <div
             role="alert"
@@ -962,6 +1133,40 @@ export function ThreadComposer({
   );
 }
 
+function ComposerCliMentionOverlay({
+  segments,
+  isHero,
+  className,
+}: {
+  segments: CliAppMentionSegment[];
+  isHero: boolean;
+  className: string;
+}) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        className,
+        "pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-foreground",
+      )}
+    >
+      {segments.map((segment, index) => {
+        if (segment.kind === "text") {
+          return <span key={`text-${index}`}>{segment.text}</span>;
+        }
+        return (
+          <CliAppMentionToken
+            key={`cli-${segment.app.name}-${index}`}
+            app={segment.app}
+            label={segment.text}
+            variant="composer"
+            isHero={isHero}
+          />
+        );
+      })}
+    </div>
+  );
+}
 interface SlashCommandPaletteProps {
   commands: SlashCommand[];
   selectedIndex: number;
@@ -969,6 +1174,15 @@ interface SlashCommandPaletteProps {
   isHero: boolean;
   onHover: (index: number) => void;
   onChoose: (command: SlashCommand) => void;
+}
+
+interface CliAppMentionPaletteProps {
+  apps: CliAppInfo[];
+  selectedIndex: number;
+  layout: SlashPaletteLayout;
+  isHero: boolean;
+  onHover: (index: number) => void;
+  onChoose: (app: CliAppInfo) => void;
 }
 
 function ImageAspectMenu({
@@ -1021,6 +1235,121 @@ function ImageAspectMenu({
         );
       })}
     </div>
+  );
+}
+
+function CliAppMentionPalette({
+  apps,
+  selectedIndex,
+  layout,
+  isHero,
+  onHover,
+  onChoose,
+}: CliAppMentionPaletteProps) {
+  const { t } = useTranslation();
+  const listMaxHeight = Math.max(
+    0,
+    layout.maxHeight - SLASH_PALETTE_CHROME_PX,
+  );
+  return (
+    <div
+      role="listbox"
+      aria-label={t("thread.composer.mentions.ariaLabel")}
+      style={{ maxHeight: layout.maxHeight }}
+      className={cn(
+        "absolute left-1/2 z-30 w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[18px] border",
+        layout.placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
+        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]",
+        "dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]",
+        isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
+      )}
+    >
+      <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground/70">
+        <AtSign className="h-3 w-3" aria-hidden />
+        <span>{t("thread.composer.mentions.label")}</span>
+      </div>
+      <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
+        {apps.map((app, index) => {
+          const selected = index === selectedIndex;
+          return (
+            <button
+              key={app.name}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              onMouseEnter={() => onHover(index)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChoose(app);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-[13px] px-3 py-2.5 text-left transition-colors",
+                selected
+                  ? "bg-primary/10 text-foreground"
+                  : "text-foreground/86 hover:bg-accent/55",
+              )}
+            >
+              <CliAppMentionLogo app={app} selected={selected} />
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="font-mono text-[13px] font-semibold text-foreground">
+                    @{app.name}
+                  </span>
+                  <span className="truncate text-[13px] font-medium">
+                    {app.display_name}
+                  </span>
+                </span>
+                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                  {app.category}
+                  {app.entry_point ? ` · ${app.entry_point}` : ""}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2 px-2 pt-1.5 text-[10.5px] text-muted-foreground/70">
+        <span>{t("thread.composer.slash.navigateHint")}</span>
+        <span>{t("thread.composer.slash.selectHint")}</span>
+        <span>{t("thread.composer.slash.closeHint")}</span>
+      </div>
+    </div>
+  );
+}
+
+function CliAppMentionLogo({
+  app,
+  selected,
+}: {
+  app: CliAppInfo;
+  selected: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const color = app.brand_color || "hsl(var(--primary))";
+  if (app.logo_url && !failed) {
+    return (
+      <span
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border bg-background",
+          selected ? "border-primary/25" : "border-border/65",
+        )}
+      >
+        <img
+          src={app.logo_url}
+          alt=""
+          className="h-4.5 w-4.5 object-contain"
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-[10.5px] font-semibold text-white"
+      style={{ backgroundColor: color }}
+    >
+      {cliAppInitials(app)}
+    </span>
   );
 }
 

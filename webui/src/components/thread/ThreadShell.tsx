@@ -19,8 +19,8 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { listSlashCommands } from "@/lib/api";
-import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
+import { fetchCliApps, listSlashCommands } from "@/lib/api";
+import type { ChatSummary, CliAppInfo, SlashCommand, UIMessage } from "@/lib/types";
 import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
@@ -97,6 +97,7 @@ export function ThreadShell({
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
   const [heroImageMode, setHeroImageMode] = useState(false);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -247,6 +248,40 @@ export function ThreadShell({
     };
   }, [token]);
 
+  const refreshCliApps = useCallback(async () => {
+    try {
+      const payload = await fetchCliApps(token);
+      setCliApps(payload.apps.filter((app) => app.installed));
+    } catch {
+      setCliApps([]);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const payload = await fetchCliApps(token);
+        if (!cancelled) setCliApps(payload.apps.filter((app) => app.installed));
+      } catch {
+        if (!cancelled) setCliApps([]);
+      }
+    };
+    load();
+
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshCliApps();
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [refreshCliApps, token]);
+
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[], options?: SendOptions) => {
       if (booting) return;
@@ -332,6 +367,7 @@ export function ThreadShell({
           modelLabel={toModelBadgeLabel(modelName)}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
+          cliApps={cliApps}
           imageMode={showHeroComposer ? heroImageMode : undefined}
           onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
@@ -351,6 +387,7 @@ export function ThreadShell({
           modelLabel={toModelBadgeLabel(modelName)}
           variant="hero"
           slashCommands={slashCommands}
+          cliApps={cliApps}
           imageMode={heroImageMode}
           onImageModeChange={setHeroImageMode}
           runStartedAt={runStartedAt}
@@ -391,6 +428,7 @@ export function ThreadShell({
         scrollToBottomSignal={scrollToBottomSignal}
         conversationKey={historyKey}
         showScrollToBottomButton={!!session}
+        cliApps={cliApps}
       />
     </section>
   );

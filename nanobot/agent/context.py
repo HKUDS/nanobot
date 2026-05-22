@@ -156,9 +156,14 @@ class ContextBuilder:
         sender_id: str | None = None,
         session_summary: str | None = None,
         session_metadata: Mapping[str, Any] | None = None,
+        current_runtime_lines: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        extra = goal_state_runtime_lines(session_metadata)
+        extra = [
+            *goal_state_runtime_lines(session_metadata),
+        ]
+        if current_runtime_lines:
+            extra.extend(line for line in current_runtime_lines if line)
         runtime_ctx = self._build_runtime_context(
             channel,
             chat_id,

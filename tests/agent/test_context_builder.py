@@ -362,6 +362,21 @@ class TestBuildMessages:
         assert "Other chat goal." not in str(without_goal[-1]["content"])
         assert "Goal (active):" not in str(without_goal[-1]["content"])
 
+    def test_current_runtime_lines_are_injected(self, tmp_path):
+        builder = _builder(tmp_path)
+        messages = builder.build_messages(
+            [],
+            "please use @zoom tonight",
+            current_runtime_lines=[
+                "CLI App Attachment: @zoom (installed; tool=run_cli_app; entry_point=cli-anything-zoom).",
+            ],
+        )
+        user_msg = str(messages[-1]["content"])
+
+        assert "CLI App Attachment: @zoom" in user_msg
+        assert "tool=run_cli_app" in user_msg
+        assert "entry_point=cli-anything-zoom" in user_msg
+
     def test_consecutive_same_role_merged(self, tmp_path):
         builder = _builder(tmp_path)
         history = [{"role": "user", "content": "previous user message"}]

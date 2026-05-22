@@ -41,6 +41,13 @@ documents the general tool contract and non-obvious usage patterns.
 - Use `write_stdin` to poll, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
 - Use `list_exec_sessions` to recover active session IDs after context shifts.
 
+## CLI App Attachments
+
+- When Runtime Context lists a `CLI App Attachment` or `CLI App Mention`, treat the `@name` as an app capability the user intentionally attached to the current turn.
+- If the task may need app-specific behavior, read the listed skill first, then call `run_cli_app` with that `name`.
+- Do not run an attached CLI app through shell or generic process tools unless the user explicitly asks for that lower-level path.
+- If the app CLI is missing, lacks local desktop/app/API prerequisites, or cannot complete the requested action, explain that concrete blocker and what was attempted.
+
 ## Web and External Information
 
 - Use web tools when the user asks for current information, a specific URL, or information likely to have changed.

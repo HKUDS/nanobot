@@ -359,6 +359,31 @@ def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
     assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
 
 
+def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
+    session = Session(key="test:cli-app")
+    session.messages.append(
+        {
+            "role": "user",
+            "content": "please use @drawio",
+            "cli_apps": [{
+                "name": "drawio",
+                "entry_point": "cli-anything-drawio",
+            }],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [{
+        "role": "user",
+        "content": (
+            "please use @drawio\n"
+            "[CLI App Attachment: @drawio; tool=run_cli_app; "
+            "entry_point=cli-anything-drawio; skill=skills/cli-app-drawio/SKILL.md]"
+        ),
+    }]
+
+
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
     """``media`` only ever appears on user entries in practice, but the
     synthesizer must be defensive: assistants / tools with list content

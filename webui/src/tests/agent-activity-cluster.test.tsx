@@ -2,7 +2,24 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
-import type { UIMessage } from "@/lib/types";
+import type { CliAppInfo, UIMessage } from "@/lib/types";
+
+const BLENDER_CLI_APP: CliAppInfo = {
+  name: "blender",
+  display_name: "Blender",
+  category: "3d",
+  description: "3D creation",
+  requires: "",
+  source: "harness",
+  entry_point: "cli-anything-blender",
+  install_supported: true,
+  installed: true,
+  available: true,
+  status: "installed",
+  logo_url: "https://example.invalid/blender.svg",
+  brand_color: "#E87D0D",
+  skill_installed: true,
+};
 
 function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage[] {
   const rows: UIMessage[] = [
@@ -269,6 +286,67 @@ describe("AgentActivityCluster", () => {
     } finally {
       restoreMotion();
     }
+  });
+
+  it("renders CLI app runs as dedicated activity rows", () => {
+    const line = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-cli",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /running cli @blender/i }));
+
+    const cliRuns = screen.getByTestId("activity-cli-runs");
+    expect(cliRuns).toHaveTextContent("Running CLI");
+    expect(cliRuns).toHaveTextContent("@blender");
+    expect(cliRuns).toHaveTextContent("--json --background scene.blend");
+    expect(screen.getByTestId("activity-cli-logo-blender")).toBeInTheDocument();
+    expect(screen.queryByText(/run_cli_app/)).not.toBeInTheDocument();
+  });
+
+  it("labels rejected CLI app calls as failed instead of ran", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-cli-fail",
+          role: "tool",
+          kind: "trace",
+          content: 'run_cli_app({"name":"github","args":["repo","view"],"json":"true"})',
+          traces: ['run_cli_app({"name":"github","args":["repo","view"],"json":"true"})'],
+          toolEvents: [
+            {
+              phase: "error",
+              call_id: "call-github",
+              name: "run_cli_app",
+              arguments: { name: "github", args: ["repo", "view"], json: "true" },
+              error: "Error: CLI app 'github' not found",
+            },
+          ],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /cli failed @github/i }));
+
+    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("CLI failed");
+    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("@github");
+    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Error: CLI app 'github' not found");
+    expect(screen.queryByText("Ran CLI")).not.toBeInTheDocument();
   });
 
   it("does not render zero diff counters for completed edits", () => {

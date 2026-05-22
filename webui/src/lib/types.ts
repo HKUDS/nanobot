@@ -40,6 +40,9 @@ export interface UIMessage {
   /** For trace rows: each individual hint line, so consecutive hints can
    * render as a single collapsible group. */
   traces?: string[];
+  /** Structured tool events behind trace rows. Kept so activity cards can
+   * distinguish running, completed, and failed tool phases. */
+  toolEvents?: ToolProgressEvent[];
   /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
@@ -48,6 +51,8 @@ export interface UIMessage {
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
+  /** App-specific CLI adapters explicitly attached to this user turn. */
+  cliApps?: UICliAppAttachment[];
   /** Assistant turn: accumulated model reasoning / thinking text. Built up
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
@@ -57,6 +62,15 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+}
+
+export interface UICliAppAttachment {
+  name: string;
+  display_name?: string;
+  category?: string;
+  entry_point?: string;
+  logo_url?: string | null;
+  brand_color?: string | null;
 }
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
@@ -252,6 +266,34 @@ export interface SettingsPayload {
   restart_required_sections?: Array<"runtime" | "web" | "image">;
 }
 
+export interface CliAppInfo {
+  name: string;
+  display_name: string;
+  category: string;
+  description: string;
+  requires: string;
+  source: string;
+  entry_point: string;
+  install_supported: boolean;
+  installed: boolean;
+  available: boolean;
+  status: "installed" | "missing" | "available" | "unsupported" | "not_installed" | string;
+  logo_url?: string | null;
+  brand_color?: string | null;
+  skill_installed: boolean;
+}
+
+export interface CliAppsPayload {
+  apps: CliAppInfo[];
+  installed_count: number;
+  catalog_updated_at?: string | null;
+  last_action?: {
+    ok: boolean;
+    message: string;
+    output?: string | null;
+  };
+}
+
 export interface SettingsUpdate {
   model?: string;
   provider?: string;
@@ -394,6 +436,15 @@ export interface OutboundImageGeneration {
   aspect_ratio?: string | null;
 }
 
+export interface OutboundCliAppMention {
+  name: string;
+  display_name?: string;
+  category?: string;
+  entry_point?: string;
+  logo_url?: string | null;
+  brand_color?: string | null;
+}
+
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
@@ -411,6 +462,7 @@ export type Outbound =
       content: string;
       media?: OutboundMedia[];
       image_generation?: OutboundImageGeneration;
+      cli_apps?: OutboundCliAppMention[];
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

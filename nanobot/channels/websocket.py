@@ -52,6 +52,11 @@ from nanobot.webui.settings_api import (
     update_provider_settings,
     update_web_search_settings,
 )
+from nanobot.webui.cli_apps_api import (
+    cli_apps_action,
+    cli_apps_payload,
+    normalize_cli_app_mentions,
+)
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
@@ -653,6 +658,21 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/settings/image-generation/update":
             return self._handle_settings_image_generation_update(request)
 
+        if got == "/api/settings/cli-apps":
+            return self._handle_settings_cli_apps(request)
+
+        if got == "/api/settings/cli-apps/install":
+            return await self._handle_settings_cli_apps_action(request, "install")
+
+        if got == "/api/settings/cli-apps/update":
+            return await self._handle_settings_cli_apps_action(request, "update")
+
+        if got == "/api/settings/cli-apps/uninstall":
+            return await self._handle_settings_cli_apps_action(request, "uninstall")
+
+        if got == "/api/settings/cli-apps/test":
+            return await self._handle_settings_cli_apps_action(request, "test")
+
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -874,6 +894,32 @@ class WebSocketChannel(BaseChannel):
             return _http_error(e.status, e.message)
         return _http_json_response(self._with_settings_restart_state(payload, section="image"))
 
+    def _handle_settings_cli_apps(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = cli_apps_payload()
+        except Exception:
+            self.logger.exception("failed to load CLI Apps payload")
+            return _http_error(500, "failed to load CLI Apps")
+        return _http_json_response(payload)
+
+    async def _handle_settings_cli_apps_action(self, request: WsRequest, action: str) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        try:
+            payload = await asyncio.to_thread(cli_apps_action, action, query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        except Exception as e:
+            status = getattr(e, "status", 500)
+            message = getattr(e, "message", str(e))
+            if status >= 500:
+                self.logger.exception("CLI Apps action '{}' failed", action)
+            return _http_error(status, message)
+        return _http_json_response(payload)
+
     @staticmethod
     def _is_websocket_channel_session_key(key: str) -> bool:
         """True when *key* is a ``websocket:…`` session exposed on this HTTP surface."""
@@ -961,6 +1007,9 @@ class WebSocketChannel(BaseChannel):
             }
             if media:
                 user_obj["media_paths"] = list(media)
+            cli_apps = meta.get("cli_apps")
+            if isinstance(cli_apps, list) and cli_apps:
+                user_obj["cli_apps"] = cli_apps
             self._try_append_webui_transcript(chat_id, user_obj)
         await super()._handle_message(
             sender_id,
@@ -1421,6 +1470,9 @@ class WebSocketChannel(BaseChannel):
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
+            cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
+            if cli_apps:
+                metadata["cli_apps"] = cli_apps
             image_generation = envelope.get("image_generation")
             if isinstance(image_generation, dict) and image_generation.get("enabled") is True:
                 aspect_ratio = image_generation.get("aspect_ratio")

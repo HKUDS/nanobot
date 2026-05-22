@@ -143,6 +143,50 @@ def test_replay_tool_events_dedupes_finish_after_start() -> None:
         'exec({"cmd": "ls"})',
         'read_file({"path": "notes.md"})',
     ]
+    assert msgs[0]["toolEvents"][0]["phase"] == "end"
+    assert msgs[0]["toolEvents"][0]["call_id"] == "call-exec"
+
+
+def test_replay_tool_events_keeps_phase_update_when_trace_is_deduped() -> None:
+    args = {"name": "github", "args": ["repo", "view"], "json": "true"}
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-tool",
+            "text": "",
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-cli",
+                    "name": "run_cli_app",
+                    "arguments": args,
+                },
+            ],
+        },
+        {
+            "event": "message",
+            "chat_id": "t-tool",
+            "text": "",
+            "kind": "progress",
+            "tool_events": [
+                {
+                    "phase": "error",
+                    "call_id": "call-cli",
+                    "name": "run_cli_app",
+                    "arguments": args,
+                    "error": "Error: CLI app 'github' not found",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["traces"] == [
+        'run_cli_app({"name": "github", "args": ["repo", "view"], "json": "true"})',
+    ]
+    assert msgs[0]["toolEvents"][0]["phase"] == "error"
+    assert msgs[0]["toolEvents"][0]["error"] == "Error: CLI app 'github' not found"
 
 
 def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, monkeypatch) -> None:

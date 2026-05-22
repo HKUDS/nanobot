@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ChevronRight, Layers } from "lucide-react";
+import { AlertCircle, ChevronRight, Layers, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { cliAppInitials } from "@/components/CliAppMentionText";
 import { FileReferenceChip } from "@/components/FileReferenceChip";
 import { ReasoningBubble, StreamingLabelSheen, TraceGroup } from "@/components/MessageBubble";
 import { cn } from "@/lib/utils";
-import type { UIFileEdit, UIMessage } from "@/lib/types";
+import type { CliAppInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
 
 /** Scrollport height for the Cursor-style “live trace” strip (tailwind spacing). */
 const CLUSTER_SCROLL_MAX_CLASS = "max-h-52";
@@ -24,6 +25,7 @@ export function isAgentActivityMember(m: UIMessage): boolean {
 interface ActivityCounts {
   reasoningSteps: number;
   toolCalls: number;
+  cliCount: number;
   fileCount: number;
   added: number;
   deleted: number;
@@ -32,6 +34,8 @@ interface ActivityCounts {
   hasFailedFiles: boolean;
   primaryFilePath?: string;
   primaryFileTooltipPath?: string;
+  primaryCliName?: string;
+  primaryCliStatus?: CliRunStatus;
 }
 
 interface FileEditSummary {
@@ -47,17 +51,41 @@ interface FileEditSummary {
   error?: string;
 }
 
-function countActivity(messages: UIMessage[], fileEdits: FileEditSummary[]): ActivityCounts {
+interface CliRunSummary {
+  key: string;
+  name: string;
+  args: string[];
+  json: boolean;
+  workingDir?: string;
+  status: CliRunStatus;
+  error?: string;
+}
+
+type CliRunStatus = "running" | "done" | "error";
+
+function countActivity(
+  messages: UIMessage[],
+  fileEdits: FileEditSummary[],
+  cliRuns: CliRunSummary[],
+): ActivityCounts {
   let reasoningSteps = 0;
   let toolCalls = 0;
+  const cliCount = cliRuns.length;
+  const primaryCli = cliRuns[cliRuns.length - 1];
+  const primaryCliName = primaryCli?.name;
+  const primaryCliStatus = primaryCli?.status;
   for (const m of messages) {
     if (isReasoningOnlyAssistant(m)) {
       reasoningSteps += 1;
       continue;
     }
     if (m.kind === "trace") {
-      const lines = m.traces?.length ?? (m.content.trim() ? 1 : 0);
-      toolCalls += lines;
+      const lines = traceLines(m);
+      for (const line of lines) {
+        if (!isCliRunTraceLine(line)) {
+          toolCalls += 1;
+        }
+      }
     }
   }
   let added = 0;
@@ -89,6 +117,7 @@ function countActivity(messages: UIMessage[], fileEdits: FileEditSummary[]): Act
   return {
     reasoningSteps,
     toolCalls,
+    cliCount,
     fileCount: fileEdits.length,
     added,
     deleted,
@@ -97,6 +126,8 @@ function countActivity(messages: UIMessage[], fileEdits: FileEditSummary[]): Act
     hasFailedFiles: fileEdits.length > 0 && failedFileCount === fileEdits.length,
     primaryFilePath,
     primaryFileTooltipPath,
+    primaryCliName,
+    primaryCliStatus,
   };
 }
 
@@ -105,6 +136,7 @@ interface AgentActivityClusterProps {
   /** True while the session turn is still running (drives “Working…” copy + header sheen). */
   isTurnStreaming: boolean;
   hasBodyBelow: boolean;
+  cliApps?: CliAppInfo[];
 }
 
 /**
@@ -115,15 +147,22 @@ export function AgentActivityCluster({
   messages,
   isTurnStreaming,
   hasBodyBelow,
+  cliApps = [],
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEdits = useMemo(
     () => summarizeFileEdits(collectFileEdits(messages), isTurnStreaming),
     [messages, isTurnStreaming],
   );
+  const cliRuns = useMemo(() => collectCliRuns(messages), [messages]);
+  const cliAppsByName = useMemo(
+    () => new Map(cliApps.map((app) => [app.name.toLowerCase(), app])),
+    [cliApps],
+  );
   const {
     reasoningSteps,
     toolCalls,
+    cliCount,
     fileCount,
     added,
     deleted,
@@ -132,7 +171,9 @@ export function AgentActivityCluster({
     hasFailedFiles,
     primaryFilePath,
     primaryFileTooltipPath,
-  } = countActivity(messages, fileEdits);
+    primaryCliName,
+    primaryCliStatus,
+  } = countActivity(messages, fileEdits, cliRuns);
   const hasPendingFileEdit = fileEdits.some((edit) => edit.pending);
 
   const [userToggledOuter, setUserToggledOuter] = useState(false);
@@ -148,7 +189,7 @@ export function AgentActivityCluster({
   const headerBusy = fileCount > 0 ? hasEditingFiles : isTurnStreaming;
   const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
   const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
-  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || fileCount > 0;
+  const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || fileCount > 0;
 
   const fileActivitySummary = fileCount > 0
     ? hasPendingFileEdit && !singleFilePath
@@ -164,8 +205,22 @@ export function AgentActivityCluster({
         })
     : "";
 
+  const cliActivitySummary = cliCount > 0
+    ? cliCount === 1 && primaryCliName
+      ? t(cliActivitySummaryKey(primaryCliStatus, isTurnStreaming), {
+          name: primaryCliName,
+          defaultValue: cliActivitySummaryDefault(primaryCliStatus, isTurnStreaming),
+        })
+      : t(cliActivityManySummaryKey(cliRuns, isTurnStreaming), {
+          count: cliCount,
+          defaultValue: cliActivityManySummaryDefault(cliRuns, isTurnStreaming),
+        })
+    : "";
+
   const summary = fileCount > 0
     ? fileActivitySummary
+    : cliCount > 0
+      ? cliActivitySummary
     : isTurnStreaming
       ? reasoningSteps > 0
         ? t("message.agentActivityLiveSummary", {
@@ -254,6 +309,8 @@ export function AgentActivityCluster({
 
   if (!hasVisibleActivity) return null;
 
+  const HeaderIcon = cliCount > 0 && fileCount === 0 && toolCalls === 0 ? Terminal : Layers;
+
   return (
     <div className={cn("w-full", hasBodyBelow && "mb-2")}>
       <button
@@ -266,7 +323,7 @@ export function AgentActivityCluster({
         aria-expanded={outerExpanded}
         aria-label={summary}
       >
-        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <HeaderIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
           {singleFilePath ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -337,15 +394,25 @@ export function AgentActivityCluster({
                   );
                 }
                 if (m.kind === "trace") {
-                  const hasTraceLines = (m.traces?.length ?? 0) > 0 || m.content.trim().length > 0;
-                  return hasTraceLines ? (
+                  const normalLines = traceLines(m).filter((line) => !parseCliRunTrace(line));
+                  return normalLines.length > 0 ? (
                     <div key={m.id} className="flex flex-col gap-1">
-                      <TraceGroup message={m} animClass="" />
+                      <TraceGroup
+                        message={{
+                          ...m,
+                          traces: normalLines,
+                          content: normalLines[normalLines.length - 1],
+                        }}
+                        animClass=""
+                      />
                     </div>
                   ) : null;
                 }
                 return null;
               })}
+              {cliRuns.length ? (
+                <CliRunGroup runs={cliRuns} active={isTurnStreaming} cliAppsByName={cliAppsByName} />
+              ) : null}
               {fileEdits.length ? <FileEditGroup edits={fileEdits} /> : null}
             </div>
           </div>
@@ -357,6 +424,181 @@ export function AgentActivityCluster({
 
 function shortFileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
+}
+
+function traceLines(message: UIMessage): string[] {
+  if (message.traces?.length) return message.traces;
+  return message.content.trim() ? [message.content] : [];
+}
+
+const CLI_RUN_TOOL_NAMES = new Set(["run_cli_app", "cli_anything_run"]);
+const CLI_RUN_STATUS_RANK: Record<CliRunStatus, number> = { running: 1, done: 2, error: 3 };
+
+function isCliRunTraceLine(line: string): boolean {
+  return /^(run_cli_app|cli_anything_run)\(/.test(line.trim());
+}
+
+function parseCliRunTrace(line: string, status: CliRunStatus = "running"): CliRunSummary | null {
+  const match = /^(run_cli_app|cli_anything_run)\((.*)\)$/.exec(line.trim());
+  if (!match) return null;
+  const argsText = match[2].trim();
+  let argsObject: unknown = {};
+  if (argsText) {
+    try {
+      argsObject = JSON.parse(argsText);
+    } catch {
+      return {
+        key: line,
+        name: "cli",
+        args: [argsText],
+        json: false,
+        status,
+      };
+    }
+  }
+  return cliRunFromArguments(argsObject, { key: line, status });
+}
+
+function parseToolEventArguments(event: ToolProgressEvent): unknown {
+  const fnArgs = (event as { function?: { arguments?: unknown } }).function?.arguments;
+  const raw = fnArgs ?? event.arguments;
+  if (typeof raw !== "string") return raw ?? {};
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { args: [raw] };
+  }
+}
+
+function cliRunStatusFromPhase(phase: unknown): CliRunStatus {
+  if (phase === "error") return "error";
+  if (phase === "end") return "done";
+  return "running";
+}
+
+function cliRunError(event: ToolProgressEvent): string | undefined {
+  const error = event.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") return JSON.stringify(error);
+  return undefined;
+}
+
+function cliRunFromArguments(
+  argsObject: unknown,
+  options: { key: string; status: CliRunStatus; error?: string },
+): CliRunSummary {
+  if (!argsObject || typeof argsObject !== "object" || Array.isArray(argsObject)) {
+    return {
+      key: options.key,
+      name: "cli",
+      args: [],
+      json: false,
+      status: options.status,
+      error: options.error,
+    };
+  }
+  const record = argsObject as Record<string, unknown>;
+  const appName = typeof record.name === "string" && record.name.trim()
+    ? record.name.trim()
+    : "cli";
+  const rawArgs = Array.isArray(record.args) ? record.args : [];
+  const cliArgs = rawArgs.filter((item): item is string => typeof item === "string");
+  return {
+    key: options.key,
+    name: appName,
+    args: cliArgs,
+    json: record.json === true || record.json === "true",
+    workingDir: typeof record.working_dir === "string" ? record.working_dir : undefined,
+    status: options.status,
+    error: options.error,
+  };
+}
+
+function cliRunFromEvent(event: ToolProgressEvent): CliRunSummary | null {
+  const name =
+    typeof (event as { function?: { name?: unknown } }).function?.name === "string"
+      ? String((event as { function?: { name?: unknown } }).function?.name)
+      : typeof event.name === "string"
+        ? event.name
+        : "";
+  if (!CLI_RUN_TOOL_NAMES.has(name)) return null;
+  const argsObject = parseToolEventArguments(event);
+  const key = event.call_id ? `call:${event.call_id}` : `${name}:${JSON.stringify(argsObject)}`;
+  return cliRunFromArguments(argsObject, {
+    key,
+    status: cliRunStatusFromPhase(event.phase),
+    error: cliRunError(event),
+  });
+}
+
+function mergeCliRun(existing: CliRunSummary | undefined, incoming: CliRunSummary): CliRunSummary {
+  if (!existing) return incoming;
+  return CLI_RUN_STATUS_RANK[incoming.status] >= CLI_RUN_STATUS_RANK[existing.status]
+    ? { ...existing, ...incoming }
+    : existing;
+}
+
+function collectCliRuns(messages: UIMessage[]): CliRunSummary[] {
+  const runsByKey = new Map<string, CliRunSummary>();
+  for (const message of messages) {
+    if (message.kind !== "trace") continue;
+    let hasStructuredCliRun = false;
+    for (const event of message.toolEvents ?? []) {
+      const run = cliRunFromEvent(event);
+      if (!run) continue;
+      hasStructuredCliRun = true;
+      runsByKey.set(run.key, mergeCliRun(runsByKey.get(run.key), run));
+    }
+    if (hasStructuredCliRun) continue;
+    for (const line of traceLines(message)) {
+      const run = parseCliRunTrace(line);
+      if (!run || runsByKey.has(run.key)) continue;
+      runsByKey.set(run.key, run);
+    }
+  }
+  return [...runsByKey.values()];
+}
+
+function displayCliArg(arg: string): string {
+  return /\s/.test(arg) ? JSON.stringify(arg) : arg;
+}
+
+function formatCliArgs(run: CliRunSummary): string {
+  const args = [...(run.json ? ["--json"] : []), ...run.args].map(displayCliArg);
+  return args.join(" ");
+}
+
+function cliActivitySummaryKey(status: CliRunStatus | undefined, active: boolean): string {
+  if (status === "error") return "message.cliActivityFailedOne";
+  return active && status === "running" ? "message.cliActivityRunningOne" : "message.cliActivityRanOne";
+}
+
+function cliActivitySummaryDefault(status: CliRunStatus | undefined, active: boolean): string {
+  if (status === "error") return "CLI failed @{{name}}";
+  return `${active && status === "running" ? "Running" : "Ran"} CLI @{{name}}`;
+}
+
+function cliActivityManySummaryKey(runs: CliRunSummary[], active: boolean): string {
+  if (runs.some((run) => run.status === "error")) return "message.cliActivityFailedMany";
+  return active && runs.some((run) => run.status === "running")
+    ? "message.cliActivityRunningMany"
+    : "message.cliActivityRanMany";
+}
+
+function cliActivityManySummaryDefault(runs: CliRunSummary[], active: boolean): string {
+  if (runs.some((run) => run.status === "error")) return "{{count}} CLI failed";
+  return `${active && runs.some((run) => run.status === "running") ? "Running" : "Ran"} {{count}} CLIs`;
+}
+
+function cliRunLabelKey(run: CliRunSummary, active: boolean): string {
+  if (run.status === "error") return "message.cliRunFailed";
+  return active && run.status === "running" ? "message.cliRunRunning" : "message.cliRunRan";
+}
+
+function cliRunLabelDefault(run: CliRunSummary, active: boolean): string {
+  if (run.status === "error") return "CLI failed";
+  return active && run.status === "running" ? "Running CLI" : "Ran CLI";
 }
 
 function fileActivityVerb(editing: boolean, failed: boolean): string {
@@ -517,6 +759,120 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
 
 function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
   return edit.added > 0 || edit.deleted > 0;
+}
+
+function CliRunGroup({
+  runs,
+  active,
+  cliAppsByName,
+}: {
+  runs: CliRunSummary[];
+  active: boolean;
+  cliAppsByName: Map<string, CliAppInfo>;
+}) {
+  if (runs.length === 0) return null;
+  return (
+    <ul className="space-y-1 border-l border-cyan-500/20 pl-3" data-testid="activity-cli-runs">
+      {runs.map((run) => (
+        <CliRunRow
+          key={run.key}
+          run={run}
+          active={active}
+          app={cliAppsByName.get(run.name.toLowerCase())}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
+  const { t } = useTranslation();
+  const [logoFailed, setLogoFailed] = useState(false);
+  const args = formatCliArgs(run);
+  const failed = run.status === "error";
+  const rowActive = active && run.status === "running";
+  const color = failed ? "#DC2626" : app?.brand_color || "#0891B2";
+  const logoUrl = app?.logo_url && !logoFailed ? app.logo_url : null;
+  return (
+    <li
+      className={cn(
+        "grid min-w-0 grid-cols-[minmax(0,1fr)] rounded-[10px] border px-2.5 py-2 text-xs",
+        "shadow-[0_6px_18px_rgba(15,23,42,0.045)] transition-colors",
+      )}
+      style={{
+        borderColor: alphaColor(color, rowActive ? 34 : failed ? 28 : 22),
+        backgroundColor: alphaColor(color, rowActive ? 9 : failed ? 7 : 6),
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
+          className={cn(
+            "grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-[8px] border text-[10px] font-semibold text-white",
+            rowActive && "animate-pulse",
+          )}
+          style={{
+            borderColor: alphaColor(color, 26),
+            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
+            boxShadow: `0 0 0 3px ${alphaColor(color, rowActive ? 10 : 6)}`,
+          }}
+        >
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              className="h-[70%] w-[70%] object-contain"
+              onError={() => setLogoFailed(true)}
+            />
+          ) : app ? (
+            cliAppInitials(app).slice(0, 2)
+          ) : (
+            <Terminal className="h-3.5 w-3.5" aria-hidden />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <StreamingLabelSheen active={rowActive} className="shrink-0 text-[12px]">
+              {t(cliRunLabelKey(run, active), {
+                defaultValue: cliRunLabelDefault(run, active),
+              })}
+            </StreamingLabelSheen>
+            <span className="min-w-0 truncate font-mono text-[12px] font-semibold text-foreground/90">
+              @{run.name}
+            </span>
+            {failed ? (
+              <AlertCircle className="h-3 w-3 shrink-0 text-destructive/75" aria-hidden />
+            ) : null}
+          </span>
+          {args ? (
+            <span className="mt-0.5 block truncate font-mono text-[11px] leading-relaxed text-muted-foreground/82">
+              {args}
+            </span>
+          ) : null}
+          {run.error ? (
+            <span className="mt-0.5 block truncate text-[10.5px] leading-relaxed text-destructive/70">
+              {run.error}
+            </span>
+          ) : null}
+          {run.workingDir ? (
+            <span className="mt-0.5 block truncate text-[10.5px] leading-relaxed text-muted-foreground/58">
+              {run.workingDir}
+            </span>
+          ) : null}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function alphaColor(color: string, percent: number): string {
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    const alpha = Math.round((percent / 100) * 255)
+      .toString(16)
+      .padStart(2, "0");
+    return `${color}${alpha}`;
+  }
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }
 
 function FileEditGroup({ edits }: { edits: FileEditSummary[] }) {

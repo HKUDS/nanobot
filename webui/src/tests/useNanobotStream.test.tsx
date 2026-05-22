@@ -356,6 +356,58 @@ describe("useNanobotStream", () => {
       'exec({"cmd":"ls"})',
       'read_file({"path":"notes.md"})',
     ]);
+    expect(result.current.messages[0].toolEvents).toMatchObject([
+      { phase: "end", call_id: "call-exec", name: "exec" },
+      { phase: "error", call_id: "call-read", name: "read_file", error: "missing" },
+    ]);
+  });
+
+  it("keeps phase updates when a tool event trace line is deduped", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-tool-phase", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    const args = { name: "github", args: ["repo", "view"], json: "true" };
+    act(() => {
+      fake.emit("chat-tool-phase", {
+        event: "message",
+        chat_id: "chat-tool-phase",
+        text: "",
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-cli",
+          name: "run_cli_app",
+          arguments: args,
+        }],
+      });
+      fake.emit("chat-tool-phase", {
+        event: "message",
+        chat_id: "chat-tool-phase",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "error",
+          call_id: "call-cli",
+          name: "run_cli_app",
+          arguments: args,
+          error: "Error: CLI app 'github' not found",
+        }],
+      });
+    });
+
+    expect(result.current.messages[0].traces).toEqual([
+      'run_cli_app({"name":"github","args":["repo","view"],"json":"true"})',
+    ]);
+    expect(result.current.messages[0].toolEvents).toMatchObject([
+      {
+        phase: "error",
+        call_id: "call-cli",
+        name: "run_cli_app",
+        error: "Error: CLI app 'github' not found",
+      },
+    ]);
   });
 
   it("renders live file_edit events as their own activity trace", () => {

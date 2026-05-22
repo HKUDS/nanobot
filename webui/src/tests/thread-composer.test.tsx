@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { SlashCommand } from "@/lib/types";
+import type { CliAppInfo, SlashCommand } from "@/lib/types";
 
 const COMMANDS: SlashCommand[] = [
   {
@@ -17,6 +17,57 @@ const COMMANDS: SlashCommand[] = [
     description: "Print the last N persisted messages.",
     icon: "history",
     argHint: "[n]",
+  },
+];
+
+const CLI_APPS: CliAppInfo[] = [
+  {
+    name: "gimp",
+    display_name: "GIMP",
+    category: "image",
+    description: "Image editing",
+    requires: "",
+    source: "harness",
+    entry_point: "cli-anything-gimp",
+    install_supported: true,
+    installed: true,
+    available: true,
+    status: "installed",
+    logo_url: "https://example.invalid/gimp.svg",
+    brand_color: "#5C5543",
+    skill_installed: true,
+  },
+  {
+    name: "blender",
+    display_name: "Blender",
+    category: "3d",
+    description: "3D creation",
+    requires: "",
+    source: "harness",
+    entry_point: "cli-anything-blender",
+    install_supported: true,
+    installed: true,
+    available: true,
+    status: "installed",
+    logo_url: null,
+    brand_color: "#E87D0D",
+    skill_installed: true,
+  },
+  {
+    name: "krita",
+    display_name: "Krita",
+    category: "image",
+    description: "Painting",
+    requires: "",
+    source: "harness",
+    entry_point: "cli-anything-krita",
+    install_supported: true,
+    installed: false,
+    available: false,
+    status: "not_installed",
+    logo_url: null,
+    brand_color: "#3BABFF",
+    skill_installed: false,
   },
 ];
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
@@ -66,7 +117,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
-    expect(input.parentElement?.className).toContain("max-w-[58rem]");
+    expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
@@ -81,9 +132,9 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("gpt-4o")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
-    expect(input.parentElement?.className).toContain("max-w-[49.5rem]");
-    expect(input.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
+    expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
+    expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
+    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
   });
@@ -161,6 +212,123 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("/history ");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+  });
+
+  it("opens the CLI app mention palette and inserts the selected app", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    const palette = screen.getByRole("listbox", { name: "CLI Apps" });
+    expect(palette).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /@gimp/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("option", { name: /@krita/i })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /@blender/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("@blender ");
+    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
+    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "CLI Apps" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("@blender", undefined, {
+      cliApps: [{
+        name: "blender",
+        display_name: "Blender",
+        category: "3d",
+        entry_point: "cli-anything-blender",
+        logo_url: null,
+        brand_color: "#E87D0D",
+      }],
+    });
+  });
+
+  it("completes a CLI app mention with Tab and adds exactly one trailing space", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "use @ble", selectionStart: 8 },
+    });
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("use @blender ");
+    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
+  });
+
+  it("does not duplicate the next word separator when completing a CLI app mention", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "use @ble tonight", selectionStart: 8 },
+    });
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(input).toHaveValue("use @blender tonight");
+  });
+
+  it("renders a CLI app mention logo inline without moving the text cursor slot", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, {
+      target: { value: "meeting in @gimp", selectionStart: 16 },
+    });
+
+    expect(input).toHaveValue("meeting in @gimp");
+    const token = screen.getByTestId("composer-cli-mention-gimp");
+    expect(token).toHaveTextContent("@gimp");
+    expect(token.className).not.toContain("font-semibold");
+    expect(token.className).not.toContain("zoom-in");
+    expect(token.className).not.toContain("px-");
+    expect(token.className).not.toContain("mx-");
+    expect(token.getAttribute("style")).toContain("color: #5C5543");
+    expect(token.getAttribute("style")).toContain("text-shadow");
+    expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
+    const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
+    expect(logo.className).toContain("top-1/2");
+    expect(logo.className).toContain("left-1/2");
+    expect(logo.className).not.toContain("-top-");
   });
 
   it("opens the slash command palette downward when there is more room below", async () => {

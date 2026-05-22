@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "cliApps": "CLI Apps",
       "runtime": "Runtime",
       "advanced": "Advanced"
     },
@@ -94,6 +95,7 @@
       "imageDefaults": "Defaults",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
+      "cliApps": "CLI Apps",
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capabilities",
@@ -115,6 +117,7 @@
       "density": "Density",
       "activityMode": "Activity detail",
       "codeWrap": "Code wrapping",
+      "brandLogos": "Brand logos",
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
@@ -141,6 +144,8 @@
       "ssrfWhitelist": "SSRF whitelist",
       "mcpServers": "MCP servers",
       "pathAppend": "PATH append",
+      "cliAppsCatalog": "Catalog",
+      "cliAppsFilter": "Filter",
       "configurationDocs": "Configuration docs"
     },
     "help": {
@@ -154,6 +159,7 @@
       "density": "Stored only in this browser.",
       "activityMode": "Choose how much agent activity chrome to show by default.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
+      "brandLogos": "Show third-party provider and CLI logos in Settings.",
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
@@ -168,7 +174,40 @@
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
       "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; desktop apps stay untouched.",
+      "cliAppsFilter": "Search by app, category, or capability.",
       "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
+    },
+    "cliApps": {
+      "allCategories": "All categories",
+      "availableCount": "{{count}} apps",
+      "installedCount": "{{count}} CLIs installed",
+      "summary": "{{installed}} of {{total}} CLIs installed",
+      "filterAll": "All",
+      "filterInstalled": "Installed CLIs",
+      "filterNotInstalled": "Not installed",
+      "searchPlaceholder": "Search CLIs",
+      "loading": "Loading CLI Apps...",
+      "empty": "No CLI Apps match this filter.",
+      "statusInstalled": "CLI installed",
+      "statusMissing": "Missing",
+      "statusAvailable": "Available",
+      "statusUnsupported": "Unsupported",
+      "statusNotInstalled": "CLI not installed",
+      "requires": "Requires",
+      "test": "Test CLI",
+      "update": "Update CLI",
+      "uninstall": "Uninstall CLI",
+      "install": "Install CLI",
+      "readyTitle": "@{{name}} is ready",
+      "readyStatus": "Ready",
+      "readyTry": "Try @{{name}}",
+      "readyCopied": "Copied",
+      "readyPrompt": "Use @{{name}} to inspect what this CLI can do.",
+      "openChat": "Open chat",
+      "unsupported": "Unsupported",
+      "unavailable": "Unavailable",
+      "noDescription": "No description available."
     },
     "values": {
       "light": "Light",
@@ -258,6 +297,9 @@
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "legal": {
+      "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."
     },
     "image": {
       "selectProvider": "Select provider",
@@ -462,6 +504,10 @@
           }
         }
       },
+      "mentions": {
+        "ariaLabel": "CLI Apps",
+        "label": "CLI APPS"
+      },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -493,6 +539,15 @@
     "agentActivityToolsOnly": "{{tools}} tool calls",
     "agentActivityLiveSummary": "Working… · {{reasoning}} steps · {{tools}} tool calls",
     "agentActivityLiveToolsOnly": "Working… · {{tools}} tool calls",
+    "cliActivityRunningOne": "Running CLI @{{name}}",
+    "cliActivityRanOne": "Ran CLI @{{name}}",
+    "cliActivityFailedOne": "CLI failed @{{name}}",
+    "cliActivityRunningMany": "Running {{count}} CLIs",
+    "cliActivityRanMany": "Ran {{count}} CLIs",
+    "cliActivityFailedMany": "{{count}} CLI failed",
+    "cliRunRunning": "Running CLI",
+    "cliRunRan": "Ran CLI",
+    "cliRunFailed": "CLI failed",
     "imageAttachment": "Image attachment",
     "copyReply": "Copy reply",
     "copiedReply": "Copied reply",

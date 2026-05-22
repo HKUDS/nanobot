@@ -332,6 +332,49 @@ describe("NanobotClient", () => {
     );
   });
 
+  it("includes CLI app attachments in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-cli",
+      "@drawio please make this diagram",
+      undefined,
+      {
+        cliApps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-cli",
+        content: "@drawio please make this diagram",
+        cli_apps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+        webui: true,
+      }),
+    );
+  });
+
   it("re-attaches known chats after a reconnect", async () => {
     const client = new NanobotClient({
       url: "ws://test",
