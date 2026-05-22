@@ -356,6 +356,8 @@ def _format_changed_files(diff: str) -> str:
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
     files_line = _format_changed_files(diff)
     # Show the first line of the commit message as a human-readable summary.
+    from loguru import logger
+    logger.debug("_format_dream_log_content: commit.type={} commit.sha={} commit.message={!r}", type(commit).__name__, getattr(commit, "sha", "?"), getattr(commit, "message", "?"))
     msg_summary = commit.message.splitlines()[0] if commit.message else ""
     lines = [
         "## Dream Update",
