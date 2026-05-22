@@ -55,6 +55,17 @@ def test_replay_augments_assistant_text() -> None:
     assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
 
 
+def test_replay_uses_stream_end_final_text() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {"event": "user", "chat_id": "t-img", "text": "draw"},
+            {"event": "stream_end", "chat_id": "t-img", "text": "![Diagram](/api/media/sig/payload)"},
+        ],
+    )
+
+    assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
+
+
 def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file"

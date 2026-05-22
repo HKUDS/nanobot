@@ -1298,6 +1298,28 @@ describe("useNanobotStream", () => {
     });
   });
 
+  it("creates an assistant bubble from final stream_end text without prior delta", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-stream-end-only", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-stream-end-only", {
+        event: "stream_end",
+        chat_id: "chat-stream-end-only",
+        text: "![Diagram](/api/media/sig/payload)",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "![Diagram](/api/media/sig/payload)",
+      isStreaming: true,
+    });
+  });
+
   it("stamps latency on the last assistant bubble from turn_end", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-lat", EMPTY_MESSAGES), {

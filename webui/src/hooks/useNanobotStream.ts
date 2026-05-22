@@ -520,15 +520,28 @@ export function useNanobotStream(
           resolveActiveAssistantIndex(next)
           ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current)
           ?? findLatestAssistantAnswerIndex(next);
-        if (targetIndex !== null) {
-          const target = next[targetIndex];
-          next = replaceMessageAt(next, targetIndex, {
-            ...target,
-            content: finalAnswerText,
-            isStreaming: true,
-          });
+          if (targetIndex !== null) {
+            const target = next[targetIndex];
+            next = replaceMessageAt(next, targetIndex, {
+              ...target,
+              content: finalAnswerText,
+              isStreaming: true,
+            });
+          } else {
+            const id = crypto.randomUUID();
+            closedAssistantStreamIdsRef.current.add(id);
+            next = [
+              ...next,
+              {
+                id,
+                role: "assistant",
+                content: finalAnswerText,
+                isStreaming: true,
+                createdAt: Date.now(),
+              },
+            ];
+          }
         }
-      }
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return next;
     });

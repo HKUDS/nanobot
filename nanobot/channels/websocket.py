@@ -1744,7 +1744,10 @@ class WebSocketChannel(BaseChannel):
         stream_key = (chat_id, str(meta.get("_stream_id") or ""))
         if meta.get("_stream_end"):
             body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
-            full_text = "".join(self._stream_text_buffers.pop(stream_key, []))
+            buffered = self._stream_text_buffers.pop(stream_key, [])
+            if delta:
+                buffered.append(delta)
+            full_text = "".join(buffered)
             rewritten = self._rewrite_local_markdown_images(full_text)
             if rewritten != full_text:
                 body["text"] = rewritten

@@ -502,6 +502,24 @@ def replay_transcript_to_ui_messages(
                 buffer_message_id = None
                 buffer_parts = []
                 continue
+            final_text = rec.get("text")
+            if isinstance(final_text, str):
+                if buffer_message_id is None:
+                    buffer_message_id = _new_id("buf", idx)
+                    messages.append(
+                        {
+                            "id": buffer_message_id,
+                            "role": "assistant",
+                            "content": final_text,
+                            "isStreaming": True,
+                            "createdAt": _ts_base + idx,
+                        },
+                    )
+                else:
+                    for i, m in enumerate(messages):
+                        if m.get("id") == buffer_message_id:
+                            messages[i] = {**m, "content": final_text, "isStreaming": True}
+                            break
             buffer_message_id = None
             buffer_parts = []
             continue
