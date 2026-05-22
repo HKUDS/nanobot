@@ -199,6 +199,28 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
+class FilesystemPeerConfig(Base):
+    """A peer in the local filesystem inter-process channel."""
+
+    peer_id: str                       # logical id used as sender_id and chat_id
+    inbox: str                         # directory we watch for messages from this peer
+    outbox: str                        # directory we write messages to this peer
+    archive: str = ""                  # optional: move processed inbound files here instead of deleting
+
+
+class FilesystemConfig(Base):
+    """Filesystem channel for local bot-to-bot communication via shared directories.
+
+    Each peer has an inbox (we read) and an outbox (we write). Messages are plain
+    files whose entire contents are the message body. Writes are atomic
+    (tmp + rename). Suitable for two or more nanobot instances on the same host.
+    """
+
+    enabled: bool = False
+    poll_interval_ms: int = 200       # inbox scan interval; sub-second by default
+    peers: list[FilesystemPeerConfig] = Field(default_factory=list)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -214,6 +236,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    fs: FilesystemConfig = Field(default_factory=FilesystemConfig)
 
 
 class ModelRouterConfig(Base):

@@ -148,6 +148,18 @@ class ChannelManager:
                 logger.info("Matrix channel enabled")
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
+
+        # Filesystem (inter-bot) channel
+        if self.config.channels.fs.enabled:
+            try:
+                from nanobot.channels.filesystem import FilesystemChannel
+                self.channels["fs"] = FilesystemChannel(
+                    self.config.channels.fs,
+                    self.bus,
+                )
+                logger.info("Filesystem channel enabled")
+            except ImportError as e:
+                logger.warning("Filesystem channel not available: {}", e)
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
