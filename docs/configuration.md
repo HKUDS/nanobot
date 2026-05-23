@@ -128,6 +128,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
+> - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, set `"apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"` in your xiaomi_mimo provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -474,6 +475,39 @@ usually only need to set `apiKey`.
 
 Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
 `LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
+
+</details>
+
+<details>
+<summary><b>Xiaomi MiMo</b></summary>
+
+Xiaomi MiMo models are automatically detected by the `xiaomi_mimo` provider when
+the model name contains `mimo`. The default API base is
+`https://api.xiaomimimo.com/v1`.
+
+> **Token Plan**: If you're using MiMo's token plan, override `apiBase` with the
+> dedicated endpoint:
+>
+> ```json
+> {
+>   "providers": {
+>     "xiaomi_mimo": {
+>       "apiKey": "${MIMOMIMO_API_KEY}",
+>       "apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"
+>     }
+>   },
+>   "agents": {
+>     "defaults": {
+>       "model": "xiaomi/mimo-v2.5-pro"
+>     }
+>   }
+> }
+> ```
+>
+> No need to set `provider` explicitly — the model name contains `mimo`, which
+> auto-matches to the `xiaomi_mimo` provider spec. Use an API key from the MiMo
+> token plan console and check the MiMo platform for the latest supported model
+> names.
 
 </details>
 
