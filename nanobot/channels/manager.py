@@ -126,6 +126,8 @@ class ChannelManager:
         try:
             if provider == "openai":
                 return self.config.providers.openai.api_key
+            if provider == "azure_speech":
+                return self.config.providers.azure_speech.api_key  
             return self.config.providers.groq.api_key
         except AttributeError:
             return ""
@@ -135,6 +137,8 @@ class ChannelManager:
         try:
             if provider == "openai":
                 return self.config.providers.openai.api_base or ""
+            if provider == "azure_speech":
+                return self.config.providers.azure_speech.api_base or ""
             return self.config.providers.groq.api_base or ""
         except AttributeError:
             return ""

@@ -200,3 +200,95 @@ class GroqTranscriptionProvider:
             provider_label="Groq",
             language=self.language,
         )
+class AzureSpeechTranscriptionProvider:
+    """Voice transcription provider using Azure Speech Service REST API for short audio.
+
+    When no language is specified, auto-detects by trying zh-CN (Mandarin)
+    first, then zh-HK (Cantonese) on NoMatch.
+    """
+
+    _FALLBACK_LANGUAGES = ("zh-CN", "zh-HK")
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("AZURE_SPEECH_KEY")
+        self.region = (api_base or os.environ.get("AZURE_SPEECH_REGION", "")).strip().rstrip("/")
+        self.language = language or None
+
+    def _build_url(self, language: str) -> str:
+        return (
+            f"https://{self.region}.stt.speech.microsoft.com"
+            f"/speech/recognition/conversation/cognitiveservices/v1"
+            f"?language={language}&format=simple"
+        )
+
+    @staticmethod
+    def _detect_content_type(path: Path) -> str:
+        ext = path.suffix.lower()
+        if ext in (".ogg", ".oga", ".opus"):
+            return "audio/ogg; codecs=opus"
+        return "audio/wav; codecs=audio/pcm; samplerate=16000"
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("Azure Speech API key not configured for transcription")
+            return ""
+        if not self.region:
+            logger.warning("Azure Speech region not configured for transcription")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        content_type = self._detect_content_type(path)
+        headers = {
+            "Ocp-Apim-Subscription-Key": self.api_key,
+            "Content-Type": content_type,
+            "Accept": "application/json",
+        }
+
+        languages = [self.language] if self.language else list(self._FALLBACK_LANGUAGES)
+
+        try:
+            async with httpx.AsyncClient() as client:
+                audio_data = path.read_bytes()
+                for lang in languages:
+                    url = self._build_url(lang)
+                    response = await client.post(
+                        url, headers=headers, content=audio_data, timeout=60.0,
+                    )
+
+                    if response.status_code != 200:
+                        logger.error(
+                            "Azure Speech API error: status={} body={}",
+                            response.status_code,
+                            response.text[:200],
+                        )
+                        return ""
+
+                    data = response.json()
+                    status = data.get("RecognitionStatus", "")
+
+                    if status == "Success":
+                        return data.get("DisplayText", "")
+
+                    if status == "NoMatch" and not self.language:
+                        logger.debug("Azure Speech NoMatch with {}, trying next candidate", lang)
+                        continue
+
+                    if status in ("InitialSilenceTimeout", "BabbleTimeout"):
+                        return ""
+
+                    logger.warning("Azure Speech recognition status: {} for language {}", status, lang)
+                    return ""
+
+                return ""
+        except Exception as e:
+            logger.error("Azure Speech transcription error: {}", e)
+            return ""

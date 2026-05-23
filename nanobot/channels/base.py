@@ -61,6 +61,13 @@ class BaseChannel(ABC):
                     api_base=self.transcription_api_base or None,
                     language=self.transcription_language or None,
                 )
+            elif self.transcription_provider == "azure_speech":
+                from nanobot.providers.transcription import AzureSpeechTranscriptionProvider
+                provider = AzureSpeechTranscriptionProvider(
+                    api_key=self.transcription_api_key,
+                    api_base=self.transcription_api_base or None,
+                    language=self.transcription_language or None,
+                )            
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
                 provider = GroqTranscriptionProvider(
