@@ -289,12 +289,14 @@ class OpenAICompatProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
+        api_type: str = "auto",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._extra_body = extra_body or {}
+        self._api_type = api_type
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -685,6 +687,13 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
     ) -> bool:
         """Use Responses API only for direct OpenAI requests that benefit from it."""
+        if self._api_type == "chat_completions":
+            return False
+        if self._spec and self._spec.name not in ("openai", "github_copilot"):
+            if self._api_type != "responses":
+                return False
+        if self._api_type == "responses":
+            return self._responses_circuit_allows_probe(model, reasoning_effort)
         if self._spec and self._spec.name not in ("openai", "github_copilot"):
             return False
         if self._spec is None or self._spec.name != "github_copilot":
@@ -700,7 +709,14 @@ class OpenAICompatProvider(LLMProvider):
         if not wants:
             return False
 
-        # Circuit breaker: skip after repeated failures, probe periodically.
+        return self._responses_circuit_allows_probe(model, reasoning_effort)
+
+    def _responses_circuit_allows_probe(
+        self,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> bool:
+        """Return False when the Responses API circuit breaker is open."""
         key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         failures = self._responses_failures.get(key, 0)
         if failures >= _RESPONSES_FAILURE_THRESHOLD:
@@ -1262,6 +1278,8 @@ class OpenAICompatProvider(LLMProvider):
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
                         raise
+                    if self._api_type == "responses":
+                        raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
@@ -1334,6 +1352,8 @@ class OpenAICompatProvider(LLMProvider):
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
+                        raise
+                    if self._api_type == "responses":
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise

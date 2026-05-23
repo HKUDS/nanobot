@@ -98,6 +98,7 @@ def _make_provider_core(
             extra_headers=p.extra_headers if p else None,
             spec=spec,
             extra_body=p.extra_body if p else None,
+            api_type=p.api_type if p else "auto",
         )
 
     provider.generation = resolved.to_generation_settings()
@@ -183,6 +184,7 @@ def provider_signature(
             config.get_api_base(fallback.model, preset=fallback),
             fp.extra_headers if fp else None,
             fp.extra_body if fp else None,
+            fp.api_type if fp else "auto",
             getattr(fp, "region", None) if fp else None,
             getattr(fp, "profile", None) if fp else None,
             fallback.max_tokens,
@@ -199,6 +201,7 @@ def provider_signature(
         config.get_api_base(resolved.model, preset=resolved),
         p.extra_headers if p else None,
         p.extra_body if p else None,
+        p.api_type if p else "auto",
         getattr(p, "region", None) if p else None,
         getattr(p, "profile", None) if p else None,
         resolved.max_tokens,

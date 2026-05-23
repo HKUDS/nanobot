@@ -142,6 +142,8 @@ interface ModelConfigurationDraft {
 
 type PendingRestartSection = "runtime" | "web" | "image";
 type PendingRestartSections = Record<PendingRestartSection, boolean>;
+type ProviderApiType = "auto" | "chat_completions" | "responses";
+type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
@@ -189,6 +191,11 @@ const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   codeWrap: true,
   brandLogos: true,
 };
+const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "chat_completions", label: "Chat Completions" },
+  { value: "responses", label: "Responses" },
+];
 
 const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
   ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
@@ -303,7 +310,7 @@ export function SettingsView({
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [customMcpForm, setCustomMcpForm] = useState<CustomMcpForm>(DEFAULT_CUSTOM_MCP_FORM);
   const [mcpConfigImport, setMcpConfigImport] = useState("");
-  const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
+  const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
@@ -460,6 +467,7 @@ export function SettingsView({
         next[provider.name] = {
           apiKey: next[provider.name]?.apiKey ?? "",
           apiBase: next[provider.name]?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
+          apiType: next[provider.name]?.apiType ?? provider.api_type ?? "auto",
         };
       }
       return next;
@@ -620,7 +628,7 @@ export function SettingsView({
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
-    const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "" };
+    const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "", apiType: "auto" };
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
     if (!provider.configured && apiKeyRequired && !apiKey) {
@@ -633,6 +641,7 @@ export function SettingsView({
         provider: providerName,
         apiKey: apiKey || undefined,
         apiBase: providerForm.apiBase.trim(),
+        apiType: providerForm.apiType,
       });
       applyPayload(payload);
       if (payload.requires_restart) {
@@ -643,6 +652,7 @@ export function SettingsView({
         [providerName]: {
           apiKey: "",
           apiBase: providerForm.apiBase.trim(),
+          apiType: providerForm.apiType,
         },
       }));
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -719,6 +729,7 @@ export function SettingsView({
       [providerName]: {
         apiKey: "",
         apiBase: provider.api_base ?? provider.default_api_base ?? "",
+        apiType: provider.api_type ?? "auto",
       },
     }));
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -772,6 +783,7 @@ export function SettingsView({
           [providerName]: {
             apiKey: "",
             apiBase: forms[providerName]?.apiBase ?? "",
+            apiType: forms[providerName]?.apiType ?? "auto",
           },
         }));
         setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
@@ -957,6 +969,7 @@ export function SettingsView({
                   [provider]: {
                     apiKey: prev[provider]?.apiKey ?? "",
                     apiBase: prev[provider]?.apiBase ?? "",
+                    apiType: prev[provider]?.apiType ?? "auto",
                     ...value,
                   },
                 }))
@@ -1713,7 +1726,7 @@ function ProvidersSettings({
 }: {
   settings: SettingsPayload;
   expandedProvider: string | null;
-  providerForms: Record<string, { apiKey: string; apiBase: string }>;
+  providerForms: Record<string, ProviderForm>;
   visibleProviderKeys: Record<string, boolean>;
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
@@ -1723,7 +1736,7 @@ function ProvidersSettings({
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
-  onChangeProviderForm: (provider: string, value: Partial<{ apiKey: string; apiBase: string }>) => void;
+  onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
   onResetProviderDraft: (provider: string) => void;
   imageProviderRestartPending: boolean;
@@ -1744,6 +1757,7 @@ function ProvidersSettings({
     const form = providerForms[provider.name] ?? {
       apiKey: "",
       apiBase: provider.api_base ?? provider.default_api_base ?? "",
+      apiType: provider.api_type ?? "auto",
     };
     const saving = providerSaving === provider.name;
     const keyVisible = !!visibleProviderKeys[provider.name];
@@ -1855,6 +1869,38 @@ function ProvidersSettings({
                 className="h-9 rounded-full text-[13px]"
               />
             </label>
+            {provider.name === "openai" ? (
+              <label className="block space-y-1.5">
+                <span className="text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.byok.apiType", "API type")}
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full justify-between rounded-full px-3 text-[13px]"
+                    >
+                      <span>
+                        {OPENAI_API_TYPE_OPTIONS.find((option) => option.value === form.apiType)?.label ??
+                          form.apiType}
+                      </span>
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-[220px]">
+                    {OPENAI_API_TYPE_OPTIONS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onSelect={() => onChangeProviderForm(provider.name, { apiType: option.value })}
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </label>
+            ) : null}
             <div className="flex items-center justify-end gap-2">
               <Button
                 size="sm"
