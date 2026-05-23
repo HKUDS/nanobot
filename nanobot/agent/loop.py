@@ -146,7 +146,14 @@ class AgentLoop:
             restrict_to_user_urls=getattr(wf_cfg, "restrict_to_user_urls", False),
             allowed_domains=getattr(wf_cfg, "allowed_domains", None),
         ))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        fs_peers = (
+            [p.peer_id for p in self.channels_config.fs.peers]
+            if self.channels_config else []
+        )
+        self.tools.register(MessageTool(
+            send_callback=self.bus.publish_outbound,
+            fs_peers=fs_peers,
+        ))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
