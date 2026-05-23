@@ -98,7 +98,7 @@ def _make_provider_core(
             extra_headers=p.extra_headers if p else None,
             spec=spec,
             extra_body=p.extra_body if p else None,
-            api_type=p.api_type if p else "auto",
+            api_type=p.api_type if p and provider_name == "openai" else "auto",
         )
 
     provider.generation = resolved.to_generation_settings()

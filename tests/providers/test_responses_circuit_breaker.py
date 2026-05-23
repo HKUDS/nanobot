@@ -39,6 +39,13 @@ def test_api_type_responses_forces_responses_for_openai(provider):
     assert provider._should_use_responses_api("gpt-4o", None) is True
 
 
+def test_api_type_responses_does_not_force_non_openai(provider):
+    provider._spec = type("Spec", (), {"name": "custom"})()
+    provider._api_type = "responses"
+
+    assert provider._should_use_responses_api("gpt-4o", None) is False
+
+
 def test_circuit_opens_after_threshold(provider):
     for _ in range(_RESPONSES_FAILURE_THRESHOLD):
         provider._record_responses_failure("gpt-5", None)

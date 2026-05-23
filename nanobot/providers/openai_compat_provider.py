@@ -274,6 +274,47 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _merge_unique_list(base: Any, override: Any) -> Any:
+    """Append list values while preserving order and removing duplicates."""
+    if not isinstance(base, list) or not isinstance(override, list):
+        return override
+    result: list[Any] = []
+    seen: set[str] = set()
+    for value in [*base, *override]:
+        try:
+            key = json.dumps(value, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            key = repr(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
+def _merge_responses_extra_body(
+    body: dict[str, Any],
+    extra_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge configured Responses API body fields without clobbering tools."""
+    reserved = {"include", "tools"}
+    regular_extra = {key: value for key, value in extra_body.items() if key not in reserved}
+    merged = _deep_merge(body, regular_extra)
+
+    if "include" in extra_body:
+        merged["include"] = _merge_unique_list(body.get("include"), extra_body["include"])
+
+    if "tools" in extra_body:
+        current_tools = body.get("tools")
+        configured_tools = extra_body["tools"]
+        if isinstance(current_tools, list) and isinstance(configured_tools, list):
+            merged["tools"] = [*current_tools, *configured_tools]
+        else:
+            merged["tools"] = configured_tools
+
+    return merged
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -296,7 +337,7 @@ class OpenAICompatProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._extra_body = extra_body or {}
-        self._api_type = api_type
+        self._api_type = api_type if spec and spec.name == "openai" else "auto"
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -690,12 +731,9 @@ class OpenAICompatProvider(LLMProvider):
         if self._api_type == "chat_completions":
             return False
         if self._spec and self._spec.name not in ("openai", "github_copilot"):
-            if self._api_type != "responses":
-                return False
+            return False
         if self._api_type == "responses":
             return self._responses_circuit_allows_probe(model, reasoning_effort)
-        if self._spec and self._spec.name not in ("openai", "github_copilot"):
-            return False
         if self._spec is None or self._spec.name != "github_copilot":
             if not _is_direct_openai_base(self._effective_base):
                 return False
@@ -807,6 +845,10 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
             body["tool_choice"] = tool_choice or "auto"
+
+        extra_body = getattr(self, "_extra_body", {})
+        if extra_body:
+            body = _merge_responses_extra_body(body, extra_body)
 
         return body
 

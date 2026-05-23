@@ -181,18 +181,18 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         provider_config = getattr(config.providers, spec.name, None)
         if provider_config is None or spec.is_oauth:
             continue
-        providers.append(
-            {
-                "name": spec.name,
-                "label": spec.label,
-                "configured": _provider_configured_for_settings(spec, provider_config),
-                "api_key_required": _provider_requires_api_key(spec),
-                "api_key_hint": _mask_secret_hint(provider_config.api_key),
-                "api_base": provider_config.api_base,
-                "default_api_base": spec.default_api_base or None,
-                "api_type": provider_config.api_type,
-            }
-        )
+        row = {
+            "name": spec.name,
+            "label": spec.label,
+            "configured": _provider_configured_for_settings(spec, provider_config),
+            "api_key_required": _provider_requires_api_key(spec),
+            "api_key_hint": _mask_secret_hint(provider_config.api_key),
+            "api_base": provider_config.api_base,
+            "default_api_base": spec.default_api_base or None,
+        }
+        if spec.name == "openai":
+            row["api_type"] = provider_config.api_type
+        providers.append(row)
 
     search_config = config.tools.web.search
     image_config = config.tools.image_generation
@@ -472,15 +472,16 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
             provider_config.api_base = api_base
             changed = True
 
-    if "api_type" in query or "apiType" in query:
-        api_type = (_query_first_alias(query, "api_type", "apiType") or "").strip()
-        try:
-            parsed_api_type = type(provider_config)(api_type=api_type).api_type
-        except Exception:
-            raise WebUISettingsError("api_type must be auto, chat_completions, or responses") from None
-        if provider_config.api_type != parsed_api_type:
-            provider_config.api_type = parsed_api_type
-            changed = True
+    if "api_type" in query:
+        if spec.name == "openai":
+            api_type = (_query_first(query, "api_type") or "").strip()
+            try:
+                parsed_api_type = type(provider_config)(api_type=api_type).api_type
+            except Exception:
+                raise WebUISettingsError("api_type must be auto, chat_completions, or responses") from None
+            if provider_config.api_type != parsed_api_type:
+                provider_config.api_type = parsed_api_type
+                changed = True
 
     if changed:
         save_config(config)

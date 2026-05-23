@@ -36,6 +36,18 @@ def test_provider_api_type_accepts_exact_values_only() -> None:
         })
 
 
+def test_provider_api_type_is_openai_only() -> None:
+    with pytest.raises(ValueError, match="only supported"):
+        Config.model_validate({
+            "providers": {
+                "custom": {
+                    "apiBase": "https://example.test/v1",
+                    "apiType": "responses",
+                }
+            }
+        })
+
+
 def test_legacy_defaults_config_without_presets_still_resolves() -> None:
     config = Config.model_validate({
         "agents": {
