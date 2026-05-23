@@ -100,6 +100,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         if sender_name:
             lines.append(f"Sender: {sender_name}")
+        if channel == "fs":
+            lines.append(
+                "Note: this message is from a peer agent via the filesystem channel. "
+                "Reply only when the peer asks a question, requests action, or you have "
+                "substantive new information to share. Acknowledgements and pleasantries "
+                "create runaway peer-to-peer exchanges and are not required."
+            )
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
     
     def _load_bootstrap_files(self) -> str:

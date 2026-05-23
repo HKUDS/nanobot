@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+import time
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
@@ -16,12 +17,15 @@ class MessageTool(Tool):
         default_chat_id: str = "",
         default_message_id: str | None = None,
         fs_peers: list[str] | None = None,
+        fs_min_send_interval_seconds: float = 0.0,
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._fs_peers = list(fs_peers or [])
+        self._fs_min_send_interval_seconds = max(0.0, fs_min_send_interval_seconds)
+        self._fs_last_send_at: dict[str, float] = {}
         self._sent_in_turn: bool = False
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
@@ -111,10 +115,24 @@ class MessageTool(Tool):
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
 
-        if channel == "fs" and self._fs_peers and chat_id not in self._fs_peers:
-            return (
-                f"Error: unknown fs peer {chat_id!r}. Known peers: {self._fs_peers}"
-            )
+        if channel == "fs":
+            if self._fs_peers and chat_id not in self._fs_peers:
+                return (
+                    f"Error: unknown fs peer {chat_id!r}. Known peers: {self._fs_peers}"
+                )
+            if self._fs_min_send_interval_seconds > 0:
+                now = time.monotonic()
+                last = self._fs_last_send_at.get(chat_id, 0.0)
+                if last:
+                    delta = now - last
+                    if delta < self._fs_min_send_interval_seconds:
+                        wait = self._fs_min_send_interval_seconds - delta
+                        return (
+                            f"Error: rate-limited fs send to {chat_id!r}; "
+                            f"wait {wait:.1f}s before sending again. "
+                            "Reply only when the peer asks a question, requests "
+                            "action, or you have substantive new information."
+                        )
 
         if not self._send_callback:
             return "Error: Message sending not configured"
@@ -133,6 +151,8 @@ class MessageTool(Tool):
             await self._send_callback(msg)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
+            if channel == "fs":
+                self._fs_last_send_at[chat_id] = time.monotonic()
             media_info = f" with {len(media)} attachments" if media else ""
             preview = content[:200] + "..." if len(content) > 200 else content
             return f"Message sent to {channel}:{chat_id}{media_info}: \"{preview}\""

@@ -146,13 +146,15 @@ class AgentLoop:
             restrict_to_user_urls=getattr(wf_cfg, "restrict_to_user_urls", False),
             allowed_domains=getattr(wf_cfg, "allowed_domains", None),
         ))
-        fs_peers = (
-            [p.peer_id for p in self.channels_config.fs.peers]
-            if self.channels_config else []
-        )
+        fs_peers: list[str] = []
+        fs_min_interval = 0.0
+        if self.channels_config:
+            fs_peers = [p.peer_id for p in self.channels_config.fs.peers]
+            fs_min_interval = self.channels_config.fs.min_send_interval_seconds
         self.tools.register(MessageTool(
             send_callback=self.bus.publish_outbound,
             fs_peers=fs_peers,
+            fs_min_send_interval_seconds=fs_min_interval,
         ))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:

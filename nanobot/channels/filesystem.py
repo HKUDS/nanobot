@@ -44,6 +44,9 @@ class FilesystemChannel(BaseChannel):
             p.peer_id: p for p in config.peers
         }
         self._tasks: list[asyncio.Task] = []
+        # Per-peer depth tracking for the runaway-loop backstop.
+        self._inbound_count: dict[str, int] = {}
+        self._last_inbound_at: dict[str, float] = {}
 
     async def start(self) -> None:
         if not self.config.peers:
@@ -128,7 +131,7 @@ class FilesystemChannel(BaseChannel):
             logger.warning("FS channel failed to read {}: {}", path, e)
             return
 
-        if content.strip():
+        if content.strip() and self._allow_inbound(peer.peer_id):
             await self._handle_message(
                 sender_id=peer.peer_id,
                 chat_id=peer.peer_id,
@@ -136,6 +139,30 @@ class FilesystemChannel(BaseChannel):
                 metadata={"source_file": str(path)},
             )
 
+        await self._retire(path, archive)
+
+    def _allow_inbound(self, peer_id: str) -> bool:
+        """Apply time-decay reset + depth cap. Returns True if inbound is allowed."""
+        cap = self.config.max_thread_depth
+        if cap <= 0:
+            return True
+        now = time.monotonic()
+        last = self._last_inbound_at.get(peer_id, 0.0)
+        if last and now - last > self.config.thread_reset_seconds:
+            self._inbound_count[peer_id] = 0
+        new_count = self._inbound_count.get(peer_id, 0) + 1
+        self._inbound_count[peer_id] = new_count
+        self._last_inbound_at[peer_id] = now
+        if new_count > cap:
+            logger.warning(
+                "FS channel: max_thread_depth {} reached for peer {!r}; "
+                "dropping inbound (resumes after {}s quiet).",
+                cap, peer_id, self.config.thread_reset_seconds,
+            )
+            return False
+        return True
+
+    async def _retire(self, path: Path, archive: Path | None) -> None:
         try:
             if archive is not None:
                 await asyncio.to_thread(path.rename, archive / path.name)

@@ -64,3 +64,33 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
 
     assert messages[-1]["role"] == "user"
     assert messages[-1]["content"] == "Return exactly: OK"
+
+
+def test_runtime_context_hints_to_skip_reply_on_fs_channel(tmp_path) -> None:
+    """fs (peer-to-peer) inbound should carry a hint discouraging reflexive replies."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="hi from peer",
+        channel="fs",
+        chat_id="Iroh",
+    )
+    runtime_content = messages[-2]["content"]
+    assert "peer agent" in runtime_content
+    assert "Reply only" in runtime_content
+
+
+def test_runtime_context_has_no_fs_hint_for_other_channels(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="hi",
+        channel="telegram",
+        chat_id="12345",
+    )
+    runtime_content = messages[-2]["content"]
+    assert "peer agent" not in runtime_content

@@ -13,7 +13,12 @@ from nanobot.channels.filesystem import FilesystemChannel
 from nanobot.config.schema import FilesystemConfig, FilesystemPeerConfig
 
 
-def _make_channel(tmp_path: Path, archive: bool = False) -> tuple[FilesystemChannel, MessageBus, Path, Path]:
+def _make_channel(
+    tmp_path: Path,
+    archive: bool = False,
+    max_thread_depth: int = 0,
+    thread_reset_seconds: float = 60.0,
+) -> tuple[FilesystemChannel, MessageBus, Path, Path]:
     inbox = tmp_path / "inbox"
     outbox = tmp_path / "outbox"
     archive_dir = tmp_path / "archive" if archive else None
@@ -21,6 +26,9 @@ def _make_channel(tmp_path: Path, archive: bool = False) -> tuple[FilesystemChan
     cfg = FilesystemConfig(
         enabled=True,
         poll_interval_ms=50,
+        max_thread_depth=max_thread_depth,
+        thread_reset_seconds=thread_reset_seconds,
+        min_send_interval_seconds=0.0,
         peers=[
             FilesystemPeerConfig(
                 peer_id="botB",
@@ -128,6 +136,60 @@ async def test_outbound_unknown_peer_is_dropped(tmp_path):
     await channel.send(OutboundMessage(channel="fs", chat_id="unknown", content="ping"))
 
     assert list(outbox.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_inbound_depth_cap_drops_excess(tmp_path):
+    channel, bus, inbox, _ = _make_channel(tmp_path, max_thread_depth=2)
+    inbox.mkdir(parents=True)
+    # Three sequential messages; only the first two should reach the bus.
+    for i in range(3):
+        (inbox / f"{i:03d}.md").write_text(f"msg{i}", encoding="utf-8")
+
+    # Wait until all three files have been consumed (delivered or dropped).
+    await _drive(channel, lambda: not any(inbox.iterdir()))
+
+    delivered = []
+    while bus.inbound_size:
+        delivered.append((await bus.consume_inbound()).content)
+    assert delivered == ["msg0", "msg1"]
+
+
+@pytest.mark.asyncio
+async def test_inbound_depth_cap_disabled_when_zero(tmp_path):
+    channel, bus, inbox, _ = _make_channel(tmp_path, max_thread_depth=0)
+    inbox.mkdir(parents=True)
+    for i in range(5):
+        (inbox / f"{i:03d}.md").write_text(f"msg{i}", encoding="utf-8")
+
+    await _drive(channel, lambda: bus.inbound_size >= 5)
+    delivered = []
+    while bus.inbound_size:
+        delivered.append((await bus.consume_inbound()).content)
+    assert delivered == [f"msg{i}" for i in range(5)]
+
+
+@pytest.mark.asyncio
+async def test_depth_resets_after_quiet_period(tmp_path):
+    # Sub-second reset so the test stays fast.
+    channel, bus, inbox, _ = _make_channel(
+        tmp_path, max_thread_depth=1, thread_reset_seconds=0.1
+    )
+    inbox.mkdir(parents=True)
+    (inbox / "a.md").write_text("a", encoding="utf-8")
+    await _drive(channel, lambda: bus.inbound_size >= 1)
+    assert (await bus.consume_inbound()).content == "a"
+
+    # Second message immediately: should be dropped by the cap.
+    (inbox / "b.md").write_text("b", encoding="utf-8")
+    await _drive(channel, lambda: not (inbox / "b.md").exists())
+    assert bus.inbound_size == 0
+
+    # Wait for the reset window, then a new message goes through.
+    await asyncio.sleep(0.15)
+    (inbox / "c.md").write_text("c", encoding="utf-8")
+    await _drive(channel, lambda: bus.inbound_size >= 1)
+    assert (await bus.consume_inbound()).content == "c"
 
 
 @pytest.mark.asyncio

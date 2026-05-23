@@ -81,3 +81,47 @@ def test_description_lists_fs_peers_when_configured() -> None:
 def test_description_omits_fs_hint_when_no_peers() -> None:
     tool = MessageTool()
     assert "channel='fs'" not in tool.description
+
+
+@pytest.mark.asyncio
+async def test_fs_rate_limit_blocks_rapid_resends() -> None:
+    sent: list = []
+
+    async def cb(msg):
+        sent.append(msg)
+
+    tool = MessageTool(
+        send_callback=cb,
+        default_channel="telegram",
+        default_chat_id="12345",
+        fs_peers=["Iroh"],
+        fs_min_send_interval_seconds=1.0,
+    )
+
+    first = await tool.execute(content="one", channel="fs", chat_id="Iroh")
+    assert first.startswith("Message sent")
+    second = await tool.execute(content="two", channel="fs", chat_id="Iroh")
+    assert "rate-limited" in second
+    assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_fs_rate_limit_is_per_peer() -> None:
+    sent: list = []
+
+    async def cb(msg):
+        sent.append(msg)
+
+    tool = MessageTool(
+        send_callback=cb,
+        default_channel="telegram",
+        default_chat_id="12345",
+        fs_peers=["Iroh", "Peewee"],
+        fs_min_send_interval_seconds=1.0,
+    )
+
+    await tool.execute(content="hi I", channel="fs", chat_id="Iroh")
+    # Sending to a different peer is not rate-limited.
+    result = await tool.execute(content="hi P", channel="fs", chat_id="Peewee")
+    assert result.startswith("Message sent")
+    assert len(sent) == 2

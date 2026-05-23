@@ -214,11 +214,19 @@ class FilesystemConfig(Base):
     Each peer has an inbox (we read) and an outbox (we write). Messages are plain
     files whose entire contents are the message body. Writes are atomic
     (tmp + rename). Suitable for two or more nanobot instances on the same host.
+
+    Runaway protection: ``max_thread_depth`` caps how many inbound messages a
+    single peer can deliver before the receiving channel starts silently
+    dropping them (until ``thread_reset_seconds`` of quiet); ``min_send_interval_seconds``
+    caps how quickly the agent can reply to the same peer.
     """
 
     enabled: bool = False
-    poll_interval_ms: int = 200       # inbox scan interval; sub-second by default
+    poll_interval_ms: int = 200             # inbox scan interval; sub-second by default
     peers: list[FilesystemPeerConfig] = Field(default_factory=list)
+    max_thread_depth: int = 6               # 0 disables; consecutive inbound per peer before drop
+    thread_reset_seconds: float = 60.0      # quiet period that resets the depth counter
+    min_send_interval_seconds: float = 5.0  # outbound rate limit per peer; 0 disables
 
 
 class ChannelsConfig(Base):
