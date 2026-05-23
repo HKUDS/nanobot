@@ -492,7 +492,7 @@ the model name contains `mimo`. The default API base is
 > {
 >   "providers": {
 >     "xiaomi_mimo": {
->       "apiKey": "${MIMOMIMO_API_KEY}",
+>       "apiKey": "${XIAOMIMIMO_API_KEY}",
 >       "apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"
 >     }
 >   },
