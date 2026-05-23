@@ -733,7 +733,9 @@ class OpenAICompatProvider(LLMProvider):
         if self._spec and self._spec.name not in ("openai", "github_copilot"):
             return False
         if self._api_type == "responses":
-            return self._responses_circuit_allows_probe(model, reasoning_effort)
+            # Explicit configuration means Responses is mandatory; do not
+            # consult the circuit breaker or fall back to Chat Completions.
+            return True
         if self._spec is None or self._spec.name != "github_copilot":
             if not _is_direct_openai_base(self._effective_base):
                 return False
