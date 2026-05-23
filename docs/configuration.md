@@ -1195,7 +1195,7 @@ If you want to always use the local conversion, you can force it using:
 
 ## Image Generation
 
-Image generation is configured under `tools.imageGeneration` and uses provider credentials from `providers.openrouter` or `providers.aihubmix`.
+Image generation is configured under `tools.imageGeneration` and uses credentials from the selected provider's `providers.<name>` block.
 
 See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
 

@@ -172,6 +172,23 @@ async def test_generate_image_tool_allows_ollama_without_api_key(
 
 
 @pytest.mark.asyncio
+async def test_generate_image_tool_reports_missing_zhipu_key(tmp_path: Path) -> None:
+    tool = ImageGenerationTool(
+        workspace=tmp_path,
+        config=ImageGenerationToolConfig(
+            enabled=True,
+            provider="zhipu",
+            model="glm-image",
+        ),
+        provider_configs={"zhipu": ProviderConfig(api_base="https://open.bigmodel.cn/api/paas/v4")},
+    )
+
+    result = await tool.execute(prompt="draw a cat")
+
+    assert result.startswith("Error: Zhipu API key is not configured")
+
+
+@pytest.mark.asyncio
 async def test_generate_image_tool_rejects_reference_outside_workspace(tmp_path: Path) -> None:
     set_config_path(tmp_path / "config.json")
     outside = tmp_path.parent / "outside.png"
