@@ -224,6 +224,7 @@ class FilesystemConfig(Base):
     enabled: bool = False
     poll_interval_ms: int = 200             # inbox scan interval; sub-second by default
     peers: list[FilesystemPeerConfig] = Field(default_factory=list)
+    auto_reply_enabled: bool = False        # if false, the loop's auto-publish to fs is suppressed; LLM must use the message tool with force_send to reply
     max_thread_depth: int = 6               # 0 disables; consecutive inbound per peer before drop
     thread_reset_seconds: float = 60.0      # quiet period that resets the depth counter
     min_send_interval_seconds: float = 5.0  # outbound rate limit per peer; 0 disables

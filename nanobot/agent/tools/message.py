@@ -144,6 +144,9 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
+                # Mark this as a proactive/intentional send so channels with
+                # auto_reply_enabled=False (e.g. fs) still deliver it.
+                "force_send": True,
             }
         )
 

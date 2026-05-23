@@ -18,6 +18,7 @@ def _make_channel(
     archive: bool = False,
     max_thread_depth: int = 0,
     thread_reset_seconds: float = 60.0,
+    auto_reply_enabled: bool = True,
 ) -> tuple[FilesystemChannel, MessageBus, Path, Path]:
     inbox = tmp_path / "inbox"
     outbox = tmp_path / "outbox"
@@ -26,6 +27,7 @@ def _make_channel(
     cfg = FilesystemConfig(
         enabled=True,
         poll_interval_ms=50,
+        auto_reply_enabled=auto_reply_enabled,
         max_thread_depth=max_thread_depth,
         thread_reset_seconds=thread_reset_seconds,
         min_send_interval_seconds=0.0,
@@ -139,6 +141,44 @@ async def test_outbound_unknown_peer_is_dropped(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_auto_reply_disabled_suppresses_unforced_send(tmp_path):
+    channel, _bus, _inbox, outbox = _make_channel(tmp_path, auto_reply_enabled=False)
+    outbox.mkdir(parents=True)
+
+    # Loop's auto-publish path: no force_send marker.
+    await channel.send(OutboundMessage(channel="fs", chat_id="botB", content="auto"))
+
+    assert list(outbox.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_force_send_overrides_auto_reply_disabled(tmp_path):
+    channel, _bus, _inbox, outbox = _make_channel(tmp_path, auto_reply_enabled=False)
+    outbox.mkdir(parents=True)
+
+    await channel.send(OutboundMessage(
+        channel="fs", chat_id="botB", content="intentional",
+        metadata={"force_send": True},
+    ))
+
+    files = list(outbox.iterdir())
+    assert len(files) == 1
+    assert files[0].read_text() == "intentional"
+
+
+@pytest.mark.asyncio
+async def test_auto_reply_enabled_sends_without_force_send(tmp_path):
+    channel, _bus, _inbox, outbox = _make_channel(tmp_path, auto_reply_enabled=True)
+    outbox.mkdir(parents=True)
+
+    await channel.send(OutboundMessage(channel="fs", chat_id="botB", content="auto"))
+
+    files = list(outbox.iterdir())
+    assert len(files) == 1
+    assert files[0].read_text() == "auto"
+
+
+@pytest.mark.asyncio
 async def test_inbound_depth_cap_drops_excess(tmp_path):
     channel, bus, inbox, _ = _make_channel(tmp_path, max_thread_depth=2)
     inbox.mkdir(parents=True)
@@ -206,6 +246,7 @@ async def test_round_trip_between_two_channels(tmp_path):
         FilesystemConfig(
             enabled=True,
             poll_interval_ms=50,
+            auto_reply_enabled=True,
             peers=[FilesystemPeerConfig(peer_id="botB", inbox=str(b_to_a), outbox=str(a_to_b))],
         ),
         bus_a,
@@ -214,6 +255,7 @@ async def test_round_trip_between_two_channels(tmp_path):
         FilesystemConfig(
             enabled=True,
             poll_interval_ms=50,
+            auto_reply_enabled=True,
             peers=[FilesystemPeerConfig(peer_id="botA", inbox=str(a_to_b), outbox=str(b_to_a))],
         ),
         bus_b,

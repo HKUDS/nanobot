@@ -89,6 +89,18 @@ class FilesystemChannel(BaseChannel):
         if peer is None:
             logger.warning("FS channel: no peer matches chat_id={!r}", msg.chat_id)
             return
+
+        # auto_reply_enabled gates the loop's auto-publish path. The message tool
+        # stamps force_send=True so explicit LLM sends always go through.
+        force_send = bool((msg.metadata or {}).get("force_send"))
+        if not self.config.auto_reply_enabled and not force_send:
+            logger.info(
+                "Skip auto-reply to fs peer {!r}: auto_reply_enabled is false. "
+                "Use the message tool to send intentionally.",
+                peer.peer_id,
+            )
+            return
+
         outbox = Path(peer.outbox).expanduser()
         await asyncio.to_thread(self._atomic_write, outbox, msg.content)
 

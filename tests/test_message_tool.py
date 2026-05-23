@@ -72,6 +72,25 @@ async def test_known_fs_peer_is_sent() -> None:
     assert sent[0].chat_id == "Iroh"
 
 
+@pytest.mark.asyncio
+async def test_message_tool_stamps_force_send() -> None:
+    """Message tool sends are always intentional; force_send=True bypasses
+    channel-level auto-reply suppression."""
+    sent: list = []
+
+    async def cb(msg):
+        sent.append(msg)
+
+    tool = MessageTool(
+        send_callback=cb,
+        default_channel="telegram",
+        default_chat_id="12345",
+    )
+
+    await tool.execute(content="hi", chat_id="12345")
+    assert sent[0].metadata.get("force_send") is True
+
+
 def test_description_lists_fs_peers_when_configured() -> None:
     tool = MessageTool(fs_peers=["Iroh", "Peewee"])
     assert "'Iroh'" in tool.description
