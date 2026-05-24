@@ -1,16 +1,31 @@
-"""PostTask skill creation: trigger gates and (later) LLM-driven proposals."""
+"""PostTask skill creation: trigger gates and LLM-driven create decisions."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 from loguru import logger
 
-from nanobot.agent.evolution.models import TurnTrace
+from nanobot.agent.evolution.models import ToolCallRecord, TurnTrace
 from nanobot.config.schema import EvolutionConfig
+from nanobot.providers.base import LLMProvider
+from nanobot.utils.prompt_templates import render_template
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_UPDATE_ACTIONS = frozenset({"update_skill", "update", "modify_skill", "modify"})
+
+POST_TASK_LLM_TIMEOUT_S = 30.0
+POST_TASK_LLM_MAX_TOKENS = 512
+
+PostTaskAction = Literal["none", "create_skill"]
 
 # Human-readable skip reasons returned by ``should_trigger`` (None = proceed).
 SKIP_EVOLUTION_DISABLED = "evolution disabled"
@@ -20,6 +35,20 @@ SKIP_STOP_REASON = "stop_reason not completed"
 SKIP_NO_TOOL_CALLS = "no tool calls recorded"
 SKIP_SUBAGENT = "subagent turn"
 SKIP_COOLDOWN = "session cooldown active"
+
+
+@dataclass(frozen=True, slots=True)
+class PostTaskDecision:
+    """LLM verdict on whether to create a new skill from a turn trace."""
+
+    action: PostTaskAction = "none"
+    skill_name: str = ""
+    rationale: str = ""
+    confidence: float = 0.0
+
+    @classmethod
+    def none(cls, *, rationale: str = "") -> PostTaskDecision:
+        return cls(action="none", rationale=rationale)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +75,7 @@ class PostTaskCooldownStore:
         self._memory: dict[str, float] = {}
         self._loaded = False
 
+    # 检查 session_key 是否还在冷却窗口内 (cooldown_minutes)
     def is_active(self, session_key: str, cooldown_minutes: int) -> bool:
         """Return True when *session_key* is still inside the cooldown window."""
         if cooldown_minutes <= 0:
@@ -93,19 +123,149 @@ class PostTaskCooldownStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def format_tool_calls_for_prompt(tool_calls: tuple[ToolCallRecord, ...]) -> str:
+    """Render tool call records for the PostTask LLM prompt."""
+    if not tool_calls:
+        return "(none)"
+    lines: list[str] = []
+    for index, call in enumerate(tool_calls, start=1):
+        status = "ok" if call.ok else "error"
+        summary = call.args_summary or "(no args)"
+        lines.append(f"{index}. {call.name} [{status}] {summary}")
+    return "\n".join(lines)
+
+
+def format_skills_injected(skills: tuple[str, ...]) -> str:
+    if not skills:
+        return "(none)"
+    return ", ".join(skills)
+
+
+def _parse_confidence(raw: object) -> float | None:
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 0.0 or value > 1.0:
+        return None
+    return value
+
+
+def _normalize_action(raw: object) -> str:
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip().lower().replace("-", "_")
+
+
+def _normalize_skill_name(raw: object) -> str:
+    if not isinstance(raw, str):
+        return ""
+    name = raw.strip().lower().replace("_", "-")
+    while "--" in name:
+        name = name.replace("--", "-")
+    return name.strip("-")
+
+
+def parse_post_task_response(
+    content: str | None,
+    *,
+    min_confidence: float,
+) -> PostTaskDecision:
+    """Parse PostTask JSON from model output and apply hard post-rules."""
+    if not content:
+        return PostTaskDecision.none()
+
+    text = _JSON_FENCE_RE.sub("", content.strip()).strip()
+    data: object
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = _JSON_OBJECT_RE.search(text)
+        if not match:
+            return PostTaskDecision.none()
+        try:
+            data = json.loads(match.group())
+        except json.JSONDecodeError:
+            return PostTaskDecision.none()
+
+    if not isinstance(data, dict):
+        return PostTaskDecision.none()
+
+    action = _normalize_action(data.get("action"))
+    if action in _UPDATE_ACTIONS:
+        logger.info("PostTask LLM requested update; deferred to GEPA")
+        return PostTaskDecision.none(rationale="update deferred to GEPA")
+
+    rationale = str(data.get("rationale") or "").strip()
+    confidence = _parse_confidence(data.get("confidence"))
+    if confidence is None:
+        confidence = 0.0
+
+    if action != "create_skill":
+        return PostTaskDecision.none(rationale=rationale)
+
+    skill_name = _normalize_skill_name(data.get("skill_name"))
+    if not skill_name or not _SKILL_NAME_RE.fullmatch(skill_name):
+        return PostTaskDecision.none(rationale=rationale)
+
+    if confidence < min_confidence:
+        logger.info(
+            "PostTask confidence {:.2f} below min {:.2f}; skipping create",
+            confidence,
+            min_confidence,
+        )
+        return PostTaskDecision.none(rationale=rationale)
+
+    return PostTaskDecision(
+        action="create_skill",
+        skill_name=skill_name,
+        rationale=rationale,
+        confidence=confidence,
+    )
+
+
+def resolve_post_task_provider(
+    config: Any,
+    evolution: EvolutionConfig,
+    fallback_provider: LLMProvider,
+) -> LLMProvider:
+    """Return the LLM provider used for PostTask decisions."""
+    model = evolution.post_task.model
+    if model:
+        from nanobot.providers.factory import make_provider
+
+        try:
+            return make_provider(config, model=model)
+        except Exception as exc:
+            logger.warning(
+                "Failed to create PostTask model {!r}: {}; using fallback provider",
+                model,
+                exc,
+            )
+    return fallback_provider
+
+
 class PostTaskEvolver:
-    """Turn-boundary skill creation (E1). Step 1: trigger gates only."""
+    """Turn-boundary skill creation (E1): gates + LLM create decision."""
 
     def __init__(
         self,
         workspace: Path,
         config: EvolutionConfig,
+        provider: LLMProvider | None = None,
         *,
         cooldown_store: PostTaskCooldownStore | None = None,
+        llm_timeout_s: float = POST_TASK_LLM_TIMEOUT_S,
+        llm_max_tokens: int = POST_TASK_LLM_MAX_TOKENS,
     ) -> None:
         self._workspace = workspace.expanduser().resolve()
         self._config = config
+        self._provider = provider
         self._cooldown = cooldown_store or PostTaskCooldownStore(self._workspace)
+        self._llm_timeout_s = llm_timeout_s
+        self._llm_max_tokens = llm_max_tokens
 
     @property
     def cooldown_store(self) -> PostTaskCooldownStore:
@@ -144,3 +304,67 @@ class PostTaskEvolver:
             return SKIP_COOLDOWN
 
         return None
+
+    async def decide(self, trace: TurnTrace) -> PostTaskDecision:
+        """Ask the LLM whether to create a skill from *trace* (Step 2)."""
+        if self._provider is None:
+            logger.warning("PostTask decide skipped: no LLM provider configured")
+            return PostTaskDecision.none()
+
+        post_task = self._config.post_task
+        user_prompt = render_template(
+            "agent/evolution_post_task.md",
+            query=trace.query.strip() or "(empty)",
+            skills_injected=format_skills_injected(trace.skills_injected),
+            tool_call_count=trace.tool_call_count,
+            iterations=trace.iterations,
+            tool_calls=format_tool_calls_for_prompt(trace.tool_calls),
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a skill evolution router. Output valid JSON only.",
+            },
+            {"role": "user", "content": user_prompt},
+        ]
+        model = post_task.model
+
+        logger.info(
+            "PostTask decide [start]: trace_id={} session={} model={} tool_calls={}",
+            trace.trace_id,
+            trace.session_key,
+            model or "(provider default)",
+            trace.tool_call_count,
+        )
+
+        try:
+            async with asyncio.timeout(self._llm_timeout_s):
+                response = await self._provider.chat_with_retry(
+                    messages=messages,
+                    model=model,
+                    max_tokens=self._llm_max_tokens,
+                    temperature=0,
+                    retry_mode="standard",
+                )
+        except TimeoutError:
+            logger.warning("PostTask LLM decision timed out after {}s", self._llm_timeout_s)
+            return PostTaskDecision.none()
+        except Exception as exc:
+            logger.warning("PostTask LLM decision failed: {}", exc)
+            return PostTaskDecision.none()
+
+        if response.finish_reason == "error":
+            logger.warning("PostTask LLM provider error: {}", response.content)
+            return PostTaskDecision.none()
+
+        decision = parse_post_task_response(
+            response.content,
+            min_confidence=post_task.min_confidence,
+        )
+        logger.info(
+            "PostTask decide [done]: action={} skill_name={!r} confidence={:.2f}",
+            decision.action,
+            decision.skill_name,
+            decision.confidence,
+        )
+        return decision
