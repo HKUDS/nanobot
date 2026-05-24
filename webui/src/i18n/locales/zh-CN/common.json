@@ -533,6 +533,16 @@
         "navigateHint": "↑↓ 选择",
         "selectHint": "Enter/Tab 填入",
         "closeHint": "Esc 关闭",
+        "badges": {
+          "current": "当前",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目标正在运行",
+          "goalReady": "开始一个持续目标",
+          "history": "查看最近消息",
+          "stopRunning": "正在运行"
+        },
         "commands": {
           "new": {
             "title": "新建对话",
@@ -549,6 +559,10 @@
           "status": {
             "title": "查看状态",
             "description": "显示运行时、服务商和通道状态。"
+          },
+          "model": {
+            "title": "模型",
+            "description": "查看或切换当前模型预设。"
           },
           "history": {
             "title": "查看对话历史",
@@ -573,6 +587,10 @@
           "help": {
             "title": "查看帮助",
             "description": "列出可用的斜杠命令。"
+          },
+          "pairing": {
+            "title": "配对",
+            "description": "管理配对请求。"
           }
         }
       },

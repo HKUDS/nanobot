@@ -551,6 +551,10 @@
             "title": "ステータスを表示",
             "description": "ランタイム、provider、channel の状態を表示します。"
           },
+          "model": {
+            "title": "モデル",
+            "description": "有効なモデルプリセットを表示または切り替えます。"
+          },
           "history": {
             "title": "会話履歴を表示",
             "description": "保存済みの直近 N 件の会話メッセージを表示します。"
@@ -574,7 +578,21 @@
           "help": {
             "title": "ヘルプを表示",
             "description": "利用可能なスラッシュコマンドを一覧表示します。"
+          },
+          "pairing": {
+            "title": "ペアリング",
+            "description": "ペアリングリクエストを管理します。"
           }
+        },
+        "badges": {
+          "current": "現在",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目標が実行中",
+          "goalReady": "継続的な目標を開始",
+          "history": "最近のメッセージを表示",
+          "stopRunning": "実行中"
         }
       },
       "encoding": "処理中…",

@@ -534,6 +534,16 @@
         "navigateHint": "↑↓ Navigate",
         "selectHint": "Enter/Tab Select",
         "closeHint": "Esc Close",
+        "badges": {
+          "current": "Current",
+          "recent": "Recent"
+        },
+        "details": {
+          "goalActive": "Goal is running",
+          "goalReady": "Start a sustained objective",
+          "history": "Show recent messages",
+          "stopRunning": "Running now"
+        },
         "commands": {
           "new": {
             "title": "New chat",
@@ -550,6 +560,10 @@
           "status": {
             "title": "Show status",
             "description": "Display runtime, provider, and channel status."
+          },
+          "model": {
+            "title": "Model",
+            "description": "Show or switch the active model preset."
           },
           "history": {
             "title": "Show conversation history",
@@ -574,6 +588,10 @@
           "help": {
             "title": "Show help",
             "description": "List available slash commands."
+          },
+          "pairing": {
+            "title": "Pairing",
+            "description": "Manage pairing requests."
           }
         }
       },

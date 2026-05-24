@@ -340,6 +340,84 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("What can I do for you?")).not.toBeInTheDocument();
   });
 
+  it("keeps a live first command reply when the initial history snapshot is stale", async () => {
+    const client = makeClient();
+    const onCreateChat = vi.fn().mockResolvedValue("chat-new");
+    let resolveThread:
+      | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
+      | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-new/webui-thread")) {
+          return new Promise((resolve) => {
+            resolveThread = resolve;
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        });
+      }),
+    );
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onCreateChat={onCreateChat}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/model" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-new")}
+            title="Chat chat-new"
+            onToggleSidebar={() => {}}
+            onCreateChat={onCreateChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith("chat-new", "/model", undefined),
+    );
+
+    await act(async () => {
+      client._emitChat("chat-new", {
+        event: "message",
+        chat_id: "chat-new",
+        text: "## Model\n- Current model: `Ring-2.6-1T`",
+      });
+    });
+    expect(screen.getByText(/Current model/)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveThread?.(
+        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model" }])),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText(/Current model/)).toBeInTheDocument());
+  });
+
   it("sends quick action prompts from the empty thread landing", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

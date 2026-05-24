@@ -115,6 +115,7 @@ const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.localStorage.clear();
   Object.defineProperty(window, "innerHeight", {
     value: ORIGINAL_INNER_HEIGHT,
     configurable: true,
@@ -256,6 +257,80 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("/history ");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+  });
+
+  it("renders slash commands as direct actions with current status", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        modelLabel="deepseek-v4-pro"
+        slashCommands={[
+          {
+            command: "/model",
+            title: "Switch model preset",
+            description: "Show or switch the active model preset.",
+            icon: "brain",
+            argHint: "[preset]",
+          },
+          COMMANDS[1],
+        ]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/" },
+    });
+
+    expect(screen.getByRole("option", { name: /Model deepseek-v4-pro/i })).toBeInTheDocument();
+    expect(screen.getByText("Current")).toBeInTheDocument();
+    expect(screen.getByText("/model [preset]")).toBeInTheDocument();
+  });
+
+  it("prioritizes stop as an immediate slash action while streaming", () => {
+    const onStop = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+        slashCommands={[COMMANDS[1]]}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/" } });
+
+    expect(screen.getByRole("option", { name: /Stop current task/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("");
+  });
+
+  it("orders recent slash commands first for the blank slash menu", () => {
+    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/history"]));
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/" },
+    });
+
+    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Recent")).toBeInTheDocument();
   });
 
   it("opens the CLI app mention palette and inserts the selected app", () => {

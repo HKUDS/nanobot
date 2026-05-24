@@ -551,6 +551,10 @@
             "title": "Hiển thị trạng thái",
             "description": "Hiển thị trạng thái runtime, provider và channel."
           },
+          "model": {
+            "title": "Mô hình",
+            "description": "Hiển thị hoặc chuyển preset mô hình đang hoạt động."
+          },
           "history": {
             "title": "Hiển thị lịch sử",
             "description": "In N tin nhắn hội thoại đã lưu gần nhất."
@@ -574,7 +578,21 @@
           "help": {
             "title": "Hiển thị trợ giúp",
             "description": "Liệt kê các lệnh slash có sẵn."
+          },
+          "pairing": {
+            "title": "Ghép nối",
+            "description": "Quản lý yêu cầu ghép nối."
           }
+        },
+        "badges": {
+          "current": "Hiện tại",
+          "recent": "Gần đây"
+        },
+        "details": {
+          "goalActive": "Mục tiêu đang chạy",
+          "goalReady": "Bắt đầu mục tiêu duy trì",
+          "history": "Hiển thị tin nhắn gần đây",
+          "stopRunning": "Đang chạy"
         }
       },
       "encoding": "Đang xử lý…",

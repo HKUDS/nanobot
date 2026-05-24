@@ -551,6 +551,10 @@
             "title": "查看狀態",
             "description": "顯示執行環境、provider 和 channel 狀態。"
           },
+          "model": {
+            "title": "模型",
+            "description": "查看或切換目前模型預設。"
+          },
           "history": {
             "title": "查看對話歷史",
             "description": "列印最近 N 則已持久化的對話訊息。"
@@ -574,7 +578,21 @@
           "help": {
             "title": "查看說明",
             "description": "列出可用的斜線命令。"
+          },
+          "pairing": {
+            "title": "配對",
+            "description": "管理配對請求。"
           }
+        },
+        "badges": {
+          "current": "目前",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目標正在執行",
+          "goalReady": "開始一個持續目標",
+          "history": "查看最近訊息",
+          "stopRunning": "正在執行"
         }
       },
       "encoding": "處理中…",

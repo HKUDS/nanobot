@@ -551,6 +551,10 @@
             "title": "Tampilkan status",
             "description": "Tampilkan status runtime, provider, dan channel."
           },
+          "model": {
+            "title": "Model",
+            "description": "Tampilkan atau ganti preset model aktif."
+          },
           "history": {
             "title": "Tampilkan riwayat",
             "description": "Cetak N pesan percakapan tersimpan terbaru."
@@ -574,7 +578,21 @@
           "help": {
             "title": "Tampilkan bantuan",
             "description": "Daftar perintah slash yang tersedia."
+          },
+          "pairing": {
+            "title": "Pemasangan",
+            "description": "Kelola permintaan pemasangan."
           }
+        },
+        "badges": {
+          "current": "Saat ini",
+          "recent": "Terbaru"
+        },
+        "details": {
+          "goalActive": "Tujuan sedang berjalan",
+          "goalReady": "Mulai tujuan berkelanjutan",
+          "history": "Tampilkan pesan terbaru",
+          "stopRunning": "Sedang berjalan"
         }
       },
       "encoding": "Memproses…",

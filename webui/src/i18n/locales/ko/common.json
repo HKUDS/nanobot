@@ -551,6 +551,10 @@
             "title": "상태 보기",
             "description": "런타임, provider, channel 상태를 표시합니다."
           },
+          "model": {
+            "title": "모델",
+            "description": "활성 모델 프리셋을 보거나 전환합니다."
+          },
           "history": {
             "title": "대화 기록 보기",
             "description": "저장된 최근 N개의 대화 메시지를 출력합니다."
@@ -574,7 +578,21 @@
           "help": {
             "title": "도움말 보기",
             "description": "사용 가능한 슬래시 명령을 나열합니다."
+          },
+          "pairing": {
+            "title": "페어링",
+            "description": "페어링 요청을 관리합니다."
           }
+        },
+        "badges": {
+          "current": "현재",
+          "recent": "최근"
+        },
+        "details": {
+          "goalActive": "목표 실행 중",
+          "goalReady": "지속 목표 시작",
+          "history": "최근 메시지 보기",
+          "stopRunning": "실행 중"
         }
       },
       "encoding": "처리 중…",

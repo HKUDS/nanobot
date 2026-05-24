@@ -40,6 +40,20 @@ function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
 }
 
+function sameMessageShape(a: UIMessage, b: UIMessage): boolean {
+  return (
+    a.role === b.role
+    && (a.kind ?? "") === (b.kind ?? "")
+    && a.content === b.content
+  );
+}
+
+function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boolean {
+  if (current.length === 0 || snapshot.length >= current.length) return false;
+  if (snapshot.length === 0) return true;
+  return snapshot.every((message, index) => sameMessageShape(current[index], message));
+}
+
 interface ThreadShellProps {
   session: ChatSummary | null;
   title: string;
@@ -219,19 +233,28 @@ export function ThreadShell({
     // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
     // so rendering converges to the same shape as a manual refresh.
     setMessages((prev) => {
+      const normalizedHistory = projectWebuiThreadMessages(historical);
+      const keepLiveMessages = (messagesToKeep: UIMessage[]) => {
+        const projected = projectWebuiThreadMessages(messagesToKeep);
+        messageCacheRef.current.set(chatId, projected);
+        return projected;
+      };
       if (hasNewCanonicalHistory && historical.length > 0) {
+        if (isStaleThreadSnapshot(prev, normalizedHistory)) return keepLiveMessages(prev);
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
-        const normalized = projectWebuiThreadMessages(historical);
-        messageCacheRef.current.set(chatId, normalized);
-        return normalized;
+        messageCacheRef.current.set(chatId, normalizedHistory);
+        return normalizedHistory;
       }
-      if (cached && cached.length > 0) return projectWebuiThreadMessages(cached);
-      if (historical.length === 0 && prev.length > 0) return projectWebuiThreadMessages(prev);
+      if (cached && cached.length > 0) {
+        const normalizedCached = projectWebuiThreadMessages(cached);
+        if (isStaleThreadSnapshot(prev, normalizedCached)) return keepLiveMessages(prev);
+        return normalizedCached;
+      }
+      if (isStaleThreadSnapshot(prev, normalizedHistory)) return keepLiveMessages(prev);
       appliedHistoryVersionRef.current.set(chatId, historyVersion);
-      const next = projectWebuiThreadMessages(historical);
-      if (historical.length > 0) messageCacheRef.current.set(chatId, next);
-      return next;
+      if (normalizedHistory.length > 0) messageCacheRef.current.set(chatId, normalizedHistory);
+      return normalizedHistory;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, chatId, historical, historyVersion]);

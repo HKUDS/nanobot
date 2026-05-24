@@ -551,6 +551,10 @@
             "title": "Mostrar estado",
             "description": "Muestra el estado del runtime, provider y channels."
           },
+          "model": {
+            "title": "Modelo",
+            "description": "Muestra o cambia el preset de modelo activo."
+          },
           "history": {
             "title": "Mostrar historial",
             "description": "Imprime los últimos N mensajes persistidos de la conversación."
@@ -574,7 +578,21 @@
           "help": {
             "title": "Mostrar ayuda",
             "description": "Lista los comandos slash disponibles."
+          },
+          "pairing": {
+            "title": "Emparejamiento",
+            "description": "Gestiona solicitudes de emparejamiento."
           }
+        },
+        "badges": {
+          "current": "Actual",
+          "recent": "Reciente"
+        },
+        "details": {
+          "goalActive": "El objetivo está en curso",
+          "goalReady": "Iniciar un objetivo sostenido",
+          "history": "Mostrar mensajes recientes",
+          "stopRunning": "En ejecución"
         }
       },
       "encoding": "Procesando…",

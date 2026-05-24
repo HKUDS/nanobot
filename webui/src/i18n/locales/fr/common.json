@@ -551,6 +551,10 @@
             "title": "Afficher l’état",
             "description": "Afficher l’état du runtime, du provider et des channels."
           },
+          "model": {
+            "title": "Modèle",
+            "description": "Afficher ou changer le préréglage de modèle actif."
+          },
           "history": {
             "title": "Afficher l’historique",
             "description": "Afficher les N derniers messages persistés de la conversation."
@@ -574,7 +578,21 @@
           "help": {
             "title": "Afficher l’aide",
             "description": "Lister les commandes slash disponibles."
+          },
+          "pairing": {
+            "title": "Appairage",
+            "description": "Gérer les demandes d’appairage."
           }
+        },
+        "badges": {
+          "current": "Actuel",
+          "recent": "Récent"
+        },
+        "details": {
+          "goalActive": "L’objectif est en cours",
+          "goalReady": "Démarrer un objectif durable",
+          "history": "Afficher les messages récents",
+          "stopRunning": "En cours"
         }
       },
       "encoding": "Traitement…",
