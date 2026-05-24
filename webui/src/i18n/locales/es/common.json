@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "Plugins",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "Capacidades",
       "integrations": "Integrations",
-      "cliApps": "Apps CLI",
-      "mcp": "MCP"
+      "plugins": "Plugins",
+      "cliApps": "Plugins CLI",
+      "mcp": "Plugins MCP"
     },
     "rows": {
       "theme": "Tema",
@@ -293,6 +295,13 @@
       "select": "Seleccionar zona horaria",
       "search": "Buscar zona horaria",
       "empty": "No hay zonas horarias coincidentes."
+    },
+    "plugins": {
+      "description": "Añade adaptadores de apps locales y servidores de herramientas conectados que nanobot puede usar desde el chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}} activados",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "Todas las categorías",
@@ -607,7 +616,7 @@
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
-        "ariaLabel": "Apps y MCP",
+        "ariaLabel": "Plugins",
         "label": "Plugins",
         "cliGroup": "Apps CLI",
         "mcpGroup": "Servidores MCP",

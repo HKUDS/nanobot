@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "Plugins",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
       "runtime": "Runtime",
@@ -96,8 +97,9 @@
       "imageDefaults": "Defaults",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
-      "cliApps": "CLI Apps",
-      "mcp": "MCP",
+      "plugins": "Plugins",
+      "cliApps": "CLI plugins",
+      "mcp": "MCP plugins",
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capabilities",
@@ -196,6 +198,13 @@
       "select": "Select timezone",
       "search": "Search timezone",
       "empty": "No matching timezones."
+    },
+    "plugins": {
+      "description": "Add local app adapters and connected tool servers that nanobot can use from chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}} enabled",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "All categories",
@@ -596,7 +605,7 @@
         }
       },
       "mentions": {
-        "ariaLabel": "Apps and MCP",
+        "ariaLabel": "Plugins",
         "label": "Plugins",
         "cliGroup": "CLI Apps",
         "mcpGroup": "MCP servers",

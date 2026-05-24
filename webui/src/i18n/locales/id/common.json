@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "Plugin",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Aplikasi CLI",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "Kapabilitas",
       "integrations": "Integrations",
-      "cliApps": "Aplikasi CLI",
-      "mcp": "MCP"
+      "plugins": "Plugin",
+      "cliApps": "Plugin CLI",
+      "mcp": "Plugin MCP"
     },
     "rows": {
       "theme": "Tema",
@@ -293,6 +295,13 @@
       "select": "Pilih zona waktu",
       "search": "Cari zona waktu",
       "empty": "Tidak ada zona waktu yang cocok."
+    },
+    "plugins": {
+      "description": "Tambahkan adaptor app lokal dan server alat terhubung yang dapat digunakan nanobot dari chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}} aktif",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "Semua kategori",
@@ -607,7 +616,7 @@
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
-        "ariaLabel": "Aplikasi dan MCP",
+        "ariaLabel": "Plugin",
         "label": "Plugin",
         "cliGroup": "Aplikasi CLI",
         "mcpGroup": "Server MCP",

@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "プラグイン",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI アプリ",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "機能",
       "integrations": "Integrations",
-      "cliApps": "CLI アプリ",
-      "mcp": "MCP"
+      "plugins": "プラグイン",
+      "cliApps": "CLI プラグイン",
+      "mcp": "MCP プラグイン"
     },
     "rows": {
       "theme": "テーマ",
@@ -293,6 +295,13 @@
       "select": "タイムゾーンを選択",
       "search": "タイムゾーンを検索",
       "empty": "一致するタイムゾーンはありません。"
+    },
+    "plugins": {
+      "description": "nanobot がチャットから使えるローカルアプリのアダプターと接続済みツールサーバーを追加します。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}} 件有効",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "すべてのカテゴリ",
@@ -607,7 +616,7 @@
         "io": "このファイルを読み込めません"
       },
       "mentions": {
-        "ariaLabel": "アプリと MCP",
+        "ariaLabel": "プラグイン",
         "label": "プラグイン",
         "cliGroup": "CLI アプリ",
         "mcpGroup": "MCP サーバー",

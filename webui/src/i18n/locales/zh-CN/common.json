@@ -80,6 +80,7 @@
       "providers": "提供商",
       "image": "图片",
       "web": "网页",
+      "plugins": "插件",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "运行时",
@@ -96,8 +97,9 @@
       "imageDefaults": "默认值",
       "webSearch": "网页搜索",
       "webBehavior": "行为",
-      "cliApps": "CLI 应用",
-      "mcp": "MCP",
+      "plugins": "插件",
+      "cliApps": "CLI 插件",
+      "mcp": "MCP 插件",
       "identity": "身份",
       "safety": "安全",
       "capabilities": "能力",
@@ -196,6 +198,13 @@
       "select": "选择时区",
       "search": "搜索时区",
       "empty": "没有匹配的时区。"
+    },
+    "plugins": {
+      "description": "添加 nanobot 可在对话中调用的本地应用适配和已连接工具服务。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "已启用 {{count}} 个",
+      "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP"
     },
     "cliApps": {
       "allCategories": "全部分类",
@@ -595,7 +604,7 @@
         }
       },
       "mentions": {
-        "ariaLabel": "应用和 MCP",
+        "ariaLabel": "插件",
         "label": "插件",
         "cliGroup": "CLI 应用",
         "mcpGroup": "MCP 服务",

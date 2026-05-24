@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "插件",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 應用",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "功能",
       "integrations": "Integrations",
-      "cliApps": "CLI 應用",
-      "mcp": "MCP"
+      "plugins": "插件",
+      "cliApps": "CLI 插件",
+      "mcp": "MCP 插件"
     },
     "rows": {
       "theme": "主題",
@@ -293,6 +295,13 @@
       "select": "選擇時區",
       "search": "搜尋時區",
       "empty": "沒有符合的時區。"
+    },
+    "plugins": {
+      "description": "新增 nanobot 可在對話中使用的本機應用適配與已連接工具服務。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "已啟用 {{count}} 個",
+      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP"
     },
     "cliApps": {
       "allCategories": "全部分類",
@@ -607,7 +616,7 @@
         "io": "無法讀取這個檔案"
       },
       "mentions": {
-        "ariaLabel": "應用和 MCP",
+        "ariaLabel": "插件",
         "label": "插件",
         "cliGroup": "CLI 應用",
         "mcpGroup": "MCP 服務",

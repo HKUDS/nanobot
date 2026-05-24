@@ -31,7 +31,6 @@ import {
   Loader2,
   LogOut,
   Moon,
-  Package,
   PlayCircle,
   Plus,
   Orbit,
@@ -109,8 +108,7 @@ type SettingsSectionKey =
   | "models"
   | "image"
   | "web"
-  | "cliApps"
-  | "mcp"
+  | "plugins"
   | "runtime"
   | "advanced";
 
@@ -913,6 +911,8 @@ export function SettingsView({
             onRestart={onRestart}
             isRestarting={isRestarting}
             showBrandLogos={localPrefs.brandLogos}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
             onSelectSection={setActiveSection}
           />
         );
@@ -1009,63 +1009,66 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.web}
           />
         );
-      case "cliApps":
+      case "plugins":
         return (
-          <CliAppsSettings
-            payload={cliApps}
-            loading={cliAppsLoading}
-            query={cliAppsQuery}
-            category={cliAppsCategory}
-            installFilter={cliAppsInstallFilter}
-            actionKey={cliAppsAction}
-            message={cliAppsMessage}
-            error={cliAppsError}
-            focusName={cliAppsFocusName}
-            showBrandLogos={localPrefs.brandLogos}
-            onQueryChange={setCliAppsQuery}
-            onCategoryChange={setCliAppsCategory}
-            onInstallFilterChange={setCliAppsInstallFilter}
-            onAction={handleCliAppAction}
-            onBackToChat={onBackToChat}
-          />
-        );
-      case "mcp":
-        return (
-          <McpPresetsSettings
-            payload={mcpPresets}
-            loading={mcpPresetsLoading}
-            query={mcpQuery}
-            category={mcpCategory}
-            installFilter={mcpInstallFilter}
-            actionKey={mcpPresetAction}
-            message={mcpMessage}
-            error={mcpError}
-            fieldValues={mcpFieldValues}
-            customForm={customMcpForm}
-            configImport={mcpConfigImport}
-            showBrandLogos={localPrefs.brandLogos}
-            requiresRestartPending={pendingRestartSections.runtime}
-            onQueryChange={setMcpQuery}
-            onCategoryChange={setMcpCategory}
-            onInstallFilterChange={setMcpInstallFilter}
-            onCustomFormChange={setCustomMcpForm}
-            onConfigImportChange={setMcpConfigImport}
-            onFieldChange={(presetName, fieldName, value) => {
-              setMcpFieldValues((prev) => ({
-                ...prev,
-                [presetName]: {
-                  ...(prev[presetName] ?? {}),
-                  [fieldName]: value,
-                },
-              }));
-            }}
-            onAction={handleMcpPresetAction}
-            onSaveCustom={handleSaveCustomMcp}
-            onImportConfig={handleImportMcpConfig}
-            onToolsChange={handleMcpToolsChange}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
-          />
+          <div className="space-y-8">
+            <PluginsSummaryPanel
+              cliApps={cliApps}
+              mcpPresets={mcpPresets}
+            />
+            <CliAppsSettings
+              payload={cliApps}
+              loading={cliAppsLoading}
+              query={cliAppsQuery}
+              category={cliAppsCategory}
+              installFilter={cliAppsInstallFilter}
+              actionKey={cliAppsAction}
+              message={cliAppsMessage}
+              error={cliAppsError}
+              focusName={cliAppsFocusName}
+              showBrandLogos={localPrefs.brandLogos}
+              onQueryChange={setCliAppsQuery}
+              onCategoryChange={setCliAppsCategory}
+              onInstallFilterChange={setCliAppsInstallFilter}
+              onAction={handleCliAppAction}
+              onBackToChat={onBackToChat}
+            />
+            <McpPresetsSettings
+              payload={mcpPresets}
+              loading={mcpPresetsLoading}
+              query={mcpQuery}
+              category={mcpCategory}
+              installFilter={mcpInstallFilter}
+              actionKey={mcpPresetAction}
+              message={mcpMessage}
+              error={mcpError}
+              fieldValues={mcpFieldValues}
+              customForm={customMcpForm}
+              configImport={mcpConfigImport}
+              showBrandLogos={localPrefs.brandLogos}
+              requiresRestartPending={pendingRestartSections.runtime}
+              onQueryChange={setMcpQuery}
+              onCategoryChange={setMcpCategory}
+              onInstallFilterChange={setMcpInstallFilter}
+              onCustomFormChange={setCustomMcpForm}
+              onConfigImportChange={setMcpConfigImport}
+              onFieldChange={(presetName, fieldName, value) => {
+                setMcpFieldValues((prev) => ({
+                  ...prev,
+                  [presetName]: {
+                    ...(prev[presetName] ?? {}),
+                    [fieldName]: value,
+                  },
+                }));
+              }}
+              onAction={handleMcpPresetAction}
+              onSaveCustom={handleSaveCustomMcp}
+              onImportConfig={handleImportMcpConfig}
+              onToolsChange={handleMcpToolsChange}
+              onRestart={onRestart}
+              isRestarting={isRestarting}
+            />
+          </div>
         );
       case "runtime":
         return (
@@ -1152,8 +1155,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
-  { key: "cliApps", icon: Package, fallback: "CLI Apps" },
-  { key: "mcp", icon: Layers, fallback: "MCP" },
+  { key: "plugins", icon: Sparkles, fallback: "Plugins" },
   { key: "runtime", icon: Server, fallback: "Runtime" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
@@ -1240,6 +1242,8 @@ function OverviewSettings({
   isRestarting,
   onSelectSection,
   showBrandLogos,
+  cliApps,
+  mcpPresets,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
@@ -1247,6 +1251,8 @@ function OverviewSettings({
   isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  cliApps: CliAppsPayload | null;
+  mcpPresets: McpPresetsPayload | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1263,6 +1269,14 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
+  const cliPluginCount = cliApps?.installed_count ?? 0;
+  const mcpPluginCount = mcpPresets?.installed_count ?? settings.advanced.mcp_server_count;
+  const pluginCount = cliPluginCount + mcpPluginCount;
+  const pluginValue = tx("settings.plugins.enabledSummary", "{{count}} enabled")
+    .replace("{{count}}", String(pluginCount));
+  const pluginCaption = tx("settings.plugins.caption", "{{cli}} CLI · {{mcp}} MCP")
+    .replace("{{cli}}", String(cliPluginCount))
+    .replace("{{mcp}}", String(mcpPluginCount));
   return (
     <div className="space-y-7">
       <section>
@@ -1342,6 +1356,13 @@ function OverviewSettings({
             caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
+          />
+          <OverviewListRow
+            icon={Sparkles}
+            title={tx("settings.nav.plugins", "Plugins")}
+            value={pluginValue}
+            caption={pluginCaption}
+            onClick={() => onSelectSection("plugins")}
           />
         </SettingsGroup>
       </section>
@@ -2333,6 +2354,67 @@ function WebSettings({
   );
 }
 
+function PluginsSummaryPanel({
+  cliApps,
+  mcpPresets,
+}: {
+  cliApps: CliAppsPayload | null;
+  mcpPresets: McpPresetsPayload | null;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const cliInstalled = cliApps?.installed_count ?? 0;
+  const cliTotal = cliApps?.apps.length ?? 0;
+  const mcpInstalled = mcpPresets?.installed_count ?? 0;
+  const mcpTotal = mcpPresets?.presets.length ?? 0;
+
+  return (
+    <section className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
+      <div className="flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-border/45 bg-muted/40 text-foreground shadow-sm">
+            <Sparkles className="h-5 w-5" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[18px] font-semibold leading-6 text-foreground">
+              {tx("settings.nav.plugins", "Plugins")}
+            </h2>
+            <p className="mt-1 max-w-[620px] text-[13px] leading-5 text-muted-foreground">
+              {tx(
+                "settings.plugins.description",
+                "Add local app adapters and connected tool servers that nanobot can use from chat.",
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:w-[260px]">
+          <PluginCountPill
+            label={tx("settings.plugins.cliLabel", "CLI")}
+            value={`${cliInstalled}/${cliTotal}`}
+          />
+          <PluginCountPill
+            label={tx("settings.plugins.mcpLabel", "MCP")}
+            value={`${mcpInstalled}/${mcpTotal}`}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PluginCountPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[14px] border border-border/45 bg-background/72 px-3 py-2 text-right shadow-sm">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-0.5 text-[16px] font-semibold tabular-nums text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function CliAppsSettings({
   payload,
   loading,
@@ -2406,7 +2488,7 @@ function CliAppsSettings({
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <SettingsSectionTitle>{tx("settings.sections.cliApps", "CLI Apps")}</SettingsSectionTitle>
+            <SettingsSectionTitle>{tx("settings.sections.cliApps", "CLI plugins")}</SettingsSectionTitle>
             <p className="mt-1 text-[13px] text-muted-foreground">
               {tx("settings.cliApps.summary", "{{installed}} of {{total}} CLIs installed")
                 .replace("{{installed}}", String(payload?.installed_count ?? 0))
@@ -2589,7 +2671,7 @@ function McpPresetsSettings({
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <SettingsSectionTitle>{tx("settings.sections.mcp", "MCP")}</SettingsSectionTitle>
+            <SettingsSectionTitle>{tx("settings.sections.mcp", "MCP plugins")}</SettingsSectionTitle>
             <p className="mt-1 text-[13px] text-muted-foreground">
               {tx("settings.mcp.summary", "{{installed}} of {{total}} presets enabled")
                 .replace("{{installed}}", String(payload?.installed_count ?? 0))

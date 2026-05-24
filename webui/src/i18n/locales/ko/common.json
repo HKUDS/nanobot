@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "플러그인",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 앱",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "기능",
       "integrations": "Integrations",
-      "cliApps": "CLI 앱",
-      "mcp": "MCP"
+      "plugins": "플러그인",
+      "cliApps": "CLI 플러그인",
+      "mcp": "MCP 플러그인"
     },
     "rows": {
       "theme": "테마",
@@ -293,6 +295,13 @@
       "select": "시간대 선택",
       "search": "시간대 검색",
       "empty": "일치하는 시간대가 없습니다."
+    },
+    "plugins": {
+      "description": "nanobot이 채팅에서 사용할 수 있는 로컬 앱 어댑터와 연결된 도구 서버를 추가합니다.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}}개 활성화됨",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "모든 카테고리",
@@ -607,7 +616,7 @@
         "io": "이 파일을 읽을 수 없습니다"
       },
       "mentions": {
-        "ariaLabel": "앱 및 MCP",
+        "ariaLabel": "플러그인",
         "label": "플러그인",
         "cliGroup": "CLI 앱",
         "mcpGroup": "MCP 서버",

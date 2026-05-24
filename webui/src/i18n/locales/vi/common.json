@@ -80,6 +80,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
+      "plugins": "Plugin",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Ứng dụng CLI",
@@ -100,8 +101,9 @@
       "safety": "Safety",
       "capabilities": "Khả năng",
       "integrations": "Integrations",
-      "cliApps": "Ứng dụng CLI",
-      "mcp": "MCP"
+      "plugins": "Plugin",
+      "cliApps": "Plugin CLI",
+      "mcp": "Plugin MCP"
     },
     "rows": {
       "theme": "Giao diện",
@@ -293,6 +295,13 @@
       "select": "Chọn múi giờ",
       "search": "Tìm múi giờ",
       "empty": "Không có múi giờ phù hợp."
+    },
+    "plugins": {
+      "description": "Thêm bộ điều hợp app cục bộ và máy chủ công cụ đã kết nối mà nanobot có thể dùng từ chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "enabledSummary": "{{count}} đã bật",
+      "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
     "cliApps": {
       "allCategories": "Tất cả danh mục",
@@ -607,7 +616,7 @@
         "io": "Không thể đọc tệp này"
       },
       "mentions": {
-        "ariaLabel": "Ứng dụng và MCP",
+        "ariaLabel": "Plugin",
         "label": "Plugin",
         "cliGroup": "Ứng dụng CLI",
         "mcpGroup": "Máy chủ MCP",
