@@ -22,6 +22,8 @@ from nanobot.utils.prompt_templates import render_template
 
 from nanobot.agent.skill_index import SkillIndex
 from nanobot.config.schema import SkillRetrievalConfig
+from nanobot.agent.skill_selector import SkillCandidate, SkillLLMSelector
+from nanobot.providers.base import LLMProvider
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
@@ -37,6 +39,7 @@ class ContextBuilder:
         timezone: str | None = None, 
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
+        skill_llm_provider: LLMProvider | None = None,
     ):
         self.workspace = workspace
         self.timezone = timezone
@@ -44,6 +47,19 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
         self._skill_retrieval = skill_retrieval or SkillRetrievalConfig()
         self._skill_index: SkillIndex | None = None
+        self._skill_llm_selector: SkillLLMSelector | None = None
+        if skill_llm_provider is not None and self._uses_llm_selection():
+            self._skill_llm_selector = SkillLLMSelector(skill_llm_provider, self._skill_retrieval)
+
+    def set_skill_llm_provider(self, provider: LLMProvider | None) -> None:
+        """Attach or replace the LLM used for skill selection."""
+        if provider is not None and self._uses_llm_selection():
+            self._skill_llm_selector = SkillLLMSelector(provider, self._skill_retrieval)
+        else:
+            self._skill_llm_selector = None
+
+    def _uses_llm_selection(self) -> bool:
+        return self._skill_retrieval.mode in {"llm", "hybrid", "auto"}
 
     def warm_skill_index(self) -> None:
         """启用检索时预热/构建磁盘 skill 索引。"""
@@ -63,6 +79,7 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
         retrieval_query: str | None = None,
+        skill_entries: list[dict[str, object]] | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         logger.info("Building system prompt with retrieval query: {}", retrieval_query)
@@ -86,7 +103,11 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
         exclude = set(always_skills)
-        skills_summary = self._build_skills_summary_section(exclude, retrieval_query)
+        skills_summary = self._build_skills_summary_section(
+            exclude,
+            retrieval_query,
+            skill_entries=skill_entries,
+        )
         # skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
@@ -110,9 +131,16 @@ class ContextBuilder:
         self,
         exclude: set[str],
         retrieval_query: str | None,
+        skill_entries: list[dict[str, object]] | None = None,
     ) -> str:
         cfg = self._skill_retrieval
         query = (retrieval_query or "").strip()
+        if skill_entries is not None:
+            if skill_entries:
+                return self.skills.build_skills_summary(exclude=exclude, entries=skill_entries)
+            if cfg.fallback_to_full_list:
+                return self._build_full_skills_summary(exclude)
+            return ""
         if cfg.enable and query:
             entries = self._retrieve_skill_entries(query, exclude=exclude)
             if entries:
@@ -121,6 +149,174 @@ class ContextBuilder:
                 return self._build_full_skills_summary(exclude)
             return ""
         return self._build_full_skills_summary(exclude)
+
+
+    async def resolve_skill_entries(
+        self,
+        query: str | None,
+        *,
+        exclude: set[str],
+    ) -> list[dict[str, object]] | None:
+        """Resolve skill summary rows for the current turn.
+
+        Returns ``None`` when retrieval is disabled or the query is empty.
+        Returns ``[]`` when selection ran but found no relevant skills.
+        """
+        cfg = self._skill_retrieval
+        normalized = (query or "").strip()
+        if not cfg.enable or not normalized:
+            return None
+
+        mode = self._effective_retrieval_mode(exclude)
+        logger.info(
+            "Skill resolve [start]: query={!r} mode={} config_mode={} exclude={}",
+            normalized,
+            mode,
+            cfg.mode,
+            sorted(exclude),
+        )
+
+        if mode == "fts":
+            entries = self._retrieve_skill_entries(normalized, exclude=exclude)
+            logger.info(
+                "Skill resolve [fts done]: query={!r} selected={}",
+                normalized,
+                [str(entry["name"]) for entry in entries],
+            )
+            return entries
+
+        if self._skill_llm_selector is None:
+            logger.warning("Skill retrieval mode {} requires an LLM provider; falling back to FTS", mode)
+            entries = self._retrieve_skill_entries(normalized, exclude=exclude)
+            logger.info(
+                "Skill resolve [fts fallback done]: query={!r} selected={}",
+                normalized,
+                [str(entry["name"]) for entry in entries],
+            )
+            return entries
+
+        if mode == "llm":
+            candidates = self._list_candidate_entries(exclude)
+            logger.info(
+                "Skill resolve [llm catalog]: count={} names={}",
+                len(candidates),
+                [str(entry["name"]) for entry in candidates],
+            )
+        else:
+            logger.info(
+                "Skill resolve [hybrid bm25 pool start]: query={!r} fts_candidate_k={}",
+                normalized,
+                cfg.fts_candidate_k,
+            )
+            candidates = self._retrieve_skill_entries(
+                normalized,
+                exclude=exclude,
+                k=cfg.fts_candidate_k,
+            )
+            if not candidates:
+                logger.info(
+                    "Skill resolve [hybrid bm25 empty]: falling back to catalog slice",
+                )
+                candidates = self._list_candidate_entries(exclude)[: cfg.fts_candidate_k]
+            logger.info(
+                "Skill resolve [hybrid bm25 pool done]: count={} names={}",
+                len(candidates),
+                [str(entry["name"]) for entry in candidates],
+            )
+
+        if not candidates:
+            logger.info("Skill resolve [done]: query={!r} mode={} no candidates", normalized, mode)
+            return []
+
+        skill_candidates = [
+            SkillCandidate(
+                name=str(entry["name"]),
+                description=str(entry.get("description") or entry["name"]),
+            )
+            for entry in candidates
+        ]
+        logger.info(
+            "Skill resolve [llm select start]: query={!r} top_k={} candidates={}",
+            normalized,
+            cfg.top_k,
+            [(candidate.name, candidate.description) for candidate in skill_candidates],
+        )
+        selected = await self._skill_llm_selector.select(
+            normalized,
+            skill_candidates,
+            k=cfg.top_k,
+        )
+        logger.info(
+            "Skill resolve [llm select done]: query={!r} selected={}",
+            normalized,
+            selected,
+        )
+        if selected:
+            by_name = {str(entry["name"]): entry for entry in candidates}
+            result = [by_name[name] for name in selected if name in by_name]
+            logger.info(
+                "Skill resolve [done]: query={!r} mode={} final={}",
+                normalized,
+                mode,
+                [str(entry["name"]) for entry in result],
+            )
+            return result
+
+        if mode == "hybrid":
+            logger.info(
+                "Skill resolve [hybrid fallback fts start]: llm returned empty for query={!r}",
+                normalized,
+            )
+            entries = self._retrieve_skill_entries(normalized, exclude=exclude)
+            logger.info(
+                "Skill resolve [hybrid fallback fts done]: query={!r} selected={}",
+                normalized,
+                [str(entry["name"]) for entry in entries],
+            )
+            return entries
+
+        logger.info("Skill resolve [done]: query={!r} mode={} final=[]", normalized, mode)
+        return []
+
+    def _effective_retrieval_mode(self, exclude: set[str]) -> str:
+        cfg = self._skill_retrieval
+        if cfg.mode != "auto":
+            return cfg.mode
+        catalog_size = len(self._list_candidate_entries(exclude))
+        mode = "llm" if catalog_size <= cfg.llm_skill_threshold else "hybrid"
+        logger.info(
+            "Skill resolve [auto mode]: catalog_size={} threshold={} -> {}",
+            catalog_size,
+            cfg.llm_skill_threshold,
+            mode,
+        )
+        return mode
+
+    def _list_candidate_entries(self, exclude: set[str]) -> list[dict[str, object]]:
+        if self._skill_retrieval.enable:
+            catalog = self._get_skill_index().list_catalog(self.skills)
+            if catalog:
+                entries = [entry.to_summary_dict(self.skills) for entry in catalog]
+                return [entry for entry in entries if entry["name"] not in exclude]
+        entries: list[dict[str, object]] = []
+        for entry in self.skills.list_skills(filter_unavailable=False):
+            name = str(entry["name"])
+            if name in exclude:
+                continue
+            meta = self.skills._get_skill_meta(name)
+            available = self.skills._check_requirements(meta)
+            missing = self.skills._get_missing_requirements(meta) if not available else ""
+            entries.append(
+                {
+                    "name": name,
+                    "path": entry["path"],
+                    "source": entry["source"],
+                    "description": self.skills._get_skill_description(name),
+                    "available": available,
+                    "missing_requirements": missing,
+                }
+            )
+        return entries
 
     def _build_full_skills_summary(self, exclude: set[str]) -> str:
         cfg = self._skill_retrieval
@@ -131,19 +327,39 @@ class ContextBuilder:
                 return self.skills.build_skills_summary(exclude=exclude, entries=entries)
         return self.skills.build_skills_summary(exclude=exclude)
 
-    def _retrieve_skill_entries(self, query: str, *, exclude: set[str]) -> list[dict[str, object]]:
+    def _retrieve_skill_entries(
+        self,
+        query: str,
+        *,
+        exclude: set[str],
+        k: int | None = None,
+    ) -> list[dict[str, object]]:
         cfg = self._skill_retrieval
+        effective_k = k or cfg.top_k
+        logger.info(
+            "Skill retrieval FTS [start]: query={!r} k={} exclude={} min_score={}",
+            query,
+            effective_k,
+            sorted(exclude),
+            cfg.min_score,
+        )
         index = self._get_skill_index()
         if cfg.rebuild_on_miss:
             index.ensure_ready(self.skills)
         hits = index.retrieve(
             query,
             loader=self.skills,
-            k=cfg.top_k,
+            k=effective_k,
             exclude=exclude,
             min_score=cfg.min_score,
         )
-        return [hit.to_summary_dict(self.skills) for hit in hits]
+        entries = [hit.to_summary_dict(self.skills) for hit in hits]
+        logger.info(
+            "Skill retrieval FTS [done]: query={!r} selected={}",
+            query,
+            [str(entry["name"]) for entry in entries],
+        )
+        return entries
 
     @staticmethod
     def _extract_retrieval_query(current_message: str | list[dict[str, Any]]) -> str | None:
@@ -240,6 +456,7 @@ class ContextBuilder:
         session_summary: str | None = None,
         session_metadata: Mapping[str, Any] | None = None,
         current_runtime_lines: Sequence[str] | None = None,
+        skill_entries: list[dict[str, object]] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         extra = [
@@ -272,6 +489,7 @@ class ContextBuilder:
                     channel=channel,
                     session_summary=session_summary,
                     retrieval_query=self._extract_retrieval_query(current_message),
+                    skill_entries=skill_entries,
                 ),
             },
             *history,

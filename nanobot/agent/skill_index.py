@@ -262,15 +262,44 @@ class SkillIndex:
         with self._lock:
             # L1 query 命中
             if cache_size > 0 and cache_key in self._retrieve_cache:
+                hits = list(self._retrieve_cache[cache_key])
+                logger.info(
+                    "Skill BM25 retrieve [cache hit]: query={!r} k={} exclude={} min_score={} -> [{}]",
+                    query,
+                    k,
+                    sorted(exclude),
+                    min_score,
+                    _format_bm25_hits(hits),
+                )
                 self._retrieve_cache.move_to_end(cache_key)
-                return list(self._retrieve_cache[cache_key])
+                return hits
+
+            logger.info(
+                "Skill BM25 retrieve [start]: query={!r} normalized={!r} k={} exclude={} "
+                "min_score={} generation={}",
+                query,
+                normalized,
+                k,
+                sorted(exclude),
+                min_score,
+                generation,
+            )
 
             try:
                 self.ensure_ready(loader)
                 fts_query = _build_fts_query(normalized)
                 if not fts_query:
+                    logger.info(
+                        "Skill BM25 retrieve [skip]: empty fts_query for query={!r}",
+                        query,
+                    )
                     return []
 
+                logger.debug(
+                    "Skill BM25 retrieve SQL: fts_query={!r} limit={}",
+                    fts_query,
+                    k,
+                )
                 conn = self._connect()
                 # bm25(skill_fts) 升序：分数越小相关性越高
                 if exclude:
@@ -322,6 +351,14 @@ class SkillIndex:
                         score=score,
                     )
                 )
+
+            logger.info(
+                "Skill BM25 retrieve [done]: query={!r} raw_rows={} after_min_score={} -> [{}]",
+                query,
+                len(rows),
+                len(hits),
+                _format_bm25_hits(hits),
+            )
 
             # 写入 L1 query 缓存（LRU 淘汰）
             if cache_size > 0:
@@ -423,6 +460,16 @@ class SkillIndex:
         self._catalog_cache = None
         self._catalog_generation = -1
         self._retrieve_cache.clear()
+
+
+def _format_bm25_hits(hits: list[SkillIndexEntry]) -> str:
+    """Format BM25 hits for structured logging (lower score = more relevant)."""
+    if not hits:
+        return "(none)"
+    return ", ".join(
+        f"{hit.name}(score={hit.score:.4f})" if hit.score is not None else hit.name
+        for hit in hits
+    )
 
 
 def _normalize_query(text: str) -> str:

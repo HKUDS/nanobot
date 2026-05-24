@@ -28,6 +28,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.agent.skill_selector import resolve_skill_retrieval_provider
 from nanobot.cli_apps import utils as cli_app_utils
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig, SkillRetrievalConfig
@@ -182,6 +183,7 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
+        skill_llm_provider: LLMProvider | None = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -245,8 +247,19 @@ class AgentLoop:
             workspace, 
             timezone=timezone, 
             disabled_skills=disabled_skills,
-            skill_retrieval=skill_retrieval
+            skill_retrieval=skill_retrieval,
+            skill_llm_provider=skill_llm_provider,
         )
+        # 如果 skill_llm_provider 为空，且 skill_retrieval 启用，且 mode 为 llm、hybrid 或 auto，则设置 skill_llm_provider
+        retrieval_cfg = skill_retrieval or SkillRetrievalConfig()
+        
+        if (
+            skill_llm_provider is None
+            and retrieval_cfg.enable
+            and retrieval_cfg.mode in {"llm", "hybrid", "auto"}
+        ):
+            self.context.set_skill_llm_provider(provider)
+
         self.sessions = session_manager or SessionManager(workspace)
         self._webui_turns = WebuiTurnCoordinator(
             bus=self.bus,
@@ -345,6 +358,17 @@ class AgentLoop:
             bus = MessageBus()
         defaults = config.agents.defaults
         provider = extra.pop("provider", None) or make_provider(config)
+
+        # 如果 skill_llm_provider 为空，则根据 skill_retrieval 和 provider 创建一个 skill_llm_provider
+        skill_retrieval = defaults.skill_retrieval
+        skill_llm_provider = extra.pop("skill_llm_provider", None)
+        if skill_llm_provider is None:
+            skill_llm_provider = resolve_skill_retrieval_provider(
+                config,
+                skill_retrieval,
+                provider,
+            )
+
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
@@ -370,7 +394,8 @@ class AgentLoop:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
-            skill_retrieval=defaults.skill_retrieval,
+            skill_retrieval=skill_retrieval,
+            skill_llm_provider=skill_llm_provider,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
@@ -596,6 +621,7 @@ class AgentLoop:
         session: Session,
         history: list[dict[str, Any]],
         pending_summary: str | None,
+        skill_entries: list[dict[str, object]] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         return self.context.build_messages(
@@ -607,7 +633,28 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_summary=pending_summary,
             session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace),
+            skill_entries=skill_entries,
         )
+
+    async def _resolve_turn_skill_entries(
+            self,
+            current_message: str | list[dict[str, Any]],
+        ) -> list[dict[str, object]] | None:
+        """Pre-resolve skill summary rows for the current user message."""
+        retrieval_query = ContextBuilder._extract_retrieval_query(current_message)
+        logger.info("Turn skill resolve [start]: retrieval_query={!r}", retrieval_query)
+        entries = await self.context.resolve_skill_entries(
+            retrieval_query,
+            exclude=set(self.context.skills.get_always_skills()),
+        )
+        if entries is None:
+            logger.info("Turn skill resolve [done]: skipped (retrieval disabled or empty query)")
+        else:
+            logger.info(
+                "Turn skill resolve [done]: selected={}",
+                [str(entry["name"]) for entry in entries],
+            )
+        return entries
 
     async def _dispatch_command_inline(
         self,
@@ -1063,6 +1110,11 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         current_role = "assistant" if is_subagent else "user"
 
+        current_message = "" if is_subagent else msg.content
+        skill_entries = None
+        if not is_subagent:
+            skill_entries = await self._resolve_turn_skill_entries(current_message)
+        # skill_entries = await self._resolve_turn_skill_entries(msg.content)
         messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
@@ -1072,6 +1124,7 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_summary=pending,
             session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace, skip=is_subagent),
+            skill_entries=skill_entries,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
@@ -1314,7 +1367,13 @@ class AgentLoop:
         )
 
         ctx.initial_messages = self._build_initial_messages(
-            ctx.msg, ctx.session, ctx.history, ctx.pending_summary
+            ctx.msg, 
+            ctx.session, 
+            ctx.history, 
+            ctx.pending_summary,
+            skill_entries=await self._resolve_turn_skill_entries(
+                image_generation_prompt(ctx.msg.content, ctx.msg.metadata),
+            )
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session

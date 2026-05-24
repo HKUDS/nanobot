@@ -111,6 +111,7 @@ class SkillRetrievalConfig(Base):
     """按 query 检索 skill 摘要（FTS 目录）。默认关闭。"""
 
     enable: bool = True  # 启用 FTS top-k 检索，替代全量 skill 列表注入
+    mode: Literal["fts", "llm", "hybrid", "auto"] = "llm" # 检索模式：fts 全量 FTS5 目录；llm 纯 LLM 推理；hybrid 混合模式（FTS + LLM）；auto 自动选择（默认）
     top_k: int = Field(default=8, ge=1, le=50)  # 每条用户消息最多召回的 skill 数量
     min_score: float | None = Field(default=None)  # BM25 分数阈值（越小越相关；None 表示不过滤）
     fallback_to_full_list: bool = True  # 检索失败或无结果时回退到全量 catalog
@@ -119,7 +120,11 @@ class SkillRetrievalConfig(Base):
     rebuild_on_miss: bool = True  # 访问时发现 catalog 指纹不匹配则重建
     catalog_cache: bool = True  # L1 全量 catalog 内存缓存（fallback 时避免重复 SELECT）
     query_cache_size: int = Field(default=256, ge=0)  # L1 query LRU 容量（generation + query 命中）；0 表示禁用
-
+    fts_candidate_k: int = Field(default=20, ge=1, le=100)  # FTS 检索候选池大小
+    llm_skill_threshold: int = Field(default=15, ge=1, le=100)  # LLM 检索技能数量阈值
+    llm_model: str | None = None  # LLM 模型名称
+    llm_timeout_s: float = Field(default=10.0, gt=0, le=120)  # LLM 检索超时时间
+    llm_max_tokens: int = Field(default=256, ge=32, le=4096)  # LLM 检索最大 token 数
 
 
 class AgentDefaults(Base):
