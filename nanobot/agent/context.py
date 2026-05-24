@@ -8,6 +8,8 @@ from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from loguru import logger
+
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.session.goal_state import goal_state_runtime_lines
@@ -18,7 +20,8 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.prompt_templates import render_template
 
-
+from nanobot.agent.skill_index import SkillIndex
+from nanobot.config.schema import SkillRetrievalConfig
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
@@ -28,19 +31,43 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self, 
+        workspace: Path, 
+        timezone: str | None = None, 
+        disabled_skills: list[str] | None = None,
+        skill_retrieval: SkillRetrievalConfig | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._skill_retrieval = skill_retrieval or SkillRetrievalConfig()
+        self._skill_index: SkillIndex | None = None
 
+    def warm_skill_index(self) -> None:
+        """启用检索时预热/构建磁盘 skill 索引。"""
+        if not self._skill_retrieval.enable:
+            return
+        self._get_skill_index().warm(self.skills)
+
+    def _get_skill_index(self) -> SkillIndex:
+        """懒加载 SkillIndex 实例。"""
+        if self._skill_index is None:
+            self._skill_index = SkillIndex(self.workspace, self._skill_retrieval)
+        return self._skill_index
+        
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
+        retrieval_query: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        logger.info("Building system prompt with retrieval query: {}", retrieval_query)
+        logger.info("Skill retrieval config: {}", self._skill_retrieval)
+        logger.info("Skill index: {}", self._get_skill_index())
         parts = [self._get_identity(channel=channel)]
 
         bootstrap = self._load_bootstrap_files()
@@ -58,8 +85,9 @@ class ContextBuilder:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
-
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+        exclude = set(always_skills)
+        skills_summary = self._build_skills_summary_section(exclude, retrieval_query)
+        # skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -76,6 +104,61 @@ class ContextBuilder:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
+
+
+    def _build_skills_summary_section(
+        self,
+        exclude: set[str],
+        retrieval_query: str | None,
+    ) -> str:
+        cfg = self._skill_retrieval
+        query = (retrieval_query or "").strip()
+        if cfg.enable and query:
+            entries = self._retrieve_skill_entries(query, exclude=exclude)
+            if entries:
+                return self.skills.build_skills_summary(exclude=exclude, entries=entries)
+            if cfg.fallback_to_full_list:
+                return self._build_full_skills_summary(exclude)
+            return ""
+        return self._build_full_skills_summary(exclude)
+
+    def _build_full_skills_summary(self, exclude: set[str]) -> str:
+        cfg = self._skill_retrieval
+        if cfg.enable:
+            catalog = self._get_skill_index().list_catalog(self.skills)
+            if catalog:
+                entries = [entry.to_summary_dict(self.skills) for entry in catalog]
+                return self.skills.build_skills_summary(exclude=exclude, entries=entries)
+        return self.skills.build_skills_summary(exclude=exclude)
+
+    def _retrieve_skill_entries(self, query: str, *, exclude: set[str]) -> list[dict[str, object]]:
+        cfg = self._skill_retrieval
+        index = self._get_skill_index()
+        if cfg.rebuild_on_miss:
+            index.ensure_ready(self.skills)
+        hits = index.retrieve(
+            query,
+            loader=self.skills,
+            k=cfg.top_k,
+            exclude=exclude,
+            min_score=cfg.min_score,
+        )
+        return [hit.to_summary_dict(self.skills) for hit in hits]
+
+    @staticmethod
+    def _extract_retrieval_query(current_message: str | list[dict[str, Any]]) -> str | None:
+        if isinstance(current_message, str):
+            text = current_message.strip()
+            return text or None
+        if isinstance(current_message, list):
+            parts = [
+                str(block.get("text", ""))
+                for block in current_message
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            text = "\n".join(part for part in parts if part).strip()
+            return text or None
+        return None
 
     def _get_identity(self, channel: str | None = None) -> str:
         """Get the core identity section."""
@@ -182,7 +265,15 @@ class ContextBuilder:
         else:
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    skill_names,
+                    channel=channel,
+                    session_summary=session_summary,
+                    retrieval_query=self._extract_retrieval_query(current_message),
+                ),
+            },
             *history,
         ]
         if messages[-1].get("role") == current_role:

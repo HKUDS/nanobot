@@ -107,6 +107,20 @@ class ModelPresetConfig(Base):
             reasoning_effort=self.reasoning_effort,
         )
 
+class SkillRetrievalConfig(Base):
+    """按 query 检索 skill 摘要（FTS 目录）。默认关闭。"""
+
+    enable: bool = True  # 启用 FTS top-k 检索，替代全量 skill 列表注入
+    top_k: int = Field(default=8, ge=1, le=50)  # 每条用户消息最多召回的 skill 数量
+    min_score: float | None = Field(default=None)  # BM25 分数阈值（越小越相关；None 表示不过滤）
+    fallback_to_full_list: bool = True  # 检索失败或无结果时回退到全量 catalog
+    index_body_chars: int = Field(default=0, ge=0, le=2000)  # 除 frontmatter 外索引的 SKILL.md 正文字符数（0 = 仅 name + description）
+    rebuild_on_startup: bool = True  # Agent 启动时预热/重建索引
+    rebuild_on_miss: bool = True  # 访问时发现 catalog 指纹不匹配则重建
+    catalog_cache: bool = True  # L1 全量 catalog 内存缓存（fallback 时避免重复 SELECT）
+    query_cache_size: int = Field(default=256, ge=0)  # L1 query LRU 容量（generation + query 命中）；0 表示禁用
+
+
 
 class AgentDefaults(Base):
     """Default agent configuration."""
@@ -139,6 +153,7 @@ class AgentDefaults(Base):
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
+    skill_retrieval: SkillRetrievalConfig = Field(default_factory=SkillRetrievalConfig)
     session_ttl_minutes: int = Field(
         default=0,
         ge=0,
