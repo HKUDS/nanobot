@@ -428,6 +428,10 @@ class OpenAICompatProvider(LLMProvider):
             return tool_call_id
         return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
 
+    def _should_normalize_tool_call_ids(self) -> bool:
+        """Return True for providers that reject normal OpenAI tool call IDs."""
+        return bool(self._spec and self._spec.name == "mistral")
+
     @staticmethod
     def _normalize_tool_call_arguments(arguments: Any) -> str:
         """Force function.arguments into a valid JSON object string."""
@@ -466,9 +470,12 @@ class OpenAICompatProvider(LLMProvider):
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
         force_string_content = bool(self._spec and self._spec.name == "deepseek")
+        normalize_tool_ids = self._should_normalize_tool_call_ids()
 
         def map_id(value: Any) -> Any:
             if not isinstance(value, str):
+                return value
+            if not normalize_tool_ids:
                 return value
             return id_map.setdefault(value, self._normalize_tool_call_id(value))
 
@@ -956,7 +963,7 @@ class OpenAICompatProvider(LLMProvider):
                     args = json_repair.loads(args)
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
+                    id=str(tc_map.get("id") or _short_tool_id()),
                     name=str(fn.get("name") or ""),
                     arguments=args if isinstance(args, dict) else {},
                     extra_content=ec,
@@ -999,7 +1006,7 @@ class OpenAICompatProvider(LLMProvider):
                 args = json_repair.loads(args)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
-                id=_short_tool_id(),
+                id=str(getattr(tc, "id", None) or _short_tool_id()),
                 name=tc.function.name,
                 arguments=args,
                 extra_content=ec,

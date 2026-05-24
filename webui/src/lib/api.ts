@@ -2,6 +2,8 @@ import type {
   ChatSummary,
   CliAppsPayload,
   ImageGenerationSettingsUpdate,
+  McpPresetsPayload,
+  ModelConfigurationCreate,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
@@ -37,6 +39,21 @@ async function request<T>(
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
+}
+
+function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefined {
+  const payload: Record<string, unknown> = {};
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === null || value === undefined) return;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) payload[key] = trimmed;
+      return;
+    }
+    payload[key] = value;
+  });
+  if (!Object.keys(payload).length) return undefined;
+  return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -125,6 +142,66 @@ export async function runCliAppAction(
   return request<CliAppsPayload>(`${base}/api/settings/cli-apps/${action}?${query}`, token);
 }
 
+export async function fetchMcpPresets(
+  token: string,
+  base: string = "",
+): Promise<McpPresetsPayload> {
+  return request<McpPresetsPayload>(`${base}/api/settings/mcp-presets`, token);
+}
+
+export async function runMcpPresetAction(
+  token: string,
+  action: "enable" | "remove" | "test",
+  name: string,
+  values: Record<string, string> = {},
+  base: string = "",
+): Promise<McpPresetsPayload> {
+  const query = new URLSearchParams();
+  query.set("name", name);
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets/${action}?${query}`,
+    token,
+    { headers: mcpValuesHeader(values) },
+  );
+}
+
+export async function saveCustomMcpServer(
+  token: string,
+  values: Record<string, string>,
+  base: string = "",
+): Promise<McpPresetsPayload> {
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets/custom`,
+    token,
+    { headers: mcpValuesHeader(values) },
+  );
+}
+
+export async function importMcpConfig(
+  token: string,
+  config: string,
+  base: string = "",
+): Promise<McpPresetsPayload> {
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets/import`,
+    token,
+    { headers: mcpValuesHeader({ config }) },
+  );
+}
+
+export async function updateMcpServerTools(
+  token: string,
+  name: string,
+  enabledTools: string[],
+  base: string = "",
+): Promise<McpPresetsPayload> {
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets/tools`,
+    token,
+    { headers: mcpValuesHeader({ name, enabled_tools: enabledTools }) },
+  );
+}
+
 export async function listSlashCommands(
   token: string,
   base: string = "",
@@ -186,6 +263,22 @@ export async function updateSettings(
     query.set("tool_hint_max_length", String(update.toolHintMaxLength));
   }
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
+}
+
+export async function createModelConfiguration(
+  token: string,
+  configuration: ModelConfigurationCreate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  if (configuration.name !== undefined) query.set("name", configuration.name);
+  query.set("label", configuration.label);
+  query.set("provider", configuration.provider);
+  query.set("model", configuration.model);
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/create?${query}`,
+    token,
+  );
 }
 
 export async function updateProviderSettings(

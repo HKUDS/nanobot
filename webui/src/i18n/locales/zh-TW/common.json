@@ -81,7 +81,9 @@
       "image": "Image",
       "web": "Web",
       "runtime": "Runtime",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "cliApps": "CLI 應用",
+      "mcp": "MCP"
     },
     "sections": {
       "interface": "介面",
@@ -97,7 +99,9 @@
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "功能",
-      "integrations": "Integrations"
+      "integrations": "Integrations",
+      "cliApps": "CLI 應用",
+      "mcp": "MCP"
     },
     "rows": {
       "theme": "主題",
@@ -141,7 +145,11 @@
       "ssrfWhitelist": "SSRF whitelist",
       "mcpServers": "MCP servers",
       "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs"
+      "configurationDocs": "Configuration docs",
+      "currentModel": "目前模型",
+      "brandLogos": "品牌標誌",
+      "cliAppsCatalog": "CLI 應用目錄",
+      "cliAppsFilter": "CLI 應用篩選"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
@@ -168,7 +176,13 @@
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
       "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "currentModel": "選擇 nanobot 接下來回覆時使用的模型。",
+      "selectedModelProvider": "由目前模型決定。",
+      "selectedModelValue": "由目前模型決定。",
+      "brandLogos": "標誌會從品牌網域載入，並提供本地圖示作為備援。",
+      "cliAppsCatalog": "瀏覽 nanobot 可在本機執行的應用 CLI。",
+      "cliAppsFilter": "按應用、分類或能力搜尋。"
     },
     "values": {
       "light": "淺色",
@@ -185,9 +199,7 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready"
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "正在載入設定...",
@@ -259,7 +271,8 @@
     },
     "providers": {
       "searchPlaceholder": "Search providers",
-      "noMatches": "No providers match this search."
+      "noMatches": "No providers match this search.",
+      "saveProvider": "儲存服務商"
     },
     "image": {
       "selectProvider": "選擇服務商",
@@ -267,6 +280,106 @@
       "selectSize": "選擇尺寸",
       "configureProvider": "設定服務商",
       "missingCredential": "啟用圖片生成前，請先設定此服務商。"
+    },
+    "models": {
+      "selectModel": "選擇模型",
+      "addConfiguration": "新增設定",
+      "newConfiguration": "新增模型設定",
+      "newConfigurationHelp": "把服務商和模型儲存為一個可直接切換的選項。",
+      "configurationName": "名稱",
+      "configurationNamePlaceholder": "快速寫作"
+    },
+    "timezone": {
+      "select": "選擇時區",
+      "search": "搜尋時區",
+      "empty": "沒有符合的時區。"
+    },
+    "cliApps": {
+      "allCategories": "全部分類",
+      "availableCount": "{{count}} 個應用",
+      "installedCount": "已安裝 {{count}} 個",
+      "summary": "已安裝 {{installed}} / {{total}} 個 CLI",
+      "filterAll": "全部",
+      "filterInstalled": "已安裝的 CLI",
+      "filterNotInstalled": "未安裝",
+      "searchPlaceholder": "搜尋 CLI",
+      "statusInstalled": "已安裝",
+      "statusAvailable": "可用",
+      "statusMissing": "缺少相依項",
+      "statusUnsupported": "不支援",
+      "statusNotInstalled": "未安裝",
+      "unsupported": "不支援",
+      "loading": "正在載入 CLI 應用...",
+      "empty": "沒有符合此篩選條件的 CLI 應用。",
+      "readyTitle": "@{{name}} 已就緒",
+      "readyStatus": "就緒",
+      "readyPrompt": "使用 @{{name}} 查看這個 CLI 能做什麼。",
+      "readyTry": "試用 @{{name}}",
+      "readyCopied": "已複製",
+      "openChat": "開啟聊天",
+      "requires": "需要",
+      "test": "測試 CLI",
+      "update": "更新 CLI",
+      "uninstall": "解除安裝 CLI",
+      "install": "安裝 CLI",
+      "unavailable": "不可用",
+      "noDescription": "暫無描述。"
+    },
+    "mcp": {
+      "allCategories": "全部分類",
+      "summary": "已啟用 {{installed}} / {{total}} 個預設",
+      "filterAll": "全部",
+      "filterInstalled": "已啟用",
+      "filterNotInstalled": "未啟用",
+      "searchPlaceholder": "搜尋 MCP 預設",
+      "moreOptions": "更多 MCP 選項",
+      "moreOptionsSubtitle": "新增自訂服務，或匯入 mcp.json。",
+      "customTitle": "自訂 MCP",
+      "customSubtitle": "新增任意 stdio、HTTP 或 SSE MCP 服務。",
+      "customAction": "自訂",
+      "importAction": "匯入",
+      "serverName": "服務名稱",
+      "serverUrl": "URL",
+      "transport": "傳輸方式",
+      "command": "指令",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "工具逾時",
+      "advancedOptions": "進階選項",
+      "hideAdvanced": "隱藏進階",
+      "saveCustom": "儲存 MCP",
+      "configImport": "匯入 mcp.json",
+      "importConfig": "匯入",
+      "restartRequired": "重新啟動 nanobot 以連接更新後的 MCP 工具。",
+      "toolsFound": "{{count}} 個工具",
+      "loading": "正在載入 MCP 預設...",
+      "empty": "沒有符合此篩選條件的 MCP 預設。",
+      "openDocs": "開啟文件",
+      "test": "測試",
+      "remove": "移除",
+      "enable": "啟用",
+      "enabled": "已啟用",
+      "setup": "連接",
+      "configure": "連接",
+      "connectTitle": "連接 {{name}}",
+      "connectHint": "從你的帳號設定中加入金鑰。",
+      "saveAndEnable": "儲存並啟用",
+      "updateSetup": "更新設定",
+      "configured": "已設定",
+      "keepExisting": "留空以保留目前值",
+      "statusConfigured": "已設定",
+      "statusMissingCredentials": "需要金鑰",
+      "statusMissingDependency": "需要相依項",
+      "statusComingSoon": "即將推出",
+      "statusNotInstalled": "未啟用",
+      "toolScope": "工具",
+      "allTools": "全部",
+      "noTools": "無",
+      "testForTools": "執行測試以檢查並選擇個別工具。"
+    },
+    "legal": {
+      "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
     }
   },
   "chat": {
@@ -370,8 +483,7 @@
           "title": "編輯圖片",
           "prompt": "幫我編輯一張圖片。先請我上傳或指定要編輯的圖片，然後生成編輯後的結果。"
         }
-      },
-      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
+      }
     },
     "header": {
       "toggleSidebar": "切換側邊欄",
@@ -439,6 +551,10 @@
             "title": "查看狀態",
             "description": "顯示執行環境、provider 和 channel 狀態。"
           },
+          "model": {
+            "title": "模型",
+            "description": "查看或切換目前模型預設。"
+          },
           "history": {
             "title": "查看對話歷史",
             "description": "列印最近 N 則已持久化的對話訊息。"
@@ -462,7 +578,21 @@
           "help": {
             "title": "查看說明",
             "description": "列出可用的斜線命令。"
+          },
+          "pairing": {
+            "title": "配對",
+            "description": "管理配對請求。"
           }
+        },
+        "badges": {
+          "current": "目前",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目標正在執行",
+          "goalReady": "開始一個持續目標",
+          "history": "查看最近訊息",
+          "stopRunning": "正在執行"
         }
       },
       "encoding": "處理中…",
@@ -475,6 +605,16 @@
         "decode_failed": "無法解碼這張圖片",
         "too_large": "圖片太大，請換一張小一點的",
         "io": "無法讀取這個檔案"
+      },
+      "mentions": {
+        "ariaLabel": "應用和 MCP",
+        "label": "插件",
+        "cliGroup": "CLI 應用",
+        "mcpGroup": "MCP 服務",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "使用 @{{name}} 呼叫本機 CLI",
+        "mcpDescription": "使用 @{{name}} 呼叫 MCP 服務"
       }
     },
     "scrollToBottom": "捲動到底部",
@@ -499,7 +639,19 @@
     "imageAttachment": "圖片附件",
     "copyReply": "複製回覆",
     "copiedReply": "已複製回覆",
-    "turnLatencyTitle": "本輪耗時（端到端）"
+    "turnLatencyTitle": "本輪耗時（端到端）",
+    "activityThinkingFor": "思考中，已 {{duration}}",
+    "activityThought": "已思考",
+    "activityThoughtFor": "已思考 {{duration}}",
+    "cliActivityRunningOne": "正在使用 @{{name}}",
+    "cliActivityRanOne": "已使用 @{{name}}",
+    "cliActivityFailedOne": "@{{name}} 失敗",
+    "cliActivityRunningMany": "正在使用 {{count}} 個 CLI 應用",
+    "cliActivityRanMany": "已使用 {{count}} 個 CLI 應用",
+    "cliActivityFailedMany": "{{count}} 個 CLI 應用失敗",
+    "cliRunRunning": "使用中",
+    "cliRunRan": "已使用",
+    "cliRunFailed": "失敗"
   },
   "lightbox": {
     "title": "圖片預覽",

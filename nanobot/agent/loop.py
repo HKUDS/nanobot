@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
+import re
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
@@ -28,7 +30,6 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.cli_apps import utils as cli_app_utils
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
@@ -476,26 +477,8 @@ class AgentLoop:
         logger.info("Registered {} tools: {}", len(registered), registered)
 
     async def _connect_mcp(self) -> None:
-        """Connect to configured MCP servers (one-time, lazy)."""
-        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            return
-        self._mcp_connecting = True
-        from nanobot.agent.tools.mcp import connect_mcp_servers
-
-        try:
-            self._mcp_stacks = await connect_mcp_servers(self._mcp_servers, self.tools)
-            if self._mcp_stacks:
-                self._mcp_connected = True
-            else:
-                logger.warning("No MCP servers connected successfully (will retry next message)")
-        except asyncio.CancelledError:
-            logger.warning("MCP connection cancelled (will retry next message)")
-            self._mcp_stacks.clear()
-        except BaseException as e:
-            logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
-            self._mcp_stacks.clear()
-        finally:
-            self._mcp_connecting = False
+        """Connect configured MCP servers."""
+        await agent_context.connect_mcp(self, self.tools)
 
     def _set_tool_context(
         self, channel: str, chat_id: str,
@@ -568,7 +551,7 @@ class AgentLoop:
         media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
         has_text = isinstance(msg.content, str) and msg.content.strip()
         if has_text or media_paths:
-            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | cli_app_utils.session_extra(msg.metadata)
+            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
             session.add_message("user", text, **extra)
@@ -592,8 +575,9 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
+            agent_id=self.bus.agent_id,
             session_summary=pending_summary,
-            session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace),
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace),
         )
 
     async def _dispatch_command_inline(
@@ -796,11 +780,39 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
-                self.auto_compact.check_expired(
-                    self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
-                )
-                continue
+                # No user message arrived — check for agent-to-agent messages
+                # on the timeout fallback.
+                try:
+                    msg = self.bus.agent_inbound.get_nowait()
+                    target = (msg.metadata or {}).get("target_agent")
+                    if target != self.bus.agent_id and target != "*":
+                        logger.debug(
+                            "Dropping misrouted agent message for %s (we are %s)",
+                            target, self.bus.agent_id,
+                        )
+                        continue
+                    if msg.metadata and msg.metadata.get("_agent_reply"):
+                        reply = OutboundMessage(
+                            channel=msg.channel or "cli",
+                            chat_id=msg.chat_id or "",
+                            content=f"<{msg.sender}| {msg.content}",
+                        )
+                        await self.bus.outbound.put(reply)
+                        continue
+                    # Incoming forward (not a reply) — show source prefix,
+                    # then fall through to regular message processing.
+                    notification = OutboundMessage(
+                        channel=msg.channel or "cli",
+                        chat_id=msg.chat_id or "",
+                        content=f"<{msg.sender}| {msg.content}",
+                    )
+                    await self.bus.outbound.put(notification)
+                except asyncio.QueueEmpty:
+                    self.auto_compact.check_expired(
+                        self._schedule_background,
+                        active_session_keys=self._pending_queues.keys(),
+                    )
+                    continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
                 # Only ignore non-task CancelledError signals that may leak from integrations.
@@ -811,7 +823,39 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
+            if await agent_context.handle_runtime_control(self, msg, self.tools):
+                continue
             raw = msg.content.strip()
+
+            # Agent routing: |bot-name> content → forward to bot-name via bus
+            # Also: |*> content → broadcast to all agents
+            AGENT_ROUTING_RE = re.compile(r"^\|([\w][\w-]*|\*)\>\s*(.*)", re.DOTALL)
+            if m := AGENT_ROUTING_RE.match(raw):
+                target_agent = m.group(1)
+                forwarded_content = m.group(2).strip()
+                if target_agent != self.bus.agent_id:
+                    # Forward to target agent(s) via the bus
+                    routing_msg = InboundMessage(
+                        channel=msg.channel,
+                        sender_id=msg.sender_id,
+                        chat_id=msg.chat_id,
+                        content=forwarded_content or "...",
+                        sender=self.bus.agent_id,
+                        metadata={"target_agent": target_agent},
+                    )
+                    await self.bus.publish_agent_message(routing_msg)
+                    # Confirm back to sender
+                    confirm = OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Forwarded to *{target_agent}*: {forwarded_content}",
+                        reply_to=msg.sender_id,
+                    )
+                    await self.bus.outbound.put(confirm)
+                    continue
+                # Addressed to this agent — strip prefix and process normally
+                raw = forwarded_content
+
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
                     msg, msg.session_key, raw,
@@ -914,7 +958,28 @@ class AgentLoop:
                         pending_queue=pending,
                     )
                     if response is not None:
-                        await self.bus.publish_outbound(response)
+                        # Agent-to-agent: publish locally only so the response
+                        # doesn't leak into the Redis outbound stream (which
+                        # the sender's CLI would pick up as a duplicate).
+                        # Delivery to the sender is handled by _agent_reply.
+                        if msg.sender and msg.sender != self.bus.agent_id:
+                            await self.bus.outbound.put(response)
+                        else:
+                            await self.bus.publish_outbound(response)
+                        # Route the response back to the sender agent.
+                        if msg.sender and msg.sender != self.bus.agent_id:
+                            return_msg = InboundMessage(
+                                channel=msg.channel,
+                                sender_id=msg.sender_id,
+                                chat_id=msg.chat_id,
+                                content=response.content,
+                                sender=self.bus.agent_id,
+                                metadata={
+                                    "target_agent": msg.sender,
+                                    "_agent_reply": True,
+                                },
+                            )
+                            await self.bus.publish_agent_message(return_msg)
                     elif msg.channel == "cli":
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
@@ -1057,8 +1122,9 @@ class AgentLoop:
             chat_id=chat_id,
             current_role=current_role,
             sender_id=msg.sender_id,
+            agent_id=self.bus.agent_id,
             session_summary=pending,
-            session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace, skip=is_subagent),
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace, skip=is_subagent),
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(

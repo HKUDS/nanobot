@@ -95,6 +95,39 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
+    """A temperature passed to spawn() should reach the AgentRunSpec."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["temperature"] = spec.temperature
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", temperature=0.9)
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["temperature"] == 0.9
+
+
+@pytest.mark.asyncio
 async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager

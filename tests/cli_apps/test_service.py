@@ -372,6 +372,33 @@ def test_run_installed_cli_uses_argv_without_shell(
     assert "['--json', 'project', 'list']" in result
 
 
+def test_run_reports_created_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    resolved = str(tmp_path / "bin" / "cli-anything-gimp")
+    monkeypatch.setattr(
+        "nanobot.cli_apps.service.shutil.which",
+        lambda entry: resolved if entry == "cli-anything-gimp" else None,
+    )
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        cwd = Path(str(kwargs["cwd"]))
+        (cwd / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
+    manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
+
+    result = manager.run("gimp", ["render"])
+
+    assert "Artifacts created or updated:" in result
+    assert "diagram.png (previewable image" in result
+    assert "![diagram](diagram.png)" in result
+
+
 def test_run_blocks_working_dir_outside_workspace(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _seed_catalog(manager)

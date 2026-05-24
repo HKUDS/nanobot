@@ -375,6 +375,53 @@ describe("NanobotClient", () => {
     );
   });
 
+  it("includes MCP preset attachments in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-mcp",
+      "@browserbase check this page",
+      undefined,
+      {
+        mcpPresets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-mcp",
+        content: "@browserbase check this page",
+        mcp_presets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
+        webui: true,
+      }),
+    );
+  });
+
   it("re-attaches known chats after a reconnect", async () => {
     const client = new NanobotClient({
       url: "ws://test",

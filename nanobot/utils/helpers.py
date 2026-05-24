@@ -523,6 +523,7 @@ def build_status_content(
     *,
     version: str,
     model: str,
+    agent_id: str,
     start_time: float,
     last_usage: dict[str, int],
     context_window_tokens: int,
@@ -567,6 +568,7 @@ def build_status_content(
         token_line,
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}% of input budget)",
         f"\U0001f4ac Session: {session_msg_count} messages",
+        f"\U0001f43e bot-id: {agent_id or 'not set'}",
         f"\u23f1 Uptime: {uptime}",
         f"\u26a1 Tasks: {active_task_count} active",
     ]

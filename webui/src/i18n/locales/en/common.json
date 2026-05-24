@@ -81,6 +81,7 @@
       "image": "Image",
       "web": "Web",
       "cliApps": "CLI Apps",
+      "mcp": "MCP",
       "runtime": "Runtime",
       "advanced": "Advanced"
     },
@@ -96,10 +97,19 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "cliApps": "CLI Apps",
+      "mcp": "MCP",
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capabilities",
       "integrations": "Integrations"
+    },
+    "models": {
+      "selectModel": "Select model",
+      "addConfiguration": "Add configuration",
+      "newConfiguration": "New model configuration",
+      "newConfigurationHelp": "Save a provider and model as a one-click option.",
+      "configurationName": "Name",
+      "configurationNamePlaceholder": "Fast writing"
     },
     "rows": {
       "theme": "Theme",
@@ -112,6 +122,7 @@
       "gateway": "Gateway",
       "restartState": "Restart state",
       "pendingChanges": "Pending changes",
+      "currentModel": "Current model",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -154,6 +165,9 @@
       "provider": "Select the provider that should serve new model requests.",
       "model": "Set the default model name used by nanobot.",
       "configPath": "The gateway configuration file currently in use.",
+      "currentModel": "Choose the model nanobot uses for new replies.",
+      "selectedModelProvider": "Set by the selected model.",
+      "selectedModelValue": "Set by the selected model.",
       "selectedPreset": "Named presets are read-only here; edit them in config.json.",
       "presetModel": "Switch to Default to edit model and provider from the WebUI.",
       "density": "Stored only in this browser.",
@@ -177,6 +191,11 @@
       "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; desktop apps stay untouched.",
       "cliAppsFilter": "Search by app, category, or capability.",
       "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
+    },
+    "timezone": {
+      "select": "Select timezone",
+      "search": "Search timezone",
+      "empty": "No matching timezones."
     },
     "cliApps": {
       "allCategories": "All categories",
@@ -208,6 +227,59 @@
       "unsupported": "Unsupported",
       "unavailable": "Unavailable",
       "noDescription": "No description available."
+    },
+    "mcp": {
+      "allCategories": "All categories",
+      "summary": "{{installed}} of {{total}} presets enabled",
+      "filterAll": "All",
+      "filterInstalled": "Enabled",
+      "filterNotInstalled": "Not enabled",
+      "searchPlaceholder": "Search MCP presets",
+      "moreOptions": "More MCP options",
+      "moreOptionsSubtitle": "Add a custom server or import mcp.json.",
+      "customTitle": "Custom MCP",
+      "customSubtitle": "Add any stdio, HTTP, or SSE MCP server.",
+      "customAction": "Custom",
+      "importAction": "Import",
+      "serverName": "Server name",
+      "serverUrl": "URL",
+      "transport": "Transport",
+      "command": "Command",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "Tool timeout",
+      "advancedOptions": "Advanced options",
+      "hideAdvanced": "Hide advanced",
+      "saveCustom": "Save MCP",
+      "configImport": "Import mcp.json",
+      "importConfig": "Import",
+      "restartRequired": "Restart nanobot to connect updated MCP tools.",
+      "toolsFound": "{{count}} tools",
+      "loading": "Loading MCP presets...",
+      "empty": "No MCP presets match this filter.",
+      "openDocs": "Open docs",
+      "test": "Test",
+      "remove": "Remove",
+      "enable": "Enable",
+      "enabled": "Enabled",
+      "setup": "Connect",
+      "configure": "Connect",
+      "connectTitle": "Connect {{name}}",
+      "connectHint": "Add the key from your account settings.",
+      "saveAndEnable": "Save and enable",
+      "updateSetup": "Update setup",
+      "configured": "configured",
+      "keepExisting": "Leave blank to keep existing",
+      "statusConfigured": "Configured",
+      "statusMissingCredentials": "Needs key",
+      "statusMissingDependency": "Needs dependency",
+      "statusComingSoon": "Coming soon",
+      "statusNotInstalled": "Not enabled",
+      "toolScope": "Tools",
+      "allTools": "All",
+      "noTools": "None",
+      "testForTools": "Run Test to inspect and choose individual tools."
     },
     "values": {
       "light": "Light",
@@ -296,7 +368,8 @@
     },
     "providers": {
       "searchPlaceholder": "Search providers",
-      "noMatches": "No providers match this search."
+      "noMatches": "No providers match this search.",
+      "saveProvider": "Save provider"
     },
     "legal": {
       "thirdPartyBrands": "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement."
@@ -461,6 +534,16 @@
         "navigateHint": "↑↓ Navigate",
         "selectHint": "Enter/Tab Select",
         "closeHint": "Esc Close",
+        "badges": {
+          "current": "Current",
+          "recent": "Recent"
+        },
+        "details": {
+          "goalActive": "Goal is running",
+          "goalReady": "Start a sustained objective",
+          "history": "Show recent messages",
+          "stopRunning": "Running now"
+        },
         "commands": {
           "new": {
             "title": "New chat",
@@ -477,6 +560,10 @@
           "status": {
             "title": "Show status",
             "description": "Display runtime, provider, and channel status."
+          },
+          "model": {
+            "title": "Model",
+            "description": "Show or switch the active model preset."
           },
           "history": {
             "title": "Show conversation history",
@@ -501,12 +588,22 @@
           "help": {
             "title": "Show help",
             "description": "List available slash commands."
+          },
+          "pairing": {
+            "title": "Pairing",
+            "description": "Manage pairing requests."
           }
         }
       },
       "mentions": {
-        "ariaLabel": "CLI Apps",
-        "label": "CLI APPS"
+        "ariaLabel": "Apps and MCP",
+        "label": "Plugins",
+        "cliGroup": "CLI Apps",
+        "mcpGroup": "MCP servers",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Use @{{name}} as a local CLI app",
+        "mcpDescription": "Use @{{name}} as an MCP server"
       },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
@@ -539,15 +636,18 @@
     "agentActivityToolsOnly": "{{tools}} tool calls",
     "agentActivityLiveSummary": "Working… · {{reasoning}} steps · {{tools}} tool calls",
     "agentActivityLiveToolsOnly": "Working… · {{tools}} tool calls",
-    "cliActivityRunningOne": "Running CLI @{{name}}",
-    "cliActivityRanOne": "Ran CLI @{{name}}",
-    "cliActivityFailedOne": "CLI failed @{{name}}",
-    "cliActivityRunningMany": "Running {{count}} CLIs",
-    "cliActivityRanMany": "Ran {{count}} CLIs",
-    "cliActivityFailedMany": "{{count}} CLI failed",
-    "cliRunRunning": "Running CLI",
-    "cliRunRan": "Ran CLI",
-    "cliRunFailed": "CLI failed",
+    "activityThinkingFor": "Thinking for {{duration}}",
+    "activityThought": "Thought",
+    "activityThoughtFor": "Thought for {{duration}}",
+    "cliActivityRunningOne": "Using @{{name}}",
+    "cliActivityRanOne": "Used @{{name}}",
+    "cliActivityFailedOne": "Failed @{{name}}",
+    "cliActivityRunningMany": "Using {{count}} CLI apps",
+    "cliActivityRanMany": "Used {{count}} CLI apps",
+    "cliActivityFailedMany": "{{count}} CLI apps failed",
+    "cliRunRunning": "Using",
+    "cliRunRan": "Used",
+    "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
     "copyReply": "Copy reply",
     "copiedReply": "Copied reply",

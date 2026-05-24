@@ -92,6 +92,7 @@ FallbackCandidate = str | InlineFallbackConfig
 class ModelPresetConfig(Base):
     """A named set of model + generation parameters for quick switching."""
 
+    label: str | None = None
     model: str
     provider: str = "auto"
     max_tokens: int = 8192
@@ -254,6 +255,7 @@ class MCPServerConfig(Base):
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
+    cwd: str = ""  # Stdio: working directory for MCP server runtime artifacts
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
@@ -287,9 +289,35 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class BusConfig(Base):
+    """Message bus backend configuration.
+
+    Controls how the agent and channels exchange messages.
+    ``local`` (default) uses in-process ``asyncio.Queue``.
+    ``nats`` uses NATS pub/sub for cross-instance communication.
+    ``redis`` uses Redis pub/sub for cross-instance communication.
+    """
+
+    backend: Literal["local", "nats", "redis"] = "nats"
+    url: str = ""
+    agent_id: str = ""
+
+    # NATS-specific
+    subject_prefix: str = "nanobot.agent"
+
+    # Redis-specific
+    channel_prefix: str = "nanobot:agent"
+
+    # Legacy Redis Stream fields (kept for backward compat)
+    stream_prefix: str = "nanobot:bus"
+    consumer_group: str = "nanobot-consumers"
+    read_block_ms: int = 2000
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    bus: BusConfig = Field(default_factory=BusConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)

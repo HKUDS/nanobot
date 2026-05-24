@@ -109,6 +109,46 @@ export default function MarkdownTextRenderer({
           </a>
         );
       },
+      img({ src, alt, node: _node, className: imgClassName, ...props }) {
+        void _node;
+        const source = typeof src === "string" ? src : "";
+        if (!source) return null;
+        const label = typeof alt === "string" ? alt : "";
+        return (
+          <span
+            className={cn(
+              "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
+              "border border-border/70 bg-background shadow-sm",
+            )}
+          >
+            <a
+              href={source}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="block bg-muted/20"
+              aria-label={label ? `Open ${label}` : "Open image"}
+            >
+              <img
+                src={source}
+                alt={label}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+                className={cn(
+                  "block h-auto max-h-[34rem] max-w-full bg-background object-contain",
+                  imgClassName,
+                )}
+                {...props}
+              />
+            </a>
+            {label ? (
+              <span className="block max-w-full truncate px-3 py-2 text-xs text-muted-foreground">
+                {label}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     }),
     [highlightCode],
   );

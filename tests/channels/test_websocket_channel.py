@@ -481,6 +481,72 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_stream_end_rewrites_local_markdown_image(monkeypatch, tmp_path) -> None:
+    bus = MagicMock()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    media = tmp_path / "media"
+
+    def fake_media_dir(channel: str | None = None):
+        path = media / channel if channel else media
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        workspace_path=workspace,
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_delta("chat-1", "![Diagram](", {"_stream_delta": True, "_stream_id": "sid"})
+    await channel.send_delta("chat-1", "diagram.png)", {"_stream_delta": True, "_stream_id": "sid"})
+    await channel.send_delta("chat-1", "", {"_stream_end": True, "_stream_id": "sid"})
+
+    assert mock_ws.send.await_count == 3
+    final = json.loads(mock_ws.send.call_args_list[2][0][0])
+    assert final["event"] == "stream_end"
+    assert final["text"].startswith("![Diagram](/api/media/")
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_rewrites_inline_final_text(monkeypatch, tmp_path) -> None:
+    bus = MagicMock()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    media = tmp_path / "media"
+
+    def fake_media_dir(channel: str | None = None):
+        path = media / channel if channel else media
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        workspace_path=workspace,
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_delta(
+        "chat-1",
+        "![Diagram](diagram.png)",
+        {"_stream_delta": True, "_stream_end": True, "_stream_id": "sid"},
+    )
+
+    mock_ws.send.assert_awaited_once()
+    final = json.loads(mock_ws.send.await_args.args[0])
+    assert final["event"] == "stream_end"
+    assert final["text"].startswith("![Diagram](/api/media/")
+
+
+@pytest.mark.asyncio
 async def test_send_reasoning_delta_emits_streaming_frame() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -1122,6 +1188,30 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert bad_preset.status_code == 400
 
+        created_preset = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/model-configurations/create"
+            "?label=Fast%20writing&provider=openai&model=openai%2Fgpt-4.1-mini",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert created_preset.status_code == 200
+        created_body = created_preset.json()
+        assert created_body["agent"]["model_preset"] == "fast-writing"
+        assert created_body["agent"]["model"] == "openai/gpt-4.1-mini"
+        created_presets = {
+            preset["name"]: preset for preset in created_body["model_presets"]
+        }
+        assert created_presets["fast-writing"]["label"] == "Fast writing"
+        assert created_presets["fast-writing"]["provider"] == "openai"
+
+        duplicate_preset = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/model-configurations/create"
+            "?label=Fast%20writing&provider=openai&model=openai%2Fgpt-4.1-mini",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert duplicate_preset.status_code == 409
+
         search_updated = await _http_get(
             "http://127.0.0.1:"
             f"{port}/api/settings/web-search/update?provider=searxng"
@@ -1189,7 +1279,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         saved = load_config(config_path)
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
-        assert saved.agents.defaults.model_preset == "deep"
+        assert saved.agents.defaults.model_preset == "fast-writing"
+        assert saved.model_presets["fast-writing"].label == "Fast writing"
+        assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
+        assert saved.model_presets["fast-writing"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"
         assert saved.agents.defaults.bot_name == "Nano"
         assert saved.agents.defaults.bot_icon == "N"

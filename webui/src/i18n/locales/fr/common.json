@@ -81,7 +81,9 @@
       "image": "Image",
       "web": "Web",
       "runtime": "Runtime",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "cliApps": "Apps CLI",
+      "mcp": "MCP"
     },
     "sections": {
       "interface": "Interface",
@@ -97,7 +99,9 @@
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capacités",
-      "integrations": "Integrations"
+      "integrations": "Integrations",
+      "cliApps": "Apps CLI",
+      "mcp": "MCP"
     },
     "rows": {
       "theme": "Thème",
@@ -141,7 +145,11 @@
       "ssrfWhitelist": "SSRF whitelist",
       "mcpServers": "MCP servers",
       "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs"
+      "configurationDocs": "Configuration docs",
+      "currentModel": "Modèle actuel",
+      "brandLogos": "Logos de marque",
+      "cliAppsCatalog": "Catalogue d'apps CLI",
+      "cliAppsFilter": "Filtre des apps CLI"
     },
     "help": {
       "theme": "Basculer entre les apparences claire et sombre.",
@@ -168,7 +176,13 @@
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
       "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "currentModel": "Choisissez le modèle que nanobot utilisera pour les prochaines réponses.",
+      "selectedModelProvider": "Défini par le modèle sélectionné.",
+      "selectedModelValue": "Défini par le modèle sélectionné.",
+      "brandLogos": "Les logos sont chargés depuis les domaines des marques avec une icône locale en secours.",
+      "cliAppsCatalog": "Parcourez les CLIs d'apps que nanobot peut exécuter localement.",
+      "cliAppsFilter": "Recherchez par app, catégorie ou capacité."
     },
     "values": {
       "light": "Clair",
@@ -185,9 +199,7 @@
       "on": "On",
       "off": "Off",
       "configured": "Configured",
-      "notConfigured": "Not configured",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready"
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "Chargement des paramètres...",
@@ -259,7 +271,8 @@
     },
     "providers": {
       "searchPlaceholder": "Search providers",
-      "noMatches": "No providers match this search."
+      "noMatches": "No providers match this search.",
+      "saveProvider": "Enregistrer le fournisseur"
     },
     "image": {
       "selectProvider": "Sélectionner un fournisseur",
@@ -267,6 +280,106 @@
       "selectSize": "Sélectionner une taille",
       "configureProvider": "Configurer le fournisseur",
       "missingCredential": "Configurez ce fournisseur avant d’activer la génération d’images."
+    },
+    "models": {
+      "selectModel": "Sélectionner un modèle",
+      "addConfiguration": "Ajouter une configuration",
+      "newConfiguration": "Nouvelle configuration de modèle",
+      "newConfigurationHelp": "Enregistrez un fournisseur et un modèle comme option en un clic.",
+      "configurationName": "Nom",
+      "configurationNamePlaceholder": "Rédaction rapide"
+    },
+    "timezone": {
+      "select": "Sélectionner un fuseau horaire",
+      "search": "Rechercher un fuseau horaire",
+      "empty": "Aucun fuseau horaire correspondant."
+    },
+    "cliApps": {
+      "allCategories": "Toutes les catégories",
+      "availableCount": "{{count}} apps",
+      "installedCount": "{{count}} installées",
+      "summary": "{{installed}} CLIs installées sur {{total}}",
+      "filterAll": "Tout",
+      "filterInstalled": "CLIs installées",
+      "filterNotInstalled": "Non installées",
+      "searchPlaceholder": "Rechercher des CLIs",
+      "statusInstalled": "Installée",
+      "statusAvailable": "Disponible",
+      "statusMissing": "Dépendance manquante",
+      "statusUnsupported": "Non compatible",
+      "statusNotInstalled": "Non installée",
+      "unsupported": "Non compatible",
+      "loading": "Chargement des apps CLI...",
+      "empty": "Aucune app CLI ne correspond à ce filtre.",
+      "readyTitle": "@{{name}} est prêt",
+      "readyStatus": "Prêt",
+      "readyPrompt": "Utilisez @{{name}} pour voir ce que ce CLI peut faire.",
+      "readyTry": "Essayer @{{name}}",
+      "readyCopied": "Copié",
+      "openChat": "Ouvrir le chat",
+      "requires": "Requiert",
+      "test": "Tester le CLI",
+      "update": "Mettre à jour le CLI",
+      "uninstall": "Désinstaller le CLI",
+      "install": "Installer le CLI",
+      "unavailable": "Indisponible",
+      "noDescription": "Aucune description disponible."
+    },
+    "mcp": {
+      "allCategories": "Toutes les catégories",
+      "summary": "{{installed}} presets activés sur {{total}}",
+      "filterAll": "Tout",
+      "filterInstalled": "Activés",
+      "filterNotInstalled": "Non activés",
+      "searchPlaceholder": "Rechercher des presets MCP",
+      "moreOptions": "Plus d'options MCP",
+      "moreOptionsSubtitle": "Ajoutez un serveur personnalisé ou importez mcp.json.",
+      "customTitle": "MCP personnalisé",
+      "customSubtitle": "Ajoutez n'importe quel serveur MCP stdio, HTTP ou SSE.",
+      "customAction": "Personnalisé",
+      "importAction": "Importer",
+      "serverName": "Nom du serveur",
+      "serverUrl": "URL",
+      "transport": "Transport",
+      "command": "Commande",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "Délai d'outil",
+      "advancedOptions": "Options avancées",
+      "hideAdvanced": "Masquer les options avancées",
+      "saveCustom": "Enregistrer MCP",
+      "configImport": "Importer mcp.json",
+      "importConfig": "Importer",
+      "restartRequired": "Redémarrez nanobot pour connecter les outils MCP mis à jour.",
+      "toolsFound": "{{count}} outils",
+      "loading": "Chargement des presets MCP...",
+      "empty": "Aucun preset MCP ne correspond à ce filtre.",
+      "openDocs": "Ouvrir la doc",
+      "test": "Tester",
+      "remove": "Supprimer",
+      "enable": "Activer",
+      "enabled": "Activé",
+      "setup": "Connecter",
+      "configure": "Connecter",
+      "connectTitle": "Connecter {{name}}",
+      "connectHint": "Ajoutez la clé depuis les paramètres de votre compte.",
+      "saveAndEnable": "Enregistrer et activer",
+      "updateSetup": "Mettre à jour la configuration",
+      "configured": "configuré",
+      "keepExisting": "Laissez vide pour conserver la valeur actuelle",
+      "statusConfigured": "Configuré",
+      "statusMissingCredentials": "Clé requise",
+      "statusMissingDependency": "Dépendance requise",
+      "statusComingSoon": "Bientôt disponible",
+      "statusNotInstalled": "Non activé",
+      "toolScope": "Outils",
+      "allTools": "Tous",
+      "noTools": "Aucun",
+      "testForTools": "Exécutez Tester pour inspecter et choisir des outils individuels."
+    },
+    "legal": {
+      "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
     }
   },
   "chat": {
@@ -370,8 +483,7 @@
           "title": "Modifier une image",
           "prompt": "Aidez-moi à modifier une image. Demandez-moi d’abord de téléverser ou d’indiquer l’image, puis générez le résultat modifié."
         }
-      },
-      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil."
+      }
     },
     "header": {
       "toggleSidebar": "Afficher ou masquer la barre latérale",
@@ -439,6 +551,10 @@
             "title": "Afficher l’état",
             "description": "Afficher l’état du runtime, du provider et des channels."
           },
+          "model": {
+            "title": "Modèle",
+            "description": "Afficher ou changer le préréglage de modèle actif."
+          },
           "history": {
             "title": "Afficher l’historique",
             "description": "Afficher les N derniers messages persistés de la conversation."
@@ -462,7 +578,21 @@
           "help": {
             "title": "Afficher l’aide",
             "description": "Lister les commandes slash disponibles."
+          },
+          "pairing": {
+            "title": "Appairage",
+            "description": "Gérer les demandes d’appairage."
           }
+        },
+        "badges": {
+          "current": "Actuel",
+          "recent": "Récent"
+        },
+        "details": {
+          "goalActive": "L’objectif est en cours",
+          "goalReady": "Démarrer un objectif durable",
+          "history": "Afficher les messages récents",
+          "stopRunning": "En cours"
         }
       },
       "encoding": "Traitement…",
@@ -475,6 +605,16 @@
         "decode_failed": "Impossible de décoder cette image",
         "too_large": "Image trop grande — essayez-en une plus petite",
         "io": "Impossible de lire ce fichier"
+      },
+      "mentions": {
+        "ariaLabel": "Apps et MCP",
+        "label": "Plugins",
+        "cliGroup": "Apps CLI",
+        "mcpGroup": "Serveurs MCP",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Utiliser @{{name}} comme app CLI locale",
+        "mcpDescription": "Utiliser @{{name}} comme serveur MCP"
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",
@@ -499,7 +639,19 @@
     "imageAttachment": "Pièce jointe image",
     "copyReply": "Copier la réponse",
     "copiedReply": "Réponse copiée",
-    "turnLatencyTitle": "Temps de réponse (de bout en bout)"
+    "turnLatencyTitle": "Temps de réponse (de bout en bout)",
+    "activityThinkingFor": "Réflexion pendant {{duration}}",
+    "activityThought": "Réflexion terminée",
+    "activityThoughtFor": "Réflexion terminée en {{duration}}",
+    "cliActivityRunningOne": "Utilisation de @{{name}}",
+    "cliActivityRanOne": "@{{name}} utilisé",
+    "cliActivityFailedOne": "Échec de @{{name}}",
+    "cliActivityRunningMany": "Utilisation de {{count}} apps CLI",
+    "cliActivityRanMany": "{{count}} apps CLI utilisées",
+    "cliActivityFailedMany": "Échec de {{count}} apps CLI",
+    "cliRunRunning": "Utilisation",
+    "cliRunRan": "Utilisé",
+    "cliRunFailed": "Échec"
   },
   "lightbox": {
     "title": "Aperçu de l’image",

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { CliAppInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -39,6 +39,28 @@ const CLI_APPS: CliAppInfo[] = [
   },
 ];
 
+const MCP_PRESETS: McpPresetInfo[] = [
+  {
+    name: "browserbase",
+    display_name: "Browserbase",
+    category: "browser",
+    description: "Cloud browser automation",
+    docs_url: "https://docs.browserbase.com",
+    transport: "streamableHttp",
+    requires: "Browserbase API key",
+    note: "",
+    install_supported: true,
+    installed: true,
+    configured: true,
+    available: true,
+    status: "configured",
+    logo_url: "https://example.invalid/browserbase.svg",
+    brand_color: "#111827",
+    required_fields: [],
+    connection_summary: "https://mcp.browserbase.com/mcp",
+  },
+];
+
 describe("MessageBubble", () => {
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
@@ -69,6 +91,7 @@ describe("MessageBubble", () => {
 
     const token = screen.getByTestId("message-cli-mention-zoom");
     expect(token).toHaveTextContent("@zoom");
+    expect(token).toHaveAttribute("title", "CLI app: Zoom");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
@@ -102,6 +125,23 @@ describe("MessageBubble", () => {
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #F08705");
     expect(screen.getByTestId("message-cli-mention-logo-drawio")).toBeInTheDocument();
+  });
+
+  it("renders MCP preset mentions inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-mcp",
+      role: "user",
+      content: "Use @browserbase to inspect the checkout flow",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} mcpPresets={MCP_PRESETS} />);
+
+    const token = screen.getByTestId("message-mcp-mention-browserbase");
+    expect(token).toHaveTextContent("@browserbase");
+    expect(token).toHaveAttribute("title", "MCP server: Browserbase");
+    expect(token.getAttribute("style")).toContain("color: #111827");
+    expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
   });
 
   it("copies completed assistant replies from the action row", async () => {
@@ -279,6 +319,7 @@ describe("MessageBubble", () => {
       expect(references[0].parentElement).not.toHaveClass("translate-y-[0.08em]");
       expect(references[0].parentElement).toHaveClass("align-baseline");
       expect(references[0].parentElement).toHaveClass("leading-[inherit]");
+      expect(references[0]).toHaveClass("items-baseline");
       expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
       expect(references[0]).not.toHaveTextContent("webui/src/components");
       expect(screen.getByText("index.html")).toBeInTheDocument();

@@ -226,6 +226,7 @@ describe("ThreadMessages", () => {
         content: "final answer",
         reasoning: "summarize results",
         reasoningStreaming: false,
+        latencyMs: 9_200,
         createdAt: 3,
       },
     ];
@@ -239,6 +240,7 @@ describe("ThreadMessages", () => {
       "t1",
       "a1-reasoning",
     ]);
+    expect(units[0].type === "cluster" ? units[0].messages.at(-1)?.latencyMs : undefined).toBe(9_200);
     expect(units[1]).toMatchObject({
       type: "single",
       message: {
@@ -252,7 +254,41 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Thought for 9s")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
+  });
+
+  it("passes assistant turn latency to the preceding completed activity cluster", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "search plan",
+        reasoningStreaming: false,
+        createdAt: 1,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "web_search()",
+        traces: ["web_search()"],
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "final answer",
+        latencyMs: 14_800,
+        createdAt: 1,
+      },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+
+    expect(screen.getByText("Thought for 15s")).toBeInTheDocument();
+    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
   });
 
   it("shows copy only on the last assistant slice before the next user turn", () => {

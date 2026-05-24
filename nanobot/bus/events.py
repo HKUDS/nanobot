@@ -9,6 +9,12 @@ from typing import Any
 # render it and other channels may ignore unknown keys.
 OUTBOUND_META_AGENT_UI = "_agent_ui"
 
+# Internal-only inbound metadata used by in-process channels to ask the agent
+# loop to update runtime state without going through a user session.
+INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
+RUNTIME_CONTROL_ACK = "_ack"
+RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
+
 
 @dataclass
 class InboundMessage:
@@ -18,6 +24,7 @@ class InboundMessage:
     sender_id: str  # User identifier
     chat_id: str  # Chat/channel identifier
     content: str  # Message text
+    sender: str = ""  # Agent ID of the sending instance (cross-bus comms)
     timestamp: datetime = field(default_factory=datetime.now)
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
@@ -45,4 +52,3 @@ class OutboundMessage:
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     buttons: list[list[str]] = field(default_factory=list)
-

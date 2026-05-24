@@ -14,13 +14,22 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
-import type { CliAppInfo, UICliAppAttachment, UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  UICliAppAttachment,
+  UIMcpPresetAttachment,
+  UIImage,
+  UIMediaAttachment,
+  UIMessage,
+} from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
   /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
   showAssistantCopyAction?: boolean;
   cliApps?: CliAppInfo[];
+  mcpPresets?: McpPresetInfo[];
 }
 
 /**
@@ -36,6 +45,7 @@ export function MessageBubble({
   message,
   showAssistantCopyAction = true,
   cliApps = [],
+  mcpPresets = [],
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -44,6 +54,10 @@ export function MessageBubble({
   const mentionCliApps = useMemo(
     () => mergeCliMentionApps(cliApps, message.cliApps),
     [cliApps, message.cliApps],
+  );
+  const mentionMcpPresets = useMemo(
+    () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
+    [mcpPresets, message.mcpPresets],
   );
 
   useEffect(() => {
@@ -96,7 +110,11 @@ export function MessageBubble({
               "text-left text-[16px]/[1.75] whitespace-pre-wrap break-words",
             )}
           >
-            <CliAppMentionText text={message.content} cliApps={mentionCliApps} />
+            <CliAppMentionText
+              text={message.content}
+              cliApps={mentionCliApps}
+              mcpPresets={mentionMcpPresets}
+            />
           </p>
         ) : null}
       </div>
@@ -164,6 +182,39 @@ export function MessageBubble({
       )}
     </div>
   );
+}
+
+function mergeMcpMentionPresets(
+  presets: McpPresetInfo[],
+  attachments: UIMcpPresetAttachment[] | undefined,
+): McpPresetInfo[] {
+  if (!attachments?.length) return presets;
+  const byName = new Map(presets.map((preset) => [preset.name.toLowerCase(), preset]));
+  for (const attachment of attachments) {
+    const name = attachment.name?.trim();
+    if (!name) continue;
+    const existing = byName.get(name.toLowerCase());
+    byName.set(name.toLowerCase(), {
+      name,
+      display_name: attachment.display_name || existing?.display_name || name,
+      category: attachment.category || existing?.category || "mcp",
+      description: existing?.description || "",
+      docs_url: existing?.docs_url || "",
+      transport: attachment.transport || existing?.transport || "mcp",
+      requires: existing?.requires || "",
+      note: existing?.note || "",
+      install_supported: existing?.install_supported ?? true,
+      installed: true,
+      configured: attachment.configured ?? existing?.configured ?? true,
+      available: existing?.available ?? true,
+      status: attachment.status || existing?.status || "configured",
+      logo_url: attachment.logo_url ?? existing?.logo_url ?? null,
+      brand_color: attachment.brand_color ?? existing?.brand_color ?? null,
+      required_fields: existing?.required_fields || [],
+      connection_summary: existing?.connection_summary || "",
+    });
+  }
+  return Array.from(byName.values());
 }
 
 function mergeCliMentionApps(

@@ -602,6 +602,7 @@ async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
 
     assert len(result.tool_calls) == 1
     tool_call = result.tool_calls[0]
+    assert tool_call.id == "call_123"
     assert tool_call.extra_content == {"google": {"thought_signature": "signed-token"}}
     assert tool_call.function_provider_specific_fields == {"inner": "value"}
 
@@ -994,9 +995,37 @@ def test_deepseek_thinking_keeps_tool_history_with_reasoning_content() -> None:
     assert kwargs["messages"][2]["role"] == "tool"
 
 
-def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -> None:
+def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messages() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "不错"},
+        {"role": "assistant", "content": "对，破 4 万指日可待"},
+        {
+            "role": "assistant",
+            "content": "<think>我再查一下</think>",
+            "tool_calls": [
+                {
+                    "id": "call_function_akxp3wqzn7ph_1",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_function_akxp3wqzn7ph_1", "name": "exec", "content": "ok"},
+        {"role": "user", "content": "多少star了呢"},
+    ])
+
+    assert sanitized[1]["role"] == "assistant"
+    assert sanitized[1]["content"] is None
+    assert sanitized[1]["tool_calls"][0]["id"] == "call_function_akxp3wqzn7ph_1"
+    assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
+
+
+def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(spec=find_by_name("mistral"))
 
     sanitized = provider._sanitize_messages([
         {"role": "user", "content": "不错"},

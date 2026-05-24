@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
-import type { CliAppInfo, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 const BLENDER_CLI_APP: CliAppInfo = {
   name: "blender",
@@ -19,6 +19,26 @@ const BLENDER_CLI_APP: CliAppInfo = {
   logo_url: "https://example.invalid/blender.svg",
   brand_color: "#E87D0D",
   skill_installed: true,
+};
+
+const BROWSERBASE_MCP: McpPresetInfo = {
+  name: "browserbase",
+  display_name: "Browserbase",
+  category: "browser",
+  description: "Cloud browser automation",
+  docs_url: "https://docs.browserbase.com",
+  transport: "streamableHttp",
+  requires: "Browserbase API key",
+  note: "",
+  install_supported: true,
+  installed: true,
+  configured: true,
+  available: true,
+  status: "configured",
+  logo_url: "https://example.invalid/browserbase.svg",
+  brand_color: "#111827",
+  required_fields: [],
+  connection_summary: "https://mcp.browserbase.com/mcp",
 };
 
 function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage[] {
@@ -120,7 +140,6 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: /working/i }));
       const scrollport = screen.getByTestId("agent-activity-scroll");
       setScrollGeometry(scrollport, {
         scrollHeight: 1000,
@@ -149,7 +168,6 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: /working/i }));
       const scrollport = screen.getByTestId("agent-activity-scroll");
       setScrollGeometry(scrollport, {
         scrollHeight: 1000,
@@ -201,7 +219,6 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: /working/i }));
       const scrollport = screen.getByTestId("agent-activity-scroll");
       setScrollGeometry(scrollport, {
         scrollHeight: 1000,
@@ -236,6 +253,129 @@ describe("AgentActivityCluster", () => {
     } finally {
       raf.restore();
     }
+  });
+
+  it("turns the live reasoning marker into an animated check when thinking completes", async () => {
+    const liveReasoning: UIMessage = {
+      id: "r-check",
+      role: "assistant",
+      content: "",
+      reasoning: "checking a source",
+      reasoningStreaming: true,
+      isStreaming: true,
+      createdAt: 1,
+    };
+    const { rerender } = render(
+      <AgentActivityCluster
+        messages={[liveReasoning]}
+        isTurnStreaming
+        hasBodyBelow
+      />,
+    );
+
+    expect(screen.getByTestId("activity-reasoning-marker")).toHaveAttribute("data-state", "thinking");
+
+    rerender(
+      <AgentActivityCluster
+        messages={[{
+          ...liveReasoning,
+          reasoningStreaming: false,
+          isStreaming: false,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+
+    const marker = screen.getByTestId("activity-reasoning-marker");
+    expect(marker).toHaveAttribute("data-state", "done");
+    expect(marker.querySelector("svg")).toBeInTheDocument();
+    await waitFor(() => expect(marker).toHaveClass("animate-in"));
+  });
+
+  it("briefly shows completed activity, then auto-collapses before the answer", () => {
+    vi.useFakeTimers();
+    const liveReasoning: UIMessage = {
+      id: "r-collapse",
+      role: "assistant",
+      content: "",
+      reasoning: "checking files",
+      reasoningStreaming: true,
+      isStreaming: true,
+      createdAt: 1,
+    };
+    try {
+      const { rerender } = render(
+        <AgentActivityCluster
+          messages={[liveReasoning]}
+          isTurnStreaming
+          hasBodyBelow
+        />,
+      );
+      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+
+      rerender(
+        <AgentActivityCluster
+          messages={[{
+            ...liveReasoning,
+            reasoningStreaming: false,
+            isStreaming: false,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow
+        />,
+      );
+
+      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(901);
+      });
+      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /1 steps/i })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses persisted turn latency for completed history instead of replay timestamps", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "r-history",
+          role: "assistant",
+          content: "",
+          reasoning: "historical thought",
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+        turnLatencyMs={12_400}
+      />,
+    );
+
+    expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
+  });
+
+  it("omits the duration when completed history has no reliable timing", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "r-old-history",
+          role: "assistant",
+          content: "",
+          reasoning: "old historical thought",
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+
+    expect(screen.getByText("Thought")).toBeInTheDocument();
+    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
   });
 
   it("renders file edit totals and a compact expanded file list", async () => {
@@ -279,6 +419,11 @@ describe("AgentActivityCluster", () => {
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
       expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
+      for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
+        expect(diffPair).toHaveClass("items-baseline");
+        expect(diffPair).toHaveClass("leading-[inherit]");
+        expect(diffPair.className).not.toContain("translate-y");
+      }
       await waitFor(() => {
         expect(screen.getAllByText("+12").length).toBeGreaterThan(0);
         expect(screen.getAllByText("-3").length).toBeGreaterThan(0);
@@ -306,14 +451,66 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /running cli @blender/i }));
-
     const cliRuns = screen.getByTestId("activity-cli-runs");
-    expect(cliRuns).toHaveTextContent("Running CLI");
+    expect(cliRuns).toHaveTextContent("Using");
     expect(cliRuns).toHaveTextContent("@blender");
     expect(cliRuns).toHaveTextContent("--json --background scene.blend");
     expect(screen.getByTestId("activity-cli-logo-blender")).toBeInTheDocument();
     expect(screen.queryByText(/run_cli_app/)).not.toBeInTheDocument();
+  });
+
+  it("keeps CLI rows in chronological trace order", () => {
+    const cliArgs = { name: "blender", args: ["project", "new"], json: true };
+    const cliLine = `run_cli_app(${JSON.stringify(cliArgs)})`;
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "t-search",
+            role: "tool",
+            kind: "trace",
+            content: 'web_search({"query":"nanobot architecture"})',
+            traces: ['web_search({"query":"nanobot architecture"})'],
+            createdAt: 1,
+          },
+          {
+            id: "t-cli",
+            role: "tool",
+            kind: "trace",
+            content: cliLine,
+            traces: [cliLine],
+            toolEvents: [{
+              phase: "end",
+              call_id: "call-blender",
+              name: "run_cli_app",
+              arguments: cliArgs,
+            }],
+            createdAt: 2,
+          },
+          {
+            id: "t-fetch",
+            role: "tool",
+            kind: "trace",
+            content: 'web_fetch({"url":"https://example.com/diagram"})',
+            traces: ['web_fetch({"url":"https://example.com/diagram"})'],
+            createdAt: 3,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+      />,
+    );
+
+    const searchRow = screen.getByText("Searching").closest("li");
+    const cliRow = screen.getByText("@blender").closest("li");
+    const fetchRow = screen.getByText("Reading").closest("li");
+
+    expect(searchRow).not.toBeNull();
+    expect(cliRow).not.toBeNull();
+    expect(fetchRow).not.toBeNull();
+    expect(searchRow!.compareDocumentPosition(cliRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cliRow!.compareDocumentPosition(fetchRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("labels rejected CLI app calls as failed instead of ran", () => {
@@ -341,12 +538,143 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /cli failed @github/i }));
+    fireEvent.click(screen.getByRole("button", { name: /failed @github/i }));
 
-    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("CLI failed");
+    expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Failed");
     expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("@github");
     expect(screen.getByTestId("activity-cli-runs")).toHaveTextContent("Error: CLI app 'github' not found");
     expect(screen.queryByText("Ran CLI")).not.toBeInTheDocument();
+  });
+
+  it("renders MCP preset tool calls as branded activity rows", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-mcp",
+          role: "tool",
+          kind: "trace",
+          content: "mcp_browserbase_browser_navigate()",
+          traces: ["mcp_browserbase_browser_navigate({\"url\":\"https://example.com\"})"],
+          toolEvents: [
+            {
+              phase: "start",
+              call_id: "call-browserbase",
+              name: "mcp_browserbase_browser_navigate",
+              arguments: { url: "https://example.com" },
+            },
+          ],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        mcpPresets={[BROWSERBASE_MCP]}
+      />,
+    );
+
+    const mcpRuns = screen.getByTestId("activity-mcp-runs");
+    expect(mcpRuns).toHaveTextContent("Using");
+    expect(mcpRuns).toHaveTextContent("Browserbase");
+    expect(mcpRuns).toHaveTextContent("browser_navigate");
+    expect(mcpRuns).toHaveTextContent("url: https://example.com");
+    expect(screen.getByTestId("activity-mcp-logo-browserbase")).toBeInTheDocument();
+    expect(screen.queryByText(/mcp_browserbase_browser_navigate/)).not.toBeInTheDocument();
+  });
+
+  it("renders public web fetch traces with the site favicon", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-fetch",
+          role: "tool",
+          kind: "trace",
+          content: 'web_fetch({"url":"https://auth0.com/blog/jwt-security-best-practices"})',
+          traces: ['web_fetch({"url":"https://auth0.com/blog/jwt-security-best-practices"})'],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    const favicon = screen.getByTestId("activity-web-favicon-auth0.com");
+    expect(favicon.querySelector("img")?.getAttribute("src")).toContain("auth0.com");
+    expect(screen.getByText("Reading")).toBeInTheDocument();
+    expect(screen.getByText("auth0.com/blog/jwt-security-best-practices")).toBeInTheDocument();
+  });
+
+  it("renders plain-text fetch progress with the site favicon", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-fetch-text",
+          role: "tool",
+          kind: "trace",
+          content: "Fetching https://auth0.com/blog/jwt-security-best-practices",
+          traces: ["Fetching https://auth0.com/blog/jwt-security-best-practices"],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByTestId("activity-web-favicon-auth0.com")).toBeInTheDocument();
+    expect(screen.getByText("Reading")).toBeInTheDocument();
+    expect(screen.getByText("auth0.com/blog/jwt-security-best-practices")).toBeInTheDocument();
+  });
+
+  it("does not request favicons for private web fetch targets", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-web-fetch-local",
+          role: "tool",
+          kind: "trace",
+          content: 'web_fetch({"url":"http://localhost:3000/dashboard"})',
+          traces: ['web_fetch({"url":"http://localhost:3000/dashboard"})'],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("activity-web-favicon-localhost")).not.toBeInTheDocument();
+    expect(screen.getByText("url: http://localhost:3000/dashboard")).toBeInTheDocument();
+  });
+
+  it("summarizes long shell traces instead of dumping scripts", () => {
+    const command = [
+      "cat << 'EOF' | bash",
+      "SECRET_TOKEN=sk-test",
+      "for id in m1 m2 m3; do",
+      "  echo done $id",
+      "done",
+      "EOF",
+    ].join("\n");
+    const line = `exec(${JSON.stringify({ command })})`;
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-shell",
+          role: "tool",
+          kind: "trace",
+          content: line,
+          traces: [line],
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /1 tool calls/i }));
+
+    expect(screen.getByText("Shell")).toBeInTheDocument();
+    expect(screen.getByText(/cat << 'EOF' \| bash · script, 6 lines/)).toBeInTheDocument();
+    expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/for id in/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument();
   });
 
   it("does not render zero diff counters for completed edits", () => {
@@ -440,7 +768,6 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.getByRole("button", { name: /preparing edit/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /preparing edit/i }));
     expect(screen.getByText("Preparing file edit…")).toBeInTheDocument();
   });
 

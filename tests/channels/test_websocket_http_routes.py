@@ -210,6 +210,156 @@ async def test_cli_apps_routes_require_token_and_return_payload(
 
 
 @pytest.mark.asyncio
+async def test_mcp_presets_routes_require_token_and_return_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.mcp_presets_payload",
+        lambda: {
+            "presets": [
+                {
+                    "name": "browserbase",
+                    "display_name": "Browserbase",
+                    "category": "browser",
+                    "description": "Cloud browser automation",
+                    "docs_url": "https://docs.browserbase.com/integrations/mcp/configuration",
+                    "transport": "streamableHttp",
+                    "requires": "Browserbase API key",
+                    "note": "",
+                    "install_supported": True,
+                    "installed": False,
+                    "configured": False,
+                    "available": False,
+                    "status": "not_installed",
+                    "logo_url": None,
+                    "brand_color": "#111827",
+                    "required_fields": [],
+                    "connection_summary": "",
+                }
+            ],
+            "installed_count": 0,
+        },
+    )
+    preset_queries: list[tuple[str, dict[str, list[str]]]] = []
+    custom_queries: list[tuple[str, dict[str, list[str]]]] = []
+
+    def _mcp_preset_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        preset_queries.append((action, query))
+        return {
+            "presets": [],
+            "installed_count": 1,
+            "requires_restart": action != "test",
+            "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
+        }
+
+    def _custom_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        custom_queries.append((action, query))
+        return {
+            "presets": [],
+            "installed_count": 1,
+            "requires_restart": True,
+            "last_action": {
+                "ok": True,
+                "message": f"{action}:{query.get('name', ['config'])[0]}",
+            },
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.mcp_presets_action",
+        _mcp_preset_action,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.custom_mcp_action",
+        _custom_action,
+    )
+
+    async def _hot_reload(_bus):
+        return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}
+
+    monkeypatch.setattr(
+        "nanobot.channels.websocket.request_mcp_reload",
+        _hot_reload,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29913/api/settings/mcp-presets")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29913/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        assert catalog.json()["presets"][0]["name"] == "browserbase"
+
+        enabled = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"browserbase_api_key": "bb_live_secret"}
+                ),
+            },
+        )
+        assert enabled.status_code == 200
+        assert preset_queries[-1][1]["browserbase_api_key"] == ["bb_live_secret"]
+        body = enabled.json()
+        assert "bb_live_secret" not in enabled.text
+        assert body["last_action"]["message"] == "enable:browserbase MCP config reloaded."
+        assert body["hot_reload"]["ok"] is True
+        assert body["restart_required_sections"] == []
+
+        bad_header = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
+            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
+        )
+        assert bad_header.status_code == 400
+
+        custom = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"name": "docs", "command": "npx"}
+                ),
+            },
+        )
+        assert custom.status_code == 200
+        assert custom_queries[-1][1]["command"] == ["npx"]
+        assert custom.json()["last_action"]["message"] == "custom:docs MCP config reloaded."
+
+        imported = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/import",
+            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
+        )
+        assert imported.status_code == 200
+        assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
+
+        tools = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"name": "docs", "enabled_tools": []}
+                ),
+            },
+        )
+        assert tools.status_code == 200
+        assert tools.json()["last_action"]["message"] == "tools:docs MCP config reloaded."
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
     bus: MagicMock, tmp_path: Path
 ) -> None:

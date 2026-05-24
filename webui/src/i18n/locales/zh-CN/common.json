@@ -9,6 +9,18 @@
       "title": "无法连接到 nanobot",
       "gatewayHint": "请确认 gateway 已启动（`nanobot gateway`），并且当前页面与 gateway 运行在同一台机器上。"
     },
+    "auth": {
+      "title": "需要验证",
+      "hint": "请输入 gateway 配置中的 tokenIssueSecret。",
+      "placeholder": "密码",
+      "submit": "连接",
+      "invalid": "密码无效，请重试。"
+    },
+    "account": {
+      "section": "账户",
+      "logoutHint": "断开此浏览器与 gateway 的连接。",
+      "logout": "退出登录"
+    },
     "system": {
       "section": "系统",
       "restartHint": "重启 nanobot 以应用运行时更改。",
@@ -69,6 +81,7 @@
       "image": "图片",
       "web": "网页",
       "cliApps": "CLI 应用",
+      "mcp": "MCP",
       "runtime": "运行时",
       "advanced": "高级"
     },
@@ -84,10 +97,19 @@
       "webSearch": "网页搜索",
       "webBehavior": "行为",
       "cliApps": "CLI 应用",
+      "mcp": "MCP",
       "identity": "身份",
       "safety": "安全",
       "capabilities": "能力",
       "integrations": "集成"
+    },
+    "models": {
+      "selectModel": "选择模型",
+      "addConfiguration": "添加配置",
+      "newConfiguration": "新建模型配置",
+      "newConfigurationHelp": "把服务商和模型保存为一个可直接切换的选项。",
+      "configurationName": "名称",
+      "configurationNamePlaceholder": "快速写作"
     },
     "rows": {
       "theme": "主题",
@@ -100,6 +122,7 @@
       "gateway": "网关",
       "restartState": "重启状态",
       "pendingChanges": "待处理更改",
+      "currentModel": "当前模型",
       "selectedPreset": "选中的预设",
       "presetModel": "预设模型",
       "density": "密度",
@@ -142,6 +165,9 @@
       "provider": "选择新模型请求使用的服务商。",
       "model": "设置 nanobot 默认使用的模型名称。",
       "configPath": "当前网关正在使用的配置文件。",
+      "currentModel": "选择 nanobot 接下来回复时使用的模型。",
+      "selectedModelProvider": "由当前模型决定。",
+      "selectedModelValue": "由当前模型决定。",
       "selectedPreset": "命名预设在这里只读；需要编辑时请改 config.json。",
       "presetModel": "切回 Default 后可在 WebUI 编辑模型和服务商。",
       "density": "仅保存在当前浏览器。",
@@ -165,6 +191,11 @@
       "cliAppsCatalog": "只安装 nanobot 在本机调用应用时需要的 CLI 适配层，不触碰应用本体。",
       "cliAppsFilter": "按应用、分类或能力搜索。",
       "advancedReadOnly": "高级安全控制在 WebUI 中只读；需要时请谨慎编辑 config.json。"
+    },
+    "timezone": {
+      "select": "选择时区",
+      "search": "搜索时区",
+      "empty": "没有匹配的时区。"
     },
     "cliApps": {
       "allCategories": "全部分类",
@@ -196,6 +227,59 @@
       "unsupported": "暂不支持",
       "unavailable": "不可用",
       "noDescription": "暂无描述。"
+    },
+    "mcp": {
+      "allCategories": "全部分类",
+      "summary": "已启用 {{installed}} / {{total}} 个预设",
+      "filterAll": "全部",
+      "filterInstalled": "已启用",
+      "filterNotInstalled": "未启用",
+      "searchPlaceholder": "搜索 MCP 预设",
+      "moreOptions": "更多 MCP 选项",
+      "moreOptionsSubtitle": "添加自定义服务，或导入 mcp.json。",
+      "customTitle": "自定义 MCP",
+      "customSubtitle": "添加任意 stdio、HTTP 或 SSE MCP 服务。",
+      "customAction": "自定义",
+      "importAction": "导入",
+      "serverName": "服务名",
+      "serverUrl": "URL",
+      "transport": "传输方式",
+      "command": "命令",
+      "args": "参数 JSON",
+      "headers": "Headers JSON",
+      "env": "环境变量 JSON",
+      "timeout": "工具超时",
+      "advancedOptions": "高级选项",
+      "hideAdvanced": "收起高级",
+      "saveCustom": "保存 MCP",
+      "configImport": "导入 mcp.json",
+      "importConfig": "导入",
+      "restartRequired": "重启 nanobot 以连接更新后的 MCP 工具。",
+      "toolsFound": "{{count}} 个工具",
+      "loading": "正在加载 MCP 预设...",
+      "empty": "没有匹配的 MCP 预设。",
+      "openDocs": "打开文档",
+      "test": "测试",
+      "remove": "移除",
+      "enable": "启用",
+      "enabled": "已启用",
+      "setup": "连接",
+      "configure": "连接",
+      "connectTitle": "连接 {{name}}",
+      "connectHint": "填入你账户里的 key。",
+      "saveAndEnable": "保存并启用",
+      "updateSetup": "更新配置",
+      "configured": "已配置",
+      "keepExisting": "留空则保留当前值",
+      "statusConfigured": "已配置",
+      "statusMissingCredentials": "需要 key",
+      "statusMissingDependency": "缺少依赖",
+      "statusComingSoon": "暂不支持",
+      "statusNotInstalled": "未启用",
+      "toolScope": "工具",
+      "allTools": "全部",
+      "noTools": "不暴露",
+      "testForTools": "运行测试后，可以查看并选择单个工具。"
     },
     "values": {
       "light": "浅色",
@@ -284,7 +368,8 @@
     },
     "providers": {
       "searchPlaceholder": "搜索服务商",
-      "noMatches": "没有匹配的服务商。"
+      "noMatches": "没有匹配的服务商。",
+      "saveProvider": "保存服务商"
     },
     "legal": {
       "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
@@ -448,6 +533,16 @@
         "navigateHint": "↑↓ 选择",
         "selectHint": "Enter/Tab 填入",
         "closeHint": "Esc 关闭",
+        "badges": {
+          "current": "当前",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目标正在运行",
+          "goalReady": "开始一个持续目标",
+          "history": "查看最近消息",
+          "stopRunning": "正在运行"
+        },
         "commands": {
           "new": {
             "title": "新建对话",
@@ -464,6 +559,10 @@
           "status": {
             "title": "查看状态",
             "description": "显示运行时、服务商和通道状态。"
+          },
+          "model": {
+            "title": "模型",
+            "description": "查看或切换当前模型预设。"
           },
           "history": {
             "title": "查看对话历史",
@@ -488,12 +587,22 @@
           "help": {
             "title": "查看帮助",
             "description": "列出可用的斜杠命令。"
+          },
+          "pairing": {
+            "title": "配对",
+            "description": "管理配对请求。"
           }
         }
       },
       "mentions": {
-        "ariaLabel": "CLI 应用",
-        "label": "CLI 应用"
+        "ariaLabel": "应用和 MCP",
+        "label": "插件",
+        "cliGroup": "CLI 应用",
+        "mcpGroup": "MCP 服务",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "使用 @{{name}} 调用本地 CLI",
+        "mcpDescription": "使用 @{{name}} 调用 MCP 服务"
       },
       "encoding": "处理中…",
       "remove": "移除附件",
@@ -527,15 +636,18 @@
     "agentActivityToolsOnly": "{{tools}} 次工具调用",
     "agentActivityLiveSummary": "进行中… · {{reasoning}} 步 · {{tools}} 次工具调用",
     "agentActivityLiveToolsOnly": "进行中… · {{tools}} 次工具调用",
-    "cliActivityRunningOne": "正在运行 CLI @{{name}}",
-    "cliActivityRanOne": "已运行 CLI @{{name}}",
-    "cliActivityFailedOne": "CLI 调用失败 @{{name}}",
-    "cliActivityRunningMany": "正在运行 {{count}} 个 CLI",
-    "cliActivityRanMany": "已运行 {{count}} 个 CLI",
-    "cliActivityFailedMany": "{{count}} 个 CLI 调用失败",
-    "cliRunRunning": "正在运行 CLI",
-    "cliRunRan": "已运行 CLI",
-    "cliRunFailed": "CLI 调用失败",
+    "activityThinkingFor": "思考中 {{duration}}",
+    "activityThought": "已思考",
+    "activityThoughtFor": "思考了 {{duration}}",
+    "cliActivityRunningOne": "正在使用 @{{name}}",
+    "cliActivityRanOne": "已使用 @{{name}}",
+    "cliActivityFailedOne": "使用 @{{name}} 失败",
+    "cliActivityRunningMany": "正在使用 {{count}} 个 CLI 应用",
+    "cliActivityRanMany": "已使用 {{count}} 个 CLI 应用",
+    "cliActivityFailedMany": "{{count}} 个 CLI 应用失败",
+    "cliRunRunning": "正在使用",
+    "cliRunRan": "已使用",
+    "cliRunFailed": "失败",
     "imageAttachment": "图片附件",
     "copyReply": "复制回复",
     "copiedReply": "已复制回复",

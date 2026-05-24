@@ -6,10 +6,12 @@ settings payload shape and the allowlisted config mutations exposed to WebUI.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -41,6 +43,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
+_MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 
 
 class WebUISettingsError(ValueError):
@@ -98,6 +101,32 @@ def _parse_bool(value: str, field: str) -> bool:
     if normalized not in {"1", "0", "true", "false", "yes", "no"}:
         raise WebUISettingsError(f"{field} must be boolean")
     return normalized in {"1", "true", "yes"}
+
+
+def _model_configuration_slug(label: str) -> str:
+    normalized = _MODEL_CONFIGURATION_SLUG_RE.sub("-", label.strip().lower())
+    normalized = normalized.strip("-_")
+    if not normalized:
+        raise WebUISettingsError("configuration name is required")
+    if normalized == "default":
+        raise WebUISettingsError("configuration name is reserved")
+    if len(normalized) > 48:
+        normalized = normalized[:48].rstrip("-_")
+    return normalized
+
+
+def _validate_configured_provider(config: Any, provider: str) -> None:
+    if provider == "auto":
+        return
+    spec = find_by_name(provider)
+    if spec is None:
+        raise WebUISettingsError("unknown provider")
+    provider_config = getattr(config.providers, provider, None)
+    if (
+        provider_config is None
+        or not _provider_configured_for_settings(spec, provider_config)
+    ):
+        raise WebUISettingsError("provider is not configured")
 
 
 def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
@@ -198,7 +227,7 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         model_presets.append(
             {
                 "name": name,
-                "label": name,
+                "label": preset.label or name,
                 "active": active_preset_name == name,
                 "is_default": False,
                 "model": preset.model,
@@ -321,15 +350,7 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         provider = provider.strip()
         if not provider:
             raise WebUISettingsError("provider is required")
-        spec = find_by_name(provider)
-        if spec is None:
-            raise WebUISettingsError("unknown provider")
-        provider_config = getattr(config.providers, provider, None)
-        if (
-            provider_config is None
-            or not _provider_configured_for_settings(spec, provider_config)
-        ):
-            raise WebUISettingsError("provider is not configured")
+        _validate_configured_provider(config, provider)
         if defaults.provider != provider:
             defaults.provider = provider
             changed = True
@@ -386,6 +407,40 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=restart_required)
+
+
+def create_model_configuration(query: QueryParams) -> dict[str, Any]:
+    label = (_query_first_alias(query, "label", "displayName") or "").strip()
+    raw_name = (_query_first(query, "name") or label).strip()
+    model = (_query_first(query, "model") or "").strip()
+    provider = (_query_first(query, "provider") or "").strip()
+
+    if not label:
+        label = raw_name
+    if not model:
+        raise WebUISettingsError("model is required")
+    if not provider:
+        raise WebUISettingsError("provider is required")
+
+    name = _model_configuration_slug(raw_name or label)
+    config = load_config()
+    if name in config.model_presets:
+        raise WebUISettingsError("configuration already exists", status=409)
+    _validate_configured_provider(config, provider)
+
+    base = config.resolve_default_preset()
+    config.model_presets[name] = ModelPresetConfig(
+        label=label,
+        model=model,
+        provider=provider,
+        max_tokens=base.max_tokens,
+        context_window_tokens=base.context_window_tokens,
+        temperature=base.temperature,
+        reasoning_effort=base.reasoning_effort,
+    )
+    config.agents.defaults.model_preset = name
+    save_config(config)
+    return settings_payload()
 
 
 def update_provider_settings(query: QueryParams) -> dict[str, Any]:
