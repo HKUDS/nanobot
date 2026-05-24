@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from contextlib import suppress
+import time
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -46,8 +47,51 @@ from nanobot.utils.runtime import (
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
+    repeated_loop_error,
     repeated_workspace_violation_error,
+    rate_limit_error,
+    RATE_LIMIT_WINDOW,
 )
+
+@dataclass(slots=True)
+class LoopGuardRuntimeConfig:
+    """Configuration for loop/rate-limit guards in agent execution.
+
+    Parameters
+    ----------
+    enabled:
+        Master switch.  Set ``False`` to disable both loop and rate-limit guards.
+    max_repeated_loops:
+        Override the default threshold (``_MAX_REPEATED_LOOPS``).
+        When ``None`` the module default is used (current value is 3).
+    rate_limit_count:
+        Override the default count threshold (``RATE_LIMIT_WINDOW[0]``).
+        When ``None`` the module default is used (current value is 5).
+    rate_limit_seconds:
+        Override the default time window (``RATE_LIMIT_WINDOW[1]``).
+        When ``None`` the module default is used (current value is 3.0).
+    """
+    enabled: bool = True
+    max_repeated_loops: int | None = None  # None → module default
+    rate_limit_count: int | None = None
+    rate_limit_seconds: float | None = None
+
+
+@dataclass(slots=True)
+class _ToolExecutionState:
+    """Shared mutable state for tool execution within a single turn.
+
+    Aggregates the per-turn counters and locks that were previously
+    passed as separate arguments to ``_execute_tools`` and ``_run_tool``.
+    This reduces signature friction in tests and internal call-sites.
+    """
+
+    external_lookup_counts: dict[str, int] = field(default_factory=dict)
+    workspace_violation_counts: dict[str, int] = field(default_factory=dict)
+    loop_counts: dict[str, int] = field(default_factory=dict)
+    rate_timestamps: dict[str, list[float]] = field(default_factory=dict)
+    loop_counts_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
@@ -97,6 +141,7 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    loop_guard: LoopGuardRuntimeConfig | None = None  # None → use defaults
 
 
 @dataclass(slots=True)
@@ -256,15 +301,17 @@ class AgentRunner:
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
-        external_lookup_counts: dict[str, int] = {}
-        # Per-turn throttle for repeated attempts against the same outside target.
-        workspace_violation_counts: dict[str, int] = {}
+        tool_state = _ToolExecutionState()
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
+            # Per-turn loop and rate-limit guard reset —
+            # design doc specifies per-turn lifetime for both counters.
+            tool_state.loop_counts.clear()
+            tool_state.rate_timestamps.clear()
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -339,8 +386,7 @@ class AgentRunner:
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     response.tool_calls,
-                    external_lookup_counts,
-                    workspace_violation_counts,
+                    tool_state,
                 )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
@@ -776,26 +822,21 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
-        external_lookup_counts: dict[str, int],
-        workspace_violation_counts: dict[str, int],
+        state: _ToolExecutionState,
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
-                    self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
-                    )
+                    self._run_tool(spec, tool_call, state)
                     for tool_call in batch
                 ))
                 tool_results.extend(batch_results)
             else:
                 batch_results = []
                 for tool_call in batch:
-                    result = await self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
-                    )
+                    result = await self._run_tool(spec, tool_call, state)
                     tool_results.append(result)
                     batch_results.append(result)
 
@@ -813,14 +854,58 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
-        external_lookup_counts: dict[str, int],
-        workspace_violation_counts: dict[str, int],
+        state: _ToolExecutionState,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
+
+        # ---- Resolve loop-guard config ----
+        _lg = spec.loop_guard
+        _lg_enabled = getattr(_lg, "enabled", True) if _lg else True
+        _lg_max_loops = getattr(_lg, "max_repeated_loops", None) if _lg else None
+        _lg_rate_count = getattr(_lg, "rate_limit_count", None) if _lg else None
+        _lg_rate_secs = getattr(_lg, "rate_limit_seconds", None) if _lg else None
+
+        if not _lg_enabled:
+            _lg_max_loops = 0  # disabled
+            _lg_rate_count = 999999  # disable trim too
+            _lg_rate_window = (999999, 999999.0)  # disabled
+        else:
+            _lg_rate_window = (
+                (_lg_rate_count if _lg_rate_count is not None else RATE_LIMIT_WINDOW[0],
+                 _lg_rate_secs if _lg_rate_secs is not None else RATE_LIMIT_WINDOW[1])
+            )
+
+        # ---- Rate-limit check (before execution) ----
+        # Protect rate_timestamps mutations when _run_tool is invoked
+        # concurrently via asyncio.gather.  setdefault + append +
+        # slice-assignment are not an atomic group under CPython's GIL.
+        # In non-concurrent mode nullcontext() avoids unnecessary lock overhead.
+        _lock = state.loop_counts_lock if spec.concurrent_tools else nullcontext()
+        async with _lock:
+            ts_list = state.rate_timestamps.setdefault(tool_call.name, [])
+            ts_list.append(time.monotonic())
+            # Trim to window size to avoid unbounded growth
+            _trim_count = (_lg_rate_count if _lg_rate_count is not None else RATE_LIMIT_WINDOW[0]) * 3
+            if _trim_count > 0 and len(ts_list) > _trim_count:
+                ts_list[:] = ts_list[-_trim_count:]
+
+        rate_hint = rate_limit_error(tool_call.name, ts_list, rate_window=_lg_rate_window)
+        if rate_hint is not None:
+            logger.info("Rate-limit hint for {}", tool_call.name)
+            event = {
+                "name": tool_call.name,
+                "status": "warn",
+                "detail": "rate limit hint injected",
+            }
+            if spec.fail_on_tool_error:
+                return rate_hint + hint, event, RuntimeError(rate_hint)
+            return rate_hint + hint, event, None
+
+        # ---- Existing: external lookup throttle ----
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
-            external_lookup_counts,
+            state.external_lookup_counts,
         )
         if lookup_error:
             event = {
@@ -849,7 +934,7 @@ class AgentRunner:
                 soft_payload=prep_error + hint,
                 event=event,
                 tool_call=tool_call,
-                workspace_violation_counts=workspace_violation_counts,
+                workspace_violation_counts=state.workspace_violation_counts,
             )
             if handled is not None:
                 return handled
@@ -880,6 +965,29 @@ class AgentRunner:
                     params if isinstance(params, dict) else None,
                 ) for file_edit_tracker in file_edit_trackers],
             )
+        # ---- Loop guard: hard block BEFORE execution ----
+        # write_stdin is excluded: it is the only interactive poll-based tool
+        # whose repeated invocations with identical arguments (same session_id)
+        # express "keep waiting for output" rather than "stuck in a loop".
+        if tool_call.name != "write_stdin":
+            async with _lock:
+                loop_hint = repeated_loop_error(
+                    tool_call.name, tool_call.arguments, state.loop_counts,
+                    max_loops=_lg_max_loops,
+                )
+        else:
+            loop_hint = None
+        if loop_hint is not None:
+            logger.warning("Loop guard blocked {}", tool_call.name)
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": "loop guard blocked",
+            }
+            if spec.fail_on_tool_error:
+                return loop_hint + hint, event, RuntimeError(loop_hint)
+            return loop_hint + hint, event, None
+
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -908,7 +1016,7 @@ class AgentRunner:
                 soft_payload=payload,
                 event=event,
                 tool_call=tool_call,
-                workspace_violation_counts=workspace_violation_counts,
+                workspace_violation_counts=state.workspace_violation_counts,
             )
             if handled is not None:
                 return handled
@@ -935,7 +1043,7 @@ class AgentRunner:
                 soft_payload=result + hint,
                 event=event,
                 tool_call=tool_call,
-                workspace_violation_counts=workspace_violation_counts,
+                workspace_violation_counts=state.workspace_violation_counts,
             )
             if handled is not None:
                 return handled

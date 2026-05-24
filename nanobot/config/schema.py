@@ -108,6 +108,15 @@ class ModelPresetConfig(Base):
         )
 
 
+class LoopGuardConfig(Base):
+    """Optional fine-tuning for the turn-level loop guard (v2.0)."""
+
+    enabled: bool = True
+    max_repeated_loops: int | None = Field(default=None, ge=2, le=10)
+    rate_limit_count: int | None = Field(default=None, ge=3, le=20)
+    rate_limit_seconds: float | None = Field(default=None, ge=0.5, le=30.0)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -157,6 +166,7 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    loop_guard: LoopGuardConfig = Field(default_factory=lambda: LoopGuardConfig())
 
 
 class AgentsConfig(Base):

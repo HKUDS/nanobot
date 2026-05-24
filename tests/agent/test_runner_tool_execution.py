@@ -59,7 +59,7 @@ class _DelayTool(Tool):
 
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import _ToolExecutionState, AgentRunSpec, AgentRunner
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -85,8 +85,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
             ToolCallRequest(id="rw1", name="write_a", arguments={}),
         ],
-        {},
-        {},
+        _ToolExecutionState(),
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -98,7 +97,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_batch_exclusive_read_only_tools():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import _ToolExecutionState, AgentRunSpec, AgentRunner
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -130,8 +129,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
             ToolCallRequest(id="ddg1", name="ddg_like", arguments={}),
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
         ],
-        {},
-        {},
+        _ToolExecutionState(),
     )
 
     assert shared_events[0] == "start:read_a"
