@@ -164,8 +164,7 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token);
-          let client: NanobotClient;
-          client = new NanobotClient({
+          const client = new NanobotClient({
             url,
             onReauth: async () => {
               try {
@@ -654,12 +653,13 @@ function Shell({
 
   useEffect(() => {
     return client.onStatus((status) => {
-      let startedAt = 0;
-      try {
-        startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-      } catch {
-        startedAt = 0;
-      }
+      const startedAt = (() => {
+        try {
+          return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
+        } catch {
+          return 0;
+        }
+      })();
       if (!startedAt) return;
       if (status !== "open") {
         restartSawDisconnectRef.current = true;
