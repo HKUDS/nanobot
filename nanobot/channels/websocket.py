@@ -824,12 +824,33 @@ class WebSocketChannel(BaseChannel):
             if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
             else "duckduckgo"
         )
+        active_preset = defaults.model_preset or "default"
+        if active_preset != "default" and active_preset not in config.model_presets:
+            active_preset = "default"
+        model_presets: list[dict[str, Any]] = [
+            {
+                "name": "default",
+                "label": "Default",
+                "model": defaults.model,
+                "provider": selected_provider,
+            }
+        ]
+        for name, preset in config.model_presets.items():
+            model_presets.append(
+                {
+                    "name": name,
+                    "label": name,
+                    "model": preset.model,
+                    "provider": preset.provider,
+                }
+            )
         return {
             "agent": {
                 "model": defaults.model,
                 "provider": selected_provider,
                 "resolved_provider": provider_name,
                 "has_api_key": bool(provider and provider.api_key),
+                "model_preset": active_preset,
             },
             "providers": providers,
             "web_search": {
@@ -838,6 +859,7 @@ class WebSocketChannel(BaseChannel):
                 "base_url": search_config.base_url or None,
                 "providers": list(_WEB_SEARCH_PROVIDER_OPTIONS),
             },
+            "model_presets": model_presets,
             "runtime": {
                 "config_path": str(get_config_path().expanduser()),
             },

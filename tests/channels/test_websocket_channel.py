@@ -1136,6 +1136,30 @@ def test_settings_payload_normalizes_camel_case_provider(
     assert body["agent"]["provider"] == "minimax_anthropic"
 
 
+def test_settings_payload_includes_model_presets(
+    bus: MagicMock,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from nanobot.config.schema import ModelPresetConfig
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets["pro"] = ModelPresetConfig(
+        model="deepseek-v4-pro", provider="deepseek"
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    body = _ch(bus)._settings_payload()
+
+    assert body["agent"]["model_preset"] == "default"
+    presets = {p["name"]: p for p in body["model_presets"]}
+    assert presets["default"]["label"] == "Default"
+    assert presets["pro"]["model"] == "deepseek-v4-pro"
+    assert presets["pro"]["provider"] == "deepseek"
+
+
 @pytest.mark.asyncio
 async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMock) -> None:
     port = 29880

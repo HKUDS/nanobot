@@ -123,6 +123,7 @@ export interface SettingsPayload {
     provider: string;
     resolved_provider: string | null;
     has_api_key: boolean;
+    model_preset: string;
   };
   providers: Array<{
     name: string;
@@ -143,6 +144,12 @@ export interface SettingsPayload {
       credential: "none" | "api_key" | "base_url";
     }>;
   };
+  model_presets: Array<{
+    name: string;
+    label: string;
+    model: string;
+    provider: string;
+  }>;
   runtime: {
     config_path: string;
   };

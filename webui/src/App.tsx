@@ -19,7 +19,8 @@ import {
 } from "@/lib/bootstrap";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
-import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { fetchSettings } from "@/lib/api";
+import { ClientProvider, type ModelPresetInfo, useClient } from "@/providers/ClientProvider";
 import type { ChatSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,8 @@ type BootState =
       token: string;
       tokenExpiresAt: number;
       modelName: string | null;
+      modelPreset: string | null;
+      modelPresets: ModelPresetInfo[];
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
@@ -162,12 +165,24 @@ export default function App() {
           });
           bootstrapSecretRef.current = secret;
           client.connect();
+          let modelPreset: string | null = null;
+          let modelPresets: ModelPresetInfo[] = [];
+          try {
+            const settings = await fetchSettings(boot.token);
+            modelPreset = settings.agent.model_preset ?? null;
+            modelPresets = settings.model_presets ?? [];
+          } catch {
+            // Non-fatal: chip will degrade to a read-only label.
+          }
+          if (cancelled) return;
           setState({
             status: "ready",
             client,
             token: boot.token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
+            modelPreset,
+            modelPresets,
           });
         } catch (e) {
           if (cancelled) return;
@@ -257,9 +272,18 @@ export default function App() {
     );
   }
 
-  const handleModelNameChange = (modelName: string | null) => {
+  const handleModelNameChange = (
+    modelName: string | null,
+    modelPreset?: string | null,
+  ) => {
     setState((current) =>
-      current.status === "ready" ? { ...current, modelName } : current,
+      current.status === "ready"
+        ? {
+            ...current,
+            modelName,
+            modelPreset: modelPreset === undefined ? current.modelPreset : modelPreset,
+          }
+        : current,
     );
   };
 
@@ -276,8 +300,13 @@ export default function App() {
       client={state.client}
       token={state.token}
       modelName={state.modelName}
+      modelPreset={state.modelPreset}
+      modelPresets={state.modelPresets}
     >
-      <Shell onModelNameChange={handleModelNameChange} onLogout={handleLogout} />
+      <Shell
+        onModelNameChange={handleModelNameChange}
+        onLogout={handleLogout}
+      />
     </ClientProvider>
   );
 }
@@ -286,7 +315,10 @@ function Shell({
   onModelNameChange,
   onLogout,
 }: {
-  onModelNameChange: (modelName: string | null) => void;
+  onModelNameChange: (
+    modelName: string | null,
+    modelPreset?: string | null,
+  ) => void;
   onLogout: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -400,8 +432,8 @@ function Shell({
   }, [activeSession?.chatId, client]);
 
   useEffect(() => {
-    return client.onRuntimeModelUpdate((modelName) => {
-      onModelNameChange(modelName);
+    return client.onRuntimeModelUpdate((modelName, modelPreset) => {
+      onModelNameChange(modelName, modelPreset ?? null);
     });
   }, [client, onModelNameChange]);
 

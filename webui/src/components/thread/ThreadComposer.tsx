@@ -34,6 +34,13 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { ModelPresetInfo } from "@/providers/ClientProvider";
+import {
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
@@ -60,6 +67,9 @@ interface ThreadComposerProps {
   placeholder?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
+  modelPresets?: ModelPresetInfo[];
+  activeModelPreset?: string | null;
+  onSelectPreset?: (name: string) => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   imageMode?: boolean;
@@ -369,6 +379,9 @@ export function ThreadComposer({
   placeholder,
   isStreaming = false,
   modelLabel = null,
+  modelPresets = [],
+  activeModelPreset = null,
+  onSelectPreset,
   variant = "thread",
   slashCommands = [],
   imageMode: controlledImageMode,
@@ -907,22 +920,77 @@ export function ThreadComposer({
               ) : null}
             </div>
             {modelLabel ? (
-              <span
-                title={modelLabel}
-                className={cn(
-                  "inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1",
-                  "border-foreground/10 bg-foreground/[0.035] font-medium text-foreground/80",
-                  isHero
-                    ? "max-w-[13rem] text-[12px] shadow-[0_2px_8px_rgba(15,23,42,0.04)]"
-                    : "max-w-[10rem] text-[10.5px] shadow-[0_2px_8px_rgba(15,23,42,0.035)]",
-                )}
-              >
+              modelPresets.length > 0 && onSelectPreset ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      title={modelLabel}
+                      className={cn(
+                        "inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1",
+                        "border-foreground/10 bg-foreground/[0.035] font-medium text-foreground/80",
+                        "transition-colors hover:bg-foreground/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+                        isHero
+                          ? "max-w-[13rem] text-[12px] shadow-[0_2px_8px_rgba(15,23,42,0.04)]"
+                          : "max-w-[10rem] text-[10.5px] shadow-[0_2px_8px_rgba(15,23,42,0.035)]",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 flex-none rounded-full bg-emerald-500/80"
+                      />
+                      <span className="truncate">{modelLabel}</span>
+                      <ChevronDown
+                        aria-hidden
+                        className="h-3 w-3 flex-none text-foreground/55"
+                      />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[12rem]">
+                    {modelPresets.map((preset) => {
+                      const isActive = preset.name === (activeModelPreset ?? "default");
+                      return (
+                        <DropdownMenuItem
+                          key={preset.name}
+                          onSelect={() => onSelectPreset(preset.name)}
+                          className="flex items-start gap-2 py-1.5"
+                        >
+                          <Check
+                            aria-hidden
+                            className={cn(
+                              "mt-0.5 h-3.5 w-3.5 flex-none",
+                              isActive ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          <div className="flex min-w-0 flex-col">
+                            <span className="truncate font-medium">{preset.label}</span>
+                            <span className="truncate text-[11px] text-muted-foreground">
+                              {preset.model}
+                            </span>
+                          </div>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
                 <span
-                  aria-hidden
-                  className="h-1.5 w-1.5 flex-none rounded-full bg-emerald-500/80"
-                />
-                <span className="truncate">{modelLabel}</span>
-              </span>
+                  title={modelLabel}
+                  className={cn(
+                    "inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1",
+                    "border-foreground/10 bg-foreground/[0.035] font-medium text-foreground/80",
+                    isHero
+                      ? "max-w-[13rem] text-[12px] shadow-[0_2px_8px_rgba(15,23,42,0.04)]"
+                      : "max-w-[10rem] text-[10.5px] shadow-[0_2px_8px_rgba(15,23,42,0.035)]",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 flex-none rounded-full bg-emerald-500/80"
+                  />
+                  <span className="truncate">{modelLabel}</span>
+                </span>
+              )
             ) : null}
             {!isHero ? (
               <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">

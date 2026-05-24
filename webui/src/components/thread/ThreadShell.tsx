@@ -94,7 +94,16 @@ export function ThreadShell({
     refresh: refreshHistory,
     version: historyVersion,
   } = useSessionHistory(historyKey);
-  const { client, modelName, token } = useClient();
+  const { client, modelName, modelPreset, modelPresets, token } = useClient();
+  const onSelectPreset = useCallback(
+    (name: string) => {
+      if (name === (modelPreset ?? "default")) return;
+      const target = chatId ?? client.defaultChatId;
+      if (!target) return;
+      client.sendMessage(target, `/model ${name}`);
+    },
+    [chatId, client, modelPreset],
+  );
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [heroImageMode, setHeroImageMode] = useState(false);
@@ -330,6 +339,9 @@ export function ThreadShell({
               : t("thread.composer.placeholderThread")
           }
           modelLabel={toModelBadgeLabel(modelName)}
+          modelPresets={modelPresets}
+          activeModelPreset={modelPreset}
+          onSelectPreset={onSelectPreset}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
           imageMode={showHeroComposer ? heroImageMode : undefined}
@@ -349,6 +361,9 @@ export function ThreadShell({
               : t("thread.composer.placeholderHero")
           }
           modelLabel={toModelBadgeLabel(modelName)}
+          modelPresets={modelPresets}
+          activeModelPreset={modelPreset}
+          onSelectPreset={onSelectPreset}
           variant="hero"
           slashCommands={slashCommands}
           imageMode={heroImageMode}
