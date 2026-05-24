@@ -294,6 +294,7 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._last_update_time: float = time.monotonic()
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -419,9 +420,33 @@ class TelegramChannel(BaseChannel):
             error_callback=self._on_polling_error,
         )
 
-        # Keep running until stopped
+        # Keep running until stopped; also act as a polling watchdog
         while self._running:
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
+            if not self._app:
+                continue
+            updater_running = getattr(self._app.updater, "running", True)
+            if not updater_running:
+                try:
+                    await self._app.updater.start_polling(
+                        allowed_updates=["message"],
+                        drop_pending_updates=False,
+                        error_callback=self._on_polling_error,
+                    )
+                    self._last_update_time = time.monotonic()
+                except Exception as e:
+                    logger.error("Failed to restart Telegram polling: {}", e)
+            elif time.monotonic() - self._last_update_time > 300:
+                try:
+                    await self._app.updater.stop()
+                    await self._app.updater.start_polling(
+                        allowed_updates=["message"],
+                        drop_pending_updates=False,
+                        error_callback=self._on_polling_error,
+                    )
+                    self._last_update_time = time.monotonic()
+                except Exception as e:
+                    logger.error("Failed to restart Telegram polling: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -1027,6 +1052,8 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
+
+        self._last_update_time = time.monotonic()
 
         message = update.message
         user = update.effective_user
