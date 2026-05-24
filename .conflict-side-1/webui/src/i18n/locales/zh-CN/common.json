@@ -1,0 +1,678 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "正在连接 nanobot…",
+      "boot": "正在加载 nanobot…"
+    },
+    "error": {
+      "title": "无法连接到 nanobot",
+      "gatewayHint": "请确认 gateway 已启动（`nanobot gateway`），并且当前页面与 gateway 运行在同一台机器上。"
+    },
+    "auth": {
+      "title": "需要验证",
+      "hint": "请输入 gateway 配置中的 tokenIssueSecret。",
+      "placeholder": "密码",
+      "submit": "连接",
+      "invalid": "密码无效，请重试。"
+    },
+    "account": {
+      "section": "账户",
+      "logoutHint": "断开此浏览器与 gateway 的连接。",
+      "logout": "退出登录"
+    },
+    "system": {
+      "section": "系统",
+      "restartHint": "重启 nanobot 以应用运行时更改。",
+      "restart": "重启 nanobot",
+      "restarting": "正在重启..."
+    },
+    "restart": {
+      "completed": "重启已完成，用时 {{seconds}} 秒。"
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
+    }
+  },
+  "sidebar": {
+    "navigation": "侧边栏导航",
+    "globalActions": "全局操作",
+    "collapse": "收起侧边栏",
+    "toggleTheme": "切换主题",
+    "home": "首页",
+    "newChat": "新建对话",
+    "searchAria": "搜索",
+    "viewOptions": "视图",
+    "compactList": "紧凑列表",
+    "showPreviews": "显示预览",
+    "showTimestamps": "显示时间",
+    "sortLabel": "排序",
+    "sortUpdated": "最近更新",
+    "sortCreated": "最近创建",
+    "sortTitle": "标题 A-Z",
+    "searchPlaceholder": "搜索",
+    "searchResults": "搜索结果",
+    "noSearchResults": "没有匹配的会话。",
+    "recent": "最近对话",
+    "refreshSessions": "刷新会话",
+    "settings": "设置",
+    "language": {
+      "label": "语言",
+      "ariaLabel": "切换语言"
+    }
+  },
+  "settings": {
+    "backToChat": "返回对话",
+    "sidebar": {
+      "title": "设置",
+      "ariaLabel": "设置分区"
+    },
+    "nav": {
+      "general": "通用",
+      "byok": "BYOK",
+      "overview": "概览",
+      "appearance": "外观",
+      "models": "模型",
+      "providers": "提供商",
+      "image": "图片",
+      "web": "网页",
+      "cliApps": "CLI 应用",
+      "mcp": "MCP",
+      "runtime": "运行时",
+      "advanced": "高级"
+    },
+    "sections": {
+      "interface": "界面",
+      "ai": "AI",
+      "system": "系统",
+      "status": "状态",
+      "localPreferences": "本地偏好",
+      "presets": "预设",
+      "imageGeneration": "图片生成",
+      "imageDefaults": "默认值",
+      "webSearch": "网页搜索",
+      "webBehavior": "行为",
+      "cliApps": "CLI 应用",
+      "mcp": "MCP",
+      "identity": "身份",
+      "safety": "安全",
+      "capabilities": "能力",
+      "integrations": "集成"
+    },
+    "models": {
+      "selectModel": "选择模型",
+      "addConfiguration": "添加配置",
+      "newConfiguration": "新建模型配置",
+      "newConfigurationHelp": "把服务商和模型保存为一个可直接切换的选项。",
+      "configurationName": "名称",
+      "configurationNamePlaceholder": "快速写作"
+    },
+    "rows": {
+      "theme": "主题",
+      "language": "语言",
+      "provider": "提供商",
+      "model": "模型",
+      "restart": "重启 nanobot",
+      "configPath": "配置路径",
+      "activePreset": "当前预设",
+      "gateway": "网关",
+      "restartState": "重启状态",
+      "pendingChanges": "待处理更改",
+      "currentModel": "当前模型",
+      "selectedPreset": "选中的预设",
+      "presetModel": "预设模型",
+      "density": "密度",
+      "activityMode": "活动细节",
+      "codeWrap": "代码换行",
+      "brandLogos": "品牌 Logo",
+      "maxResults": "最大结果数",
+      "timeout": "超时",
+      "jinaReader": "Jina Reader",
+      "imageGeneration": "图片生成",
+      "imageProvider": "图片服务商",
+      "imageProviderStatus": "服务商状态",
+      "imageProviderBase": "服务商地址",
+      "imageModel": "图片模型",
+      "defaultAspectRatio": "默认比例",
+      "defaultImageSize": "默认尺寸",
+      "maxImagesPerTurn": "每轮最多图片数",
+      "imageSaveDir": "保存目录",
+      "botName": "Bot 名称",
+      "botIcon": "Bot 图标",
+      "timezone": "时区",
+      "toolHintMaxLength": "工具提示长度",
+      "workspacePath": "工作区路径",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "统一会话",
+      "restrictWorkspace": "限制在工作区内",
+      "execTool": "Exec 工具",
+      "execSandbox": "Exec 沙箱",
+      "ssrfWhitelist": "SSRF 白名单",
+      "mcpServers": "MCP 服务器",
+      "pathAppend": "PATH 追加",
+      "cliAppsCatalog": "目录",
+      "cliAppsFilter": "筛选",
+      "configurationDocs": "配置文档"
+    },
+    "help": {
+      "theme": "在浅色和深色外观之间切换。",
+      "language": "选择 WebUI 使用的语言。",
+      "provider": "选择新模型请求使用的服务商。",
+      "model": "设置 nanobot 默认使用的模型名称。",
+      "configPath": "当前网关正在使用的配置文件。",
+      "currentModel": "选择 nanobot 接下来回复时使用的模型。",
+      "selectedModelProvider": "由当前模型决定。",
+      "selectedModelValue": "由当前模型决定。",
+      "selectedPreset": "命名预设在这里只读；需要编辑时请改 config.json。",
+      "presetModel": "切回 Default 后可在 WebUI 编辑模型和服务商。",
+      "density": "仅保存在当前浏览器。",
+      "activityMode": "选择默认显示多少 agent 活动细节。",
+      "codeWrap": "让较小屏幕上的长代码行更易读。",
+      "brandLogos": "在设置页显示第三方服务商和 CLI 的 Logo。",
+      "maxResults": "每次 web_search 返回的结果数量。",
+      "timeout": "搜索服务商请求超时秒数。",
+      "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
+      "imageGeneration": "当已配置图片服务商时，在对话中开放 generate_image。",
+      "imageProvider": "选择 generate_image 使用的服务商。",
+      "imageProviderStatus": "图片生成复用服务商页里的凭证配置。",
+      "imageModel": "发送给所选图片服务商的模型名称。",
+      "defaultAspectRatio": "当提示词没有选择比例时使用。",
+      "defaultImageSize": "发送给支持该能力的服务商的尺寸提示。",
+      "maxImagesPerTurn": "单次 generate_image 请求允许的图片上限。",
+      "botName": "显示在使用 bot 身份的运行时界面里。",
+      "botIcon": "显示在 bot 名称旁的短 emoji 或文本。",
+      "timezone": "运行时上下文和计划任务使用的 IANA 时区。",
+      "toolHintMaxLength": "工具进度提示显示的最大字符数。",
+      "cliAppsCatalog": "只安装 nanobot 在本机调用应用时需要的 CLI 适配层，不触碰应用本体。",
+      "cliAppsFilter": "按应用、分类或能力搜索。",
+      "advancedReadOnly": "高级安全控制在 WebUI 中只读；需要时请谨慎编辑 config.json。"
+    },
+    "timezone": {
+      "select": "选择时区",
+      "search": "搜索时区",
+      "empty": "没有匹配的时区。"
+    },
+    "cliApps": {
+      "allCategories": "全部分类",
+      "availableCount": "{{count}} 个应用",
+      "installedCount": "已安装 {{count}} 个 CLI",
+      "summary": "CLI 已安装 {{installed}} / {{total}}",
+      "filterAll": "全部",
+      "filterInstalled": "已装 CLI",
+      "filterNotInstalled": "未装 CLI",
+      "searchPlaceholder": "搜索 CLI",
+      "loading": "正在加载 CLI 应用...",
+      "empty": "没有匹配的 CLI 应用。",
+      "statusInstalled": "CLI 已安装",
+      "statusMissing": "缺失",
+      "statusAvailable": "可用",
+      "statusUnsupported": "暂不支持",
+      "statusNotInstalled": "CLI 未安装",
+      "requires": "依赖",
+      "test": "测试 CLI",
+      "update": "更新 CLI",
+      "uninstall": "卸载 CLI",
+      "install": "安装 CLI",
+      "readyTitle": "@{{name}} 已就绪",
+      "readyStatus": "就绪",
+      "readyTry": "试试 @{{name}}",
+      "readyCopied": "已复制",
+      "readyPrompt": "用 @{{name}} 看看这个 CLI 能做什么。",
+      "openChat": "回到对话",
+      "unsupported": "暂不支持",
+      "unavailable": "不可用",
+      "noDescription": "暂无描述。"
+    },
+    "mcp": {
+      "allCategories": "全部分类",
+      "summary": "已启用 {{installed}} / {{total}} 个预设",
+      "filterAll": "全部",
+      "filterInstalled": "已启用",
+      "filterNotInstalled": "未启用",
+      "searchPlaceholder": "搜索 MCP 预设",
+      "moreOptions": "更多 MCP 选项",
+      "moreOptionsSubtitle": "添加自定义服务，或导入 mcp.json。",
+      "customTitle": "自定义 MCP",
+      "customSubtitle": "添加任意 stdio、HTTP 或 SSE MCP 服务。",
+      "customAction": "自定义",
+      "importAction": "导入",
+      "serverName": "服务名",
+      "serverUrl": "URL",
+      "transport": "传输方式",
+      "command": "命令",
+      "args": "参数 JSON",
+      "headers": "Headers JSON",
+      "env": "环境变量 JSON",
+      "timeout": "工具超时",
+      "advancedOptions": "高级选项",
+      "hideAdvanced": "收起高级",
+      "saveCustom": "保存 MCP",
+      "configImport": "导入 mcp.json",
+      "importConfig": "导入",
+      "restartRequired": "重启 nanobot 以连接更新后的 MCP 工具。",
+      "toolsFound": "{{count}} 个工具",
+      "loading": "正在加载 MCP 预设...",
+      "empty": "没有匹配的 MCP 预设。",
+      "openDocs": "打开文档",
+      "test": "测试",
+      "remove": "移除",
+      "enable": "启用",
+      "enabled": "已启用",
+      "setup": "连接",
+      "configure": "连接",
+      "connectTitle": "连接 {{name}}",
+      "connectHint": "填入你账户里的 key。",
+      "saveAndEnable": "保存并启用",
+      "updateSetup": "更新配置",
+      "configured": "已配置",
+      "keepExisting": "留空则保留当前值",
+      "statusConfigured": "已配置",
+      "statusMissingCredentials": "需要 key",
+      "statusMissingDependency": "缺少依赖",
+      "statusComingSoon": "暂不支持",
+      "statusNotInstalled": "未启用",
+      "toolScope": "工具",
+      "allTools": "全部",
+      "noTools": "不暴露",
+      "testForTools": "运行测试后，可以查看并选择单个工具。"
+    },
+    "values": {
+      "light": "浅色",
+      "dark": "深色",
+      "notAvailable": "不可用",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "restartPending": "等待重启",
+      "ready": "就绪",
+      "comfortable": "舒适",
+      "compact": "紧凑",
+      "auto": "自动",
+      "expanded": "展开",
+      "on": "开",
+      "off": "关",
+      "configured": "已配置",
+      "notConfigured": "未配置"
+    },
+    "status": {
+      "loading": "正在加载设置...",
+      "loadError": "无法加载设置",
+      "unsaved": "有未保存的更改。",
+      "upToDate": "已是最新。",
+      "savedRestart": "已保存。重启 nanobot 后生效。",
+      "restartAfterSaving": "保存后，可在合适时重启。",
+      "savedRestartApply": "已保存，可稍后重启。",
+      "imageProviderRestart": "图片服务商改动已保存，可稍后重启。"
+    },
+    "actions": {
+      "save": "保存",
+      "saving": "保存中",
+      "edit": "编辑",
+      "cancel": "取消",
+      "openDocs": "打开文档"
+    },
+    "byok": {
+      "description": "自带服务商密钥。Nanobot 会从当前 config 读取这些值，只有已配置的服务商才能在通用设置里选择。",
+      "configured": "已配置",
+      "notConfigured": "未配置",
+      "configuredSection": "已配置",
+      "notConfiguredSection": "未配置",
+      "showMore": "再显示 {{count}} 个",
+      "showLess": "收起",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "输入 API key",
+      "apiKeyConfiguredPlaceholder": "留空则保留当前 key",
+      "configuredKeyHint": "已配置的 key",
+      "apiBasePlaceholder": "使用服务商默认地址",
+      "apiKeyRequired": "需要 API key 才能配置此服务商。",
+      "showApiKey": "显示 API key",
+      "hideApiKey": "隐藏 API key",
+      "noConfiguredProviders": "没有已配置的服务商",
+      "configureFirst": "请先在 BYOK 里配置服务商。",
+      "openByok": "打开 BYOK",
+      "tabs": {
+        "ariaLabel": "BYOK 凭证类型",
+        "llm": "LLM",
+        "webSearch": "网页搜索"
+      },
+      "webSearch": {
+        "provider": "搜索服务商",
+        "providerHelp": "选择网页搜索工具使用的后端。",
+        "selectProvider": "选择服务商",
+        "credentials": "凭证",
+        "noCredentialRequired": "无需 key",
+        "noCredentialHelp": "DuckDuckGo 不需要保存 API key。",
+        "apiKeyHelp": "保存到 config 后只显示掩码提示。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG 需要你自己的实例地址。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "这个搜索服务商需要 API key。",
+        "baseUrlRequired": "SearXNG 需要 Base URL。",
+        "missingCredential": "填写所需凭证后才能保存。",
+        "saveHint": "改动会应用到新的网页搜索请求。"
+      }
+    },
+    "overview": {
+      "model": "当前模型",
+      "providers": "提供商",
+      "configuredCount": "已配置 {{count}} 个",
+      "totalProviders": "共 {{count}} 个可用",
+      "webSearch": "网页搜索",
+      "imageGeneration": "图片生成",
+      "workspace": "工作区"
+    },
+    "providers": {
+      "searchPlaceholder": "搜索服务商",
+      "noMatches": "没有匹配的服务商。",
+      "saveProvider": "保存服务商"
+    },
+    "legal": {
+      "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"
+    },
+    "image": {
+      "selectProvider": "选择服务商",
+      "selectAspect": "选择比例",
+      "selectSize": "选择尺寸",
+      "configureProvider": "配置服务商",
+      "missingCredential": "启用图片生成前，请先配置这个服务商。"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "对话 {{id}}",
+    "loading": "加载中…",
+    "noSessions": "还没有会话。",
+    "showMore": "再显示 {{count}} 个",
+    "actions": "“{{title}}” 的会话操作",
+    "activity": {
+      "running": "Agent 正在运行",
+      "complete": "Agent 已完成"
+    },
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "rename": "重命名",
+    "renameTitle": "重命名对话",
+    "renameDescription": "为这个对话设置一个仅用于 WebUI 侧边栏的名称。",
+    "renamePlaceholder": "对话名称",
+    "renameSave": "保存",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "showArchived": "显示归档",
+    "hideArchived": "隐藏归档",
+    "delete": "删除",
+    "newChat": "新建对话",
+    "groups": {
+      "pinned": "置顶",
+      "all": "对话",
+      "today": "今天",
+      "yesterday": "昨天",
+      "earlier": "更早",
+      "archived": "已归档"
+    }
+  },
+  "deleteConfirm": {
+    "title": "删除这个对话？",
+    "description": "此操作无法撤销。",
+    "cancel": "取消",
+    "confirm": "删除"
+  },
+  "connection": {
+    "idle": "空闲",
+    "connecting": "连接中…",
+    "open": "已连接",
+    "reconnecting": "重连中…",
+    "closed": "已断开",
+    "error": "连接出错"
+  },
+  "thread": {
+    "loadingConversation": "正在加载对话…",
+    "empty": {
+      "greeting": "我可以帮你做什么？",
+      "quickActions": {
+        "plan": {
+          "title": "创建项目计划",
+          "prompt": "帮我为接下来要做的事情写一份简洁的项目计划。"
+        },
+        "analyze": {
+          "title": "分析这些数据",
+          "prompt": "帮我分析这些数据，并指出最重要的模式。"
+        },
+        "brainstorm": {
+          "title": "头脑风暴想法",
+          "prompt": "围绕这个问题头脑风暴几个实用方案，并说明取舍。"
+        },
+        "code": {
+          "title": "编写代码",
+          "prompt": "帮我为这个任务写代码，先从最小可用改动开始。"
+        },
+        "summarize": {
+          "title": "总结这份文档",
+          "prompt": "帮我总结这份文档，并列出关键要点。"
+        },
+        "more": {
+          "title": "更多",
+          "prompt": "展示几个你在这个工作区里可以帮我的实用方式。"
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "设计应用图标",
+          "prompt": "生成一个干净的 1:1 nanobot 应用图标：友好的机器人，简洁矢量风格，蓝白柔和配色，不要文字。"
+        },
+        "sticker": {
+          "title": "制作贴纸",
+          "prompt": "生成一张可爱的贴纸风小机器人助手图片，背景像透明贴纸，表情活泼有趣。"
+        },
+        "poster": {
+          "title": "创建海报",
+          "prompt": "生成一张个人 AI 助手的精致海报概念图，现代构图，视觉层级清晰，适合落地页展示。"
+        },
+        "product": {
+          "title": "产品样机",
+          "prompt": "生成一张对话式 AI Web 应用的干净产品样机图，极简界面，高级光影，真实设备边框。"
+        },
+        "portrait": {
+          "title": "风格化头像",
+          "prompt": "生成一个友好的 AI 伙伴风格化头像，柔和光线，细节丰富但亲切，现代插画风格。"
+        },
+        "edit": {
+          "title": "编辑图片",
+          "prompt": "帮我编辑一张图片。先让我上传或指定要编辑的图片，然后生成编辑后的结果。"
+        }
+      }
+    },
+    "header": {
+      "toggleSidebar": "切换侧边栏",
+      "newChat": "从顶部新建对话",
+      "toggleTheme": "从顶部切换主题",
+      "settings": "打开设置"
+    },
+    "composer": {
+      "placeholderThread": "输入消息…",
+      "placeholderHero": "问任何问题...",
+      "placeholderOpening": "正在打开新对话…",
+      "placeholderStreaming": "模型正在回复…",
+      "inputAria": "消息输入框",
+      "sendHint": "Enter 发送 · Shift+Enter 换行",
+      "runRuntimeTitle": "运行中 · {{elapsed}}",
+      "goalStateStrip": "目标 · {{label}}",
+      "goalStateFallback": "目标",
+      "goalStateExpandAria": "查看完整目标",
+      "goalStateSheetTitle": "目标",
+      "send": "发送消息",
+      "stop": "停止响应",
+      "attachImage": "添加图片",
+      "imageMode": {
+        "label": "图片生成",
+        "toggle": "切换图片生成模式",
+        "placeholder": "描述或编辑图片…",
+        "aspectAria": "图片画幅",
+        "aspectLabel": "图片画幅",
+        "aspect": {
+          "auto": "自动",
+          "1_1": "方形 1:1",
+          "3_4": "竖版 3:4",
+          "9_16": "故事版 9:16",
+          "4_3": "横版 4:3",
+          "16_9": "宽屏 16:9"
+        }
+      },
+      "tools": {
+        "search": "搜索",
+        "reason": "推理",
+        "deepResearch": "深度研究",
+        "voice": "语音输入"
+      },
+      "slash": {
+        "ariaLabel": "斜杠命令",
+        "label": "命令",
+        "navigateHint": "↑↓ 选择",
+        "selectHint": "Enter/Tab 填入",
+        "closeHint": "Esc 关闭",
+        "badges": {
+          "current": "当前",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目标正在运行",
+          "goalReady": "开始一个持续目标",
+          "history": "查看最近消息",
+          "stopRunning": "正在运行"
+        },
+        "commands": {
+          "new": {
+            "title": "新建对话",
+            "description": "停止当前任务，并开始一个新的对话。"
+          },
+          "stop": {
+            "title": "停止当前任务",
+            "description": "取消这个对话中正在运行的 agent 回合。"
+          },
+          "restart": {
+            "title": "重启 nanobot",
+            "description": "原地重启 bot 进程。"
+          },
+          "status": {
+            "title": "查看状态",
+            "description": "显示运行时、服务商和通道状态。"
+          },
+          "model": {
+            "title": "模型",
+            "description": "查看或切换当前模型预设。"
+          },
+          "history": {
+            "title": "查看对话历史",
+            "description": "打印最近 N 条已持久化的对话消息。"
+          },
+          "dream": {
+            "title": "运行 Dream",
+            "description": "手动触发记忆整理。"
+          },
+          "dream_log": {
+            "title": "查看 Dream 日志",
+            "description": "查看上一次 Dream 整理改变了什么。"
+          },
+          "dream_restore": {
+            "title": "恢复记忆",
+            "description": "将记忆恢复到之前的 Dream 快照。"
+          },
+          "goal": {
+            "title": "长期目标",
+            "description": "让助手把当前请求当作需要多步骤持续推进的目标。"
+          },
+          "help": {
+            "title": "查看帮助",
+            "description": "列出可用的斜杠命令。"
+          },
+          "pairing": {
+            "title": "配对",
+            "description": "管理配对请求。"
+          }
+        }
+      },
+      "mentions": {
+        "ariaLabel": "应用和 MCP",
+        "label": "插件",
+        "cliGroup": "CLI 应用",
+        "mcpGroup": "MCP 服务",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "使用 @{{name}} 调用本地 CLI",
+        "mcpDescription": "使用 @{{name}} 调用 MCP 服务"
+      },
+      "encoding": "处理中…",
+      "remove": "移除附件",
+      "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",
+      "imageRejected": {
+        "unsupported_type": "不支持的文件类型",
+        "too_many_images": "每条消息最多 {{max}} 张图片",
+        "magic_mismatch": "文件看起来不像真实的图片",
+        "decode_failed": "无法解码这张图片",
+        "too_large": "图片太大，请换一张小一点的",
+        "io": "无法读取该文件"
+      },
+      "goalStateCloseAria": "关闭目标"
+    },
+    "scrollToBottom": "滚动到底部",
+    "loadEarlier": "加载更早消息"
+  },
+  "message": {
+    "streaming": "流式输出中",
+    "assistantTyping": "助手正在输入",
+    "toolSingle": "正在使用工具",
+    "toolMany": "已使用 {{count}} 个工具",
+    "toolSummary": "{{count}} 个工具",
+    "toolSummaryMany": "{{count}} 个工具",
+    "reasoningTools": "推理 · {{count}} 个工具",
+    "reasoningToolsSingular": "推理 · 1 个工具",
+    "reasoning": "思考过程",
+    "reasoningStreaming": "正在思考…",
+    "reasoningSummary": "推理",
+    "agentActivitySummary": "{{reasoning}} 步 · {{tools}} 次工具调用",
+    "agentActivityToolsOnly": "{{tools}} 次工具调用",
+    "agentActivityLiveSummary": "进行中… · {{reasoning}} 步 · {{tools}} 次工具调用",
+    "agentActivityLiveToolsOnly": "进行中… · {{tools}} 次工具调用",
+    "activityThinkingFor": "思考中 {{duration}}",
+    "activityThought": "已思考",
+    "activityThoughtFor": "思考了 {{duration}}",
+    "cliActivityRunningOne": "正在使用 @{{name}}",
+    "cliActivityRanOne": "已使用 @{{name}}",
+    "cliActivityFailedOne": "使用 @{{name}} 失败",
+    "cliActivityRunningMany": "正在使用 {{count}} 个 CLI 应用",
+    "cliActivityRanMany": "已使用 {{count}} 个 CLI 应用",
+    "cliActivityFailedMany": "{{count}} 个 CLI 应用失败",
+    "cliRunRunning": "正在使用",
+    "cliRunRan": "已使用",
+    "cliRunFailed": "失败",
+    "imageAttachment": "图片附件",
+    "copyReply": "复制回复",
+    "copiedReply": "已复制回复",
+    "turnLatencyTitle": "本轮耗时（端到端）"
+  },
+  "lightbox": {
+    "title": "图片预览",
+    "open": "查看图片",
+    "prev": "上一张",
+    "next": "下一张",
+    "close": "关闭预览"
+  },
+  "code": {
+    "fallbackLanguage": "代码",
+    "copyAria": "复制代码",
+    "copy": "复制",
+    "copied": "已复制"
+  },
+  "common": {
+    "dismiss": "关闭"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "消息过大",
+      "body": "服务端因超过大小限制拒收了上一条消息。可移除部分图片或使用更小的图片后重试。"
+    }
+  }
+}

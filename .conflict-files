@@ -1,0 +1,3 @@
+ancestorEntries = ["webui/src/components/settings/SettingsView.tsx"]
+ourEntries = ["webui/src/components/settings/SettingsView.tsx"]
+theirEntries = ["webui/src/components/settings/SettingsView.tsx"]

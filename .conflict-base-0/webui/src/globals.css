@@ -1,0 +1,284 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 3% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 3% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 3% 12%;
+    --primary: 240 4% 16%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.4375rem;
+    --sidebar: 0 0% 98.5%;
+    --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-accent: 0 0% 95.8%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 0 0% 89.8%;
+  }
+
+  .dark {
+    --background: 0 0% 10%;
+    --foreground: 240 4% 96%;
+    --card: 0 0% 12%;
+    --card-foreground: 240 4% 96%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 240 4% 96%;
+    --primary: 240 5% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 83.1%;
+    --sidebar: 0 0% 11.5%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-accent: 0 0% 15.5%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 0 0% 18%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  ::selection {
+    @apply bg-primary/15;
+  }
+}
+
+@layer utilities {
+  .shadow-inner-right {
+    box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
+  }
+
+  /* Markdown body styles, ported from agent-chat-ui's markdown-styles.css. */
+  .markdown-content > :first-child {
+    @apply mt-0;
+  }
+  .markdown-content > :last-child {
+    @apply mb-0;
+  }
+
+  /* Override Tailwind Typography's built-in colors with our design tokens
+     so assistant messages use the same --foreground as user messages. */
+  .markdown-content {
+    --tw-prose-body: hsl(var(--foreground));
+    --tw-prose-headings: hsl(var(--foreground));
+    --tw-prose-bold: hsl(var(--foreground));
+    --tw-prose-lead: hsl(var(--foreground));
+  }
+
+  /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
+     tight for Chinese/Japanese/Korean characters. Bump to 1.8 for better
+     readability when the browser detects a CJK primary font. */
+  :lang(zh),
+  :lang(zh-CN),
+  :lang(zh-TW),
+  :lang(zh-HK),
+  :lang(ja),
+  :lang(ko) {
+    --cjk-line-height: 1.8;
+  }
+  :root {
+    --cjk-line-height: 1.625;
+  }
+
+  /* L→R sheen clipped to live activity labels. The highlight lives inside
+     the glyphs, not in the row background, so dark mode stays quiet. */
+  @keyframes streaming-text-sheen-ltr {
+    0% {
+      background-position: 140% 50%;
+    }
+    100% {
+      background-position: -40% 50%;
+    }
+  }
+  .streaming-text-sheen {
+    position: relative;
+    color: hsl(var(--muted-foreground));
+  }
+  .file-reference-sheen {
+    color: inherit;
+  }
+  .streaming-text-sheen::after {
+    content: attr(data-sheen-text);
+    position: absolute;
+    inset: 0;
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    color: transparent;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
+      transparent 100%
+    );
+    background-size: 260% 100%;
+    background-position: 140% 50%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+  }
+  .dark .streaming-text-sheen::after {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
+      transparent 100%
+    );
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .streaming-text-sheen::after {
+      animation: none;
+      content: "";
+    }
+  }
+
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
+  @keyframes goal-shell-glow-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
+    }
+    50% {
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
+    }
+  }
+  .goal-shell-glow {
+    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
+  }
+  @keyframes goal-shell-glow-breathe-dark {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
+    }
+    50% {
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
+    }
+  }
+  .dark .goal-shell-glow {
+    animation-name: goal-shell-glow-breathe-dark;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .goal-shell-glow {
+      animation: none;
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
+    }
+    .dark .goal-shell-glow {
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
+    }
+  }
+
+  @keyframes cli-app-linked-sheen {
+    0% {
+      transform: translateX(-140%) skewX(-14deg);
+      opacity: 0;
+    }
+    18% {
+      opacity: 0.7;
+    }
+    72%,
+    100% {
+      transform: translateX(140%) skewX(-14deg);
+      opacity: 0;
+    }
+  }
+  .cli-app-linked-chip::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--foreground) / 0.14) 46%,
+      hsl(var(--background) / 0.7) 50%,
+      hsl(var(--foreground) / 0.12) 54%,
+      transparent 100%
+    );
+    animation: cli-app-linked-sheen 1.25s ease-out 1;
+  }
+  .dark .cli-app-linked-chip::after {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(var(--foreground) / 0.12) 46%,
+      hsl(var(--background) / 0.5) 50%,
+      hsl(var(--foreground) / 0.1) 54%,
+      transparent 100%
+    );
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cli-app-linked-chip::after {
+      animation: none;
+      content: none;
+    }
+  }
+
+  /* Subtle scrollbar that doesn't fight the dark background. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+    border-radius: 9999px;
+  }
+  .scrollbar-track-transparent {
+    scrollbar-gutter: stable;
+  }
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

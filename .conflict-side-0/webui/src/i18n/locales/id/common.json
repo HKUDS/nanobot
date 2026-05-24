@@ -1,0 +1,678 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Menghubungkan ke nanobot…",
+      "boot": "Memuat nanobot…"
+    },
+    "error": {
+      "title": "Tidak dapat menjangkau nanobot",
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+    },
+    "auth": {
+      "title": "Autentikasi diperlukan",
+      "hint": "Masukkan secret yang dikonfigurasi sebagai tokenIssueSecret di konfigurasi gateway.",
+      "placeholder": "Kata sandi",
+      "submit": "Hubungkan",
+      "invalid": "Kata sandi tidak valid. Coba lagi."
+    },
+    "account": {
+      "section": "Akun",
+      "logoutHint": "Putuskan browser ini dari gateway.",
+      "logout": "Keluar"
+    },
+    "system": {
+      "section": "Sistem",
+      "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
+      "restart": "Mulai ulang nanobot",
+      "restarting": "Memulai ulang..."
+    },
+    "restart": {
+      "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "UI web nanobot — ngobrol dengan workspace nanobot Anda."
+    }
+  },
+  "sidebar": {
+    "navigation": "Navigasi bilah samping",
+    "globalActions": "Aksi global",
+    "collapse": "Ciutkan sidebar",
+    "toggleTheme": "Ganti tema",
+    "home": "Beranda",
+    "newChat": "Obrolan baru",
+    "searchAria": "Cari",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
+    "searchPlaceholder": "Cari",
+    "searchResults": "Hasil",
+    "noSearchResults": "Tidak ada chat yang cocok.",
+    "recent": "Terbaru",
+    "refreshSessions": "Segarkan sesi",
+    "settings": "Pengaturan",
+    "language": {
+      "label": "Bahasa",
+      "ariaLabel": "Ganti bahasa"
+    }
+  },
+  "settings": {
+    "backToChat": "Kembali ke obrolan",
+    "sidebar": {
+      "title": "Pengaturan",
+      "ariaLabel": "Bagian pengaturan"
+    },
+    "nav": {
+      "general": "Umum",
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced",
+      "cliApps": "Aplikasi CLI",
+      "mcp": "MCP"
+    },
+    "sections": {
+      "interface": "Antarmuka",
+      "ai": "AI",
+      "system": "Sistem",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "imageGeneration": "Pembuatan gambar",
+      "imageDefaults": "Default",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "capabilities": "Kapabilitas",
+      "integrations": "Integrations",
+      "cliApps": "Aplikasi CLI",
+      "mcp": "MCP"
+    },
+    "rows": {
+      "theme": "Tema",
+      "language": "Bahasa",
+      "provider": "Penyedia",
+      "model": "Model",
+      "restart": "Mulai ulang nanobot",
+      "configPath": "Path konfigurasi",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "pendingChanges": "Perubahan tertunda",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "imageGeneration": "Pembuatan gambar",
+      "imageProvider": "Penyedia gambar",
+      "imageProviderStatus": "Status penyedia",
+      "imageProviderBase": "Basis penyedia",
+      "imageModel": "Model gambar",
+      "defaultAspectRatio": "Rasio default",
+      "defaultImageSize": "Ukuran default",
+      "maxImagesPerTurn": "Maks. gambar per giliran",
+      "imageSaveDir": "Direktori penyimpanan",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs",
+      "currentModel": "Model saat ini",
+      "brandLogos": "Logo merek",
+      "cliAppsCatalog": "Katalog aplikasi CLI",
+      "cliAppsFilter": "Filter aplikasi CLI"
+    },
+    "help": {
+      "theme": "Beralih antara tampilan terang dan gelap.",
+      "language": "Pilih bahasa yang digunakan WebUI.",
+      "provider": "Pilih penyedia untuk permintaan model baru.",
+      "model": "Atur nama model default yang digunakan nanobot.",
+      "configPath": "File konfigurasi gateway yang sedang digunakan.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "Tampilkan generate_image di chat saat penyedia gambar yang dikonfigurasi tersedia.",
+      "imageProvider": "Pilih penyedia registry yang digunakan oleh generate_image.",
+      "imageProviderStatus": "Pembuatan gambar menggunakan ulang kredensial penyedia dari Providers.",
+      "imageModel": "Nama model yang dikirim ke penyedia gambar yang dipilih.",
+      "defaultAspectRatio": "Digunakan saat prompt tidak memilih rasio aspek.",
+      "defaultImageSize": "Petunjuk ukuran yang dikirim ke penyedia yang mendukungnya.",
+      "maxImagesPerTurn": "Batas atas untuk satu permintaan generate_image.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "currentModel": "Pilih model yang digunakan nanobot untuk balasan berikutnya.",
+      "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
+      "selectedModelValue": "Ditentukan oleh model yang dipilih.",
+      "brandLogos": "Logo dimuat dari domain merek dengan ikon lokal sebagai cadangan.",
+      "cliAppsCatalog": "Jelajahi CLI aplikasi yang dapat dijalankan nanobot secara lokal.",
+      "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan."
+    },
+    "values": {
+      "light": "Terang",
+      "dark": "Gelap",
+      "notAvailable": "Tidak tersedia",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartPending": "Menunggu restart",
+      "ready": "Siap",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
+    },
+    "status": {
+      "loading": "Memuat pengaturan...",
+      "loadError": "Tidak dapat memuat pengaturan",
+      "unsaved": "Ada perubahan yang belum disimpan.",
+      "upToDate": "Sudah terbaru.",
+      "savedRestart": "Tersimpan. Mulai ulang nanobot untuk menerapkan.",
+      "restartAfterSaving": "Simpan perubahan, lalu restart saat siap.",
+      "savedRestartApply": "Tersimpan. Restart saat siap.",
+      "imageProviderRestart": "Perubahan penyedia gambar tersimpan. Restart saat siap."
+    },
+    "actions": {
+      "save": "Simpan",
+      "saving": "Menyimpan",
+      "edit": "Edit",
+      "cancel": "Batal",
+      "openDocs": "Open docs"
+    },
+    "byok": {
+      "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
+      "configured": "Terkonfigurasi",
+      "notConfigured": "Belum dikonfigurasi",
+      "configuredSection": "Terkonfigurasi",
+      "notConfiguredSection": "Belum dikonfigurasi",
+      "showMore": "Tampilkan {{count}} lagi",
+      "showLess": "Tampilkan lebih sedikit",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Masukkan API key",
+      "apiKeyConfiguredPlaceholder": "Kosongkan untuk mempertahankan key saat ini",
+      "configuredKeyHint": "Key terkonfigurasi",
+      "apiBasePlaceholder": "Gunakan default provider",
+      "apiKeyRequired": "API key diperlukan untuk mengonfigurasi provider ini.",
+      "showApiKey": "Tampilkan API key",
+      "hideApiKey": "Sembunyikan API key",
+      "noConfiguredProviders": "Belum ada provider terkonfigurasi",
+      "configureFirst": "Konfigurasikan provider di BYOK terlebih dahulu.",
+      "openByok": "Buka BYOK",
+      "tabs": {
+        "ariaLabel": "Jenis kredensial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Pilih backend yang digunakan alat web search.",
+        "selectProvider": "Pilih provider",
+        "credentials": "Kredensial",
+        "noCredentialRequired": "Tidak perlu key",
+        "noCredentialHelp": "DuckDuckGo berfungsi tanpa menyimpan API key.",
+        "apiKeyHelp": "Disimpan di config dan ditampilkan tersamarkan setelah disimpan.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG memerlukan URL instance Anda sendiri.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider pencarian ini memerlukan API key.",
+        "baseUrlRequired": "SearXNG memerlukan Base URL.",
+        "missingCredential": "Tambahkan kredensial yang diperlukan sebelum menyimpan.",
+        "saveHint": "Perubahan berlaku untuk permintaan web search baru."
+      }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "imageGeneration": "Pembuatan gambar",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search.",
+      "saveProvider": "Simpan penyedia"
+    },
+    "image": {
+      "selectProvider": "Pilih penyedia",
+      "selectAspect": "Pilih rasio",
+      "selectSize": "Pilih ukuran",
+      "configureProvider": "Konfigurasi penyedia",
+      "missingCredential": "Konfigurasikan penyedia ini sebelum mengaktifkan pembuatan gambar."
+    },
+    "models": {
+      "selectModel": "Pilih model",
+      "addConfiguration": "Tambah konfigurasi",
+      "newConfiguration": "Konfigurasi model baru",
+      "newConfigurationHelp": "Simpan penyedia dan model sebagai opsi sekali klik.",
+      "configurationName": "Nama",
+      "configurationNamePlaceholder": "Penulisan cepat"
+    },
+    "timezone": {
+      "select": "Pilih zona waktu",
+      "search": "Cari zona waktu",
+      "empty": "Tidak ada zona waktu yang cocok."
+    },
+    "cliApps": {
+      "allCategories": "Semua kategori",
+      "availableCount": "{{count}} aplikasi",
+      "installedCount": "{{count}} terpasang",
+      "summary": "{{installed}} dari {{total}} CLI terpasang",
+      "filterAll": "Semua",
+      "filterInstalled": "CLI terpasang",
+      "filterNotInstalled": "Belum terpasang",
+      "searchPlaceholder": "Cari CLI",
+      "statusInstalled": "Terpasang",
+      "statusAvailable": "Tersedia",
+      "statusMissing": "Dependensi hilang",
+      "statusUnsupported": "Tidak didukung",
+      "statusNotInstalled": "Belum terpasang",
+      "unsupported": "Tidak didukung",
+      "loading": "Memuat aplikasi CLI...",
+      "empty": "Tidak ada aplikasi CLI yang cocok dengan filter ini.",
+      "readyTitle": "@{{name}} siap",
+      "readyStatus": "Siap",
+      "readyPrompt": "Gunakan @{{name}} untuk melihat kemampuan CLI ini.",
+      "readyTry": "Coba @{{name}}",
+      "readyCopied": "Disalin",
+      "openChat": "Buka chat",
+      "requires": "Membutuhkan",
+      "test": "Uji CLI",
+      "update": "Perbarui CLI",
+      "uninstall": "Copot CLI",
+      "install": "Pasang CLI",
+      "unavailable": "Tidak tersedia",
+      "noDescription": "Tidak ada deskripsi."
+    },
+    "mcp": {
+      "allCategories": "Semua kategori",
+      "summary": "{{installed}} dari {{total}} preset diaktifkan",
+      "filterAll": "Semua",
+      "filterInstalled": "Aktif",
+      "filterNotInstalled": "Tidak aktif",
+      "searchPlaceholder": "Cari preset MCP",
+      "moreOptions": "Opsi MCP lainnya",
+      "moreOptionsSubtitle": "Tambahkan server khusus atau impor mcp.json.",
+      "customTitle": "MCP khusus",
+      "customSubtitle": "Tambahkan server MCP stdio, HTTP, atau SSE apa pun.",
+      "customAction": "Khusus",
+      "importAction": "Impor",
+      "serverName": "Nama server",
+      "serverUrl": "URL",
+      "transport": "Transport",
+      "command": "Perintah",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "Batas waktu alat",
+      "advancedOptions": "Opsi lanjutan",
+      "hideAdvanced": "Sembunyikan lanjutan",
+      "saveCustom": "Simpan MCP",
+      "configImport": "Impor mcp.json",
+      "importConfig": "Impor",
+      "restartRequired": "Mulai ulang nanobot untuk menyambungkan alat MCP yang diperbarui.",
+      "toolsFound": "{{count}} alat",
+      "loading": "Memuat preset MCP...",
+      "empty": "Tidak ada preset MCP yang cocok dengan filter ini.",
+      "openDocs": "Buka dokumentasi",
+      "test": "Uji",
+      "remove": "Hapus",
+      "enable": "Aktifkan",
+      "enabled": "Aktif",
+      "setup": "Hubungkan",
+      "configure": "Hubungkan",
+      "connectTitle": "Hubungkan {{name}}",
+      "connectHint": "Tambahkan kunci dari pengaturan akun Anda.",
+      "saveAndEnable": "Simpan dan aktifkan",
+      "updateSetup": "Perbarui konfigurasi",
+      "configured": "terkonfigurasi",
+      "keepExisting": "Biarkan kosong untuk mempertahankan nilai saat ini",
+      "statusConfigured": "Terkonfigurasi",
+      "statusMissingCredentials": "Butuh kunci",
+      "statusMissingDependency": "Butuh dependensi",
+      "statusComingSoon": "Segera hadir",
+      "statusNotInstalled": "Tidak aktif",
+      "toolScope": "Alat",
+      "allTools": "Semua",
+      "noTools": "Tidak ada",
+      "testForTools": "Jalankan Uji untuk memeriksa dan memilih alat individual."
+    },
+    "legal": {
+      "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Obrolan {{id}}",
+    "loading": "Memuat…",
+    "noSessions": "Belum ada sesi.",
+    "showMore": "Tampilkan {{count}} lagi",
+    "actions": "Aksi obrolan untuk {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
+    "delete": "Hapus",
+    "newChat": "Obrolan baru",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
+  },
+  "deleteConfirm": {
+    "title": "Hapus obrolan ini?",
+    "description": "Tindakan ini tidak dapat dibatalkan.",
+    "cancel": "Batal",
+    "confirm": "Hapus"
+  },
+  "connection": {
+    "idle": "Idle",
+    "connecting": "Menghubungkan…",
+    "open": "Terhubung",
+    "reconnecting": "Menyambung ulang…",
+    "closed": "Terputus",
+    "error": "Kesalahan koneksi"
+  },
+  "thread": {
+    "loadingConversation": "Memuat percakapan…",
+    "empty": {
+      "greeting": "Apa yang bisa saya bantu?",
+      "quickActions": {
+        "plan": {
+          "title": "Buat rencana proyek",
+          "prompt": "Buat rencana proyek ringkas untuk apa yang sebaiknya saya bangun berikutnya."
+        },
+        "analyze": {
+          "title": "Analisis data ini",
+          "prompt": "Bantu saya menganalisis data ini dan soroti pola yang paling penting."
+        },
+        "brainstorm": {
+          "title": "Brainstorm ide",
+          "prompt": "Brainstorm beberapa ide praktis dan tradeoff untuk masalah ini."
+        },
+        "code": {
+          "title": "Tulis kode",
+          "prompt": "Bantu saya menulis kode untuk tugas ini, mulai dari perubahan berguna yang paling kecil."
+        },
+        "summarize": {
+          "title": "Ringkas dokumen ini",
+          "prompt": "Ringkas dokumen ini dan daftar poin-poin utamanya."
+        },
+        "more": {
+          "title": "Lainnya",
+          "prompt": "Tunjukkan beberapa cara berguna Anda dapat membantu di workspace ini."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Desain ikon aplikasi",
+          "prompt": "Buat ikon aplikasi 1:1 yang bersih untuk nanobot: robot ramah, gaya vektor sederhana, palet biru dan putih lembut, tanpa teks."
+        },
+        "sticker": {
+          "title": "Buat stiker",
+          "prompt": "Buat gambar gaya stiker yang lucu dari asisten robot kecil, latar terlihat transparan, ekspresif dan menyenangkan."
+        },
+        "poster": {
+          "title": "Buat poster",
+          "prompt": "Buat konsep poster yang rapi untuk asisten AI pribadi, komposisi modern, hierarki visual kuat, cocok untuk landing page."
+        },
+        "product": {
+          "title": "Mockup produk",
+          "prompt": "Buat gambar mockup produk yang bersih untuk aplikasi web AI percakapan, antarmuka minimal, pencahayaan premium, bingkai perangkat realistis."
+        },
+        "portrait": {
+          "title": "Potret bergaya",
+          "prompt": "Buat potret bergaya dari pendamping AI yang ramah, pencahayaan lembut, detail tetapi tetap mudah didekati, gaya ilustrasi modern."
+        },
+        "edit": {
+          "title": "Edit gambar",
+          "prompt": "Bantu saya mengedit gambar. Minta saya mengunggah atau menyebutkan gambar terlebih dahulu, lalu buat hasil editnya."
+        }
+      }
+    },
+    "header": {
+      "toggleSidebar": "Tampilkan atau sembunyikan sidebar",
+      "newChat": "Mulai chat baru",
+      "toggleTheme": "Alihkan tema dari header",
+      "settings": "Buka pengaturan"
+    },
+    "composer": {
+      "placeholderThread": "Ketik pesan Anda…",
+      "placeholderHero": "Apa yang sedang Anda pikirkan?",
+      "placeholderOpening": "Membuka obrolan baru…",
+      "placeholderStreaming": "Model sedang merespons…",
+      "inputAria": "Input pesan",
+      "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
+      "runRuntimeTitle": "Berjalan · {{elapsed}}",
+      "goalStateStrip": "Tujuan · {{label}}",
+      "goalStateFallback": "Tujuan",
+      "goalStateExpandAria": "Lihat tujuan lengkap",
+      "goalStateSheetTitle": "Tujuan",
+      "goalStateCloseAria": "Tutup tujuan",
+      "send": "Kirim pesan",
+      "stop": "Hentikan respons",
+      "attachImage": "Lampirkan gambar",
+      "imageMode": {
+        "label": "Buat gambar",
+        "toggle": "Alihkan mode pembuatan gambar",
+        "placeholder": "Deskripsikan atau edit gambar…",
+        "aspectAria": "Rasio aspek gambar",
+        "aspectLabel": "Rasio gambar",
+        "aspect": {
+          "auto": "Otomatis",
+          "1_1": "Persegi 1:1",
+          "3_4": "Potret 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Lanskap 4:3",
+          "16_9": "Lebar 16:9"
+        }
+      },
+      "tools": {
+        "search": "Cari",
+        "reason": "Bernalar",
+        "deepResearch": "Riset mendalam",
+        "voice": "Input suara"
+      },
+      "slash": {
+        "ariaLabel": "Perintah slash",
+        "label": "perintah",
+        "navigateHint": "↑↓ Pilih",
+        "selectHint": "Enter/Tab Sisipkan",
+        "closeHint": "Esc Tutup",
+        "commands": {
+          "new": {
+            "title": "Obrolan baru",
+            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+          },
+          "stop": {
+            "title": "Hentikan tugas saat ini",
+            "description": "Batalkan giliran agent yang sedang aktif di chat ini."
+          },
+          "restart": {
+            "title": "Mulai ulang nanobot",
+            "description": "Mulai ulang proses bot di tempat."
+          },
+          "status": {
+            "title": "Tampilkan status",
+            "description": "Tampilkan status runtime, provider, dan channel."
+          },
+          "model": {
+            "title": "Model",
+            "description": "Tampilkan atau ganti preset model aktif."
+          },
+          "history": {
+            "title": "Tampilkan riwayat",
+            "description": "Cetak N pesan percakapan tersimpan terbaru."
+          },
+          "dream": {
+            "title": "Jalankan Dream",
+            "description": "Picu konsolidasi memori secara manual."
+          },
+          "dream_log": {
+            "title": "Tampilkan log Dream",
+            "description": "Tampilkan perubahan dari konsolidasi Dream terakhir."
+          },
+          "dream_restore": {
+            "title": "Pulihkan memori",
+            "description": "Kembalikan memori ke snapshot Dream sebelumnya."
+          },
+          "goal": {
+            "title": "Tujuan jangka panjang",
+            "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
+          },
+          "help": {
+            "title": "Tampilkan bantuan",
+            "description": "Daftar perintah slash yang tersedia."
+          },
+          "pairing": {
+            "title": "Pemasangan",
+            "description": "Kelola permintaan pemasangan."
+          }
+        },
+        "badges": {
+          "current": "Saat ini",
+          "recent": "Terbaru"
+        },
+        "details": {
+          "goalActive": "Tujuan sedang berjalan",
+          "goalReady": "Mulai tujuan berkelanjutan",
+          "history": "Tampilkan pesan terbaru",
+          "stopRunning": "Sedang berjalan"
+        }
+      },
+      "encoding": "Memproses…",
+      "remove": "Hapus lampiran",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipe file tidak didukung",
+        "too_many_images": "Maksimal {{max}} gambar per pesan",
+        "magic_mismatch": "File ini tampaknya bukan gambar asli",
+        "decode_failed": "Tidak dapat mendekode gambar ini",
+        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "io": "Tidak dapat membaca file ini"
+      },
+      "mentions": {
+        "ariaLabel": "Aplikasi dan MCP",
+        "label": "Plugin",
+        "cliGroup": "Aplikasi CLI",
+        "mcpGroup": "Server MCP",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",
+        "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
+      }
+    },
+    "scrollToBottom": "Gulir ke bawah",
+    "loadEarlier": "Muat pesan sebelumnya"
+  },
+  "message": {
+    "streaming": "sedang mengalir",
+    "assistantTyping": "Asisten sedang mengetik",
+    "toolSingle": "Menggunakan sebuah alat",
+    "toolMany": "Menggunakan {{count}} alat",
+    "toolSummary": "{{count}} alat",
+    "toolSummaryMany": "{{count}} alat",
+    "reasoningTools": "Penalaran · {{count}} alat",
+    "reasoningToolsSingular": "Penalaran · 1 alat",
+    "reasoning": "Penalaran",
+    "reasoningStreaming": "Berpikir…",
+    "reasoningSummary": "Penalaran",
+    "agentActivitySummary": "{{reasoning}} langkah · {{tools}} panggilan alat",
+    "agentActivityToolsOnly": "{{tools}} panggilan alat",
+    "agentActivityLiveSummary": "Berjalan… · {{reasoning}} langkah · {{tools}} panggilan alat",
+    "agentActivityLiveToolsOnly": "Berjalan… · {{tools}} panggilan alat",
+    "imageAttachment": "Lampiran gambar",
+    "copyReply": "Salin balasan",
+    "copiedReply": "Balasan disalin",
+    "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
+    "activityThinkingFor": "Berpikir selama {{duration}}",
+    "activityThought": "Selesai berpikir",
+    "activityThoughtFor": "Selesai berpikir dalam {{duration}}",
+    "cliActivityRunningOne": "Menggunakan @{{name}}",
+    "cliActivityRanOne": "Menggunakan @{{name}} selesai",
+    "cliActivityFailedOne": "@{{name}} gagal",
+    "cliActivityRunningMany": "Menggunakan {{count}} aplikasi CLI",
+    "cliActivityRanMany": "{{count}} aplikasi CLI digunakan",
+    "cliActivityFailedMany": "{{count}} aplikasi CLI gagal",
+    "cliRunRunning": "Menggunakan",
+    "cliRunRan": "Digunakan",
+    "cliRunFailed": "Gagal"
+  },
+  "lightbox": {
+    "title": "Pratinjau gambar",
+    "open": "Lihat gambar",
+    "prev": "Gambar sebelumnya",
+    "next": "Gambar berikutnya",
+    "close": "Tutup pratinjau"
+  },
+  "code": {
+    "fallbackLanguage": "kode",
+    "copyAria": "Salin kode",
+    "copy": "Salin",
+    "copied": "Tersalin"
+  },
+  "common": {
+    "dismiss": "Tutup"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Pesan terlalu besar",
+      "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
+    }
+  }
+}
