@@ -1,4 +1,4 @@
-"""CLI-Anything catalog, install state, and safe CLI execution."""
+"""CLI Apps catalog, install state, and safe CLI execution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -191,61 +193,15 @@ _BRAND_ALIASES: dict[str, str] = {
 
 _BRAND_TRAILING_WORDS = ("cli", "workflow", "workflows", "app", "apps", "tool", "tools")
 
-_NANOBOT_CLI_APPS: tuple[dict[str, Any], ...] = (
-    {
-        "name": "hyperframes",
-        "display_name": "HyperFrames",
-        "aliases": ["hyperframe"],
-        "version": "latest",
-        "description": "Create, preview, and render HTML-native videos locally with HyperFrames.",
-        "category": "video",
-        "requires": "Node.js >= 22 and FFmpeg",
-        "package_manager": "npm",
-        "npm_package": "hyperframes",
-        "install_cmd": "npm install -g hyperframes",
-        "uninstall_cmd": "npm uninstall -g hyperframes",
-        "entry_point": "hyperframes",
-        "_source": "nanobot",
-        "_logo_url": "https://www.heygen.com/favicon.ico",
-        "_brand_color": "#7559FF",
-        "_skill_markdown": """---
-name: cli-app-hyperframes
-description: >-
-  Create, preview, and render HTML-native videos locally with HyperFrames.
----
-
-# HyperFrames
-
-Use this skill when the user asks nanobot to create a product video, launch video,
-animated explainer, social clip, narrated motion graphic, website-to-video demo,
-or any other lightweight video artifact.
-
-If the user attached `@hyperframe` or `@hyperframes` in chat, treat HyperFrames
-as the selected video engine for the current turn.
-
-## Workflow
-
-1. Create or reuse a project inside the workspace.
-2. Author self-contained HTML/CSS/JS composition files and local assets.
-3. Run HyperFrames with the `run_cli_app` tool, never through shell by default.
-4. Validate or preview before rendering when the command is available.
-5. Render to `.mp4`, `.webm`, or `.mov`, then reference the video with Markdown
-   using a workspace-relative path, for example `![Product intro](intro.mp4)`.
-
-## Commands
-
-```bash
-hyperframes --help
-hyperframes init my-video --non-interactive --example blank
-hyperframes preview
-hyperframes render --output output.mp4
-```
-
-Prefer deterministic, local assets. Avoid remote CDNs unless the user explicitly
-asks for them, because renders should be reproducible and work offline.
-""",
-    },
-)
+_BUNDLED_CATALOG_DIR = "catalog"
+_BUNDLED_SKILL_DEFAULT = "skills/{name}/SKILL.md"
+_BUNDLED_REQUIRED_FIELDS = frozenset({
+    "name",
+    "display_name",
+    "description",
+    "category",
+    "entry_point",
+})
 
 
 def _now() -> float:
@@ -286,6 +242,21 @@ def _is_pip_install_command(command: str) -> bool:
     )
 
 
+def _app_strategy(app: dict[str, Any]) -> str:
+    package_manager = str(app.get("package_manager") or "").lower()
+    install_strategy = str(app.get("install_strategy") or "").lower()
+    if package_manager == "bundled" or install_strategy == "bundled":
+        return "bundled"
+    if package_manager in {"npm", "brew", "uv", "pip"}:
+        return package_manager
+    if app.get("npm_package"):
+        return "npm"
+    install_cmd = str(app.get("install_cmd") or "")
+    if _is_pip_install_command(install_cmd):
+        return "pip"
+    return "unsupported"
+
+
 def _pip_uninstall_args_from_command(command: str) -> list[str] | None:
     if not command or _has_shell_meta(command):
         return None
@@ -307,6 +278,98 @@ def _pip_uninstall_args_from_command(command: str) -> list[str] | None:
     if not packages or any(arg.startswith("-") for arg in packages):
         return None
     return packages
+
+
+def _clean_resource_path(value: str) -> str:
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise CliAppError(f"invalid bundled CLI App resource path: {value}")
+    return path.as_posix()
+
+
+def _resource_child(root: Any, resource_path: str) -> Any:
+    child = root
+    for part in PurePosixPath(resource_path).parts:
+        child = child / part
+    return child
+
+
+def _validate_bundled_cli_app(raw: dict[str, Any], *, source_name: str) -> dict[str, Any]:
+    missing = sorted(field for field in _BUNDLED_REQUIRED_FIELDS if not raw.get(field))
+    if missing:
+        raise CliAppError(
+            f"bundled CLI App {source_name} is missing required fields: {', '.join(missing)}"
+        )
+    entry = dict(raw)
+    name = str(entry["name"]).strip().lower()
+    if not name:
+        raise CliAppError(f"bundled CLI App {source_name} has an empty name")
+    entry["name"] = name
+    entry["_source"] = "nanobot"
+    if _app_strategy(entry) == "unsupported":
+        raise CliAppError(f"bundled CLI App '{name}' has an unsupported install strategy")
+    if "skill_resource" in entry and "_skill_resource" not in entry:
+        entry["_skill_resource"] = entry.pop("skill_resource")
+    if entry.get("_skill_resource"):
+        entry["_skill_resource"] = _clean_resource_path(str(entry["_skill_resource"]))
+    return entry
+
+
+def _load_bundled_cli_apps_from(root: Any) -> tuple[dict[str, Any], ...]:
+    catalog_dir = root / _BUNDLED_CATALOG_DIR
+    try:
+        resources_iter = sorted(
+            (
+                item
+                for item in catalog_dir.iterdir()
+                if getattr(item, "name", "").endswith(".json")
+            ),
+            key=lambda item: item.name,
+        )
+    except (FileNotFoundError, NotADirectoryError):
+        return ()
+    apps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for resource in resources_iter:
+        try:
+            data = json.loads(resource.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CliAppError(f"failed to read bundled CLI App catalog {resource.name}: {exc}") from exc
+        rows = data.get("clis") if isinstance(data, dict) and isinstance(data.get("clis"), list) else [data]
+        for raw in rows:
+            if not isinstance(raw, dict):
+                raise CliAppError(f"bundled CLI App catalog {resource.name} contains a non-object row")
+            entry = _validate_bundled_cli_app(raw, source_name=resource.name)
+            name = str(entry["name"])
+            if name in seen:
+                raise CliAppError(f"duplicate bundled CLI App name: {name}")
+            seen.add(name)
+            if not entry.get("_skill_resource"):
+                default_skill = _BUNDLED_SKILL_DEFAULT.format(name=name)
+                try:
+                    if _resource_child(root, default_skill).is_file():
+                        entry["_skill_resource"] = default_skill
+                except OSError:
+                    pass
+            apps.append(entry)
+    return tuple(apps)
+
+
+def _bundled_cli_apps() -> tuple[dict[str, Any], ...]:
+    try:
+        return _load_bundled_cli_apps_from(resources.files("nanobot.cli_apps"))
+    except ModuleNotFoundError:
+        return ()
+
+
+def _read_bundled_text_resource(resource_path: str) -> str | None:
+    try:
+        clean_path = _clean_resource_path(resource_path)
+        resource = _resource_child(resources.files("nanobot.cli_apps"), clean_path)
+        text = resource.read_text(encoding="utf-8")
+    except (CliAppError, FileNotFoundError, ModuleNotFoundError, OSError):
+        return None
+    return text if text.strip() else None
 
 
 def _brand_key(value: str) -> str:
@@ -435,7 +498,7 @@ def _app_aliases(app: dict[str, Any]) -> list[str]:
 
 
 class CliAppManager:
-    """Manage CLI-Anything registry entries and local install state."""
+    """Manage CLI Apps registry entries and local install state."""
 
     def __init__(
         self,
@@ -531,7 +594,7 @@ class CliAppManager:
                     apps_by_name[key] = {**previous, **entry, "_source": merged_source}
                 else:
                     apps_by_name[key] = entry
-        for entry in _NANOBOT_CLI_APPS:
+        for entry in _bundled_cli_apps():
             key = str(entry["name"]).lower()
             apps_by_name[key] = dict(entry)
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
@@ -590,18 +653,7 @@ class CliAppManager:
         return mentions
 
     def _strategy(self, app: dict[str, Any]) -> str:
-        package_manager = str(app.get("package_manager") or "").lower()
-        install_strategy = str(app.get("install_strategy") or "").lower()
-        if package_manager == "bundled" or install_strategy == "bundled":
-            return "bundled"
-        if package_manager in {"npm", "brew", "uv", "pip"}:
-            return package_manager
-        if app.get("npm_package"):
-            return "npm"
-        install_cmd = str(app.get("install_cmd") or "")
-        if _is_pip_install_command(install_cmd):
-            return "pip"
-        return "unsupported"
+        return _app_strategy(app)
 
     def _install_supported(self, app: dict[str, Any]) -> bool:
         if self._strategy(app) == "unsupported":
@@ -830,7 +882,11 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
     def install_skill(self, app: dict[str, Any]) -> Path:
         path = self._skill_path(str(app["name"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        local_skill = app.get("_skill_markdown") if app.get("_source") == "nanobot" else None
+        local_skill = (
+            _read_bundled_text_resource(str(app.get("_skill_resource") or ""))
+            if app.get("_source") == "nanobot"
+            else None
+        )
         content = (
             str(local_skill)
             if isinstance(local_skill, str) and local_skill.strip()

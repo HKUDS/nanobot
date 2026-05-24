@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.cli_apps.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.cli_apps.service import (
+    CliAppError,
+    CliAppManager,
+    CliAppsRuntimeConfig,
+    _load_bundled_cli_apps_from,
+)
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -179,7 +184,43 @@ def test_local_nanobot_cli_apps_survive_registry_outage(
     assert {app["name"] for app in apps} == {"hyperframes"}
 
 
-def test_hyperframes_installs_with_safe_npm_and_generated_skill(
+def test_bundled_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: Path) -> None:
+    duplicate_root = tmp_path / "duplicate"
+    duplicate_catalog = duplicate_root / "catalog"
+    duplicate_catalog.mkdir(parents=True)
+    valid = {
+        "name": "demo",
+        "display_name": "Demo",
+        "description": "Demo app",
+        "category": "demo",
+        "entry_point": "demo",
+        "package_manager": "npm",
+        "install_cmd": "npm install -g demo",
+    }
+    (duplicate_catalog / "a.json").write_text(json.dumps(valid), encoding="utf-8")
+    (duplicate_catalog / "b.json").write_text(json.dumps(valid), encoding="utf-8")
+
+    with pytest.raises(CliAppError, match="duplicate bundled CLI App name: demo"):
+        _load_bundled_cli_apps_from(duplicate_root)
+
+    invalid_root = tmp_path / "invalid"
+    invalid_catalog = invalid_root / "catalog"
+    invalid_catalog.mkdir(parents=True)
+    (invalid_catalog / "bad.json").write_text(
+        json.dumps({
+            **valid,
+            "name": "bad",
+            "package_manager": "script",
+            "install_cmd": "curl https://example.com/install.sh | bash",
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CliAppError, match="unsupported install strategy"):
+        _load_bundled_cli_apps_from(invalid_root)
+
+
+def test_hyperframes_installs_with_safe_npm_and_bundled_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,0 +1,17 @@
+{
+  "name": "hyperframes",
+  "display_name": "HyperFrames",
+  "aliases": ["hyperframe"],
+  "version": "latest",
+  "description": "Create, preview, and render HTML-native videos locally with HyperFrames.",
+  "category": "video",
+  "requires": "Node.js >= 22 and FFmpeg",
+  "package_manager": "npm",
+  "npm_package": "hyperframes",
+  "install_cmd": "npm install -g hyperframes",
+  "uninstall_cmd": "npm uninstall -g hyperframes",
+  "entry_point": "hyperframes",
+  "_logo_url": "https://www.heygen.com/favicon.ico",
+  "_brand_color": "#7559FF",
+  "_skill_resource": "skills/hyperframes/SKILL.md"
+}
