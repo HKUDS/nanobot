@@ -4,6 +4,8 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+    - /usr/local/bin/gws:/usr/local/bin/gws:ro
+    - ~/.config/gws:/home/nanobot/.config/gws
   cap_drop:
     - ALL
   cap_add:
