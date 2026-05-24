@@ -300,6 +300,9 @@
       "description": "新增 nanobot 可在對話中使用的本機應用適配與已連接工具服務。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "全部",
+      "filterCli": "應用 CLI",
+      "filterMcp": "MCP 服務",
       "enabledSummary": "已啟用 {{count}} 個",
       "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP"
     },

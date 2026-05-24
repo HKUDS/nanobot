@@ -300,6 +300,9 @@
       "description": "nanobot이 채팅에서 사용할 수 있는 로컬 앱 어댑터와 연결된 도구 서버를 추가합니다.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "전체",
+      "filterCli": "앱 CLI",
+      "filterMcp": "MCP 서비스",
       "enabledSummary": "{{count}}개 활성화됨",
       "caption": "{{cli}} CLI · {{mcp}} MCP"
     },

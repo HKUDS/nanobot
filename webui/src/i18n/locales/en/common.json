@@ -203,6 +203,9 @@
       "description": "Add local app adapters and connected tool servers that nanobot can use from chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "All",
+      "filterCli": "App CLIs",
+      "filterMcp": "MCP services",
       "enabledSummary": "{{count}} enabled",
       "caption": "{{cli}} CLI · {{mcp}} MCP"
     },

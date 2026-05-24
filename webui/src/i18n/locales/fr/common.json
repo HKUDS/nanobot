@@ -300,6 +300,9 @@
       "description": "Ajoutez des adaptateurs d'apps locales et des serveurs d'outils connectés que nanobot peut utiliser depuis le chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "Tout",
+      "filterCli": "CLIs d'apps",
+      "filterMcp": "Services MCP",
       "enabledSummary": "{{count}} activés",
       "caption": "{{cli}} CLI · {{mcp}} MCP"
     },

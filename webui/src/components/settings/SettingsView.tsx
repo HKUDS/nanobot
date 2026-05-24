@@ -114,6 +114,7 @@ type SettingsSectionKey =
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
+type PluginKindFilter = "all" | "cli" | "mcp";
 
 interface LocalPreferences {
   density: LocalDensity;
@@ -296,6 +297,7 @@ export function SettingsView({
   const [mcpQuery, setMcpQuery] = useState("");
   const [mcpCategory, setMcpCategory] = useState("all");
   const [mcpInstallFilter, setMcpInstallFilter] = useState<"all" | "installed" | "notInstalled">("all");
+  const [pluginKindFilter, setPluginKindFilter] = useState<PluginKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
@@ -1015,59 +1017,65 @@ export function SettingsView({
             <PluginsSummaryPanel
               cliApps={cliApps}
               mcpPresets={mcpPresets}
+              filter={pluginKindFilter}
+              onFilterChange={setPluginKindFilter}
             />
-            <CliAppsSettings
-              payload={cliApps}
-              loading={cliAppsLoading}
-              query={cliAppsQuery}
-              category={cliAppsCategory}
-              installFilter={cliAppsInstallFilter}
-              actionKey={cliAppsAction}
-              message={cliAppsMessage}
-              error={cliAppsError}
-              focusName={cliAppsFocusName}
-              showBrandLogos={localPrefs.brandLogos}
-              onQueryChange={setCliAppsQuery}
-              onCategoryChange={setCliAppsCategory}
-              onInstallFilterChange={setCliAppsInstallFilter}
-              onAction={handleCliAppAction}
-              onBackToChat={onBackToChat}
-            />
-            <McpPresetsSettings
-              payload={mcpPresets}
-              loading={mcpPresetsLoading}
-              query={mcpQuery}
-              category={mcpCategory}
-              installFilter={mcpInstallFilter}
-              actionKey={mcpPresetAction}
-              message={mcpMessage}
-              error={mcpError}
-              fieldValues={mcpFieldValues}
-              customForm={customMcpForm}
-              configImport={mcpConfigImport}
-              showBrandLogos={localPrefs.brandLogos}
-              requiresRestartPending={pendingRestartSections.runtime}
-              onQueryChange={setMcpQuery}
-              onCategoryChange={setMcpCategory}
-              onInstallFilterChange={setMcpInstallFilter}
-              onCustomFormChange={setCustomMcpForm}
-              onConfigImportChange={setMcpConfigImport}
-              onFieldChange={(presetName, fieldName, value) => {
-                setMcpFieldValues((prev) => ({
-                  ...prev,
-                  [presetName]: {
-                    ...(prev[presetName] ?? {}),
-                    [fieldName]: value,
-                  },
-                }));
-              }}
-              onAction={handleMcpPresetAction}
-              onSaveCustom={handleSaveCustomMcp}
-              onImportConfig={handleImportMcpConfig}
-              onToolsChange={handleMcpToolsChange}
-              onRestart={onRestart}
-              isRestarting={isRestarting}
-            />
+            {pluginKindFilter !== "mcp" ? (
+              <CliAppsSettings
+                payload={cliApps}
+                loading={cliAppsLoading}
+                query={cliAppsQuery}
+                category={cliAppsCategory}
+                installFilter={cliAppsInstallFilter}
+                actionKey={cliAppsAction}
+                message={cliAppsMessage}
+                error={cliAppsError}
+                focusName={cliAppsFocusName}
+                showBrandLogos={localPrefs.brandLogos}
+                onQueryChange={setCliAppsQuery}
+                onCategoryChange={setCliAppsCategory}
+                onInstallFilterChange={setCliAppsInstallFilter}
+                onAction={handleCliAppAction}
+                onBackToChat={onBackToChat}
+              />
+            ) : null}
+            {pluginKindFilter !== "cli" ? (
+              <McpPresetsSettings
+                payload={mcpPresets}
+                loading={mcpPresetsLoading}
+                query={mcpQuery}
+                category={mcpCategory}
+                installFilter={mcpInstallFilter}
+                actionKey={mcpPresetAction}
+                message={mcpMessage}
+                error={mcpError}
+                fieldValues={mcpFieldValues}
+                customForm={customMcpForm}
+                configImport={mcpConfigImport}
+                showBrandLogos={localPrefs.brandLogos}
+                requiresRestartPending={pendingRestartSections.runtime}
+                onQueryChange={setMcpQuery}
+                onCategoryChange={setMcpCategory}
+                onInstallFilterChange={setMcpInstallFilter}
+                onCustomFormChange={setCustomMcpForm}
+                onConfigImportChange={setMcpConfigImport}
+                onFieldChange={(presetName, fieldName, value) => {
+                  setMcpFieldValues((prev) => ({
+                    ...prev,
+                    [presetName]: {
+                      ...(prev[presetName] ?? {}),
+                      [fieldName]: value,
+                    },
+                  }));
+                }}
+                onAction={handleMcpPresetAction}
+                onSaveCustom={handleSaveCustomMcp}
+                onImportConfig={handleImportMcpConfig}
+                onToolsChange={handleMcpToolsChange}
+                onRestart={onRestart}
+                isRestarting={isRestarting}
+              />
+            ) : null}
           </div>
         );
       case "runtime":
@@ -2357,9 +2365,13 @@ function WebSettings({
 function PluginsSummaryPanel({
   cliApps,
   mcpPresets,
+  filter,
+  onFilterChange,
 }: {
   cliApps: CliAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
+  filter: PluginKindFilter;
+  onFilterChange: (value: PluginKindFilter) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -2367,6 +2379,11 @@ function PluginsSummaryPanel({
   const cliTotal = cliApps?.apps.length ?? 0;
   const mcpInstalled = mcpPresets?.installed_count ?? 0;
   const mcpTotal = mcpPresets?.presets.length ?? 0;
+  const filterOptions = [
+    { value: "all", label: tx("settings.plugins.filterAll", "All") },
+    { value: "cli", label: tx("settings.plugins.filterCli", "App CLIs") },
+    { value: "mcp", label: tx("settings.plugins.filterMcp", "MCP services") },
+  ];
 
   return (
     <section className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
@@ -2387,15 +2404,22 @@ function PluginsSummaryPanel({
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:w-[260px]">
-          <PluginCountPill
-            label={tx("settings.plugins.cliLabel", "CLI")}
-            value={`${cliInstalled}/${cliTotal}`}
+        <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+          <SegmentedControl
+            value={filter}
+            options={filterOptions}
+            onChange={(value) => onFilterChange(value as PluginKindFilter)}
           />
-          <PluginCountPill
-            label={tx("settings.plugins.mcpLabel", "MCP")}
-            value={`${mcpInstalled}/${mcpTotal}`}
-          />
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-[260px]">
+            <PluginCountPill
+              label={tx("settings.plugins.cliLabel", "CLI")}
+              value={`${cliInstalled}/${cliTotal}`}
+            />
+            <PluginCountPill
+              label={tx("settings.plugins.mcpLabel", "MCP")}
+              value={`${mcpInstalled}/${mcpTotal}`}
+            />
+          </div>
         </div>
       </div>
     </section>

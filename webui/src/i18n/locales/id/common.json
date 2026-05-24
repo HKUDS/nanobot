@@ -300,6 +300,9 @@
       "description": "Tambahkan adaptor app lokal dan server alat terhubung yang dapat digunakan nanobot dari chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "Semua",
+      "filterCli": "CLI app",
+      "filterMcp": "Layanan MCP",
       "enabledSummary": "{{count}} aktif",
       "caption": "{{cli}} CLI · {{mcp}} MCP"
     },

@@ -300,6 +300,9 @@
       "description": "nanobot がチャットから使えるローカルアプリのアダプターと接続済みツールサーバーを追加します。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
+      "filterAll": "すべて",
+      "filterCli": "アプリ CLI",
+      "filterMcp": "MCP サービス",
       "enabledSummary": "{{count}} 件有効",
       "caption": "{{cli}} CLI · {{mcp}} MCP"
     },
