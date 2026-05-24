@@ -25,6 +25,36 @@ export default defineConfig(({ mode }) => {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
       sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/refractor/lang/")) {
+              return;
+            }
+            if (
+              id.includes("node_modules/react-syntax-highlighter")
+              || id.includes("node_modules/refractor/core")
+            ) {
+              return "syntax-highlight";
+            }
+            if (
+              id.includes("node_modules/react-markdown")
+              || id.includes("node_modules/remark-")
+              || id.includes("node_modules/rehype-")
+              || id.includes("node_modules/unified")
+              || id.includes("node_modules/mdast-")
+              || id.includes("node_modules/hast-")
+              || id.includes("node_modules/micromark")
+              || id.includes("node_modules/unist-")
+            ) {
+              return "markdown-vendor";
+            }
+            if (id.includes("node_modules/katex")) {
+              return "katex";
+            }
+          },
+        },
+      },
     },
     server: {
       host: "127.0.0.1",

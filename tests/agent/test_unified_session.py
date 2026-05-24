@@ -387,6 +387,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = [{"role": "user", "content": "msg"}]
+        sessions.get_or_create.return_value = session
 
         # Simulate over-budget: estimated > budget
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
@@ -399,7 +400,6 @@ class TestConsolidationUnaffectedByUnifiedSession:
         # estimate was called (consolidation was attempted)
         consolidator.estimate_session_prompt_tokens.assert_called_once_with(
             session,
-            session_summary=None,
         )
         # but archive was not called (no valid boundary)
         consolidator.archive.assert_not_called()

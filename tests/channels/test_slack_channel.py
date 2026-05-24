@@ -234,13 +234,13 @@ async def test_send_renders_buttons_on_last_message_chunk() -> None:
                 "type": "button",
                 "text": {"type": "plain_text", "text": "Yes"},
                 "value": "Yes",
-                "action_id": "ask_user_Yes",
+                "action_id": "btn_Yes",
             },
             {
                 "type": "button",
                 "text": {"type": "plain_text", "text": "No"},
                 "value": "No",
-                "action_id": "ask_user_No",
+                "action_id": "btn_No",
             },
         ],
     }
@@ -641,6 +641,14 @@ def test_slack_download_rejects_login_html() -> None:
 
     assert SlackChannel._looks_like_html_download(html_response) is True
     assert SlackChannel._looks_like_html_download(markdown_response) is False
+
+
+def test_slack_download_failure_marker_is_actionable() -> None:
+    marker = SlackChannel._download_failure_marker("image", "screenshot.png", "download failed")
+
+    assert "not available to nanobot" in marker
+    assert "files:read" in marker
+    assert "reinstall the Slack app" in marker
 
 
 def test_slack_channel_uses_channel_aware_allow_policy() -> None:

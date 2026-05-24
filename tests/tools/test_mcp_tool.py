@@ -467,7 +467,7 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
         yield  # pragma: no cover
 
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _broken_stdio_client)
-    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.error", _error)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.exception", _error)
 
     registry = ToolRegistry()
     stacks = await connect_mcp_servers({"gh": MCPServerConfig(command="github-mcp")}, registry)

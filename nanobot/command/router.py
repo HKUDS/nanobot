@@ -32,14 +32,12 @@ class CommandRouter:
          (e.g. /stop, /restart).
       2. *exact* — exact-match commands handled inside the dispatch lock.
       3. *prefix* — longest-prefix-first match (e.g. "/team ").
-      4. *interceptors* — fallback predicates (e.g. team-mode active check).
     """
 
     def __init__(self) -> None:
         self._priority: dict[str, Handler] = {}
         self._exact: dict[str, Handler] = {}
         self._prefix: list[tuple[str, Handler]] = []
-        self._interceptors: list[Handler] = []
 
     def priority(self, cmd: str, handler: Handler) -> None:
         self._priority[cmd] = handler
@@ -51,16 +49,13 @@ class CommandRouter:
         self._prefix.append((pfx, handler))
         self._prefix.sort(key=lambda p: len(p[0]), reverse=True)
 
-    def intercept(self, handler: Handler) -> None:
-        self._interceptors.append(handler)
-
     def is_priority(self, text: str) -> bool:
         return text.strip().lower() in self._priority
 
     def is_dispatchable_command(self, text: str) -> bool:
         """Check whether *text* matches any non-priority command tier (exact or prefix).
 
-        Does NOT check priority or interceptor tiers.
+        Does NOT check priority tier.
         If this returns True, ``dispatch()`` is guaranteed to match a handler.
         """
         cmd = text.strip().lower()
@@ -79,7 +74,7 @@ class CommandRouter:
         return None
 
     async def dispatch(self, ctx: CommandContext) -> OutboundMessage | None:
-        """Try exact, prefix, then interceptors. Returns None if unhandled."""
+        """Try exact, then prefix handlers. Returns None if unhandled."""
         cmd = ctx.raw.lower()
 
         if handler := self._exact.get(cmd):
@@ -89,10 +84,5 @@ class CommandRouter:
             if cmd.startswith(pfx):
                 ctx.args = ctx.raw[len(pfx):]
                 return await handler(ctx)
-
-        for interceptor in self._interceptors:
-            result = await interceptor(ctx)
-            if result is not None:
-                return result
 
         return None

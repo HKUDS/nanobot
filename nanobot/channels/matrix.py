@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import logging
 import mimetypes
 import time
 from contextlib import suppress
@@ -10,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
-from loguru import logger
 from pydantic import Field
 
 try:
@@ -30,10 +28,11 @@ try:
         RoomMessageMedia,
         RoomMessageText,
         RoomSendError,
+        RoomSendResponse,
         RoomTypingError,
         SyncError,
-        UploadError, RoomSendResponse,
-)
+        UploadError,
+    )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
 except ImportError as e:
@@ -47,6 +46,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
 # Must stay below TYPING_NOTICE_TIMEOUT_MS so the indicator doesn't expire mid-processing.
@@ -108,7 +108,7 @@ class _StreamBuf:
 
     :ivar text: Stores the text content of the buffer.
     :type text: str
-    :ivar event_id: Identifier for the associated event. None indicates no 
+    :ivar event_id: Identifier for the associated event. None indicates no
         specific event association.
     :type event_id: str | None
     :ivar last_edit: Timestamp of the most recent edit to the buffer.
@@ -141,19 +141,19 @@ def _build_matrix_text_content(
 ) -> dict[str, object]:
     """
     Constructs and returns a dictionary representing the matrix text content with optional
-    HTML formatting and reference to an existing event for replacement. This function is 
+    HTML formatting and reference to an existing event for replacement. This function is
     primarily used to create content payloads compatible with the Matrix messaging protocol.
 
     :param text: The plain text content to include in the message.
     :type text: str
-    :param event_id: Optional ID of the event to replace. If provided, the function will 
-        include information indicating that the message is a replacement of the specified 
+    :param event_id: Optional ID of the event to replace. If provided, the function will
+        include information indicating that the message is a replacement of the specified
         event.
     :type event_id: str | None
     :param thread_relates_to: Optional Matrix thread relation metadata. For edits this is
         stored in ``m.new_content`` so the replacement remains in the same thread.
     :type thread_relates_to: dict[str, object] | None
-    :return: A dictionary containing the matrix text content, potentially enriched with 
+    :return: A dictionary containing the matrix text content, potentially enriched with
         HTML formatting and replacement metadata if applicable.
     :rtype: dict[str, object]
     """
@@ -176,28 +176,6 @@ def _build_matrix_text_content(
         content["m.relates_to"] = thread_relates_to
 
     return content
-
-
-class _NioLoguruHandler(logging.Handler):
-    """Route matrix-nio stdlib logs into Loguru."""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame, depth = frame.f_back, depth + 1
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
-
-
-def _configure_nio_logging_bridge() -> None:
-    """Bridge matrix-nio logs to Loguru (idempotent)."""
-    nio_logger = logging.getLogger("nio")
-    if not any(isinstance(h, _NioLoguruHandler) for h in nio_logger.handlers):
-        nio_logger.handlers = [_NioLoguruHandler()]
-        nio_logger.propagate = False
 
 
 class MatrixConfig(Base):
@@ -259,7 +237,7 @@ class MatrixChannel(BaseChannel):
         """Start Matrix client and begin sync loop."""
         self._running = True
         self._started_at_ms = int(time.time() * 1000)
-        _configure_nio_logging_bridge()
+        redirect_lib_logging("nio", level="WARNING")
 
         self.store_path = get_data_dir() / "matrix-store"
         self.store_path.mkdir(parents=True, exist_ok=True)
@@ -283,15 +261,15 @@ class MatrixChannel(BaseChannel):
         self._register_response_callbacks()
 
         if not self.config.e2ee_enabled:
-            logger.warning("Matrix E2EE disabled; encrypted rooms may be undecryptable.")
+            self.logger.warning("E2EE disabled; encrypted rooms may be undecryptable.")
 
         if self.config.password:
             if self.config.access_token or self.config.device_id:
-                logger.warning("Password-based Matrix login active; access_token and device_id fields will be ignored.")
+                self.logger.warning("Password-based login active; access_token and device_id fields will be ignored.")
 
             create_new_session = True
             if self.session_path.exists():
-                logger.info("Found session.json at {}; attempting to use existing session...", self.session_path)
+                self.logger.info("Found session.json at {}; attempting to use existing session...", self.session_path)
                 try:
                     with open(self.session_path, "r", encoding="utf-8") as f:
                         session = json.load(f)
@@ -299,20 +277,20 @@ class MatrixChannel(BaseChannel):
                     self.client.access_token = session["access_token"]
                     self.client.device_id = session["device_id"]
                     self.client.load_store()
-                    logger.info("Successfully loaded from existing session")
+                    self.logger.info("Successfully loaded from existing session")
                     create_new_session = False
                 except Exception as e:
-                    logger.warning("Failed to load from existing session: {}", e)
-                    logger.info("Falling back to password login...")
+                    self.logger.warning("Failed to load from existing session: {}", e)
+                    self.logger.info("Falling back to password login...")
 
             if create_new_session:
-                logger.info("Using password login...")
+                self.logger.info("Using password login...")
                 resp = await self.client.login(self.config.password)
                 if isinstance(resp, LoginResponse):
-                    logger.info("Logged in using a password; saving details to disk")
+                    self.logger.info("Logged in using a password; saving details to disk")
                     self._write_session_to_disk(resp)
                 else:
-                    logger.error("Failed to log in: {}", resp)
+                    self.logger.error("Failed to log in: {}", resp)
                     return
 
         elif self.config.access_token and self.config.device_id:
@@ -321,12 +299,12 @@ class MatrixChannel(BaseChannel):
                 self.client.access_token = self.config.access_token
                 self.client.device_id = self.config.device_id
                 self.client.load_store()
-                logger.info("Successfully loaded from existing session")
+                self.logger.info("Successfully loaded from existing session")
             except Exception as e:
-                logger.warning("Failed to load from existing session: {}", e)
+                self.logger.warning("Failed to load from existing session: {}", e)
 
         else:
-            logger.warning("Unable to load a Matrix session due to missing password, access_token, or device_id; encryption may not work")
+            self.logger.warning("Unable to load a session due to missing password, access_token, or device_id; encryption may not work")
             return
 
         self._sync_task = asyncio.create_task(self._sync_loop())
@@ -358,9 +336,9 @@ class MatrixChannel(BaseChannel):
         try:
             with open(self.session_path, "w", encoding="utf-8") as f:
                 json.dump(session, f, indent=2)
-            logger.info("Session saved to {}", self.session_path)
+            self.logger.info("Session saved to {}", self.session_path)
         except Exception as e:
-            logger.warning("Failed to save session: {}", e)
+            self.logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
         """Check path is inside workspace (when restriction enabled)."""
@@ -435,6 +413,7 @@ class MatrixChannel(BaseChannel):
         try:
             response = await self.client.content_repository_config()
         except Exception:
+            self.logger.error("Failed to fetch server upload limit", exc_info=True)
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -480,6 +459,7 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
+            self.logger.error("Matrix media upload failed for %s", filename, exc_info=True)
             return fail
 
         upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
@@ -499,6 +479,7 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
+            self.logger.error("Matrix room content send failed for room_id=%s", room_id, exc_info=True)
             return fail
         return None
 
@@ -543,7 +524,7 @@ class MatrixChannel(BaseChannel):
                 return
 
             await self._stop_typing_keepalive(chat_id, clear_typing=True)
-            
+
             content = _build_matrix_text_content(
                 buf.text,
                 buf.event_id,
@@ -557,7 +538,7 @@ class MatrixChannel(BaseChannel):
             buf = _StreamBuf()
             self._stream_bufs[chat_id] = buf
         buf.text += delta
-    
+
         if not buf.text.strip():
             return
 
@@ -576,8 +557,8 @@ class MatrixChannel(BaseChannel):
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
             except Exception:
+                self.logger.error("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
-                pass
 
 
     def _register_event_callbacks(self) -> None:
@@ -598,14 +579,14 @@ class MatrixChannel(BaseChannel):
     def _log_response_error(self, label: str, response: Any) -> None:
         """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
         is_fatal = self._is_fatal_auth_response(response)
-        (logger.error if is_fatal else logger.warning)("Matrix {} failed: {}", label, response)
+        (self.logger.error if is_fatal else self.logger.warning)("{} failed: {}", label, response)
 
     async def _on_sync_error(self, response: SyncError) -> None:
         self._log_response_error("sync", response)
         if self._is_fatal_auth_response(response):
             # Auth errors won't recover by retry; stop the sync loop instead of
             # spamming the homeserver every 2s (#1851).
-            logger.error("Matrix authentication failed irrecoverably; stopping sync loop")
+            self.logger.error("Authentication failed irrecoverably; stopping sync loop")
             self._running = False
             if self.client:
                 with suppress(Exception):
@@ -625,7 +606,7 @@ class MatrixChannel(BaseChannel):
             response = await self.client.room_typing(room_id=room_id, typing_state=typing,
                                                      timeout=TYPING_NOTICE_TIMEOUT_MS)
             if isinstance(response, RoomTypingError):
-                logger.debug("Matrix typing failed for {}: {}", room_id, response)
+                self.logger.debug("typing failed for {}: {}", room_id, response)
 
     async def _start_typing_keepalive(self, room_id: str) -> None:
         """Start periodic typing refresh (spec-recommended keepalive)."""
@@ -796,7 +777,7 @@ class MatrixChannel(BaseChannel):
             return None
         response = await self.client.download(mxc=mxc_url)
         if isinstance(response, DownloadError):
-            logger.warning("Matrix download failed for {}: {}", mxc_url, response)
+            self.logger.warning("download failed for {}: {}", mxc_url, response)
             return None
         body = getattr(response, "body", None)
         if isinstance(body, (bytes, bytearray)):
@@ -821,7 +802,7 @@ class MatrixChannel(BaseChannel):
         try:
             return decrypt_attachment(ciphertext, key, sha256, iv)
         except (EncryptionError, ValueError, TypeError):
-            logger.warning("Matrix decrypt failed for event {}", getattr(event, "event_id", ""))
+            self.logger.warning("decrypt failed for event {}", getattr(event, "event_id", ""))
             return None
 
     async def _fetch_media_attachment(
@@ -890,6 +871,7 @@ class MatrixChannel(BaseChannel):
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
                 content=event.body, metadata=self._base_metadata(room, event),
+                is_dm=self._is_direct_room(room),
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
@@ -927,6 +909,7 @@ class MatrixChannel(BaseChannel):
                 content="\n".join(parts),
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
+                is_dm=self._is_direct_room(room),
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)

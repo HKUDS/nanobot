@@ -103,8 +103,11 @@ pytest
 # Lint code
 ruff check nanobot/
 
-# Format code
-ruff format nanobot/
+# Format code — optional. The existing tree predates `ruff format`,
+# so running it across `nanobot/` produces a large unrelated diff
+# (E501 is ignored, so many existing lines exceed the 100-char setting).
+# Format only files you've actually touched, not the whole package.
+ruff format <files-you-changed>
 ```
 
 ## Contribution License
@@ -133,6 +136,20 @@ In practice:
 - Prefer readable code over magical code
 - Prefer focused patches over broad rewrites
 - If a new abstraction is introduced, it should clearly reduce complexity rather than move it around
+
+## Modifying CI Workflows
+
+If your PR touches `.github/workflows/`, please keep the CI within
+GitHub Actions' free tier:
+
+- Use only standard GitHub-hosted runners (`ubuntu-latest`, `windows-latest`)
+- Avoid macOS runners, larger runners (`*-cores`, `*-xlarge`, `*-gpu`),
+  and self-hosted runners
+- Avoid uploading large artifacts or using long retention
+- Avoid paid Marketplace actions
+
+If your change genuinely needs to step outside this, please call it out
+explicitly in the PR description so it can be discussed before merge.
 
 ## Questions?
 

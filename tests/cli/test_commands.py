@@ -9,7 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _make_provider, app
+from nanobot.cli.commands import app
+from nanobot.providers.factory import make_provider
 from nanobot.config.schema import Config
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.factory import ProviderSnapshot
@@ -17,6 +18,13 @@ from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
+
+
+def _fake_provider():
+    """Return a minimal fake provider that satisfies AgentLoop.__init__."""
+    p = MagicMock()
+    p.generation.max_tokens = 4096
+    return p
 
 
 class _StopGatewayError(RuntimeError):
@@ -220,6 +228,89 @@ def test_config_dump_excludes_oauth_provider_blocks():
     assert "githubCopilot" not in providers
 
 
+def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "codex.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "codex.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_logout_paths_resolve_to_expected_files():
+    from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+    from oauth_cli_kit.storage import FileTokenStorage
+
+    from nanobot.providers.github_copilot_provider import get_storage
+
+    codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    codex_path = codex_storage.get_token_path()
+    assert codex_path.name == "codex.json"
+    assert codex_path.parent.name == "auth"
+
+    gh_storage = get_storage()
+    gh_path = gh_storage.get_token_path()
+    assert gh_path.name == "github-copilot.json"
+    assert gh_path.parent.name == "auth"
+
+
+def test_provider_login_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "login", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
@@ -280,6 +371,28 @@ def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api
     assert config.get_api_base() == "http://localhost:1234/v1"
 
 
+def test_config_accepts_atomic_chat_without_api_key_and_uses_default_localhost_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "atomic_chat",
+                    "model": "local-model",
+                }
+            },
+            "providers": {
+                "atomicChat": {
+                    "apiKey": None,
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "atomic_chat"
+    assert config.get_api_key() is None
+    assert config.get_api_base() == "http://localhost:1337/v1"
+
+
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
@@ -287,6 +400,8 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("github-copilot").name == "github_copilot"
     assert find_by_name("longcat") is not None
     assert find_by_name("longcat").name == "longcat"
+    assert find_by_name("atomic-chat") is not None
+    assert find_by_name("atomic-chat").name == "atomic_chat"
 
 
 def test_config_explicit_longcat_provider_resolves_provider_name():
@@ -405,7 +520,7 @@ def test_openai_compat_provider_passes_model_through():
 
 
 def test_make_provider_uses_github_copilot_backend():
-    from nanobot.cli.commands import _make_provider
+    from nanobot.providers.factory import make_provider
     from nanobot.config.schema import Config
 
     config = Config.model_validate(
@@ -420,7 +535,7 @@ def test_make_provider_uses_github_copilot_backend():
     )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = _make_provider(config)
+        provider = make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
@@ -457,6 +572,7 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
+        await provider._ensure_client()
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
@@ -496,7 +612,8 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
-        _make_provider(config)
+        provider = make_provider(config)
+        asyncio.run(provider._ensure_client())
 
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "test-key"
@@ -514,24 +631,24 @@ def mock_agent_runtime(tmp_path):
     with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
          patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
          patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
-         patch("nanobot.cli.commands._make_provider", return_value=object()), \
+         patch("nanobot.providers.factory.make_provider", return_value=_fake_provider()), \
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
          patch("nanobot.cron.service.CronService"), \
-         patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
+         patch("nanobot.cli.commands.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
         agent_loop.channels_config = None
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
         agent_loop.close_mcp = AsyncMock(return_value=None)
-        mock_agent_loop_cls.return_value = agent_loop
+        mock_from_config.return_value = agent_loop
 
         yield {
             "config": config,
             "load_config": mock_load_config,
             "sync_templates": mock_sync_templates,
-            "agent_loop_cls": mock_agent_loop_cls,
+            "from_config": mock_from_config,
             "agent_loop": agent_loop,
             "print_response": mock_print_response,
         }
@@ -556,9 +673,8 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     assert mock_agent_runtime["sync_templates"].call_args.args == (
         mock_agent_runtime["config"].workspace_path,
     )
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == (
-        mock_agent_runtime["config"].workspace_path
-    )
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
@@ -589,11 +705,14 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -603,7 +722,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -624,7 +743,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
@@ -632,6 +751,9 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -642,7 +764,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -670,7 +792,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
@@ -679,6 +801,9 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -689,7 +814,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -723,7 +848,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
@@ -732,6 +857,9 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -742,7 +870,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr(
         "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -763,7 +891,8 @@ def test_agent_overrides_workspace_path(mock_agent_runtime):
     assert result.exit_code == 0
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == workspace_path
 
 
 def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime, tmp_path: Path):
@@ -780,7 +909,8 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == workspace_path
 
 
 def test_agent_hints_about_deprecated_memory_window(mock_agent_runtime, tmp_path):
@@ -832,7 +962,7 @@ def _patch_cli_command_runtime(
     cron_service=None,
     get_cron_dir=None,
 ) -> None:
-    provider_factory = make_provider or (lambda _config: object())
+    provider_factory = make_provider or (lambda _config: _fake_provider())
 
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
@@ -845,7 +975,7 @@ def _patch_cli_command_runtime(
         sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
+        "nanobot.providers.factory.make_provider",
         provider_factory,
     )
     monkeypatch.setattr(
@@ -876,6 +1006,9 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
             self.on_cleanup: list[object] = []
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(workspace=config.workspace_path, **extra)
         def __init__(self, **kwargs) -> None:
             seen["workspace"] = kwargs["workspace"]
 
@@ -902,7 +1035,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
     monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
@@ -986,7 +1119,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    provider = object()
+    provider = _fake_provider()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
@@ -994,7 +1127,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: provider)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: provider)
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(provider, _config),
@@ -1032,9 +1165,14 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             seen["cron"] = self
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
             self.tools = {}
+            seen["agent"] = self
 
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(
@@ -1069,7 +1207,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         return True
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
         "nanobot.utils.evaluator.evaluate_response",
@@ -1082,6 +1220,11 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     cron = seen["cron"]
     assert isinstance(cron, _FakeCron)
     assert cron.on_job is not None
+
+    runtime_provider = object()
+    agent = seen["agent"]
+    agent.provider = runtime_provider
+    agent.model = "runtime-model"
 
     job = CronJob(
         id="cron-1",
@@ -1098,8 +1241,8 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     assert response == "Time to stretch."
     assert seen["response"] == "Time to stretch."
-    assert seen["provider"] is provider
-    assert seen["model"] == "test-model"
+    assert seen["provider"] is runtime_provider
+    assert seen["model"] == "runtime-model"
     assert seen["task_context"] == (
         "The scheduled time has arrived. Deliver this reminder to the user now, "
         "as a brief and natural message in their language. Speak directly to them — "
@@ -1145,7 +1288,7 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr(
         "nanobot.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(object(), _config),
@@ -1163,8 +1306,12 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
             seen["cron"] = self
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
+            self.provider = object()
             self.tools = {}
 
         async def process_direct(self, *_args, on_progress=None, **_kwargs):
@@ -1192,7 +1339,7 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
         return False
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
         "nanobot.utils.evaluator.evaluate_response",
@@ -1395,10 +1542,17 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return 0
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
+            self.provider = object()
             self.dream = _FakeDream()
             self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
 
         async def run(self) -> None:
             await asyncio.Event().wait()
@@ -1488,7 +1642,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)

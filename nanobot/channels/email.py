@@ -128,7 +128,7 @@ class EmailChannel(BaseChannel):
     async def start(self) -> None:
         """Start polling IMAP for inbound emails."""
         if not self.config.consent_granted:
-            logger.warning(
+            self.logger.warning(
                 "Email channel disabled: consent_granted is false. "
                 "Set channels.email.consentGranted=true after explicit user permission."
             )
@@ -139,12 +139,12 @@ class EmailChannel(BaseChannel):
 
         self._running = True
         if not self.config.verify_dkim and not self.config.verify_spf:
-            logger.warning(
-                "Email channel: DKIM and SPF verification are both DISABLED. "
+            self.logger.warning(
+                "DKIM and SPF verification are both DISABLED. "
                 "Emails with spoofed From headers will be accepted. "
                 "Set verify_dkim=true and verify_spf=true for anti-spoofing protection."
             )
-        logger.info("Starting Email channel (IMAP polling mode)...")
+        self.logger.info("Starting Email channel (IMAP polling mode)...")
 
         poll_seconds = max(5, int(self.config.poll_interval_seconds))
         while self._running:
@@ -167,8 +167,8 @@ class EmailChannel(BaseChannel):
                         media=item.get("media") or None,
                         metadata=item.get("metadata", {}),
                     )
-            except Exception as e:
-                logger.error("Email polling error: {}", e)
+            except Exception:
+                self.logger.exception("Polling error")
 
             await asyncio.sleep(poll_seconds)
 
@@ -179,16 +179,16 @@ class EmailChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
         if not self.config.consent_granted:
-            logger.warning("Skip email send: consent_granted is false")
+            self.logger.warning("Skip email send: consent_granted is false")
             return
 
         if not self.config.smtp_host:
-            logger.warning("Email channel SMTP host not configured")
+            self.logger.warning("SMTP host not configured")
             return
 
         to_addr = msg.chat_id.strip()
         if not to_addr:
-            logger.warning("Email channel missing recipient address")
+            self.logger.warning("Missing recipient address")
             return
 
         # Determine if this is a reply (recipient has sent us an email before)
@@ -197,7 +197,7 @@ class EmailChannel(BaseChannel):
 
         # autoReplyEnabled only controls automatic replies, not proactive sends
         if is_reply and not self.config.auto_reply_enabled and not force_send:
-            logger.info("Skip automatic email reply to {}: auto_reply_enabled is false", to_addr)
+            self.logger.info("Skip automatic reply to {}: auto_reply_enabled is false", to_addr)
             return
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
@@ -220,8 +220,8 @@ class EmailChannel(BaseChannel):
 
         try:
             await asyncio.to_thread(self._smtp_send, email_msg)
-        except Exception as e:
-            logger.error("Error sending email to {}: {}", to_addr, e)
+        except Exception:
+            self.logger.exception("Error sending to {}", to_addr)
             raise
 
     def _validate_config(self) -> bool:
@@ -240,7 +240,7 @@ class EmailChannel(BaseChannel):
             missing.append("smtp_password")
 
         if missing:
-            logger.error("Email channel not configured, missing: {}", ', '.join(missing))
+            self.logger.error("Channel not configured, missing: {}", ', '.join(missing))
             return False
         return True
 
@@ -321,7 +321,7 @@ class EmailChannel(BaseChannel):
             except Exception as exc:
                 if attempt == 1 or not self._is_stale_imap_error(exc):
                     raise
-                logger.warning("Email IMAP connection went stale, retrying once: {}", exc)
+                self.logger.warning("IMAP connection went stale, retrying once: {}", exc)
 
         return messages
 
@@ -348,11 +348,11 @@ class EmailChannel(BaseChannel):
                 status, _ = client.select(mailbox)
             except Exception as exc:
                 if self._is_missing_mailbox_error(exc):
-                    logger.warning("Email mailbox unavailable, skipping poll for {}: {}", mailbox, exc)
+                    self.logger.warning("Mailbox unavailable, skipping poll for {}: {}", mailbox, exc)
                     return messages
                 raise
             if status != "OK":
-                logger.warning("Email mailbox select returned {}, skipping poll for {}", status, mailbox)
+                self.logger.warning("Mailbox select returned {}, skipping poll for {}", status, mailbox)
                 return messages
 
             status, data = client.search(None, *search_criteria)
@@ -382,7 +382,7 @@ class EmailChannel(BaseChannel):
                 if not sender:
                     continue
                 if self._is_self_address(sender):
-                    logger.info("Email from {} ignored: matches bot-owned address", sender)
+                    self.logger.info("From {} ignored: matches bot-owned address", sender)
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
                         client.store(imap_id, "+FLAGS", "\\Seen")
@@ -391,20 +391,26 @@ class EmailChannel(BaseChannel):
                 # --- Anti-spoofing: verify Authentication-Results ---
                 spf_pass, dkim_pass = self._check_authentication_results(parsed)
                 if self.config.verify_spf and not spf_pass:
-                    logger.warning(
-                        "Email from {} rejected: SPF verification failed "
+                    self.logger.warning(
+                        "From {} rejected: SPF verification failed "
                         "(no 'spf=pass' in Authentication-Results header)",
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     continue
                 if self.config.verify_dkim and not dkim_pass:
-                    logger.warning(
-                        "Email from {} rejected: DKIM verification failed "
+                    self.logger.warning(
+                        "From {} rejected: DKIM verification failed "
                         "(no 'dkim=pass' in Authentication-Results header)",
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    continue
+
+                if not self.is_allowed(sender):
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    if mark_seen:
+                        client.store(imap_id, "+FLAGS", "\\Seen")
                     continue
 
                 subject = self._decode_header_value(parsed.get("Subject", ""))
@@ -635,7 +641,7 @@ class EmailChannel(BaseChannel):
 
             content_type = part.get_content_type()
             if not any(fnmatch(content_type, pat) for pat in allowed_types):
-                logger.debug("Email attachment skipped (type {}): not in allowed list", content_type)
+                logger.debug("Attachment skipped (type {}): not in allowed list", content_type)
                 continue
 
             payload = part.get_payload(decode=True)
@@ -643,7 +649,7 @@ class EmailChannel(BaseChannel):
                 continue
             if len(payload) > max_size:
                 logger.warning(
-                    "Email attachment skipped: size {} exceeds limit {}",
+                    "Attachment skipped: size {} exceeds limit {}",
                     len(payload),
                     max_size,
                 )
@@ -656,9 +662,9 @@ class EmailChannel(BaseChannel):
             try:
                 dest.write_bytes(payload)
                 saved.append(dest)
-                logger.info("Email attachment saved: {}", dest)
+                logger.info("Attachment saved: {}", dest)
             except Exception as exc:
-                logger.warning("Failed to save email attachment {}: {}", dest, exc)
+                logger.warning("Failed to save attachment {}: {}", dest, exc)
 
         return saved
 
