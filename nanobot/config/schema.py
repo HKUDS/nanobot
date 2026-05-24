@@ -127,6 +127,57 @@ class SkillRetrievalConfig(Base):
     llm_max_tokens: int = Field(default=256, ge=32, le=4096)  # LLM 检索最大 token 数
 
 
+class EvolutionTraceConfig(Base):
+    """Turn 执行轨迹存储（PostTask 与 GEPA 共用）。"""
+
+    retention_days: int = Field(default=30, ge=1)  # 超过此天数的 trace 可被 prune
+
+
+class EvolutionPostTaskConfig(Base):
+    """Turn 结束后 skill 创建（MVP 仅 create，update 走 GEPA）。"""
+
+    min_tool_calls: int = Field(default=5, ge=1)  # 单 turn 工具调用数达到此值才考虑触发
+    cooldown_minutes: int = Field(default=5, ge=0)  # 同 session 两次 PostTask 的最小间隔
+    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)  # LLM 判定 create 的置信度下限
+    auto_apply: bool = False  # true = 直接写入 skills/；false = 提案 + /evolve-apply 审核
+    model: str | None = None  # PostTask 路由 LLM；None 时使用主 agent provider
+    proposal_retention_days: int = Field(default=30, ge=1)  # 未 apply 的提案过期天数
+
+
+class EvolutionGepaConfig(Base):
+    """离线 DSPy + GEPA skill 优化（仅 update 已有 skill）。"""
+
+    enable: bool = False
+    interval_hours: float | None = Field(default=None, gt=0)  # None = 仅手动 / CLI 触发
+    model: str | None = None  # GEPA 运行模型；None 时使用主 agent provider
+    max_budget_usd: float = Field(default=10.0, gt=0)  # 单次 GEPA 运行预算上限（USD）
+
+
+class EvolutionConfig(Base):
+    """Hermes 式自进化：PostTask 创建 skill + GEPA 离线优化。
+
+    默认关闭；在 workspace config 中显式开启。详见 ``.agent/hermes-design.md``。
+    """
+
+    enable: bool = False  # 总开关：开启后记录 trace，并按子配置运行 PostTask / GEPA
+
+    trace: EvolutionTraceConfig = Field(default_factory=EvolutionTraceConfig)
+    post_task: EvolutionPostTaskConfig = Field(default_factory=EvolutionPostTaskConfig)
+    gepa: EvolutionGepaConfig = Field(default_factory=EvolutionGepaConfig)
+
+    def recording_enabled(self) -> bool:
+        """是否应在本 turn 结束后写入 trace。"""
+        return self.enable
+
+    def post_task_enabled(self) -> bool:
+        """是否应在本 turn 结束后尝试 PostTask 进化。"""
+        return self.enable
+
+    def gepa_enabled(self) -> bool:
+        """是否应调度 GEPA 离线优化。"""
+        return self.enable and self.gepa.enable
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -177,6 +228,7 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
 
 
 class AgentsConfig(Base):
