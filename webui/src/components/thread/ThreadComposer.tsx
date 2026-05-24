@@ -286,7 +286,6 @@ function RunElapsedStrip({
   const showTimer = startedAt != null;
   const stripLabel = goalStateStripPreview(goalState, t);
   const showGoal = !!stripLabel?.trim();
-  if (!showTimer && !showGoal) return null;
 
   const objectiveFull = goalState?.objective?.trim() ?? "";
   const summaryFull = goalState?.ui_summary?.trim() ?? "";
@@ -348,6 +347,8 @@ function RunElapsedStrip({
       window.removeEventListener("keydown", onKey);
     };
   }, [goalPanelOpen]);
+
+  if (!showTimer && !showGoal) return null;
 
   const elapsed =
     startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
