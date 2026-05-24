@@ -304,7 +304,11 @@
       "filterCli": "アプリ CLI",
       "filterMcp": "MCP サービス",
       "enabledSummary": "{{count}} 件有効",
-      "caption": "{{cli}} CLI · {{mcp}} MCP"
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "プラグインを検索",
+      "featured": "注目",
+      "loading": "プラグインを読み込み中...",
+      "empty": "条件に一致するプラグインはありません。"
     },
     "cliApps": {
       "allCategories": "すべてのカテゴリ",

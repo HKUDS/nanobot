@@ -207,7 +207,11 @@
       "filterCli": "应用 CLI",
       "filterMcp": "MCP 服务",
       "enabledSummary": "已启用 {{count}} 个",
-      "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP"
+      "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP",
+      "searchPlaceholder": "搜索插件",
+      "featured": "推荐",
+      "loading": "正在加载插件...",
+      "empty": "没有匹配的插件。"
     },
     "cliApps": {
       "allCategories": "全部分类",

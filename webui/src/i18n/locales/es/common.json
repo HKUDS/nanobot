@@ -304,7 +304,11 @@
       "filterCli": "CLIs de apps",
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP"
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Buscar plugins",
+      "featured": "Destacados",
+      "loading": "Cargando plugins...",
+      "empty": "Ningún plugin coincide con este filtro."
     },
     "cliApps": {
       "allCategories": "Todas las categorías",

@@ -207,7 +207,11 @@
       "filterCli": "App CLIs",
       "filterMcp": "MCP services",
       "enabledSummary": "{{count}} enabled",
-      "caption": "{{cli}} CLI · {{mcp}} MCP"
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Search plugins",
+      "featured": "Featured",
+      "loading": "Loading plugins...",
+      "empty": "No plugins match this filter."
     },
     "cliApps": {
       "allCategories": "All categories",

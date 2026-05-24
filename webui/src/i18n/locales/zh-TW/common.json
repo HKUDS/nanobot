@@ -304,7 +304,11 @@
       "filterCli": "應用 CLI",
       "filterMcp": "MCP 服務",
       "enabledSummary": "已啟用 {{count}} 個",
-      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP"
+      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP",
+      "searchPlaceholder": "搜尋插件",
+      "featured": "推薦",
+      "loading": "正在載入插件...",
+      "empty": "沒有符合的插件。"
     },
     "cliApps": {
       "allCategories": "全部分類",

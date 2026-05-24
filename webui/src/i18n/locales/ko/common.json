@@ -304,7 +304,11 @@
       "filterCli": "앱 CLI",
       "filterMcp": "MCP 서비스",
       "enabledSummary": "{{count}}개 활성화됨",
-      "caption": "{{cli}} CLI · {{mcp}} MCP"
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "플러그인 검색",
+      "featured": "추천",
+      "loading": "플러그인을 불러오는 중...",
+      "empty": "일치하는 플러그인이 없습니다."
     },
     "cliApps": {
       "allCategories": "모든 카테고리",

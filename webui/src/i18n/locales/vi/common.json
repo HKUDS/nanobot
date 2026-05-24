@@ -304,7 +304,11 @@
       "filterCli": "CLI app",
       "filterMcp": "Dịch vụ MCP",
       "enabledSummary": "{{count}} đã bật",
-      "caption": "{{cli}} CLI · {{mcp}} MCP"
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Tìm plugin",
+      "featured": "Nổi bật",
+      "loading": "Đang tải plugin...",
+      "empty": "Không có plugin nào khớp với bộ lọc này."
     },
     "cliApps": {
       "allCategories": "Tất cả danh mục",
