@@ -31,7 +31,13 @@ from nanobot.bus.queue import MessageBus
 from nanobot.agent.skill_selector import resolve_skill_retrieval_provider
 from nanobot.cli_apps import utils as cli_app_utils
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults, ModelPresetConfig, SkillRetrievalConfig
+from nanobot.agent.evolution.trace_recorder import TraceRecorder
+from nanobot.config.schema import (
+    AgentDefaults,
+    EvolutionConfig,
+    ModelPresetConfig,
+    SkillRetrievalConfig,
+)
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
@@ -114,6 +120,10 @@ class TurnContext:
     turn_wall_started_at: float = field(default_factory=time.time)
     turn_latency_ms: int | None = None
 
+    retrieval_query: str = ""
+    skill_entry_names: list[str] = field(default_factory=list)
+    trace_baseline_len: int = 0
+
     trace: list[StateTraceEntry] = field(default_factory=list)
 
 
@@ -183,6 +193,7 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
+        evolution: EvolutionConfig | None = None,
         skill_llm_provider: LLMProvider | None = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
@@ -242,6 +253,8 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self._evolution = evolution or EvolutionConfig()
+        self._trace_recorder = TraceRecorder(workspace, self._evolution)
 
         self.context = ContextBuilder(
             workspace, 
@@ -395,6 +408,7 @@ class AgentLoop:
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
             skill_retrieval=skill_retrieval,
+            evolution=defaults.evolution,
             skill_llm_provider=skill_llm_provider,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
@@ -846,6 +860,31 @@ class AgentLoop:
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
+    def _record_turn_trace(
+        self,
+        *,
+        session_key: str,
+        query: str,
+        messages: list[dict[str, Any]],
+        stop_reason: str,
+        skills_injected: list[str] | None = None,
+        tools_used: list[str] | None = None,
+        turn_id: str = "",
+        baseline_len: int | None = None,
+    ) -> None:
+        """Persist a turn execution trace when evolution recording is enabled."""
+        self._trace_recorder.record_turn(
+            session_key=session_key,
+            query=query,
+            messages=messages,
+            stop_reason=stop_reason,
+            skills_injected=skills_injected or (),
+            tools_used=tools_used,
+            turn_id=turn_id,
+            token_usage=self._last_usage or None,
+            baseline_len=baseline_len,
+        )
+
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
@@ -1126,8 +1165,12 @@ class AgentLoop:
             session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace, skip=is_subagent),
             skill_entries=skill_entries,
         )
+        baseline_len = len(messages)
+        retrieval_query = (
+            ContextBuilder._extract_retrieval_query(current_message) if not is_subagent else ""
+        )
         t_wall = time.time()
-        final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
+        final_content, tools_used, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
             message_id=msg.metadata.get("message_id"),
             metadata=msg.metadata,
@@ -1136,6 +1179,18 @@ class AgentLoop:
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
+        skill_names = (
+            [str(entry["name"]) for entry in skill_entries] if skill_entries else []
+        )
+        self._record_turn_trace(
+            session_key=key,
+            query=retrieval_query,
+            messages=all_msgs,
+            stop_reason=stop_reason,
+            skills_injected=skill_names,
+            tools_used=tools_used,
+            baseline_len=baseline_len,
+        )
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
         if channel == "websocket":
             self._pending_turn_latency_ms[key] = latency_ms
@@ -1366,15 +1421,20 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = self._build_initial_messages(
-            ctx.msg, 
-            ctx.session, 
-            ctx.history, 
-            ctx.pending_summary,
-            skill_entries=await self._resolve_turn_skill_entries(
-                image_generation_prompt(ctx.msg.content, ctx.msg.metadata),
-            )
+        query_source = image_generation_prompt(ctx.msg.content, ctx.msg.metadata)
+        ctx.retrieval_query = ContextBuilder._extract_retrieval_query(query_source)
+        skill_entries = await self._resolve_turn_skill_entries(query_source)
+        ctx.skill_entry_names = (
+            [str(entry["name"]) for entry in skill_entries] if skill_entries else []
         )
+        ctx.initial_messages = self._build_initial_messages(
+            ctx.msg,
+            ctx.session,
+            ctx.history,
+            ctx.pending_summary,
+            skill_entries=skill_entries,
+        )
+        ctx.trace_baseline_len = len(ctx.initial_messages)
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
         )
@@ -1417,6 +1477,16 @@ class AgentLoop:
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
 
         ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
+        self._record_turn_trace(
+            session_key=ctx.session_key,
+            query=ctx.retrieval_query,
+            messages=ctx.all_messages,
+            stop_reason=ctx.stop_reason,
+            skills_injected=ctx.skill_entry_names,
+            tools_used=ctx.tools_used,
+            turn_id=ctx.turn_id,
+            baseline_len=ctx.trace_baseline_len,
+        )
         self._save_turn(
             ctx.session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
