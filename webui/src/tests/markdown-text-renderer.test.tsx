@@ -15,4 +15,16 @@ describe("MarkdownTextRenderer", () => {
     );
     expect(screen.getByText("Diagram")).toBeInTheDocument();
   });
+
+  it("renders markdown video references as inline players", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>![Product intro](/api/media/sig/payload#intro.mp4)</MarkdownTextRenderer>,
+    );
+
+    const video = screen.getByLabelText("Product intro");
+    expect(video.tagName).toBe("VIDEO");
+    expect(video).toHaveAttribute("src", "/api/media/sig/payload#intro.mp4");
+    expect(container.querySelector("video[controls]")).toBeInTheDocument();
+    expect(screen.getByText("Product intro")).toBeInTheDocument();
+  });
 });

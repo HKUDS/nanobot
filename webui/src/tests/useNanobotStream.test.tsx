@@ -591,6 +591,58 @@ describe("useNanobotStream", () => {
     }]);
   });
 
+  it("upgrades an unresolved pending file edit when the resolved event uses a provider call id", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-edit-call-id", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-edit-call-id", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-call-id",
+        edits: [{
+          call_id: "idx:0",
+          tool: "write_file",
+          path: "",
+          phase: "start",
+          added: 206,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+          pending: true,
+        }],
+      });
+      fake.emit("chat-file-edit-call-id", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-call-id",
+        edits: [{
+          call_id: "provider-final-id",
+          tool: "write_file",
+          path: "project-plan.md",
+          phase: "start",
+          added: 206,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+    });
+
+    const fileEditMessages = result.current.messages.filter((message) => message.fileEdits?.length);
+    expect(fileEditMessages).toHaveLength(1);
+    expect(fileEditMessages[0].fileEdits).toEqual([{
+      call_id: "provider-final-id",
+      tool: "write_file",
+      path: "project-plan.md",
+      phase: "start",
+      added: 206,
+      deleted: 0,
+      approximate: true,
+      status: "editing",
+    }]);
+  });
+
   it("starts a new assistant bubble for deltas after stream_end and activity", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-stream-segments", EMPTY_MESSAGES), {

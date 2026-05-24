@@ -229,6 +229,7 @@ function mergeCliMentionApps(
     const existing = byName.get(name.toLowerCase());
     byName.set(name.toLowerCase(), {
       name,
+      aliases: attachment.aliases ?? existing?.aliases ?? null,
       display_name: attachment.display_name || existing?.display_name || name,
       category: attachment.category || existing?.category || "cli",
       description: existing?.description || "",

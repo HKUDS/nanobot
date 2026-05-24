@@ -37,6 +37,23 @@ const CLI_APPS: CliAppInfo[] = [
     brand_color: "#3BABFF",
     skill_installed: false,
   },
+  {
+    name: "hyperframes",
+    aliases: ["hyperframe"],
+    display_name: "HyperFrames",
+    category: "video",
+    description: "Video generation",
+    requires: "",
+    source: "nanobot",
+    entry_point: "hyperframes",
+    install_supported: true,
+    installed: true,
+    available: true,
+    status: "installed",
+    logo_url: "https://example.invalid/hyperframes.svg",
+    brand_color: "#7559FF",
+    skill_installed: true,
+  },
 ];
 
 const MCP_PRESETS: McpPresetInfo[] = [
@@ -125,6 +142,22 @@ describe("MessageBubble", () => {
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #F08705");
     expect(screen.getByTestId("message-cli-mention-logo-drawio")).toBeInTheDocument();
+  });
+
+  it("renders CLI app aliases inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-cli-alias",
+      role: "user",
+      content: "Please use @hyperframe for this launch video",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+
+    const token = screen.getByTestId("message-cli-mention-hyperframes");
+    expect(token).toHaveTextContent("@hyperframe");
+    expect(token).toHaveAttribute("title", "CLI app: HyperFrames");
+    expect(screen.getByTestId("message-cli-mention-logo-hyperframes")).toBeInTheDocument();
   });
 
   it("renders MCP preset mentions inside sent user messages", () => {

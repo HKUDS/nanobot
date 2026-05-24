@@ -155,6 +155,29 @@ def test_local_markdown_image_is_staged_and_rewritten(
     assert staged[0].read_bytes() == _PNG_BYTES
 
 
+def test_local_markdown_video_is_staged_and_rewritten(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    video = workspace / "intro.mp4"
+    video.write_bytes(b"\x00\x00\x00 ftypmp42")
+    media = tmp_path / "media"
+    channel = _ch(bus, workspace_path=workspace, port=0)
+
+    with patch("nanobot.channels.websocket.get_media_dir", side_effect=_fake_media_dir(media)):
+        rewritten = channel._rewrite_local_markdown_images(
+            "The result:\n![Product intro](intro.mp4)"
+        )
+
+    assert "![Product intro](/api/media/" in rewritten
+    assert "#intro.mp4)" in rewritten
+    staged = list((media / "websocket").iterdir())
+    assert len(staged) == 1
+    assert staged[0].read_bytes() == b"\x00\x00\x00 ftypmp42"
+
+
 def test_local_markdown_image_rejects_workspace_escape(
     bus: MagicMock,
     tmp_path: Path,

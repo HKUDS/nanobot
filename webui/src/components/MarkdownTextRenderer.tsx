@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { FileReferenceChip, isLikelyFilePath } from "@/components/FileReferenceChip";
+import { inferMediaKind } from "@/lib/media";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
@@ -20,6 +21,18 @@ interface MarkdownTextRendererProps {
 
 const remarkPlugins = [remarkBreaks, remarkGfm, remarkMath];
 const rehypePlugins = [rehypeKatex];
+
+function mediaNameHint(source: string, label: string): string | undefined {
+  const hash = source.split("#", 2)[1];
+  if (hash) {
+    try {
+      return decodeURIComponent(hash);
+    } catch {
+      return hash;
+    }
+  }
+  return label || undefined;
+}
 
 /**
  * Heavy markdown stack (GFM, math, KaTeX, syntax highlighting) kept in a
@@ -114,6 +127,30 @@ export default function MarkdownTextRenderer({
         const source = typeof src === "string" ? src : "";
         if (!source) return null;
         const label = typeof alt === "string" ? alt : "";
+        const kind = inferMediaKind({ url: source, name: mediaNameHint(source, label) });
+        if (kind === "video") {
+          return (
+            <span
+              className={cn(
+                "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
+                "border border-border/70 bg-background shadow-sm",
+              )}
+            >
+              <video
+                src={source}
+                controls
+                preload="metadata"
+                className="block max-h-[34rem] max-w-full bg-black"
+                aria-label={label || undefined}
+              />
+              {label ? (
+                <span className="block max-w-full truncate px-3 py-2 text-xs text-muted-foreground">
+                  {label}
+                </span>
+              ) : null}
+            </span>
+          );
+        }
         return (
           <span
             className={cn(

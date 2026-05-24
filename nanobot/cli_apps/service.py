@@ -38,16 +38,22 @@ _ARTIFACT_EXTENSIONS = frozenset({
     ".jpeg",
     ".jpg",
     ".json",
+    ".m4v",
     ".md",
+    ".mov",
+    ".mp4",
     ".pdf",
     ".png",
     ".svg",
     ".txt",
     ".vsdx",
+    ".webm",
     ".webp",
     ".xml",
 })
 _INLINE_ARTIFACT_EXTENSIONS = frozenset({".gif", ".jpeg", ".jpg", ".png", ".webp"})
+_VIDEO_ARTIFACT_EXTENSIONS = frozenset({".m4v", ".mov", ".mp4", ".webm"})
+_PREVIEW_ARTIFACT_EXTENSIONS = _INLINE_ARTIFACT_EXTENSIONS | _VIDEO_ARTIFACT_EXTENSIONS
 _ARTIFACT_IGNORE_DIRS = frozenset({
     ".git",
     ".hg",
@@ -62,6 +68,9 @@ _ARTIFACT_IGNORE_DIRS = frozenset({
     "node_modules",
     "venv",
 })
+_TERMINAL_CONTROL_RE = re.compile(
+    r"(?:\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_])"
+)
 
 
 class CliAppError(ValueError):
@@ -182,6 +191,62 @@ _BRAND_ALIASES: dict[str, str] = {
 
 _BRAND_TRAILING_WORDS = ("cli", "workflow", "workflows", "app", "apps", "tool", "tools")
 
+_NANOBOT_CLI_APPS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "hyperframes",
+        "display_name": "HyperFrames",
+        "aliases": ["hyperframe"],
+        "version": "latest",
+        "description": "Create, preview, and render HTML-native videos locally with HyperFrames.",
+        "category": "video",
+        "requires": "Node.js >= 22 and FFmpeg",
+        "package_manager": "npm",
+        "npm_package": "hyperframes",
+        "install_cmd": "npm install -g hyperframes",
+        "uninstall_cmd": "npm uninstall -g hyperframes",
+        "entry_point": "hyperframes",
+        "_source": "nanobot",
+        "_logo_url": "https://www.heygen.com/favicon.ico",
+        "_brand_color": "#7559FF",
+        "_skill_markdown": """---
+name: cli-app-hyperframes
+description: >-
+  Create, preview, and render HTML-native videos locally with HyperFrames.
+---
+
+# HyperFrames
+
+Use this skill when the user asks nanobot to create a product video, launch video,
+animated explainer, social clip, narrated motion graphic, website-to-video demo,
+or any other lightweight video artifact.
+
+If the user attached `@hyperframe` or `@hyperframes` in chat, treat HyperFrames
+as the selected video engine for the current turn.
+
+## Workflow
+
+1. Create or reuse a project inside the workspace.
+2. Author self-contained HTML/CSS/JS composition files and local assets.
+3. Run HyperFrames with the `run_cli_app` tool, never through shell by default.
+4. Validate or preview before rendering when the command is available.
+5. Render to `.mp4`, `.webm`, or `.mov`, then reference the video with Markdown
+   using a workspace-relative path, for example `![Product intro](intro.mp4)`.
+
+## Commands
+
+```bash
+hyperframes --help
+hyperframes init my-video --non-interactive --example blank
+hyperframes preview
+hyperframes render --output output.mp4
+```
+
+Prefer deterministic, local assets. Avoid remote CDNs unless the user explicitly
+asks for them, because renders should be reproducible and work offline.
+""",
+    },
+)
+
 
 def _now() -> float:
     return time.time()
@@ -269,6 +334,11 @@ def _brand_candidates(app: dict[str, Any]) -> list[str]:
 
 
 def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
+    if app.get("_source") == "nanobot":
+        logo_url = str(app.get("_logo_url") or "").strip()
+        brand_color = str(app.get("_brand_color") or "").strip()
+        if logo_url:
+            return logo_url, brand_color or None
     brand = None
     domain_brand = None
     for candidate in _brand_candidates(app):
@@ -337,6 +407,33 @@ def _truncate(text: str, limit: int = _MAX_TOOL_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n\n... truncated {omitted} characters ..."
 
 
+def _clean_process_output(text: str) -> str:
+    text = _TERMINAL_CONTROL_RE.sub("", text)
+    return text.replace("\r\n", "\n").replace("\r", "\n").rstrip()
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip().lower()
+        if not text or text in seen:
+            continue
+        if _SAFE_NAME_RE.sub("-", text).strip("-") != text:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _app_aliases(app: dict[str, Any]) -> list[str]:
+    return _string_list(app.get("aliases"))
+
+
 class CliAppManager:
     """Manage CLI-Anything registry entries and local install state."""
 
@@ -402,24 +499,17 @@ class CliAppManager:
         return data
 
     def catalog(self, *, force_refresh: bool = False) -> tuple[list[dict[str, Any]], str | None]:
-        registries = [
-            (
-                "harness",
-                self._fetch_registry(
-                    CLI_ANYTHING_REGISTRY_URL,
-                    self._cache_path("harness"),
-                    force_refresh=force_refresh,
-                ),
-            ),
-            (
-                "public",
-                self._fetch_registry(
-                    CLI_ANYTHING_PUBLIC_REGISTRY_URL,
-                    self._cache_path("public"),
-                    force_refresh=force_refresh,
-                ),
-            ),
+        registry_sources = [
+            ("harness", CLI_ANYTHING_REGISTRY_URL, self._cache_path("harness")),
+            ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, self._cache_path("public")),
         ]
+        registries: list[tuple[str, dict[str, Any]]] = []
+        for source, url, cache_path in registry_sources:
+            try:
+                registry = self._fetch_registry(url, cache_path, force_refresh=force_refresh)
+            except Exception:
+                registry = {"meta": {}, "clis": []}
+            registries.append((source, registry))
         apps_by_name: dict[str, dict[str, Any]] = {}
         updated_values: list[str] = []
         for source, registry in registries:
@@ -441,12 +531,16 @@ class CliAppManager:
                     apps_by_name[key] = {**previous, **entry, "_source": merged_source}
                 else:
                     apps_by_name[key] = entry
+        for entry in _NANOBOT_CLI_APPS:
+            key = str(entry["name"]).lower()
+            apps_by_name[key] = dict(entry)
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
 
     def get_app(self, name: str, *, force_refresh: bool = False) -> dict[str, Any]:
         wanted = name.lower()
         for app in self.catalog(force_refresh=force_refresh)[0]:
-            if str(app.get("name", "")).lower() == wanted:
+            app_name = str(app.get("name", "")).lower()
+            if app_name == wanted or wanted in _app_aliases(app):
                 return app
         raise CliAppError(f"CLI app '{name}' not found", status=404)
 
@@ -461,24 +555,38 @@ class CliAppManager:
             str(name).lower(): (str(name), data if isinstance(data, dict) else {})
             for name, data in installed.items()
         }
+        catalog_by_name = {
+            str(app.get("name", "")).lower(): app
+            for app in self.catalog()[0]
+            if app.get("name")
+        }
+        installed_by_mention: dict[str, tuple[str, dict[str, Any]]] = {}
+        for installed_key, (installed_name, data) in installed_by_name.items():
+            aliases = _string_list(data.get("aliases"))
+            app = catalog_by_name.get(installed_key)
+            if app:
+                aliases.extend(alias for alias in _app_aliases(app) if alias not in aliases)
+            for mention_name in [installed_key, *aliases]:
+                installed_by_mention.setdefault(mention_name, (installed_name, data))
         seen: set[str] = set()
         mentions: list[dict[str, str]] = []
         for match in _MENTION_RE.finditer(text):
             wanted = str(match.group(2)).lower()
-            if wanted in seen or wanted not in installed_by_name:
+            if wanted in seen or wanted not in installed_by_mention:
                 continue
-            installed_name, data = installed_by_name[wanted]
+            installed_name, data = installed_by_mention[wanted]
             seen.add(wanted)
             entry_point = str(data.get("entry_point") or "")
-            mentions.append(
-                {
-                    "name": installed_name,
-                    "entry_point": entry_point,
-                    "source": str(data.get("source") or ""),
-                    "skill": f"skills/{_safe_skill_name(installed_name)}/SKILL.md",
-                    "tool": "run_cli_app",
-                }
-            )
+            mention = {
+                "name": installed_name,
+                "entry_point": entry_point,
+                "source": str(data.get("source") or ""),
+                "skill": f"skills/{_safe_skill_name(installed_name)}/SKILL.md",
+                "tool": "run_cli_app",
+            }
+            if wanted != installed_name.lower():
+                mention["mention"] = wanted
+            mentions.append(mention)
         return mentions
 
     def _strategy(self, app: dict[str, Any]) -> str:
@@ -527,6 +635,7 @@ class CliAppManager:
         logo_url, brand_color = _brand_payload(app)
         return {
             "name": name,
+            "aliases": _app_aliases(app),
             "display_name": app.get("display_name") or name,
             "category": app.get("category") or "uncategorized",
             "description": app.get("description") or "",
@@ -651,6 +760,7 @@ class CliAppManager:
         return {
             "version": app.get("version") or "unknown",
             "entry_point": app.get("entry_point") or "",
+            "aliases": _app_aliases(app),
             "source": app.get("_source") or "harness",
             "strategy": self._strategy(app),
             "installed_at": int(_now()),
@@ -720,7 +830,12 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
     def install_skill(self, app: dict[str, Any]) -> Path:
         path = self._skill_path(str(app["name"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        content = self._fetch_skill_content(app) or self._fallback_skill(app)
+        local_skill = app.get("_skill_markdown") if app.get("_source") == "nanobot" else None
+        content = (
+            str(local_skill)
+            if isinstance(local_skill, str) and local_skill.strip()
+            else self._fetch_skill_content(app) or self._fallback_skill(app)
+        )
         content = self._with_nanobot_skill_note(content, app)
         path.write_text(content, encoding="utf-8")
         return path
@@ -741,18 +856,22 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if not self._install_supported(app):
             raise CliAppError("this CLI app uses an unsupported install strategy")
         strategy = self._strategy(app)
+        entry_point = str(app.get("entry_point") or "")
         if strategy == "bundled":
-            detect_cmd = str(app.get("detect_cmd") or app.get("entry_point") or "")
+            detect_cmd = str(app.get("detect_cmd") or entry_point)
             if detect_cmd and _command_exists(detect_cmd):
                 self._record_installed(app)
                 return self.payload() | {"last_action": {"ok": True, "message": f"CLI for {app['display_name']} is available."}}
             note = app.get("install_notes") or f"{app['display_name']} is bundled with its parent app."
             raise CliAppError(str(note))
+        if entry_point and shutil.which(entry_point):
+            self._record_installed(app)
+            return self.payload() | {"last_action": {"ok": True, "message": f"CLI for {app['display_name']} is already available."}}
         argv = self._argv_for_action(app, "install")
         assert argv is not None
         result = self._run_argv(argv, timeout=self.runtime.install_timeout)
         if result.returncode != 0:
-            raise CliAppError(_truncate(result.stderr or result.stdout or "install failed"), status=500)
+            raise CliAppError(_truncate(result.stderr or result.stdout or "install failed"))
         self._record_installed(app)
         return self.payload() | {"last_action": {"ok": True, "message": f"Installed CLI for {app['display_name']}."}}
 
@@ -767,7 +886,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         assert argv is not None
         result = self._run_argv(argv, timeout=self.runtime.install_timeout)
         if result.returncode != 0:
-            raise CliAppError(_truncate(result.stderr or result.stdout or "update failed"), status=500)
+            raise CliAppError(_truncate(result.stderr or result.stdout or "update failed"))
         self._record_installed(app)
         return self.payload() | {"last_action": {"ok": True, "message": f"Updated CLI for {app['display_name']}."}}
 
@@ -781,7 +900,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             assert argv is not None
             result = self._run_argv(argv, timeout=self.runtime.install_timeout)
             if result.returncode != 0:
-                raise CliAppError(_truncate(result.stderr or result.stdout or "uninstall failed"), status=500)
+                raise CliAppError(_truncate(result.stderr or result.stdout or "uninstall failed"))
         installed.pop(str(app["name"]), None)
         self._save_installed(installed)
         self.remove_skill(str(app["name"]))
@@ -893,6 +1012,8 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             kind = (
                 "previewable image"
                 if ext in _INLINE_ARTIFACT_EXTENSIONS
+                else "previewable video"
+                if ext in _VIDEO_ARTIFACT_EXTENSIONS
                 else ext.lstrip(".") or "file"
             )
             lines.append(f"- {rel} ({kind}, {self._format_artifact_size(path)})")
@@ -937,19 +1058,26 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             f"CLI app '{name}' exited {result.returncode}.",
             f"Command: {entry} {' '.join(shlex.quote(arg) for arg in clean_args)}".rstrip(),
         ]
-        if result.stdout:
-            output.append("\nSTDOUT:\n" + result.stdout.rstrip())
-        if result.stderr:
-            output.append("\nSTDERR:\n" + result.stderr.rstrip())
+        stdout = _clean_process_output(result.stdout) if result.stdout else ""
+        stderr = _clean_process_output(result.stderr) if result.stderr else ""
+        if stdout:
+            output.append("\nSTDOUT:\n" + stdout)
+        if stderr:
+            output.append("\nSTDERR:\n" + stderr)
         artifacts = self._changed_artifacts(cwd, artifact_snapshot)
         if artifacts:
             output.append(
                 "\nArtifacts created or updated:\n"
                 + "\n".join(self._format_artifact_lines(cwd, artifacts))
             )
-            if any(path.suffix.lower() in _INLINE_ARTIFACT_EXTENSIONS for path in artifacts):
+            preview_artifact = next(
+                (path for path in artifacts if path.suffix.lower() in _PREVIEW_ARTIFACT_EXTENSIONS),
+                None,
+            )
+            if preview_artifact:
+                example_path = self._format_artifact_path(cwd, preview_artifact)
                 output.append(
-                    "\nTo show a preview in WebUI, reference a raster artifact with Markdown "
-                    "using its workspace-relative path, for example `![diagram](diagram.png)`."
+                    "\nTo show a preview in WebUI, reference an image or video artifact with Markdown "
+                    f"using its workspace-relative path, for example `![preview]({example_path})`."
                 )
         return _truncate("\n".join(output))

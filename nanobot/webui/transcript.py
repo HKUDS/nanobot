@@ -9,7 +9,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from loguru import logger
 
@@ -28,6 +28,22 @@ _INLINE_MARKDOWN_IMAGE_EXTS: frozenset[str] = frozenset({
     ".webp",
     ".gif",
 })
+_INLINE_MARKDOWN_VIDEO_EXTS: frozenset[str] = frozenset({
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".m4v",
+})
+_INLINE_MARKDOWN_MEDIA_EXTS = _INLINE_MARKDOWN_IMAGE_EXTS | _INLINE_MARKDOWN_VIDEO_EXTS
+
+
+def _infer_media_kind(*, url: str = "", name: str = "") -> str:
+    suffix = Path(name or "").suffix.lower() or Path(urlparse(url).path).suffix.lower()
+    if suffix in _INLINE_MARKDOWN_VIDEO_EXTS:
+        return "video"
+    if suffix in _INLINE_MARKDOWN_IMAGE_EXTS:
+        return "image"
+    return "file"
 
 
 def rewrite_local_markdown_images(
@@ -36,7 +52,7 @@ def rewrite_local_markdown_images(
     workspace_path: Path,
     sign_path: Callable[[Path], Mapping[str, Any] | None],
 ) -> str:
-    """Rewrite markdown image paths inside the workspace to signed WebUI media URLs."""
+    """Rewrite markdown image/video paths inside the workspace to signed WebUI media URLs."""
     if "![" not in text:
         return text
 
@@ -50,7 +66,8 @@ def rewrite_local_markdown_images(
         if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
             return None
         path_text = unquote(url)
-        if Path(path_text).suffix.lower() not in _INLINE_MARKDOWN_IMAGE_EXTS:
+        suffix = Path(path_text).suffix.lower()
+        if suffix not in _INLINE_MARKDOWN_MEDIA_EXTS:
             return None
         candidate = Path(path_text).expanduser()
         if not candidate.is_absolute():
@@ -63,7 +80,12 @@ def rewrite_local_markdown_images(
         if not resolved.is_file():
             return None
         signed = sign_path(resolved)
-        return str(signed.get("url")) if signed and signed.get("url") else None
+        if not signed or not signed.get("url"):
+            return None
+        signed_url = str(signed["url"])
+        if suffix in _INLINE_MARKDOWN_VIDEO_EXTS:
+            return f"{signed_url}#{quote(resolved.name)}"
+        return signed_url
 
     def replace(match: re.Match[str]) -> str:
         signed_url = resolve_url(match.group(2))
@@ -469,6 +491,22 @@ def replay_transcript_to_ui_messages(
             for pos, edit in enumerate(existing)
             if isinstance(edit, dict)
         }
+
+        def pending_replacement_index(edit: dict[str, Any]) -> int | None:
+            if not edit.get("path"):
+                return None
+            matches = [
+                pos
+                for pos, candidate in enumerate(existing)
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("pending")
+                    and not candidate.get("path")
+                    and candidate.get("tool") == edit.get("tool")
+                )
+            ]
+            return matches[0] if len(matches) == 1 else None
+
         for edit in edits:
             if not isinstance(edit, dict):
                 continue
@@ -479,6 +517,14 @@ def replay_transcript_to_ui_messages(
                 if edit.get("path") and not edit.get("pending"):
                     merged.pop("pending", None)
                 existing[pos] = merged
+            elif (pos := pending_replacement_index(edit)) is not None:
+                old_key = _file_edit_key(existing[pos])
+                merged = {**existing[pos], **edit}
+                if edit.get("path") and not edit.get("pending"):
+                    merged.pop("pending", None)
+                existing[pos] = merged
+                index_by_key.pop(old_key, None)
+                index_by_key[_file_edit_key(merged)] = pos
             else:
                 index_by_key[key] = len(existing)
                 existing.append(dict(edit))
@@ -669,16 +715,23 @@ def replay_transcript_to_ui_messages(
             buffer_parts = []
             text = rec.get("text")
             content_s = text if isinstance(text, str) else ""
-            media_urls = rec.get("media_urls")
+            media_paths = rec.get("media")
             media: list[dict[str, Any]] = []
-            if isinstance(media_urls, list):
+            if isinstance(media_paths, list) and augment_user_media is not None:
+                paths = [str(p) for p in media_paths if p]
+                media = augment_user_media(paths)
+            media_urls = rec.get("media_urls")
+            if not media and isinstance(media_urls, list):
                 for m in media_urls:
                     if isinstance(m, dict) and m.get("url"):
+                        name = str(m.get("name") or "")
+                        url = str(m["url"])
+                        kind = str(m.get("kind") or _infer_media_kind(url=url, name=name))
                         media.append(
                             {
-                                "kind": "image",
-                                "url": str(m["url"]),
-                                "name": str(m.get("name") or ""),
+                                "kind": kind,
+                                "url": url,
+                                "name": name,
                             },
                         )
             extra: dict[str, Any] = {"content": content_s}

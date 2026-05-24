@@ -13,6 +13,7 @@ QueryParams = dict[str, list[str]]
 _CLI_APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _CLI_APP_ATTACHMENT_KEYS = (
     "name",
+    "aliases",
     "display_name",
     "category",
     "entry_point",
@@ -30,7 +31,24 @@ def _clip_ws_string(value: Any, limit: int = 240) -> str | None:
     return text[:limit]
 
 
-def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
+def _clip_cli_aliases(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for item in value[:8]:
+        alias = _clip_ws_string(item, 64)
+        if not alias or _CLI_APP_NAME_RE.match(alias) is None:
+            continue
+        key = alias.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        aliases.append(key)
+    return aliases
+
+
+def normalize_cli_app_mentions(raw: Any) -> list[dict[str, Any]]:
     """Sanitize structured CLI app mentions sent by the WebUI."""
     if not isinstance(raw, list):
         return []
@@ -46,8 +64,13 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        row: dict[str, str] = {"name": key}
+        row: dict[str, Any] = {"name": key}
         for field in _CLI_APP_ATTACHMENT_KEYS[1:]:
+            if field == "aliases":
+                aliases = _clip_cli_aliases(item.get(field))
+                if aliases:
+                    row[field] = aliases
+                continue
             value = _clip_ws_string(item.get(field), 512 if field == "logo_url" else 160)
             if value:
                 row[field] = value

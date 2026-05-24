@@ -259,12 +259,31 @@ function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
 function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit[]): UIFileEdit[] {
   const next = [...(existing ?? [])];
   const indexByKey = new Map(next.map((edit, index) => [fileEditKey(edit), index]));
+  const pendingReplacementIndex = (edit: UIFileEdit): number | undefined => {
+    if (!edit.path) return undefined;
+    const candidates = next
+      .map((candidate, index) => ({ candidate, index }))
+      .filter(({ candidate }) =>
+        candidate.pending && !candidate.path && candidate.tool === edit.tool,
+      );
+    return candidates.length === 1 ? candidates[0].index : undefined;
+  };
   for (const raw of incoming) {
     const edit = normalizeFileEdit(raw);
     if (!edit) continue;
     const key = fileEditKey(edit);
     const existingIndex = indexByKey.get(key);
     if (existingIndex === undefined) {
+      const replacementIndex = pendingReplacementIndex(edit);
+      if (replacementIndex !== undefined) {
+        const previousKey = fileEditKey(next[replacementIndex]);
+        const merged = { ...next[replacementIndex], ...edit };
+        if (edit.path && !edit.pending) delete merged.pending;
+        next[replacementIndex] = merged;
+        indexByKey.delete(previousKey);
+        indexByKey.set(fileEditKey(merged), replacementIndex);
+        continue;
+      }
       indexByKey.set(key, next.length);
       next.push(edit);
       continue;

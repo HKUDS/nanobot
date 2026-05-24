@@ -14,6 +14,7 @@ import {
   McpPresetMentionToken,
   cliAppInitials,
   mcpPresetInitials,
+  preferredCliAppMentionName,
   splitCapabilityMentionSegments,
   type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
@@ -239,8 +240,10 @@ function buildGoalMarkdownBody(summary: string, objective: string): string {
 }
 
 function cliAppMentionPayload(app: CliAppInfo): OutboundCliAppMention {
+  const aliases = app.aliases?.filter((alias) => alias.trim()) ?? [];
   return {
     name: app.name,
+    ...(aliases.length > 0 ? { aliases } : {}),
     display_name: app.display_name,
     category: app.category,
     entry_point: app.entry_point,
@@ -679,10 +682,11 @@ export function ThreadComposer({
           app.category,
           app.description,
           app.entry_point,
+          ...(app.aliases ?? []),
         ].join(" ").toLowerCase();
         return haystack.includes(cliAppMention.query);
       })
-      .map((app) => ({ kind: "cli", name: app.name, app }));
+      .map((app) => ({ kind: "cli", name: preferredCliAppMentionName(app), app }));
     const mcpCandidates: MentionCandidate[] = mcpPresets
       .filter((preset) => preset.installed && preset.configured)
       .filter((preset) => {

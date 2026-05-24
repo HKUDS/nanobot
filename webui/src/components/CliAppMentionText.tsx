@@ -36,16 +36,39 @@ export function mcpPresetInitials(preset: Pick<McpPresetInfo, "name" | "display_
   );
 }
 
+function normalizeMentionNames(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const value of values) {
+    const name = value?.trim().toLowerCase();
+    if (!name || seen.has(name) || !/^[a-z0-9_-]+$/.test(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
+export function cliAppMentionNames(app: Pick<CliAppInfo, "name" | "aliases">): string[] {
+  return normalizeMentionNames([app.name, ...(app.aliases ?? [])]);
+}
+
+export function preferredCliAppMentionName(app: Pick<CliAppInfo, "name" | "aliases">): string {
+  const aliases = normalizeMentionNames(app.aliases ?? []);
+  return aliases[0] ?? normalizeMentionNames([app.name])[0] ?? app.name;
+}
+
 export function splitCliAppMentionSegments(
   value: string,
   cliApps: CliAppInfo[],
 ): CliAppMentionSegment[] {
   if (!value || cliApps.length === 0) return value ? [{ kind: "text", text: value }] : [];
-  const appsByName = new Map(
-    cliApps
-      .filter((app) => app.installed)
-      .map((app) => [app.name.toLowerCase(), app]),
-  );
+  const appsByName = new Map<string, CliAppInfo>();
+  for (const app of cliApps) {
+    if (!app.installed) continue;
+    for (const name of cliAppMentionNames(app)) {
+      appsByName.set(name, app);
+    }
+  }
   if (appsByName.size === 0) return [{ kind: "text", text: value }];
 
   const segments: CliAppMentionSegment[] = [];
@@ -80,11 +103,13 @@ export function splitCapabilityMentionSegments(
   if (!value || (cliApps.length === 0 && mcpPresets.length === 0)) {
     return value ? [{ kind: "text", text: value }] : [];
   }
-  const cliAppsByName = new Map(
-    cliApps
-      .filter((app) => app.installed)
-      .map((app) => [app.name.toLowerCase(), app]),
-  );
+  const cliAppsByName = new Map<string, CliAppInfo>();
+  for (const app of cliApps) {
+    if (!app.installed) continue;
+    for (const name of cliAppMentionNames(app)) {
+      cliAppsByName.set(name, app);
+    }
+  }
   const mcpPresetsByName = new Map(
     mcpPresets
       .filter((preset) => preset.installed && preset.configured)
