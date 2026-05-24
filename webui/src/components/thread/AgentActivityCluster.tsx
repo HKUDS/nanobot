@@ -225,13 +225,18 @@ export function AgentActivityCluster({
 
   const [userToggledOuter, setUserToggledOuter] = useState(false);
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
+  const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const activityContentRef = useRef<HTMLDivElement>(null);
   const autoFollowActivityRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
-  /** Live work and the trace directly attached to an answer read like a visible trail. */
-  const outerExpanded = userToggledOuter ? outerOpenLocal : isTurnStreaming || hasBodyBelow;
+  const wasTurnStreamingRef = useRef(isTurnStreaming);
+  const wasTurnStreaming = wasTurnStreamingRef.current;
+  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
+  const outerExpanded = userToggledOuter
+    ? outerOpenLocal
+    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
 
   const hasLiveEditingFiles = isTurnStreaming && hasEditingFiles;
   const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
@@ -376,6 +381,19 @@ export function AgentActivityCluster({
     const interval = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(interval);
   }, [isTurnStreaming]);
+
+  useEffect(() => {
+    const wasStreaming = wasTurnStreamingRef.current;
+    wasTurnStreamingRef.current = isTurnStreaming;
+    if (isTurnStreaming) {
+      setCompletionHoldOpen(false);
+      return undefined;
+    }
+    if (!wasStreaming || userToggledOuter) return undefined;
+    setCompletionHoldOpen(true);
+    const timeout = window.setTimeout(() => setCompletionHoldOpen(false), 900);
+    return () => window.clearTimeout(timeout);
+  }, [isTurnStreaming, userToggledOuter]);
 
   const onActivityScroll = useCallback(() => {
     const el = activityScrollRef.current;

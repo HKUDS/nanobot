@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
@@ -293,6 +293,53 @@ describe("AgentActivityCluster", () => {
     await waitFor(() => expect(marker).toHaveClass("animate-in"));
   });
 
+  it("briefly shows completed activity, then auto-collapses before the answer", () => {
+    vi.useFakeTimers();
+    const liveReasoning: UIMessage = {
+      id: "r-collapse",
+      role: "assistant",
+      content: "",
+      reasoning: "checking files",
+      reasoningStreaming: true,
+      isStreaming: true,
+      createdAt: 1,
+    };
+    try {
+      const { rerender } = render(
+        <AgentActivityCluster
+          messages={[liveReasoning]}
+          isTurnStreaming
+          hasBodyBelow
+        />,
+      );
+      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+
+      rerender(
+        <AgentActivityCluster
+          messages={[{
+            ...liveReasoning,
+            reasoningStreaming: false,
+            isStreaming: false,
+          }]}
+          isTurnStreaming={false}
+          hasBodyBelow
+        />,
+      );
+
+      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(901);
+      });
+      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /1 steps/i })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders file edit totals and a compact expanded file list", async () => {
     const restoreMotion = installReducedMotion();
     try {
@@ -582,6 +629,8 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow
       />,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /1 tool calls/i }));
 
     expect(screen.getByText("Shell")).toBeInTheDocument();
     expect(screen.getByText(/cat << 'EOF' \| bash · script, 6 lines/)).toBeInTheDocument();
