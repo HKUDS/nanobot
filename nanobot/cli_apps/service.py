@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from importlib import resources
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
@@ -25,6 +24,13 @@ CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
 CLI_ANYTHING_RAW_SKILLS_BASE = f"{CLI_ANYTHING_RAW_BASE}/skills/"
+NANOBOT_CLI_APPS_REPO_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "cli-apps"
+NANOBOT_CLI_APPS_GITHUB_API_URL = (
+    "https://api.github.com/repos/HKUDS/nanobot/contents/plugins/cli-apps/catalog?ref=main"
+)
+NANOBOT_CLI_APPS_RAW_BASE = (
+    "https://raw.githubusercontent.com/HKUDS/nanobot/main/plugins/cli-apps"
+)
 
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_ARTIFACT_SCAN_PATHS = 4_000
@@ -193,9 +199,9 @@ _BRAND_ALIASES: dict[str, str] = {
 
 _BRAND_TRAILING_WORDS = ("cli", "workflow", "workflows", "app", "apps", "tool", "tools")
 
-_BUNDLED_CATALOG_DIR = "catalog"
-_BUNDLED_SKILL_DEFAULT = "skills/{name}/SKILL.md"
-_BUNDLED_REQUIRED_FIELDS = frozenset({
+_NANOBOT_CATALOG_DIR = "catalog"
+_NANOBOT_SKILL_DEFAULT = "skills/{name}/SKILL.md"
+_NANOBOT_REQUIRED_FIELDS = frozenset({
     "name",
     "display_name",
     "description",
@@ -283,31 +289,31 @@ def _pip_uninstall_args_from_command(command: str) -> list[str] | None:
 def _clean_resource_path(value: str) -> str:
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
-        raise CliAppError(f"invalid bundled CLI App resource path: {value}")
+        raise CliAppError(f"invalid nanobot CLI App resource path: {value}")
     return path.as_posix()
 
 
-def _resource_child(root: Any, resource_path: str) -> Any:
+def _resource_child(root: Path, resource_path: str) -> Path:
     child = root
     for part in PurePosixPath(resource_path).parts:
         child = child / part
     return child
 
 
-def _validate_bundled_cli_app(raw: dict[str, Any], *, source_name: str) -> dict[str, Any]:
-    missing = sorted(field for field in _BUNDLED_REQUIRED_FIELDS if not raw.get(field))
+def _validate_nanobot_cli_app(raw: dict[str, Any], *, source_name: str) -> dict[str, Any]:
+    missing = sorted(field for field in _NANOBOT_REQUIRED_FIELDS if not raw.get(field))
     if missing:
         raise CliAppError(
-            f"bundled CLI App {source_name} is missing required fields: {', '.join(missing)}"
+            f"nanobot CLI App {source_name} is missing required fields: {', '.join(missing)}"
         )
     entry = dict(raw)
     name = str(entry["name"]).strip().lower()
     if not name:
-        raise CliAppError(f"bundled CLI App {source_name} has an empty name")
+        raise CliAppError(f"nanobot CLI App {source_name} has an empty name")
     entry["name"] = name
     entry["_source"] = "nanobot"
     if _app_strategy(entry) == "unsupported":
-        raise CliAppError(f"bundled CLI App '{name}' has an unsupported install strategy")
+        raise CliAppError(f"nanobot CLI App '{name}' has an unsupported install strategy")
     if "skill_resource" in entry and "_skill_resource" not in entry:
         entry["_skill_resource"] = entry.pop("skill_resource")
     if entry.get("_skill_resource"):
@@ -315,37 +321,42 @@ def _validate_bundled_cli_app(raw: dict[str, Any], *, source_name: str) -> dict[
     return entry
 
 
-def _load_bundled_cli_apps_from(root: Any) -> tuple[dict[str, Any], ...]:
-    catalog_dir = root / _BUNDLED_CATALOG_DIR
+def _rows_from_nanobot_catalog_data(data: Any, *, source_name: str) -> list[dict[str, Any]]:
+    if not isinstance(data, dict):
+        raise CliAppError(f"nanobot CLI App catalog {source_name} must be an object")
+    rows = data.get("clis") if isinstance(data.get("clis"), list) else [data]
+    valid_rows: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            raise CliAppError(f"nanobot CLI App catalog {source_name} contains a non-object row")
+        valid_rows.append(raw)
+    return valid_rows
+
+
+def _load_nanobot_cli_apps_from(root: Path) -> tuple[dict[str, Any], ...]:
+    catalog_dir = root / _NANOBOT_CATALOG_DIR
     try:
-        resources_iter = sorted(
-            (
-                item
-                for item in catalog_dir.iterdir()
-                if getattr(item, "name", "").endswith(".json")
-            ),
+        catalog_files = sorted(
+            (item for item in catalog_dir.iterdir() if item.name.endswith(".json")),
             key=lambda item: item.name,
         )
     except (FileNotFoundError, NotADirectoryError):
         return ()
     apps: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for resource in resources_iter:
+    for resource in catalog_files:
         try:
             data = json.loads(resource.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise CliAppError(f"failed to read bundled CLI App catalog {resource.name}: {exc}") from exc
-        rows = data.get("clis") if isinstance(data, dict) and isinstance(data.get("clis"), list) else [data]
-        for raw in rows:
-            if not isinstance(raw, dict):
-                raise CliAppError(f"bundled CLI App catalog {resource.name} contains a non-object row")
-            entry = _validate_bundled_cli_app(raw, source_name=resource.name)
+            raise CliAppError(f"failed to read nanobot CLI App catalog {resource.name}: {exc}") from exc
+        for raw in _rows_from_nanobot_catalog_data(data, source_name=resource.name):
+            entry = _validate_nanobot_cli_app(raw, source_name=resource.name)
             name = str(entry["name"])
             if name in seen:
-                raise CliAppError(f"duplicate bundled CLI App name: {name}")
+                raise CliAppError(f"duplicate nanobot CLI App name: {name}")
             seen.add(name)
             if not entry.get("_skill_resource"):
-                default_skill = _BUNDLED_SKILL_DEFAULT.format(name=name)
+                default_skill = _NANOBOT_SKILL_DEFAULT.format(name=name)
                 try:
                     if _resource_child(root, default_skill).is_file():
                         entry["_skill_resource"] = default_skill
@@ -355,19 +366,31 @@ def _load_bundled_cli_apps_from(root: Any) -> tuple[dict[str, Any], ...]:
     return tuple(apps)
 
 
-def _bundled_cli_apps() -> tuple[dict[str, Any], ...]:
-    try:
-        return _load_bundled_cli_apps_from(resources.files("nanobot.cli_apps"))
-    except ModuleNotFoundError:
-        return ()
+def _local_nanobot_cli_apps() -> tuple[dict[str, Any], ...]:
+    return _load_nanobot_cli_apps_from(NANOBOT_CLI_APPS_REPO_ROOT)
 
 
-def _read_bundled_text_resource(resource_path: str) -> str | None:
+def _nanobot_cli_apps_from_registry(registry: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    apps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in _rows_from_nanobot_catalog_data(registry, source_name="nanobot registry"):
+        entry = _validate_nanobot_cli_app(raw, source_name="nanobot registry")
+        name = str(entry["name"])
+        if name in seen:
+            raise CliAppError(f"duplicate nanobot CLI App name: {name}")
+        seen.add(name)
+        if not entry.get("_skill_resource"):
+            entry["_skill_resource"] = _NANOBOT_SKILL_DEFAULT.format(name=name)
+        apps.append(entry)
+    return tuple(apps)
+
+
+def _read_local_nanobot_text_resource(resource_path: str) -> str | None:
     try:
         clean_path = _clean_resource_path(resource_path)
-        resource = _resource_child(resources.files("nanobot.cli_apps"), clean_path)
+        resource = _resource_child(NANOBOT_CLI_APPS_REPO_ROOT, clean_path)
         text = resource.read_text(encoding="utf-8")
-    except (CliAppError, FileNotFoundError, ModuleNotFoundError, OSError):
+    except (CliAppError, FileNotFoundError, OSError):
         return None
     return text if text.strip() else None
 
@@ -439,6 +462,12 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
+
+
+def _cache_expired(cached: dict[str, Any] | None, ttl_seconds: int) -> bool:
+    if not cached:
+        return True
+    return _now() - float(cached.get("_cached_at", 0)) >= ttl_seconds
 
 
 def _safe_skill_path(value: str) -> str | None:
@@ -518,6 +547,9 @@ class CliAppManager:
     def _cache_path(self, source: str) -> Path:
         return self.data_dir / f"{source}_registry_cache.json"
 
+    def _text_cache_path(self, source: str) -> Path:
+        return self.data_dir / f"{source}_cache.json"
+
     def _load_installed(self) -> dict[str, Any]:
         data = _read_json(self.installed_path) or {}
         apps = data.get("apps") if isinstance(data.get("apps"), dict) else data
@@ -561,6 +593,63 @@ class CliAppManager:
         _write_json(cache_path, {"_cached_at": _now(), "data": data})
         return data
 
+    def _fetch_nanobot_cli_apps(self, *, force_refresh: bool = False) -> tuple[dict[str, Any], ...]:
+        local_apps = _local_nanobot_cli_apps()
+        if local_apps:
+            return local_apps
+
+        cache_path = self._cache_path("nanobot")
+        cached = _read_json(cache_path)
+        cached_data = cached.get("data") if cached else None
+        if (
+            not force_refresh
+            and isinstance(cached_data, dict)
+            and _now() - float(cached.get("_cached_at", 0)) < self.runtime.catalog_ttl_seconds
+        ):
+            try:
+                return _nanobot_cli_apps_from_registry(cached_data)
+            except CliAppError:
+                pass
+
+        try:
+            response = httpx.get(NANOBOT_CLI_APPS_GITHUB_API_URL, timeout=15.0, follow_redirects=True)
+            response.raise_for_status()
+            listing = response.json()
+            if not isinstance(listing, list):
+                raise ValueError("nanobot CLI Apps catalog listing must be an array")
+            catalog_entries = sorted(
+                (
+                    item
+                    for item in listing
+                    if isinstance(item, dict)
+                    and item.get("type") == "file"
+                    and str(item.get("name") or "").endswith(".json")
+                ),
+                key=lambda item: str(item.get("name") or ""),
+            )
+            rows: list[dict[str, Any]] = []
+            for item in catalog_entries:
+                name = str(item.get("name") or "")
+                download_url = str(item.get("download_url") or "").strip()
+                if not download_url:
+                    download_url = f"{NANOBOT_CLI_APPS_RAW_BASE}/catalog/{name}"
+                payload = httpx.get(download_url, timeout=15.0, follow_redirects=True)
+                payload.raise_for_status()
+                data = payload.json()
+                rows.extend(_rows_from_nanobot_catalog_data(data, source_name=name))
+            registry = {"clis": rows}
+            apps = _nanobot_cli_apps_from_registry(registry)
+        except Exception:
+            if isinstance(cached_data, dict):
+                try:
+                    return _nanobot_cli_apps_from_registry(cached_data)
+                except CliAppError:
+                    return ()
+            return ()
+
+        _write_json(cache_path, {"_cached_at": _now(), "data": registry})
+        return apps
+
     def catalog(self, *, force_refresh: bool = False) -> tuple[list[dict[str, Any]], str | None]:
         registry_sources = [
             ("harness", CLI_ANYTHING_REGISTRY_URL, self._cache_path("harness")),
@@ -594,7 +683,7 @@ class CliAppManager:
                     apps_by_name[key] = {**previous, **entry, "_source": merged_source}
                 else:
                     apps_by_name[key] = entry
-        for entry in _bundled_cli_apps():
+        for entry in self._fetch_nanobot_cli_apps(force_refresh=force_refresh):
             key = str(entry["name"]).lower()
             apps_by_name[key] = dict(entry)
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
@@ -835,6 +924,44 @@ class CliAppManager:
             return None
         return text if len(text) < 250_000 else None
 
+    def _fetch_nanobot_skill_resource(self, resource_path: str) -> str | None:
+        try:
+            clean_path = _clean_resource_path(resource_path)
+        except CliAppError:
+            return None
+        if not clean_path.startswith("skills/") or not clean_path.endswith("/SKILL.md"):
+            return None
+        cache_key = _SAFE_NAME_RE.sub("-", clean_path.lower()).strip("-")
+        cache_path = self._text_cache_path(f"nanobot_skill_{cache_key}")
+        cached = _read_json(cache_path)
+        cached_text = cached.get("text") if cached else None
+        if (
+            isinstance(cached_text, str)
+            and not _cache_expired(cached, self.runtime.catalog_ttl_seconds)
+        ):
+            return cached_text
+
+        url = f"{NANOBOT_CLI_APPS_RAW_BASE}/{clean_path}"
+        try:
+            response = httpx.get(url, timeout=15.0, follow_redirects=True)
+            response.raise_for_status()
+            text = response.text
+        except Exception:
+            return cached_text if isinstance(cached_text, str) else None
+        if not text.strip() or len(text) >= 250_000:
+            return cached_text if isinstance(cached_text, str) else None
+        _write_json(cache_path, {"_cached_at": _now(), "text": text})
+        return text
+
+    def _nanobot_skill_content(self, app: dict[str, Any]) -> str | None:
+        resource_path = str(app.get("_skill_resource") or "")
+        if not resource_path:
+            return None
+        return (
+            _read_local_nanobot_text_resource(resource_path)
+            or self._fetch_nanobot_skill_resource(resource_path)
+        )
+
     def _fallback_skill(self, app: dict[str, Any]) -> str:
         name = str(app.get("name") or "unknown")
         display = str(app.get("display_name") or name)
@@ -882,11 +1009,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
     def install_skill(self, app: dict[str, Any]) -> Path:
         path = self._skill_path(str(app["name"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        local_skill = (
-            _read_bundled_text_resource(str(app.get("_skill_resource") or ""))
-            if app.get("_source") == "nanobot"
-            else None
-        )
+        local_skill = self._nanobot_skill_content(app) if app.get("_source") == "nanobot" else None
         content = (
             str(local_skill)
             if isinstance(local_skill, str) and local_skill.strip()

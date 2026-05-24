@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 
+import nanobot.cli_apps.service as service_module
 from nanobot.cli_apps.service import (
     CliAppError,
     CliAppManager,
     CliAppsRuntimeConfig,
-    _load_bundled_cli_apps_from,
+    _load_nanobot_cli_apps_from,
 )
 
 
@@ -184,7 +185,78 @@ def test_local_nanobot_cli_apps_survive_registry_outage(
     assert {app["name"] for app in apps} == {"hyperframes"}
 
 
-def test_bundled_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: Path) -> None:
+def test_nanobot_cli_apps_fetch_from_github_when_not_in_source_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    monkeypatch.setattr(manager, "_fetch_registry", lambda *args, **kwargs: {"meta": {}, "clis": []})
+    monkeypatch.setattr(service_module, "NANOBOT_CLI_APPS_REPO_ROOT", tmp_path / "no-local-plugins")
+    monkeypatch.setattr(
+        service_module,
+        "NANOBOT_CLI_APPS_GITHUB_API_URL",
+        "https://api.example.test/catalog",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "NANOBOT_CLI_APPS_RAW_BASE",
+        "https://raw.example.test/plugins/cli-apps",
+    )
+
+    class Response:
+        def __init__(self, *, data=None, text: str = "") -> None:
+            self._data = data
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self._data
+
+    def fake_get(url: str, **kwargs):
+        if url == "https://api.example.test/catalog":
+            return Response(
+                data=[
+                    {
+                        "type": "file",
+                        "name": "hyperframes.json",
+                        "download_url": "https://raw.example.test/catalog/hyperframes.json",
+                    }
+                ]
+            )
+        if url == "https://raw.example.test/catalog/hyperframes.json":
+            return Response(
+                data={
+                    "name": "hyperframes",
+                    "display_name": "HyperFrames",
+                    "description": "Video generation",
+                    "category": "video",
+                    "package_manager": "npm",
+                    "npm_package": "hyperframes",
+                    "entry_point": "hyperframes",
+                    "_skill_resource": "skills/hyperframes/SKILL.md",
+                }
+            )
+        if url == "https://raw.example.test/plugins/cli-apps/skills/hyperframes/SKILL.md":
+            return Response(text="# HyperFrames\n\nUse `hyperframes render --output output.mp4`.\n")
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(service_module.httpx, "get", fake_get)
+
+    apps, updated = manager.catalog()
+
+    assert updated is None
+    assert {app["name"] for app in apps} == {"hyperframes"}
+    app = apps[0]
+    assert app["_source"] == "nanobot"
+    assert manager._install_supported(app) is True
+
+    skill_path = manager.install_skill(app)
+    assert "hyperframes render --output output.mp4" in skill_path.read_text(encoding="utf-8")
+
+
+def test_nanobot_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: Path) -> None:
     duplicate_root = tmp_path / "duplicate"
     duplicate_catalog = duplicate_root / "catalog"
     duplicate_catalog.mkdir(parents=True)
@@ -200,8 +272,8 @@ def test_bundled_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: 
     (duplicate_catalog / "a.json").write_text(json.dumps(valid), encoding="utf-8")
     (duplicate_catalog / "b.json").write_text(json.dumps(valid), encoding="utf-8")
 
-    with pytest.raises(CliAppError, match="duplicate bundled CLI App name: demo"):
-        _load_bundled_cli_apps_from(duplicate_root)
+    with pytest.raises(CliAppError, match="duplicate nanobot CLI App name: demo"):
+        _load_nanobot_cli_apps_from(duplicate_root)
 
     invalid_root = tmp_path / "invalid"
     invalid_catalog = invalid_root / "catalog"
@@ -217,10 +289,10 @@ def test_bundled_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: 
     )
 
     with pytest.raises(CliAppError, match="unsupported install strategy"):
-        _load_bundled_cli_apps_from(invalid_root)
+        _load_nanobot_cli_apps_from(invalid_root)
 
 
-def test_hyperframes_installs_with_safe_npm_and_bundled_skill(
+def test_hyperframes_installs_with_safe_npm_and_nanobot_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -127,8 +127,6 @@ allow-direct-references = true
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
-    "nanobot/cli_apps/catalog/**/*.json",
-    "nanobot/cli_apps/skills/**/*.md",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
