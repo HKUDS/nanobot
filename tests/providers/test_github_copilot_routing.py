@@ -20,6 +20,7 @@ def _make_copilot_provider() -> OpenAICompatProvider:
     p.default_model = "github_copilot/gpt-5.4-mini"
     p._spec = find_by_name("github_copilot")
     p._effective_base = "https://api.githubcopilot.com"
+    p._api_type = "auto"
     p._responses_failures = {}
     p._responses_tripped_at = {}
     return p

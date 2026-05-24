@@ -168,6 +168,43 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
 <details>
+<summary><b>OpenAI</b></summary>
+
+By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/o-series or explicit `reasoningEffort` requests through the Responses API when useful. You can force a specific API surface:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "apiType": "chat_completions"
+    }
+  }
+}
+```
+
+Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
+
+`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "apiType": "responses",
+      "extraBody": {
+        "tools": [{ "type": "web_search" }],
+        "include": ["web_search_call.action.sources"]
+      }
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary><b>Skywork / APIFree</b></summary>
 
 Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provider
