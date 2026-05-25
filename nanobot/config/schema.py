@@ -255,6 +255,10 @@ class ModelRouterConfig(Base):
     classifier_model: str = "anthropic/claude-haiku-4-5"  # Cheap model for classification
     simple_model: str = "anthropic/claude-haiku-4-5"  # Model for simple requests
     complex_model: str = "anthropic/claude-sonnet-4-6"  # Model for complex requests
+    # Classifier prompt customization — leave blank to use built-in defaults.
+    classifier_system_prompt: str = ""   # full system prompt for the classifier call
+    simple_description: str = ""         # rubric for the "simple" enum value
+    complex_description: str = ""        # rubric for the "complex" enum value
 
 
 class AgentDefaults(Base):

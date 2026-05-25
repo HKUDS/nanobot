@@ -207,42 +207,61 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    _CLASSIFY_TOOL = [
-        {
-            "type": "function",
-            "function": {
-                "name": "classify",
-                "description": "Classify the user request complexity.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "complexity": {
-                            "type": "string",
-                            "enum": ["simple", "complex"],
-                            "description": "simple = greeting, short question, acknowledgement, casual chat, factual enquiry, entertainment, questions relating to fiction or history, educational questions. complex = user safety, multi-step reasoning, anything requiring tool use.",
+    _DEFAULT_CLASSIFIER_SYSTEM_PROMPT = (
+        "Classify the user's message. Call the classify tool. "
+        "Default to complex if uncertain."
+    )
+    _DEFAULT_SIMPLE_DESCRIPTION = (
+        "greeting, short question, acknowledgement, casual chat, factual "
+        "enquiry, entertainment, questions relating to fiction or history, "
+        "educational questions"
+    )
+    _DEFAULT_COMPLEX_DESCRIPTION = (
+        "user safety, multi-step reasoning, anything requiring tool use"
+    )
+
+    def _build_classify_tool(self) -> list[dict]:
+        """Build the classify tool schema, applying config overrides if present."""
+        router = self.model_router
+        simple_desc = router.simple_description or self._DEFAULT_SIMPLE_DESCRIPTION
+        complex_desc = router.complex_description or self._DEFAULT_COMPLEX_DESCRIPTION
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "classify",
+                    "description": "Classify the user request complexity.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "complexity": {
+                                "type": "string",
+                                "enum": ["simple", "complex"],
+                                "description": f"simple = {simple_desc}. complex = {complex_desc}.",
+                            },
                         },
+                        "required": ["complexity"],
                     },
-                    "required": ["complexity"],
                 },
-            },
-        }
-    ]
+            }
+        ]
 
     async def _classify_request(self, message: str) -> str:
         """Classify a user message as simple or complex using a cheap model.
 
         Returns 'simple' or 'complex'. Defaults to 'complex' on any error.
         """
+        system_prompt = (
+            self.model_router.classifier_system_prompt
+            or self._DEFAULT_CLASSIFIER_SYSTEM_PROMPT
+        )
         try:
             response = await self.provider.chat(
                 messages=[
-                    {"role": "system", "content": (
-                        "Classify the user's message. Call the classify tool. "
-                        "Default to complex if uncertain."
-                    )},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message},
                 ],
-                tools=self._CLASSIFY_TOOL,
+                tools=self._build_classify_tool(),
                 model=self.model_router.classifier_model,
             )
             if response.has_tool_calls:

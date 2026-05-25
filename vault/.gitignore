@@ -1,0 +1,9 @@
+# Obsidian per-user state — created on first vault open.
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/graph.json
+.obsidian/hotkeys.json
+.obsidian/types.json
+
+# Local-only drafts.
+private/
