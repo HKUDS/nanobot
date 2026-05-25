@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from nanobot.cli_apps.service import CliAppManager
-from nanobot.cli_apps.utils import runtime_lines, session_extra
+from nanobot.apps.cli.service import CliAppManager
+from nanobot.apps.cli.utils import runtime_lines, session_extra
 
 
 def test_session_extra_returns_cli_apps_only_when_present() -> None:
@@ -15,7 +15,7 @@ def test_session_extra_returns_cli_apps_only_when_present() -> None:
 
 def test_cli_app_mentions_inject_runtime_metadata(tmp_path, monkeypatch):
     data_dir = tmp_path / "data"
-    monkeypatch.setattr("nanobot.cli_apps.service.get_runtime_subdir", lambda _name: data_dir)
+    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
     manager = CliAppManager(workspace=tmp_path)
     manager._save_installed(
         {

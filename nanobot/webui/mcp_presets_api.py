@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
+from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.paths import get_runtime_subdir
@@ -475,6 +476,20 @@ def _with_managed_stdio_cwd(name: str, cfg: MCPServerConfig) -> MCPServerConfig:
     return cfg
 
 
+def _remove_managed_stdio_cwd(name: str, cfg: MCPServerConfig | None) -> bool:
+    if cfg is None or not cfg.cwd:
+        return False
+    cwd = Path(cfg.cwd).expanduser().resolve(strict=False)
+    managed = (get_runtime_subdir("mcp") / name).resolve(strict=False)
+    if cwd != managed or not cwd.exists():
+        return False
+    if cwd.is_symlink() or cwd.is_file():
+        cwd.unlink()
+    else:
+        shutil.rmtree(cwd)
+    return True
+
+
 def _url_with_param(url: str, key: str, value: str) -> str:
     parsed = urllib.parse.urlsplit(url)
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -647,10 +662,108 @@ def _tool_allowlist(cfg: MCPServerConfig | None) -> list[str]:
     return list(cfg.enabled_tools)
 
 
+def _managed_mcp_path(name: str, cfg: MCPServerConfig | None) -> list[str]:
+    if cfg is None or not cfg.command:
+        return []
+    return [f"runtime:mcp/{name}"]
+
+
+def _preset_manifest(preset: McpPreset, *, logo_url: str) -> dict[str, Any]:
+    server = preset.server
+    managed_paths = _managed_mcp_path(preset.name, server)
+    field_specs = [
+        compact_dict({
+            "name": field.name,
+            "target": field.target[0],
+            "required": field.required,
+            "secret": field.secret,
+            "env_var": field.env_var,
+        })
+        for field in preset.fields
+    ]
+    capabilities = [
+        compact_dict({
+            "type": "mcp",
+            "transport": preset.transport,
+            "command": server.command if server and server.command else None,
+            "args": list(server.args) if server and server.command else None,
+            "url": _connection_summary(server) if server and server.url else None,
+            "fields": field_specs,
+        })
+    ]
+    return app_manifest(
+        app_id=preset.name,
+        display_name=preset.display_name,
+        description=preset.description,
+        category=preset.category,
+        source="mcp-preset",
+        docs_url=preset.docs_url,
+        logo_url=logo_url,
+        brand_color=preset.brand_color,
+        capabilities=capabilities,
+        install=compact_dict({
+            "supported": preset.install_supported,
+            "strategy": "config",
+            "managed_paths": managed_paths,
+            "verification": ["config_present", "dependency_available"],
+        }),
+        remove=compact_dict({
+            "supported": True,
+            "strategy": "config",
+            "managed_paths": managed_paths,
+            "verification": ["config_absent", "managed_paths_absent"] if managed_paths else ["config_absent"],
+        }),
+        trust={
+            "registry": "mcp-presets",
+            "level": "builtin",
+            "review_status": "builtin_preset",
+        },
+    )
+
+
+def _custom_manifest(name: str, cfg: MCPServerConfig) -> dict[str, Any]:
+    transport = cfg.type or ("stdio" if cfg.command else "streamableHttp")
+    managed_paths: list[str] = []
+    return app_manifest(
+        app_id=name,
+        display_name=name,
+        description="Custom MCP server from nanobot config.",
+        category="custom",
+        source="mcp-custom",
+        brand_color="#64748B",
+        capabilities=[
+            compact_dict({
+                "type": "mcp",
+                "transport": transport,
+                "command": cfg.command or None,
+                "url": _connection_summary(cfg) if cfg.url else None,
+            })
+        ],
+        install=compact_dict({
+            "supported": True,
+            "strategy": "config",
+            "managed_paths": managed_paths,
+            "verification": ["config_present", "dependency_available"],
+        }),
+        remove=compact_dict({
+            "supported": True,
+            "strategy": "config",
+            "managed_paths": managed_paths,
+            "verification": ["config_absent", "managed_paths_absent"] if managed_paths else ["config_absent"],
+        }),
+        trust={
+            "registry": "user-config",
+            "level": "user",
+            "review_status": "user_managed",
+        },
+    )
+
+
 def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerConfig]) -> dict[str, Any]:
     cfg = configured_servers.get(preset.name)
     status = _status_for(preset, cfg)
     configured = cfg is not None and status not in {"missing_credentials"}
+    logo_url = _favicon_url(preset.brand_domain)
     return {
         "name": preset.name,
         "display_name": preset.display_name,
@@ -665,12 +778,13 @@ def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerCo
         "configured": configured,
         "available": configured and _config_available(cfg),
         "status": status,
-        "logo_url": _favicon_url(preset.brand_domain),
+        "logo_url": logo_url,
         "brand_color": preset.brand_color,
         "required_fields": [_field_payload(field, cfg) for field in preset.fields],
         "connection_summary": _connection_summary(cfg),
         "enabled_tools": _tool_allowlist(cfg),
         "source": "preset",
+        "manifest": _preset_manifest(preset, logo_url=logo_url),
     }
 
 
@@ -705,6 +819,7 @@ def _custom_payload(
         "enabled_tools": _tool_allowlist(cfg),
         "tool_names": tool_names or [],
         "source": "custom",
+        "manifest": _custom_manifest(name, cfg),
     }
 
 
@@ -744,10 +859,17 @@ def _action_message(action: str, preset: McpPreset, *, ok: bool = True) -> dict[
         "remove": "Removed",
         "test": "Checked",
     }.get(action, "Updated")
-    return {
+    payload: dict[str, Any] = {
         "ok": ok,
         "message": f"{verb} MCP preset for {preset.display_name}.",
     }
+    if action == "enable":
+        payload["installed"] = True
+        payload["verification"] = ["config_present"]
+    elif action == "remove":
+        payload["removed"] = True
+        payload["verification"] = ["config_absent"]
+    return payload
 
 
 def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[str, Any]:
@@ -758,10 +880,17 @@ def _server_action_message(action: str, name: str, *, ok: bool = True) -> dict[s
         "tools": "Updated tools for",
         "remove": "Removed",
     }.get(action, "Updated")
-    return {
+    payload: dict[str, Any] = {
         "ok": ok,
         "message": f"{verb} MCP server {name}.",
     }
+    if action in {"custom", "import", "import-cursor"}:
+        payload["installed"] = True
+        payload["verification"] = ["config_present"]
+    elif action == "remove":
+        payload["removed"] = True
+        payload["verification"] = ["config_absent"]
+    return payload
 
 
 def _scrub_test_error(text: str) -> str:
@@ -1113,7 +1242,14 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
     if action == "remove":
         if preset is None and name not in config.tools.mcp_servers:
             raise McpPresetError("unknown MCP server", status=404)
+        removed_runtime_files = False
+        cleanup_error = ""
         if name in config.tools.mcp_servers:
+            existing_cfg = config.tools.mcp_servers[name]
+            try:
+                removed_runtime_files = _remove_managed_stdio_cwd(name, existing_cfg)
+            except OSError as exc:
+                cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config)
         last_action = (
@@ -1121,6 +1257,16 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
             if preset is not None
             else _server_action_message(action, name)
         )
+        if removed_runtime_files:
+            last_action["message"] = f"{last_action['message']} Removed managed runtime files."
+            last_action["managed_paths_removed"] = [f"runtime:mcp/{name}"]
+            last_action["verification"] = ["config_absent", "managed_paths_absent"]
+        if cleanup_error:
+            last_action["ok"] = False
+            last_action["message"] = (
+                f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
+            )
+            last_action["verification_failed"] = ["managed_paths_absent"]
         payload = mcp_presets_payload(last_action=last_action)
         payload["requires_restart"] = True
         return payload

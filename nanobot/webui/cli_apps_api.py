@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nanobot.cli_apps import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
 
 QueryParams = dict[str, list[str]]
