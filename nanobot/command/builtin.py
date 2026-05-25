@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
+from nanobot.command.evolve import register_evolve_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
@@ -97,6 +98,46 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Restore memory",
         "Revert memory to a previous Dream snapshot.",
         "undo-2",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-list",
+        "List skill proposals",
+        "List pending skill evolution proposals.",
+        "list",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-show",
+        "Show proposal",
+        "Show a proposal's SKILL.md, rationale, and trace summary.",
+        "file-text",
+        "<id>",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-apply",
+        "Apply proposal",
+        "Promote a proposal to an active workspace skill.",
+        "check",
+        "<id>",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-reject",
+        "Reject proposal",
+        "Move a pending proposal to `.rejected/`.",
+        "x",
+        "<id>",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-log",
+        "Show evolve log",
+        "Show recent skill evolution git commits.",
+        "git-commit",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-restore",
+        "Restore skill version",
+        "Revert an evolve git commit.",
+        "undo-2",
+        "[sha]",
     ),
     BuiltinCommandSpec(
         "/help",
@@ -646,6 +687,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    register_evolve_commands(router)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)

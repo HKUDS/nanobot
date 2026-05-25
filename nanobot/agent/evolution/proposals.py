@@ -356,6 +356,28 @@ class ProposalStore:
             return None
         return ProposalDetail(meta=meta, skill_md=skill_md, proposal_dir=proposal_dir)
 
+    def find_proposal_id(self, token: str) -> str | None:
+        """Resolve a full or prefix proposal id under ``.proposals/`` or ``.rejected/``."""
+        needle = token.strip()
+        if not needle:
+            return None
+
+        matches: list[str] = []
+        for root in (self._proposals_root, self.rejected_root):
+            if not root.is_dir():
+                continue
+            for proposal_dir in root.iterdir():
+                if proposal_dir.is_dir() and proposal_dir.name.startswith(needle):
+                    matches.append(proposal_dir.name)
+
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        if needle in matches:
+            return needle
+        return None
+
     def apply(self, proposal_id: str) -> ProposalActionResult:
         """
         将指定 proposal_id 的待处理技能提案（pending proposal）应用到正式技能目录 ``skills/<name>/SKILL.md``。

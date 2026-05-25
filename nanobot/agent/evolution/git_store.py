@@ -137,12 +137,26 @@ class EvolutionGitStore:
                 return entry
         return None
 
-    def restore(self, short_sha: str) -> str | None:
-        """Revert skill files introduced/changed by an evolve commit.
+    def show_commit_diff(
+        self,
+        short_sha: str,
+        max_entries: int = 50,
+    ) -> tuple[CommitInfo, str] | None:
+        """Find an evolve commit and return it with its diff vs the parent."""
+        commit = self.find_commit(short_sha, max_entries=max_entries)
+        if commit is None:
+            return None
+        result = self._git.show_commit_diff(commit.sha, max_entries=max_entries * 4)
+        if result is None:
+            return None
+        _, diff = result
+        return commit, diff
 
-        Restores paths under ``skills/`` touched by the commit to their parent
-        state, then records a new revert commit. Returns the revert SHA.
-        """
+    def restore(self, short_sha: str) -> str | None:
+        # 回滚由 evolve 提交引入/修改的技能文件。
+        #
+        # 将该提交（commit）下影响到的 ``skills/`` 目录内路径恢复到父提交状态，
+        # 并记录一次新的回滚提交。返回回滚操作的 SHA（short hash）。
         if not self.is_initialized():
             return None
 
