@@ -47,6 +47,7 @@ from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.usage_log import UsageLog
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -204,6 +205,7 @@ class AgentLoop:
         self._provider_signature = provider_signature
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
+        self.usage_log = UsageLog(workspace)
         self.model = model or provider.get_default_model()
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
@@ -757,6 +759,13 @@ class AgentLoop:
         finally:
             reset_file_states(file_state_token)
         self._last_usage = result.usage
+        if result.usage:
+            self.usage_log.record(
+                model=self.model,
+                provider=type(self.provider).__name__,
+                session_id=active_session_key,
+                usage=result.usage,
+            )
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             # Push final content through stream so streaming channels (e.g. Feishu)
