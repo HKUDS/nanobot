@@ -63,7 +63,8 @@
     "language": {
       "label": "Langue",
       "ariaLabel": "Changer de langue"
-    }
+    },
+    "store": "Boutique"
   },
   "settings": {
     "backToChat": "Retour à la discussion",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Plugins",
+      "plugins": "Boutique",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Capacités",
       "integrations": "Integrations",
-      "plugins": "Plugins",
-      "cliApps": "Plugins CLI",
-      "mcp": "Plugins MCP"
+      "plugins": "Boutique",
+      "cliApps": "Apps CLI",
+      "mcp": "Services MCP"
     },
     "rows": {
       "theme": "Thème",
@@ -296,20 +297,6 @@
       "search": "Rechercher un fuseau horaire",
       "empty": "Aucun fuseau horaire correspondant."
     },
-    "plugins": {
-      "description": "Ajoutez des adaptateurs d'apps locales et des serveurs d'outils connectés que nanobot peut utiliser depuis le chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Tout",
-      "filterCli": "CLIs d'apps",
-      "filterMcp": "Services MCP",
-      "enabledSummary": "{{count}} activés",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Rechercher des plugins",
-      "featured": "Sélection",
-      "loading": "Chargement des plugins...",
-      "empty": "Aucun plugin ne correspond à ce filtre."
-    },
     "cliApps": {
       "allCategories": "Toutes les catégories",
       "availableCount": "{{count}} apps",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
+    },
+    "store": {
+      "description": "Ajoutez des apps CLI et des services MCP utilisables par nanobot dans le chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Tout",
+      "filterCli": "Apps CLI",
+      "filterMcp": "Services MCP",
+      "enabledSummary": "{{count}} activés",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Rechercher dans la boutique",
+      "featured": "En vedette",
+      "loading": "Chargement de la boutique...",
+      "empty": "Aucun élément de la boutique ne correspond."
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "Impossible de lire ce fichier"
       },
       "mentions": {
-        "ariaLabel": "Plugins",
-        "label": "Plugins",
+        "ariaLabel": "Boutique",
+        "label": "Boutique",
         "cliGroup": "Apps CLI",
-        "mcpGroup": "Serveurs MCP",
+        "mcpGroup": "Services MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Utiliser @{{name}} comme app CLI locale",

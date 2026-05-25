@@ -166,18 +166,6 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("surfaces plain-text API errors instead of only the HTTP status", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      text: async () => "npm install failed: Node.js >= 22 is required",
-    } as Response);
-
-    await expect(runCliAppAction("tok", "install", "hyperframes")).rejects.toThrow(
-      "npm install failed: Node.js >= 22 is required",
-    );
-  });
-
   it("reads MCP presets and serializes actions", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

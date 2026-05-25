@@ -4,7 +4,7 @@ import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Sidebar } from "@/components/Sidebar";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
-import { SettingsView } from "@/components/settings/SettingsView";
+import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
@@ -325,6 +325,7 @@ function Shell({
     useSidebarState(sessions, !loading);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [view, setView] = useState<ShellView>("chat");
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>("overview");
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -588,8 +589,9 @@ function Shell({
     [onSelectChat],
   );
 
-  const onOpenSettings = useCallback(() => {
+  const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
+    setSettingsInitialSection(section);
     setView("settings");
     setMobileSidebarOpen(false);
   }, []);
@@ -728,6 +730,7 @@ function Shell({
     onRequestRename,
     onToggleArchive,
     onOpenSettings,
+    onOpenStore: () => onOpenSettings("plugins"),
     onOpenSearch: onOpenSessionSearch,
     onToggleArchived,
     onUpdateView: onUpdateSidebarView,
@@ -824,6 +827,7 @@ function Shell({
             <div className="absolute inset-0 flex flex-col">
               <SettingsView
                 theme={theme}
+                initialSection={settingsInitialSection}
                 onToggleTheme={toggle}
                 onBackToChat={onBackToChat}
                 onModelNameChange={onModelNameChange}

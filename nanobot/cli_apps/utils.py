@@ -35,11 +35,11 @@ def _cli_app_runtime_lines(
         if mentions:
             return [
                 "CLI App Attachment: "
-                f"@{str(item.get('mention') or item['name']).strip().lower()} "
-                f"(installed; registry_name={str(item['name']).strip().lower()}; tool=run_cli_app; "
+                f"@{str(item['name']).strip().lower()} "
+                f"(installed; tool=run_cli_app; "
                 f"entry_point={str(item.get('entry_point') or 'unknown')}; "
                 f"skill=skills/cli-app-{str(item['name']).strip().lower()}/SKILL.md). "
-                f"Read the skill when useful, then run this app with `run_cli_app` using name=\"{str(item['name']).strip().lower()}\"; do not bypass it with shell."
+                "Read the skill when useful, then run this app with `run_cli_app`; do not bypass it with shell."
                 for item in mentions
                 if str(item.get("name") or "").strip()
             ]
@@ -53,10 +53,10 @@ def _cli_app_runtime_lines(
         return []
     return [
         "CLI App Mention: "
-        f"@{item.get('mention') or item['name']} "
-        f"(installed; registry_name={item['name']}; tool={item['tool']}; "
+        f"@{item['name']} "
+        f"(installed; tool={item['tool']}; "
         f"entry_point={item['entry_point'] or 'unknown'}; "
         f"skill={item['skill']}). "
-        f"Read the skill when useful, then run this app with `run_cli_app` using name=\"{item['name']}\"; do not bypass it with shell."
+        "Read the skill when useful, then run this app with `run_cli_app`; do not bypass it with shell."
         for item in mentions
     ]

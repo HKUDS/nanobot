@@ -63,7 +63,8 @@
     "language": {
       "label": "语言",
       "ariaLabel": "切换语言"
-    }
+    },
+    "store": "商店"
   },
   "settings": {
     "backToChat": "返回对话",
@@ -80,7 +81,7 @@
       "providers": "提供商",
       "image": "图片",
       "web": "网页",
-      "plugins": "插件",
+      "plugins": "商店",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "运行时",
@@ -97,9 +98,9 @@
       "imageDefaults": "默认值",
       "webSearch": "网页搜索",
       "webBehavior": "行为",
-      "plugins": "插件",
-      "cliApps": "CLI 插件",
-      "mcp": "MCP 插件",
+      "plugins": "商店",
+      "cliApps": "CLI 应用",
+      "mcp": "MCP 服务",
       "identity": "身份",
       "safety": "安全",
       "capabilities": "能力",
@@ -198,20 +199,6 @@
       "select": "选择时区",
       "search": "搜索时区",
       "empty": "没有匹配的时区。"
-    },
-    "plugins": {
-      "description": "添加 nanobot 可在对话中调用的本地应用适配和已连接工具服务。",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "全部",
-      "filterCli": "应用 CLI",
-      "filterMcp": "MCP 服务",
-      "enabledSummary": "已启用 {{count}} 个",
-      "caption": "{{cli}} 个 CLI · {{mcp}} 个 MCP",
-      "searchPlaceholder": "搜索插件",
-      "featured": "推荐",
-      "loading": "正在加载插件...",
-      "empty": "没有匹配的插件。"
     },
     "cliApps": {
       "allCategories": "全部分类",
@@ -396,6 +383,20 @@
       "selectSize": "选择尺寸",
       "configureProvider": "配置服务商",
       "missingCredential": "启用图片生成前，请先配置这个服务商。"
+    },
+    "store": {
+      "description": "添加可在聊天中使用的 CLI 应用和 MCP 服务。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "全部",
+      "filterCli": "CLI 应用",
+      "filterMcp": "MCP 服务",
+      "enabledSummary": "已启用 {{count}} 个",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "搜索商店",
+      "featured": "推荐",
+      "loading": "正在加载商店...",
+      "empty": "没有匹配的商店项目。"
     }
   },
   "chat": {
@@ -611,8 +612,8 @@
         }
       },
       "mentions": {
-        "ariaLabel": "插件",
-        "label": "插件",
+        "ariaLabel": "商店",
+        "label": "商店",
         "cliGroup": "CLI 应用",
         "mcpGroup": "MCP 服务",
         "cliBadge": "CLI",

@@ -328,13 +328,6 @@ export function AgentActivityCluster({
             tools: toolCalls,
             defaultValue: "{{tools}} tool calls",
           });
-  const headerDescribesKnownFileEdit = fileCount > 0 && !hasPendingFileEdit;
-  const headerLeadLabel = singleFilePath
-    ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles)
-    : headerDescribesKnownFileEdit
-      ? fileActivitySummary
-      : thoughtLabel;
-  const showHeaderDiffStats = headerDescribesKnownFileEdit && hasDiffStats;
 
   const cancelActivityScrollFrame = useCallback(() => {
     if (scrollFrameRef.current !== null) {
@@ -433,7 +426,7 @@ export function AgentActivityCluster({
           active={isTurnStreaming}
           className="min-w-0"
         >
-          {headerLeadLabel}
+          {singleFilePath ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles) : thoughtLabel}
         </StreamingLabelSheen>
         {singleFilePath ? (
           <FileReferenceChip
@@ -446,7 +439,7 @@ export function AgentActivityCluster({
           />
         ) : null}
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
-          {showHeaderDiffStats && (
+          {fileCount > 0 && hasDiffStats && (
             <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
               <DiffPair added={added} deleted={deleted} />
             </span>
@@ -1410,22 +1403,7 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
     if (!byKey.has(key)) order.push(key);
     byKey.set(key, edit);
   }
-  const latest = order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
-  const pendingByTool = new Map<string, UIFileEdit[]>();
-  const resolvedByTool = new Map<string, UIFileEdit[]>();
-  for (const edit of latest) {
-    if (edit.pending && !edit.path) {
-      pendingByTool.set(edit.tool, [...(pendingByTool.get(edit.tool) ?? []), edit]);
-    } else if (edit.path) {
-      resolvedByTool.set(edit.tool, [...(resolvedByTool.get(edit.tool) ?? []), edit]);
-    }
-  }
-  return latest.filter((edit) => {
-    if (!(edit.pending && !edit.path)) return true;
-    const pending = pendingByTool.get(edit.tool) ?? [];
-    const resolved = resolvedByTool.get(edit.tool) ?? [];
-    return !(pending.length === 1 && resolved.length === 1);
-  });
+  return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {

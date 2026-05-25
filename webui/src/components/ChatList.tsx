@@ -143,16 +143,7 @@ export const ChatList = memo(function ChatList({
   const compact = density === "compact";
 
   return (
-    <div
-      className={cn(
-        "h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain",
-        "scrollbar-thin scrollbar-track-transparent",
-        "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full",
-        "[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/18",
-        "hover:[&::-webkit-scrollbar-thumb]:bg-sidebar-foreground/30",
-        "[&::-webkit-scrollbar-track]:bg-transparent",
-      )}
-    >
+    <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain">
       <div className="min-w-0 space-y-3 px-2 py-1.5">
         {limitedGroups.map((group) => (
           <section key={group.label} aria-label={group.label}>

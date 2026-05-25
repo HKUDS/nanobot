@@ -63,7 +63,8 @@
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
-    }
+    },
+    "store": "스토어"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "플러그인",
+      "plugins": "스토어",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 앱",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "기능",
       "integrations": "Integrations",
-      "plugins": "플러그인",
-      "cliApps": "CLI 플러그인",
-      "mcp": "MCP 플러그인"
+      "plugins": "스토어",
+      "cliApps": "CLI 앱",
+      "mcp": "MCP 서비스"
     },
     "rows": {
       "theme": "테마",
@@ -296,20 +297,6 @@
       "search": "시간대 검색",
       "empty": "일치하는 시간대가 없습니다."
     },
-    "plugins": {
-      "description": "nanobot이 채팅에서 사용할 수 있는 로컬 앱 어댑터와 연결된 도구 서버를 추가합니다.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "전체",
-      "filterCli": "앱 CLI",
-      "filterMcp": "MCP 서비스",
-      "enabledSummary": "{{count}}개 활성화됨",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "플러그인 검색",
-      "featured": "추천",
-      "loading": "플러그인을 불러오는 중...",
-      "empty": "일치하는 플러그인이 없습니다."
-    },
     "cliApps": {
       "allCategories": "모든 카테고리",
       "availableCount": "앱 {{count}}개",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
+    },
+    "store": {
+      "description": "채팅에서 nanobot이 사용할 CLI 앱과 MCP 서비스를 추가합니다.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "전체",
+      "filterCli": "CLI 앱",
+      "filterMcp": "MCP 서비스",
+      "enabledSummary": "{{count}}개 활성화됨",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "스토어 검색",
+      "featured": "추천",
+      "loading": "스토어 불러오는 중...",
+      "empty": "일치하는 스토어 항목이 없습니다."
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "이 파일을 읽을 수 없습니다"
       },
       "mentions": {
-        "ariaLabel": "플러그인",
-        "label": "플러그인",
+        "ariaLabel": "스토어",
+        "label": "스토어",
         "cliGroup": "CLI 앱",
-        "mcpGroup": "MCP 서버",
+        "mcpGroup": "MCP 서비스",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}}을 로컬 CLI 앱으로 사용",

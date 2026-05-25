@@ -8,13 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import nanobot.cli_apps.service as service_module
-from nanobot.cli_apps.service import (
-    CliAppError,
-    CliAppManager,
-    CliAppsRuntimeConfig,
-    _load_nanobot_cli_apps_from,
-)
+from nanobot.cli_apps.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -141,7 +135,6 @@ def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -
         "dify-workflow",
         "feishu",
         "gimp",
-        "hyperframes",
         "jimeng",
         "shopify",
         "suno",
@@ -161,195 +154,6 @@ def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -
     assert apps["clibrowser"]["logo_url"] == (
         "https://www.google.com/s2/favicons?domain=github.com/allthingssecurity/clibrowser&sz=64"
     )
-    assert apps["hyperframes"]["source"] == "nanobot"
-    assert apps["hyperframes"]["aliases"] == ["hyperframe"]
-    assert apps["hyperframes"]["install_supported"] is True
-    assert apps["hyperframes"]["logo_url"] == "https://www.heygen.com/favicon.ico"
-    assert apps["hyperframes"]["brand_color"] == "#7559FF"
-
-
-def test_local_nanobot_cli_apps_survive_registry_outage(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-
-    def fail_fetch(*args, **kwargs):
-        raise RuntimeError("network down")
-
-    monkeypatch.setattr(manager, "_fetch_registry", fail_fetch)
-
-    apps, updated = manager.catalog()
-
-    assert updated is None
-    assert {app["name"] for app in apps} == {"hyperframes"}
-
-
-def test_nanobot_cli_apps_fetch_from_github_when_not_in_source_checkout(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    monkeypatch.setattr(manager, "_fetch_registry", lambda *args, **kwargs: {"meta": {}, "clis": []})
-    monkeypatch.setattr(service_module, "NANOBOT_CLI_APPS_REPO_ROOT", tmp_path / "no-local-plugins")
-    monkeypatch.setattr(
-        service_module,
-        "NANOBOT_CLI_APPS_GITHUB_API_URL",
-        "https://api.example.test/catalog",
-    )
-    monkeypatch.setattr(
-        service_module,
-        "NANOBOT_CLI_APPS_RAW_BASE",
-        "https://raw.example.test/plugins/cli-apps",
-    )
-
-    class Response:
-        def __init__(self, *, data=None, text: str = "") -> None:
-            self._data = data
-            self.text = text
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self):
-            return self._data
-
-    def fake_get(url: str, **kwargs):
-        if url == "https://api.example.test/catalog":
-            return Response(
-                data=[
-                    {
-                        "type": "file",
-                        "name": "hyperframes.json",
-                        "download_url": "https://raw.example.test/catalog/hyperframes.json",
-                    }
-                ]
-            )
-        if url == "https://raw.example.test/catalog/hyperframes.json":
-            return Response(
-                data={
-                    "name": "hyperframes",
-                    "display_name": "HyperFrames",
-                    "description": "Video generation",
-                    "category": "video",
-                    "package_manager": "npm",
-                    "npm_package": "hyperframes",
-                    "entry_point": "hyperframes",
-                    "_skill_resource": "skills/hyperframes/SKILL.md",
-                }
-            )
-        if url == "https://raw.example.test/plugins/cli-apps/skills/hyperframes/SKILL.md":
-            return Response(text="# HyperFrames\n\nUse `hyperframes render --output output.mp4`.\n")
-        raise AssertionError(f"unexpected URL: {url}")
-
-    monkeypatch.setattr(service_module.httpx, "get", fake_get)
-
-    apps, updated = manager.catalog()
-
-    assert updated is None
-    assert {app["name"] for app in apps} == {"hyperframes"}
-    app = apps[0]
-    assert app["_source"] == "nanobot"
-    assert manager._install_supported(app) is True
-
-    skill_path = manager.install_skill(app)
-    assert "hyperframes render --output output.mp4" in skill_path.read_text(encoding="utf-8")
-
-
-def test_nanobot_cli_app_loader_rejects_duplicate_and_invalid_entries(tmp_path: Path) -> None:
-    duplicate_root = tmp_path / "duplicate"
-    duplicate_catalog = duplicate_root / "catalog"
-    duplicate_catalog.mkdir(parents=True)
-    valid = {
-        "name": "demo",
-        "display_name": "Demo",
-        "description": "Demo app",
-        "category": "demo",
-        "entry_point": "demo",
-        "package_manager": "npm",
-        "install_cmd": "npm install -g demo",
-    }
-    (duplicate_catalog / "a.json").write_text(json.dumps(valid), encoding="utf-8")
-    (duplicate_catalog / "b.json").write_text(json.dumps(valid), encoding="utf-8")
-
-    with pytest.raises(CliAppError, match="duplicate nanobot CLI App name: demo"):
-        _load_nanobot_cli_apps_from(duplicate_root)
-
-    invalid_root = tmp_path / "invalid"
-    invalid_catalog = invalid_root / "catalog"
-    invalid_catalog.mkdir(parents=True)
-    (invalid_catalog / "bad.json").write_text(
-        json.dumps({
-            **valid,
-            "name": "bad",
-            "package_manager": "script",
-            "install_cmd": "curl https://example.com/install.sh | bash",
-        }),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(CliAppError, match="unsupported install strategy"):
-        _load_nanobot_cli_apps_from(invalid_root)
-
-
-def test_hyperframes_installs_with_safe_npm_and_nanobot_skill(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    _seed_catalog(manager)
-    npm = str(tmp_path / "npm")
-    calls: list[list[str]] = []
-
-    monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
-        lambda entry: npm if entry == "npm" else None,
-    )
-
-    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(manager, "_run_argv", fake_run)
-
-    payload = manager.install("hyperframes")
-
-    assert calls == [[npm, "install", "-g", "hyperframes"]]
-    assert payload["last_action"]["ok"] is True
-    skill = manager.workspace / "skills" / "cli-app-hyperframes" / "SKILL.md"
-    assert skill.is_file()
-    content = skill.read_text(encoding="utf-8")
-    assert "render --output output.mp4" in content
-    assert 'run_cli_app` tool with `name="hyperframes"' in content
-
-
-def test_install_records_cli_that_is_already_on_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    _seed_catalog(manager)
-    resolved = str(tmp_path / "bin" / "hyperframes")
-    calls: list[list[str]] = []
-
-    monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
-        lambda entry: resolved if entry == "hyperframes" else None,
-    )
-
-    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="should not run")
-
-    monkeypatch.setattr(manager, "_run_argv", fake_run)
-
-    payload = manager.install("hyperframes")
-
-    assert calls == []
-    assert payload["last_action"]["ok"] is True
-    assert payload["last_action"]["message"] == "CLI for HyperFrames is already available."
-    assert manager._load_installed()["hyperframes"]["entry_point"] == "hyperframes"
-    assert manager._load_installed()["hyperframes"]["aliases"] == ["hyperframe"]
 
 
 def test_install_dispatches_safe_pip_and_installs_skill(
@@ -518,27 +322,6 @@ def test_mentioned_installed_apps_only_returns_installed_mentions(tmp_path: Path
     ]
 
 
-def test_mentioned_installed_apps_resolves_aliases_to_canonical_names(tmp_path: Path) -> None:
-    manager = _manager(tmp_path)
-    _seed_catalog(manager)
-    manager._save_installed(
-        {"hyperframes": {"entry_point": "hyperframes", "source": "nanobot"}}
-    )
-
-    mentions = manager.mentioned_installed_apps("use @hyperframe for this clip")
-
-    assert mentions == [
-        {
-            "name": "hyperframes",
-            "mention": "hyperframe",
-            "entry_point": "hyperframes",
-            "source": "nanobot",
-            "skill": "skills/cli-app-hyperframes/SKILL.md",
-            "tool": "run_cli_app",
-        }
-    ]
-
-
 def test_install_rejects_unknown_and_script_strategy(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _seed_catalog(manager)
@@ -589,36 +372,6 @@ def test_run_installed_cli_uses_argv_without_shell(
     assert "['--json', 'project', 'list']" in result
 
 
-def test_run_cleans_terminal_control_sequences(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    _seed_catalog(manager)
-    resolved = str(tmp_path / "bin" / "cli-anything-gimp")
-    monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
-        lambda entry: resolved if entry == "cli-anything-gimp" else None,
-    )
-
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout="\x1b[?25l\x1b[2KRendering\rDone\x1b[?25h",
-            stderr="\x1b[31mwarning\x1b[0m",
-        )
-
-    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
-    manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
-
-    result = manager.run("gimp", ["render"])
-
-    assert "\x1b" not in result
-    assert "Rendering\nDone" in result
-    assert "warning" in result
-
-
 def test_run_reports_created_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -643,34 +396,7 @@ def test_run_reports_created_artifacts(
 
     assert "Artifacts created or updated:" in result
     assert "diagram.png (previewable image" in result
-    assert "![preview](diagram.png)" in result
-
-
-def test_run_reports_created_video_artifacts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    _seed_catalog(manager)
-    resolved = str(tmp_path / "bin" / "hyperframes")
-    monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
-        lambda entry: resolved if entry == "hyperframes" else None,
-    )
-
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        cwd = Path(str(kwargs["cwd"]))
-        (cwd / "intro.mp4").write_bytes(b"\x00\x00\x00 ftypmp42")
-        return subprocess.CompletedProcess(argv, 0, stdout="rendered", stderr="")
-
-    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
-    manager._save_installed({"hyperframes": {"entry_point": "hyperframes"}})
-
-    result = manager.run("hyperframes", ["render", "--output", "intro.mp4"])
-
-    assert "Artifacts created or updated:" in result
-    assert "intro.mp4 (previewable video" in result
-    assert "![preview](intro.mp4)" in result
+    assert "![diagram](diagram.png)" in result
 
 
 def test_run_blocks_working_dir_outside_workspace(tmp_path: Path) -> None:

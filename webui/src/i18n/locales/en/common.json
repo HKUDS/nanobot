@@ -63,7 +63,8 @@
     "language": {
       "label": "Language",
       "ariaLabel": "Change language"
-    }
+    },
+    "store": "Store"
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Plugins",
+      "plugins": "Store",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
       "runtime": "Runtime",
@@ -97,9 +98,9 @@
       "imageDefaults": "Defaults",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
-      "plugins": "Plugins",
-      "cliApps": "CLI plugins",
-      "mcp": "MCP plugins",
+      "plugins": "Store",
+      "cliApps": "CLI apps",
+      "mcp": "MCP services",
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capabilities",
@@ -198,20 +199,6 @@
       "select": "Select timezone",
       "search": "Search timezone",
       "empty": "No matching timezones."
-    },
-    "plugins": {
-      "description": "Add local app adapters and connected tool servers that nanobot can use from chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "All",
-      "filterCli": "App CLIs",
-      "filterMcp": "MCP services",
-      "enabledSummary": "{{count}} enabled",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Search plugins",
-      "featured": "Featured",
-      "loading": "Loading plugins...",
-      "empty": "No plugins match this filter."
     },
     "cliApps": {
       "allCategories": "All categories",
@@ -396,6 +383,20 @@
       "selectSize": "Select size",
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
+    },
+    "store": {
+      "description": "Add app CLIs and MCP services nanobot can use from chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "All",
+      "filterCli": "CLI apps",
+      "filterMcp": "MCP services",
+      "enabledSummary": "{{count}} enabled",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Search Store",
+      "featured": "Featured",
+      "loading": "Loading Store...",
+      "empty": "No Store items match this filter."
     }
   },
   "chat": {
@@ -612,10 +613,10 @@
         }
       },
       "mentions": {
-        "ariaLabel": "Plugins",
-        "label": "Plugins",
-        "cliGroup": "CLI Apps",
-        "mcpGroup": "MCP servers",
+        "ariaLabel": "Store",
+        "label": "Store",
+        "cliGroup": "CLI apps",
+        "mcpGroup": "MCP services",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Use @{{name}} as a local CLI app",

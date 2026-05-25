@@ -66,67 +66,6 @@ def test_replay_uses_stream_end_final_text() -> None:
     assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
 
 
-def test_replay_infers_assistant_video_media_url_kind() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {
-                "event": "message",
-                "chat_id": "t-video",
-                "text": "video ready",
-                "media_urls": [
-                    {
-                        "url": "/api/media/sig/payload",
-                        "name": "transformer-intro.mp4",
-                    },
-                ],
-            },
-        ],
-    )
-
-    assert msgs[0]["media"] == [
-        {
-            "kind": "video",
-            "url": "/api/media/sig/payload",
-            "name": "transformer-intro.mp4",
-        },
-    ]
-
-
-def test_replay_resigns_assistant_media_paths_before_stale_urls() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {
-                "event": "message",
-                "chat_id": "t-video",
-                "text": "video ready",
-                "media": ["/tmp/transformer-intro.mp4"],
-                "media_urls": [
-                    {
-                        "url": "/api/media/old/signature",
-                        "name": "transformer-intro.mp4",
-                    },
-                ],
-            },
-        ],
-        augment_user_media=lambda paths: [
-            {
-                "kind": "video",
-                "url": f"/api/media/fresh/{idx}",
-                "name": path.rsplit("/", 1)[-1],
-            }
-            for idx, path in enumerate(paths)
-        ],
-    )
-
-    assert msgs[0]["media"] == [
-        {
-            "kind": "video",
-            "url": "/api/media/fresh/0",
-            "name": "transformer-intro.mp4",
-        },
-    ]
-
-
 def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file"
@@ -402,68 +341,6 @@ def test_replay_file_edit_pending_placeholder_upgrades_to_path(tmp_path, monkeyp
             "path": "foo.txt",
             "phase": "start",
             "added": 12,
-            "deleted": 0,
-            "approximate": True,
-            "status": "editing",
-        },
-    ]
-
-
-def test_replay_file_edit_pending_placeholder_upgrades_across_call_id_change(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-file-pending-call-id"
-    for ev in (
-        {"event": "user", "chat_id": "t-file-pending-call-id", "text": "write"},
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-pending-call-id",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "idx:0",
-                    "tool": "write_file",
-                    "path": "",
-                    "phase": "start",
-                    "added": 206,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                    "pending": True,
-                },
-            ],
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-pending-call-id",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "provider-final-id",
-                    "tool": "write_file",
-                    "path": "project-plan.md",
-                    "phase": "start",
-                    "added": 206,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-    file_edit_messages = [msg for msg in msgs if msg.get("fileEdits")]
-
-    assert len(file_edit_messages) == 1
-    assert file_edit_messages[0]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "provider-final-id",
-            "tool": "write_file",
-            "path": "project-plan.md",
-            "phase": "start",
-            "added": 206,
             "deleted": 0,
             "approximate": True,
             "status": "editing",

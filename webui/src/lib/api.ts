@@ -22,23 +22,6 @@ export class ApiError extends Error {
   }
 }
 
-async function apiErrorMessage(res: Response): Promise<string> {
-  const fallback = `HTTP ${res.status}`;
-  try {
-    const text = (await res.text()).trim();
-    if (!text) return fallback;
-    try {
-      const payload = JSON.parse(text) as { error?: unknown; message?: unknown };
-      const message = typeof payload.error === "string" ? payload.error : payload.message;
-      return typeof message === "string" && message.trim() ? message.trim() : text;
-    } catch {
-      return text;
-    }
-  } catch {
-    return fallback;
-  }
-}
-
 async function request<T>(
   url: string,
   token: string,
@@ -53,7 +36,7 @@ async function request<T>(
     credentials: "same-origin",
   });
   if (!res.ok) {
-    throw new ApiError(res.status, await apiErrorMessage(res));
+    throw new ApiError(res.status, `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
 }
@@ -118,7 +101,7 @@ export async function fetchWebuiThread(
     credentials: "same-origin",
   });
   if (res.status === 404) return null;
-  if (!res.ok) throw new ApiError(res.status, await apiErrorMessage(res));
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return (await res.json()) as WebuiThreadPersistedPayload;
 }
 

@@ -63,7 +63,8 @@
     "language": {
       "label": "語言",
       "ariaLabel": "切換語言"
-    }
+    },
+    "store": "商店"
   },
   "settings": {
     "backToChat": "返回對話",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "插件",
+      "plugins": "商店",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 應用",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "功能",
       "integrations": "Integrations",
-      "plugins": "插件",
-      "cliApps": "CLI 插件",
-      "mcp": "MCP 插件"
+      "plugins": "商店",
+      "cliApps": "CLI 應用",
+      "mcp": "MCP 服務"
     },
     "rows": {
       "theme": "主題",
@@ -296,20 +297,6 @@
       "search": "搜尋時區",
       "empty": "沒有符合的時區。"
     },
-    "plugins": {
-      "description": "新增 nanobot 可在對話中使用的本機應用適配與已連接工具服務。",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "全部",
-      "filterCli": "應用 CLI",
-      "filterMcp": "MCP 服務",
-      "enabledSummary": "已啟用 {{count}} 個",
-      "caption": "{{cli}} 個 CLI · {{mcp}} 個 MCP",
-      "searchPlaceholder": "搜尋插件",
-      "featured": "推薦",
-      "loading": "正在載入插件...",
-      "empty": "沒有符合的插件。"
-    },
     "cliApps": {
       "allCategories": "全部分類",
       "availableCount": "{{count}} 個應用",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
+    },
+    "store": {
+      "description": "新增可在聊天中使用的 CLI 應用與 MCP 服務。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "全部",
+      "filterCli": "CLI 應用",
+      "filterMcp": "MCP 服務",
+      "enabledSummary": "已啟用 {{count}} 個",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "搜尋商店",
+      "featured": "推薦",
+      "loading": "正在載入商店...",
+      "empty": "沒有符合的商店項目。"
     }
   },
   "chat": {
@@ -623,8 +624,8 @@
         "io": "無法讀取這個檔案"
       },
       "mentions": {
-        "ariaLabel": "插件",
-        "label": "插件",
+        "ariaLabel": "商店",
+        "label": "商店",
         "cliGroup": "CLI 應用",
         "mcpGroup": "MCP 服務",
         "cliBadge": "CLI",

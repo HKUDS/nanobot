@@ -54,23 +54,6 @@ const CLI_APPS: CliAppInfo[] = [
     skill_installed: true,
   },
   {
-    name: "hyperframes",
-    aliases: ["hyperframe"],
-    display_name: "HyperFrames",
-    category: "video",
-    description: "Video generation",
-    requires: "",
-    source: "nanobot",
-    entry_point: "hyperframes",
-    install_supported: true,
-    installed: true,
-    available: true,
-    status: "installed",
-    logo_url: "https://example.invalid/hyperframes.svg",
-    brand_color: "#7559FF",
-    skill_installed: true,
-  },
-  {
     name: "krita",
     display_name: "Krita",
     category: "image",
@@ -363,7 +346,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
-    const palette = screen.getByRole("listbox", { name: "Plugins" });
+    const palette = screen.getByRole("listbox", { name: "Store" });
     expect(palette).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /@gimp/i })).toHaveAttribute(
       "aria-selected",
@@ -382,7 +365,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.queryByRole("listbox", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Store" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -416,41 +399,6 @@ describe("ThreadComposer", () => {
 
     expect(input).toHaveValue("use @blender ");
     expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
-  });
-
-  it("prefers CLI app aliases in the mention UI while submitting canonical names", () => {
-    const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-        cliApps={CLI_APPS}
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, {
-      target: { value: "use @hyp", selectionStart: 8 },
-    });
-
-    fireEvent.keyDown(input, { key: "Tab" });
-
-    expect(input).toHaveValue("use @hyperframe ");
-    expect(screen.getByTestId("composer-cli-mention-hyperframes")).toHaveTextContent("@hyperframe");
-
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(onSend).toHaveBeenCalledWith("use @hyperframe", undefined, {
-      cliApps: [{
-        name: "hyperframes",
-        aliases: ["hyperframe"],
-        display_name: "HyperFrames",
-        category: "video",
-        entry_point: "hyperframes",
-        logo_url: "https://example.invalid/hyperframes.svg",
-        brand_color: "#7559FF",
-      }],
-    });
   });
 
   it("shows configured MCP presets in the mention palette and submits metadata", () => {

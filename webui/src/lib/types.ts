@@ -68,7 +68,6 @@ export interface UIMessage {
 
 export interface UICliAppAttachment {
   name: string;
-  aliases?: string[] | null;
   display_name?: string;
   category?: string;
   entry_point?: string;
@@ -283,7 +282,6 @@ export interface SettingsPayload {
 
 export interface CliAppInfo {
   name: string;
-  aliases?: string[] | null;
   display_name: string;
   category: string;
   description: string;
@@ -526,7 +524,6 @@ export interface OutboundImageGeneration {
 
 export interface OutboundCliAppMention {
   name: string;
-  aliases?: string[] | null;
   display_name?: string;
   category?: string;
   entry_point?: string;

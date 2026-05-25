@@ -63,7 +63,8 @@
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
-    }
+    },
+    "store": "Cửa hàng"
   },
   "settings": {
     "backToChat": "Quay lại trò chuyện",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Plugin",
+      "plugins": "Cửa hàng",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Ứng dụng CLI",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Khả năng",
       "integrations": "Integrations",
-      "plugins": "Plugin",
-      "cliApps": "Plugin CLI",
-      "mcp": "Plugin MCP"
+      "plugins": "Cửa hàng",
+      "cliApps": "Ứng dụng CLI",
+      "mcp": "Dịch vụ MCP"
     },
     "rows": {
       "theme": "Giao diện",
@@ -296,20 +297,6 @@
       "search": "Tìm múi giờ",
       "empty": "Không có múi giờ phù hợp."
     },
-    "plugins": {
-      "description": "Thêm bộ điều hợp app cục bộ và máy chủ công cụ đã kết nối mà nanobot có thể dùng từ chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Tất cả",
-      "filterCli": "CLI app",
-      "filterMcp": "Dịch vụ MCP",
-      "enabledSummary": "{{count}} đã bật",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Tìm plugin",
-      "featured": "Nổi bật",
-      "loading": "Đang tải plugin...",
-      "empty": "Không có plugin nào khớp với bộ lọc này."
-    },
     "cliApps": {
       "allCategories": "Tất cả danh mục",
       "availableCount": "{{count}} ứng dụng",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
+    },
+    "store": {
+      "description": "Thêm ứng dụng CLI và dịch vụ MCP mà nanobot có thể dùng trong chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Tất cả",
+      "filterCli": "Ứng dụng CLI",
+      "filterMcp": "Dịch vụ MCP",
+      "enabledSummary": "{{count}} đã bật",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Tìm trong cửa hàng",
+      "featured": "Nổi bật",
+      "loading": "Đang tải cửa hàng...",
+      "empty": "Không có mục cửa hàng phù hợp."
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "Không thể đọc tệp này"
       },
       "mentions": {
-        "ariaLabel": "Plugin",
-        "label": "Plugin",
+        "ariaLabel": "Cửa hàng",
+        "label": "Cửa hàng",
         "cliGroup": "Ứng dụng CLI",
-        "mcpGroup": "Máy chủ MCP",
+        "mcpGroup": "Dịch vụ MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",

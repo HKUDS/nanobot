@@ -63,7 +63,8 @@
     "language": {
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
-    }
+    },
+    "store": "Toko"
   },
   "settings": {
     "backToChat": "Kembali ke obrolan",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Plugin",
+      "plugins": "Toko",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Aplikasi CLI",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Kapabilitas",
       "integrations": "Integrations",
-      "plugins": "Plugin",
-      "cliApps": "Plugin CLI",
-      "mcp": "Plugin MCP"
+      "plugins": "Toko",
+      "cliApps": "App CLI",
+      "mcp": "Layanan MCP"
     },
     "rows": {
       "theme": "Tema",
@@ -296,20 +297,6 @@
       "search": "Cari zona waktu",
       "empty": "Tidak ada zona waktu yang cocok."
     },
-    "plugins": {
-      "description": "Tambahkan adaptor app lokal dan server alat terhubung yang dapat digunakan nanobot dari chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Semua",
-      "filterCli": "CLI app",
-      "filterMcp": "Layanan MCP",
-      "enabledSummary": "{{count}} aktif",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Cari plugin",
-      "featured": "Unggulan",
-      "loading": "Memuat plugin...",
-      "empty": "Tidak ada plugin yang cocok dengan filter ini."
-    },
     "cliApps": {
       "allCategories": "Semua kategori",
       "availableCount": "{{count}} aplikasi",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
+    },
+    "store": {
+      "description": "Tambahkan app CLI dan layanan MCP yang bisa digunakan nanobot dari chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Semua",
+      "filterCli": "App CLI",
+      "filterMcp": "Layanan MCP",
+      "enabledSummary": "{{count}} aktif",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Cari di toko",
+      "featured": "Unggulan",
+      "loading": "Memuat toko...",
+      "empty": "Tidak ada item toko yang cocok."
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
-        "ariaLabel": "Plugin",
-        "label": "Plugin",
-        "cliGroup": "Aplikasi CLI",
-        "mcpGroup": "Server MCP",
+        "ariaLabel": "Toko",
+        "label": "Toko",
+        "cliGroup": "App CLI",
+        "mcpGroup": "Layanan MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",

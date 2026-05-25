@@ -6,6 +6,7 @@ import {
   Search,
   Settings,
   SquarePen,
+  Store,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -41,6 +42,7 @@ interface SidebarProps {
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   onOpenSettings: () => void;
+  onOpenStore: () => void;
   onOpenSearch: () => void;
   onToggleArchived: () => void;
   onUpdateView: (view: Partial<SidebarViewState>) => void;
@@ -129,6 +131,12 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenSearch}
           icon={<Search className="h-4 w-4" />}
         />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.store")}
+          onClick={props.onOpenStore}
+          icon={<Store className="h-4 w-4" />}
+        />
         <SidebarViewMenu
           compact={collapsed}
           view={props.viewState}
@@ -215,7 +223,7 @@ function SidebarActionButton({
       variant="ghost"
       aria-label={label}
       title={collapsed ? label : undefined}
-      onClick={onClick}
+      onClick={() => onClick()}
       className={cn(
         "group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
         "transition-[width,padding,border-radius,color,background-color] duration-300 ease-out",

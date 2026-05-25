@@ -63,7 +63,8 @@
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
-    }
+    },
+    "store": "ストア"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "プラグイン",
+      "plugins": "ストア",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI アプリ",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "機能",
       "integrations": "Integrations",
-      "plugins": "プラグイン",
-      "cliApps": "CLI プラグイン",
-      "mcp": "MCP プラグイン"
+      "plugins": "ストア",
+      "cliApps": "CLI アプリ",
+      "mcp": "MCP サービス"
     },
     "rows": {
       "theme": "テーマ",
@@ -296,20 +297,6 @@
       "search": "タイムゾーンを検索",
       "empty": "一致するタイムゾーンはありません。"
     },
-    "plugins": {
-      "description": "nanobot がチャットから使えるローカルアプリのアダプターと接続済みツールサーバーを追加します。",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "すべて",
-      "filterCli": "アプリ CLI",
-      "filterMcp": "MCP サービス",
-      "enabledSummary": "{{count}} 件有効",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "プラグインを検索",
-      "featured": "注目",
-      "loading": "プラグインを読み込み中...",
-      "empty": "条件に一致するプラグインはありません。"
-    },
     "cliApps": {
       "allCategories": "すべてのカテゴリ",
       "availableCount": "{{count}} 個のアプリ",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
+    },
+    "store": {
+      "description": "チャットから使える CLI アプリと MCP サービスを追加します。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "すべて",
+      "filterCli": "CLI アプリ",
+      "filterMcp": "MCP サービス",
+      "enabledSummary": "{{count}} 件有効",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "ストアを検索",
+      "featured": "おすすめ",
+      "loading": "ストアを読み込み中...",
+      "empty": "一致するストア項目はありません。"
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "このファイルを読み込めません"
       },
       "mentions": {
-        "ariaLabel": "プラグイン",
-        "label": "プラグイン",
+        "ariaLabel": "ストア",
+        "label": "ストア",
         "cliGroup": "CLI アプリ",
-        "mcpGroup": "MCP サーバー",
+        "mcpGroup": "MCP サービス",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}} をローカル CLI アプリとして使用",

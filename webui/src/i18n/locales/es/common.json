@@ -63,7 +63,8 @@
     "language": {
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
-    }
+    },
+    "store": "Tienda"
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -80,7 +81,7 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Plugins",
+      "plugins": "Tienda",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
@@ -101,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Capacidades",
       "integrations": "Integrations",
-      "plugins": "Plugins",
-      "cliApps": "Plugins CLI",
-      "mcp": "Plugins MCP"
+      "plugins": "Tienda",
+      "cliApps": "Apps CLI",
+      "mcp": "Servicios MCP"
     },
     "rows": {
       "theme": "Tema",
@@ -296,20 +297,6 @@
       "search": "Buscar zona horaria",
       "empty": "No hay zonas horarias coincidentes."
     },
-    "plugins": {
-      "description": "Añade adaptadores de apps locales y servidores de herramientas conectados que nanobot puede usar desde el chat.",
-      "cliLabel": "CLI",
-      "mcpLabel": "MCP",
-      "filterAll": "Todo",
-      "filterCli": "CLIs de apps",
-      "filterMcp": "Servicios MCP",
-      "enabledSummary": "{{count}} activados",
-      "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Buscar plugins",
-      "featured": "Destacados",
-      "loading": "Cargando plugins...",
-      "empty": "Ningún plugin coincide con este filtro."
-    },
     "cliApps": {
       "allCategories": "Todas las categorías",
       "availableCount": "{{count}} apps",
@@ -396,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
+    },
+    "store": {
+      "description": "Agrega apps CLI y servicios MCP que nanobot puede usar desde el chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Todo",
+      "filterCli": "Apps CLI",
+      "filterMcp": "Servicios MCP",
+      "enabledSummary": "{{count}} activados",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Buscar en la tienda",
+      "featured": "Destacados",
+      "loading": "Cargando tienda...",
+      "empty": "No hay elementos de la tienda que coincidan."
     }
   },
   "chat": {
@@ -623,10 +624,10 @@
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
-        "ariaLabel": "Plugins",
-        "label": "Plugins",
+        "ariaLabel": "Tienda",
+        "label": "Tienda",
         "cliGroup": "Apps CLI",
-        "mcpGroup": "Servidores MCP",
+        "mcpGroup": "Servicios MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Usar @{{name}} como app CLI local",
