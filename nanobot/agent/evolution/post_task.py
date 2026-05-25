@@ -13,6 +13,13 @@ from typing import Any, Literal
 from loguru import logger
 
 from nanobot.agent.evolution.models import ToolCallRecord, TurnTrace
+from nanobot.agent.evolution.proposals import (
+    PostTaskCreateResult,
+    ProposalStore,
+    SKIP_ACTIVE_SKILL_EXISTS,
+    normalize_skill_md_content,
+    validate_skill_md,
+)
 from nanobot.config.schema import EvolutionConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.prompt_templates import render_template
@@ -24,6 +31,7 @@ _UPDATE_ACTIONS = frozenset({"update_skill", "update", "modify_skill", "modify"}
 
 POST_TASK_LLM_TIMEOUT_S = 30.0
 POST_TASK_LLM_MAX_TOKENS = 512
+POST_TASK_SKILL_LLM_MAX_TOKENS = 4096
 
 PostTaskAction = Literal["none", "create_skill"]
 
@@ -257,19 +265,27 @@ class PostTaskEvolver:
         provider: LLMProvider | None = None,
         *,
         cooldown_store: PostTaskCooldownStore | None = None,
+        proposal_store: ProposalStore | None = None,
         llm_timeout_s: float = POST_TASK_LLM_TIMEOUT_S,
         llm_max_tokens: int = POST_TASK_LLM_MAX_TOKENS,
+        skill_llm_max_tokens: int = POST_TASK_SKILL_LLM_MAX_TOKENS,
     ) -> None:
         self._workspace = workspace.expanduser().resolve()
         self._config = config
         self._provider = provider
         self._cooldown = cooldown_store or PostTaskCooldownStore(self._workspace)
+        self._proposals = proposal_store or ProposalStore(self._workspace)
         self._llm_timeout_s = llm_timeout_s
         self._llm_max_tokens = llm_max_tokens
+        self._skill_llm_max_tokens = skill_llm_max_tokens
 
     @property
     def cooldown_store(self) -> PostTaskCooldownStore:
         return self._cooldown
+
+    @property
+    def proposal_store(self) -> ProposalStore:
+        return self._proposals
 
     def evaluate_gate(self, trace: TurnTrace, *, is_subagent: bool) -> PostTaskGateResult:
         """Return whether PostTask should run for *trace*."""
@@ -368,3 +384,125 @@ class PostTaskEvolver:
             decision.confidence,
         )
         return decision
+
+    async def generate_skill_content(
+        self,
+        trace: TurnTrace,
+        decision: PostTaskDecision,
+    ) -> str | None:
+        """Ask the LLM to draft SKILL.md body for *decision.skill_name*."""
+        if self._provider is None:
+            logger.warning("PostTask skill generation skipped: no LLM provider")
+            return None
+
+        post_task = self._config.post_task
+        existing = self._proposals.list_workspace_skill_summaries()
+        existing_text = "\n".join(f"- {line}" for line in existing) if existing else "(none)"
+
+        user_prompt = render_template(
+            "agent/evolution_post_task_skill.md",
+            skill_name=decision.skill_name,
+            rationale=decision.rationale or "(none)",
+            query=trace.query.strip() or "(empty)",
+            skills_injected=format_skills_injected(trace.skills_injected),
+            tool_calls=format_tool_calls_for_prompt(trace.tool_calls),
+            existing_skills=existing_text,
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You write agent SKILL.md files. Output markdown only.",
+            },
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            async with asyncio.timeout(self._llm_timeout_s):
+                response = await self._provider.chat_with_retry(
+                    messages=messages,
+                    model=post_task.model,
+                    max_tokens=self._skill_llm_max_tokens,
+                    temperature=0,
+                    retry_mode="standard",
+                )
+        except TimeoutError:
+            logger.warning("PostTask skill generation timed out after {}s", self._llm_timeout_s)
+            return None
+        except Exception as exc:
+            logger.warning("PostTask skill generation failed: {}", exc)
+            return None
+
+        if response.finish_reason == "error":
+            logger.warning("PostTask skill generation provider error: {}", response.content)
+            return None
+
+        return normalize_skill_md_content(response.content)
+
+    async def create_proposal(
+        self,
+        trace: TurnTrace,
+        decision: PostTaskDecision,
+    ) -> PostTaskCreateResult:
+        """Generate SKILL.md and write proposal or auto-applied workspace skill."""
+        if decision.action != "create_skill" or not decision.skill_name:
+            return PostTaskCreateResult.skipped("not a create_skill decision")
+
+        skill_name = decision.skill_name
+        dedup_reason = self._proposals.check_dedup(skill_name)
+        if dedup_reason:
+            logger.info("PostTask create skipped (dedup): {} for {!r}", dedup_reason, skill_name)
+            return PostTaskCreateResult.skipped(dedup_reason, skill_name=skill_name)
+
+        skill_md = await self.generate_skill_content(trace, decision)
+        if not skill_md:
+            return PostTaskCreateResult.skipped("skill generation failed", skill_name=skill_name)
+
+        validation_error = validate_skill_md(skill_md, skill_name=skill_name)
+        if validation_error:
+            logger.warning(
+                "PostTask skill validation failed for {!r}: {}",
+                skill_name,
+                validation_error,
+            )
+            return PostTaskCreateResult.skipped(validation_error, skill_name=skill_name)
+
+        post_task = self._config.post_task
+        if post_task.auto_apply:
+            try:
+                skill_path = self._proposals.write_active_skill(skill_name, skill_md)
+            except FileExistsError:
+                return PostTaskCreateResult.skipped(
+                    SKIP_ACTIVE_SKILL_EXISTS,
+                    skill_name=skill_name,
+                )
+            except OSError as exc:
+                logger.warning("PostTask auto_apply write failed: {}", exc)
+                return PostTaskCreateResult.skipped("write failed", skill_name=skill_name)
+            rel = skill_path.relative_to(self._workspace).as_posix()
+            return PostTaskCreateResult.ok(
+                skill_name=skill_name,
+                skill_path=rel,
+                auto_applied=True,
+            )
+
+        try:
+            proposal_id = self._proposals.write_proposal(
+                skill_name=skill_name,
+                skill_md=skill_md,
+                trace_id=trace.trace_id,
+                rationale=decision.rationale,
+                confidence=decision.confidence,
+            )
+        except FileExistsError:
+            return PostTaskCreateResult.skipped("proposal id collision", skill_name=skill_name)
+        except OSError as exc:
+            logger.warning("PostTask proposal write failed: {}", exc)
+            return PostTaskCreateResult.skipped("write failed", skill_name=skill_name)
+
+        rel = f"skills/.proposals/{proposal_id}/SKILL.md"
+        return PostTaskCreateResult.ok(
+            skill_name=skill_name,
+            skill_path=rel,
+            proposal_id=proposal_id,
+            auto_applied=False,
+        )
