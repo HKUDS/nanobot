@@ -202,19 +202,23 @@ async def test_jina_search(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_kagi_search(monkeypatch):
-    async def mock_get(self, url, **kw):
-        assert "kagi.com/api/v0/search" in url
-        assert kw["headers"]["Authorization"] == "Bot kagi-key"
+    async def mock_post(self, url, **kw):
+        assert "kagi.com/api/v1/search" in url
+        assert kw["headers"]["Authorization"] == "Bearer kagi-key"
         assert kw["headers"]["User-Agent"] == "nanobot-search-test"
-        assert kw["params"] == {"q": "test", "limit": 2}
+        assert kw["json"] == {"query": "test", "limit": 2}
         return _response(json={
-            "data": [
-                {"t": 0, "title": "Kagi Result", "url": "https://kagi.com", "snippet": "Premium search"},
-                {"t": 1, "list": ["ignored related search"]},
-            ]
+            "data": {
+                "search": [
+                    {"title": "Kagi Result", "url": "https://kagi.com", "snippet": "Premium search"},
+                ],
+                "related_search": [
+                    {"title": "ignored related search", "url": "", "snippet": ""},
+                ],
+            }
         })
 
-    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
     tool = _tool(provider="kagi", api_key="kagi-key", user_agent="nanobot-search-test")
     result = await tool.execute(query="test", count=2)
     assert "Kagi Result" in result

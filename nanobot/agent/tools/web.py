@@ -455,17 +455,16 @@ class WebSearchTool(Tool):
             return await self._search_duckduckgo(query, n)
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://kagi.com/api/v0/search",
-                    params={"q": query, "limit": n},
-                    headers={"Authorization": f"Bot {api_key}", "User-Agent": self.user_agent},
+                r = await client.post(
+                    "https://kagi.com/api/v1/search",
+                    json={"query": query, "limit": n},
+                    headers={"Authorization": f"Bearer {api_key}", "User-Agent": self.user_agent},
                     timeout=10.0,
                 )
                 r.raise_for_status()
-            # t=0 items are search results; other values are related searches, etc.
             items = [
                 {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("snippet", "")}
-                for d in r.json().get("data", []) if d.get("t") == 0
+                for d in r.json().get("data", {}).get("search", [])
             ]
             return _format_results(query, items, n)
         except Exception as e:
