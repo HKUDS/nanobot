@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+import shutil
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -13,6 +14,7 @@ from uuid import uuid4
 from loguru import logger
 
 _PROPOSALS_DIR = ".proposals"
+_REJECTED_DIR = ".rejected"
 _SKIP_DIRS = frozenset({".proposals", ".archive", ".rejected"})
 _FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", re.DOTALL)
 _NAME_RE = re.compile(r"^name:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
@@ -25,6 +27,11 @@ ProposalSource = Literal["post_task", "gepa"]
 
 SKIP_ACTIVE_SKILL_EXISTS = "workspace skill already exists"
 SKIP_PENDING_PROPOSAL = "pending proposal with same skill_name"
+
+ERR_PROPOSAL_NOT_FOUND = "proposal not found"
+ERR_PROPOSAL_NOT_PENDING = "proposal is not pending"
+ERR_PROPOSAL_ALREADY_REJECTED = "proposal already rejected"
+ERR_APPLY_ACTIVE_SKILL_EXISTS = "workspace skill already exists (update deferred to GEPA)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +46,11 @@ class ProposalMeta:
     confidence: float
     created_at: str
     status: ProposalStatus = "pending"
+    applied_at: str = ""
+    rejected_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "proposal_id": self.proposal_id,
             "source": self.source,
             "trace_id": self.trace_id,
@@ -51,6 +60,11 @@ class ProposalMeta:
             "created_at": self.created_at,
             "status": self.status,
         }
+        if self.applied_at:
+            payload["applied_at"] = self.applied_at
+        if self.rejected_at:
+            payload["rejected_at"] = self.rejected_at
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProposalMeta:
@@ -63,6 +77,58 @@ class ProposalMeta:
             confidence=float(data.get("confidence") or 0.0),
             created_at=str(data.get("created_at") or ""),
             status=data.get("status") or "pending",  # type: ignore[arg-type]
+            applied_at=str(data.get("applied_at") or ""),
+            rejected_at=str(data.get("rejected_at") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalDetail:
+    """Full proposal payload for inspection (E2 /evolve-show)."""
+
+    meta: ProposalMeta
+    skill_md: str
+    proposal_dir: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalActionResult:
+    """Outcome of apply/reject on a pending proposal."""
+
+    ok: bool
+    proposal_id: str = ""
+    skill_name: str = ""
+    skill_path: str = ""
+    skip_reason: str = ""
+
+    @classmethod
+    def fail(
+        cls,
+        reason: str,
+        *,
+        proposal_id: str = "",
+        skill_name: str = "",
+    ) -> ProposalActionResult:
+        return cls(
+            ok=False,
+            proposal_id=proposal_id,
+            skill_name=skill_name,
+            skip_reason=reason,
+        )
+
+    @classmethod
+    def success(
+        cls,
+        *,
+        proposal_id: str,
+        skill_name: str,
+        skill_path: str,
+    ) -> ProposalActionResult:
+        return cls(
+            ok=True,
+            proposal_id=proposal_id,
+            skill_name=skill_name,
+            skill_path=skill_path,
         )
 
 
@@ -114,6 +180,42 @@ class ProposalStore:
     @property
     def proposals_root(self) -> Path:
         return self._proposals_root
+
+    @property
+    def rejected_root(self) -> Path:
+        return self._skills_root / _REJECTED_DIR
+
+    @property
+    def workspace(self) -> Path:
+        return self._workspace
+
+    def _active_skill_rel_path(self, skill_name: str) -> str:
+        return f"skills/{skill_name}/SKILL.md"
+
+    def _read_meta_file(self, meta_path: Path) -> ProposalMeta | None:
+        if not meta_path.is_file():
+            return None
+        try:
+            return ProposalMeta.from_dict(json.loads(meta_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Unreadable proposal meta {}: {}", meta_path, exc)
+            return None
+
+    def _write_meta(self, proposal_dir: Path, meta: ProposalMeta) -> None:
+        proposal_dir.mkdir(parents=True, exist_ok=True)
+        (proposal_dir / "meta.json").write_text(
+            json.dumps(meta.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _proposal_dir(self, proposal_id: str) -> Path | None:
+        pending_dir = self._proposals_root / proposal_id
+        if pending_dir.is_dir():
+            return pending_dir
+        rejected_dir = self.rejected_root / proposal_id
+        if rejected_dir.is_dir():
+            return rejected_dir
+        return None
 
     def workspace_skill_exists(self, skill_name: str) -> bool:
         """Return True when ``skills/<skill_name>/SKILL.md`` exists in workspace."""
@@ -210,10 +312,7 @@ class ProposalStore:
             status="pending",
         )
         (proposal_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
-        (proposal_dir / "meta.json").write_text(
-            json.dumps(meta.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._write_meta(proposal_dir, meta)
         logger.info(
             "PostTask proposal written: id={} skill={} path={}",
             proposal_id,
@@ -232,14 +331,188 @@ class ProposalStore:
         return skill_path
 
     def read_meta(self, proposal_id: str) -> ProposalMeta | None:
-        meta_path = self._proposals_root / proposal_id / "meta.json"
-        if not meta_path.is_file():
+        proposal_dir = self._proposal_dir(proposal_id)
+        if proposal_dir is None:
+            return None
+        return self._read_meta_file(proposal_dir / "meta.json")
+
+    def get(self, proposal_id: str) -> ProposalDetail | None:
+        """Load proposal meta + SKILL.md from ``.proposals/`` or ``.rejected/``."""
+        proposal_dir = self._proposal_dir(proposal_id)
+        if proposal_dir is None:
+            return None
+        meta = self._read_meta_file(proposal_dir / "meta.json")
+        skill_path = proposal_dir / "SKILL.md"
+        if meta is None or not skill_path.is_file():
             return None
         try:
-            return ProposalMeta.from_dict(json.loads(meta_path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.warning("Unreadable proposal meta {}: {}", meta_path, exc)
+            skill_md = skill_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Unreadable proposal SKILL.md {}: {}", skill_path, exc)
             return None
+        return ProposalDetail(meta=meta, skill_md=skill_md, proposal_dir=proposal_dir)
+
+    def apply(self, proposal_id: str) -> ProposalActionResult:
+        """Promote a pending proposal to ``skills/<name>/SKILL.md``."""
+        proposal_dir = self._proposals_root / proposal_id
+        meta = self._read_meta_file(proposal_dir / "meta.json")
+        if meta is None:
+            return ProposalActionResult.fail(ERR_PROPOSAL_NOT_FOUND, proposal_id=proposal_id)
+
+        if meta.status == "applied":
+            if self.workspace_skill_exists(meta.skill_name):
+                return ProposalActionResult.success(
+                    proposal_id=proposal_id,
+                    skill_name=meta.skill_name,
+                    skill_path=self._active_skill_rel_path(meta.skill_name),
+                )
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status == "rejected":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_ALREADY_REJECTED,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status != "pending":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        skill_path = proposal_dir / "SKILL.md"
+        if not skill_path.is_file():
+            return ProposalActionResult.fail(
+                "proposal SKILL.md invalid: missing SKILL.md",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        try:
+            skill_md = skill_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Unreadable proposal SKILL.md {}: {}", skill_path, exc)
+            return ProposalActionResult.fail(
+                "proposal SKILL.md invalid: unreadable",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        validation_error = validate_skill_md(skill_md, skill_name=meta.skill_name)
+        if validation_error:
+            return ProposalActionResult.fail(
+                f"proposal SKILL.md invalid: {validation_error}",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if self.workspace_skill_exists(meta.skill_name):
+            return ProposalActionResult.fail(
+                ERR_APPLY_ACTIVE_SKILL_EXISTS,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        try:
+            active_path = self.write_active_skill(meta.skill_name, skill_md)
+        except FileExistsError:
+            return ProposalActionResult.fail(
+                ERR_APPLY_ACTIVE_SKILL_EXISTS,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+        except OSError as exc:
+            logger.warning("Proposal apply write failed: {}", exc)
+            return ProposalActionResult.fail(
+                "write failed",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        applied_meta = replace(
+            meta,
+            status="applied",
+            applied_at=datetime.now(UTC).isoformat(),
+        )
+        self._write_meta(proposal_dir, applied_meta)
+        rel = active_path.relative_to(self._workspace).as_posix()
+        logger.info(
+            "Proposal applied: id={} skill={} active={}",
+            proposal_id,
+            meta.skill_name,
+            rel,
+        )
+        return ProposalActionResult.success(
+            proposal_id=proposal_id,
+            skill_name=meta.skill_name,
+            skill_path=rel,
+        )
+
+    def reject(self, proposal_id: str) -> ProposalActionResult:
+        """Move a pending proposal to ``skills/.rejected/<id>/``."""
+        if self.rejected_root.is_dir() and (self.rejected_root / proposal_id).is_dir():
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_ALREADY_REJECTED,
+                proposal_id=proposal_id,
+            )
+
+        proposal_dir = self._proposals_root / proposal_id
+        meta = self._read_meta_file(proposal_dir / "meta.json")
+        if meta is None:
+            return ProposalActionResult.fail(ERR_PROPOSAL_NOT_FOUND, proposal_id=proposal_id)
+
+        if meta.status == "applied":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status == "rejected":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_ALREADY_REJECTED,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status != "pending":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        rejected_meta = replace(
+            meta,
+            status="rejected",
+            rejected_at=datetime.now(UTC).isoformat(),
+        )
+        self._write_meta(proposal_dir, rejected_meta)
+
+        self.rejected_root.mkdir(parents=True, exist_ok=True)
+        target_dir = self.rejected_root / proposal_id
+        try:
+            shutil.move(str(proposal_dir), str(target_dir))
+        except OSError as exc:
+            logger.warning("Proposal reject move failed: {}", exc)
+            return ProposalActionResult.fail(
+                "move failed",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        logger.info("Proposal rejected: id={} skill={}", proposal_id, meta.skill_name)
+        return ProposalActionResult.success(
+            proposal_id=proposal_id,
+            skill_name=meta.skill_name,
+            skill_path=str(target_dir.relative_to(self._workspace)),
+        )
 
 
 def normalize_skill_md_content(content: str | None) -> str:

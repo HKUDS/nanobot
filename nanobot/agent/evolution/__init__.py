@@ -11,6 +11,8 @@ from nanobot.agent.evolution.post_task import (
 )
 from nanobot.agent.evolution.proposals import (
     PostTaskCreateResult,
+    ProposalActionResult,
+    ProposalDetail,
     ProposalMeta,
     ProposalStore,
     normalize_skill_md_content,
@@ -25,6 +27,8 @@ __all__ = [
     "PostTaskDecision",
     "PostTaskEvolver",
     "PostTaskGateResult",
+    "ProposalActionResult",
+    "ProposalDetail",
     "ProposalMeta",
     "ProposalStore",
     "ToolCallRecord",
