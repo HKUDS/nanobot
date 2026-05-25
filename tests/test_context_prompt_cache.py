@@ -39,8 +39,14 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be a separate user message before the actual user message."""
+def test_runtime_context_is_preamble_to_user_message(tmp_path) -> None:
+    """Runtime metadata is a preamble to the single user message — not a separate turn.
+
+    Keeping it merged preserves user/assistant alternation in the prompt.
+    Two consecutive user messages (metadata, then real input) were causing
+    models to treat the metadata block as a session boundary and deny
+    access to history that was plainly above.
+    """
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -54,16 +60,19 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert messages[0]["role"] == "system"
     assert "## Current Session" not in messages[0]["content"]
 
-    assert messages[-2]["role"] == "user"
-    runtime_content = messages[-2]["content"]
-    assert isinstance(runtime_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime_content
-    assert "Current Time:" in runtime_content
-    assert "Channel: cli" in runtime_content
-    assert "Chat ID: direct" in runtime_content
-
+    # Exactly one user message at the tail; runtime context is its preamble.
     assert messages[-1]["role"] == "user"
-    assert messages[-1]["content"] == "Return exactly: OK"
+    content = messages[-1]["content"]
+    assert isinstance(content, str)
+    assert content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)
+    assert "Current Time:" in content
+    assert "Channel: cli" in content
+    assert "Chat ID: direct" in content
+    assert content.endswith("Return exactly: OK")
+
+    # No second user message — no `user → user` adjacency to confuse models.
+    user_messages = [m for m in messages if m["role"] == "user"]
+    assert len(user_messages) == 1
 
 
 def test_runtime_context_hints_to_skip_reply_on_fs_channel(tmp_path) -> None:
@@ -77,9 +86,9 @@ def test_runtime_context_hints_to_skip_reply_on_fs_channel(tmp_path) -> None:
         channel="fs",
         chat_id="Iroh",
     )
-    runtime_content = messages[-2]["content"]
-    assert "peer agent" in runtime_content
-    assert "Reply only" in runtime_content
+    content = messages[-1]["content"]
+    assert "peer agent" in content
+    assert "Reply only" in content
 
 
 def test_runtime_context_has_no_fs_hint_for_other_channels(tmp_path) -> None:
@@ -92,5 +101,28 @@ def test_runtime_context_has_no_fs_hint_for_other_channels(tmp_path) -> None:
         channel="telegram",
         chat_id="12345",
     )
-    runtime_content = messages[-2]["content"]
-    assert "peer agent" not in runtime_content
+    content = messages[-1]["content"]
+    assert "peer agent" not in content
+
+
+def test_runtime_context_preamble_in_multipart_content(tmp_path) -> None:
+    """When the user sends media, the runtime context is the first text part."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    # Force list-content path by passing media that exists (use a stub file).
+    img = tmp_path / "img.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)  # not a real png, just non-empty bytes
+    messages = builder.build_messages(
+        history=[],
+        current_message="describe this",
+        media=[str(img)],
+        channel="telegram",
+        chat_id="42",
+    )
+
+    content = messages[-1]["content"]
+    assert isinstance(content, list)
+    # Runtime context is the first part; user text is later.
+    assert content[0]["type"] == "text"
+    assert content[0]["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG)

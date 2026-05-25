@@ -19,11 +19,17 @@ consolidations.
 
 ## Scope
 
-- Track `IDENTITY.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, `HEARTBEAT.md`,
-  `skills/`, `cron/jobs.json`. Gitignore everything else.
+- Track `IDENTITY.md`, `SOUL.md`, `USER.md`, `HEARTBEAT.md`, `AGENTS.md`,
+  `TOOLS.md` (workspace root), `memory/MEMORY.md`, `skills/`,
+  `cron/jobs.json`. Gitignore `media/`, `gateway.log`, `whatsapp-auth/`,
+  and (by default) `memory/HISTORY.md`.
 - Commit on semantic triggers (not every turn).
 - Push to a per-host branch.
 - Stay out of `main` — humans curate that via PR.
+
+> Implementation uses `git add -A` and trusts the workspace `.gitignore`.
+> A recommended `.gitignore` ships in the agent repo template
+> (see [[p2-terraform-single-agent]] when that lands).
 
 ## New module: `nanobot/sync/git.py`
 
@@ -64,9 +70,9 @@ Lives at `agents.defaults.sync` in `~/.nanobot/config.json`.
 
 | Trigger | Site | Files captured |
 |---------|------|----------------|
-| Memory consolidation | `agent/memory.py` after `save_memory` tool | `MEMORY.md`, `HISTORY.md` (if tracked) |
-| Heartbeat tick (optional) | `heartbeat/service.py` end of phase 2 | All tracked files |
-| Shutdown | gateway `finally` block | All tracked files |
+| Memory consolidation | `loop.py:_consolidate_memory` after success | All tracked changes (`memory/MEMORY.md` + anything else dirty) |
+| Heartbeat tick (optional) | `heartbeat/service.py` end of phase 2 | All tracked changes |
+| Shutdown | gateway `finally` block | All tracked changes |
 
 Every trigger calls `WorkspaceSync.commit(reason=...)`. The throttle
 silently drops commits over the per-hour budget — the next trigger

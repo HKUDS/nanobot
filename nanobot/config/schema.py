@@ -261,6 +261,32 @@ class ModelRouterConfig(Base):
     complex_description: str = ""        # rubric for the "complex" enum value
 
 
+class SyncConfig(Base):
+    """Workspace-to-git sync configuration.
+
+    When enabled, nanobot commits selected workspace changes (memory
+    consolidation, identity edits, etc.) to a git repo at the workspace root
+    and optionally pushes to a remote. Auth uses whatever the host git is
+    configured with (SSH agent, gh credential helper, deploy key, etc.) —
+    nanobot just shells out to the system git binary.
+
+    The workspace must already be a git repo (``git init`` was run by the
+    operator); nanobot does not auto-initialize. If ``workspace/.git`` is
+    missing, sync silently disables itself.
+    """
+
+    enabled: bool = False
+    push: bool = True                       # push after each commit
+    branch: str = "main"                    # remote branch name; set "" to use "host/<hostname>"
+    remote: str = "origin"                  # which remote to push to
+    commit_on_memory: bool = True           # commit after each successful consolidation
+    commit_on_shutdown: bool = True         # commit + push on gateway shutdown
+    commit_on_heartbeat: bool = False       # commit after each heartbeat tick (noisy; off by default)
+    max_commits_per_hour: int = 6           # sliding-window throttle; 0 disables
+    author_name: str = "nanobot"            # GIT_AUTHOR_NAME / COMMITTER_NAME
+    author_email: str = "nanobot@localhost" # GIT_AUTHOR_EMAIL / COMMITTER_EMAIL
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -274,6 +300,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     max_tokens_per_turn: int = 0  # 0 = unlimited; hard cap on total tokens per message turn
     model_router: ModelRouterConfig = Field(default_factory=ModelRouterConfig)
+    sync: SyncConfig = Field(default_factory=SyncConfig)
 
 
 class AgentsConfig(Base):

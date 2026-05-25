@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import subprocess
 from pathlib import Path
 import select
 import sys
@@ -249,6 +250,7 @@ def gateway(
     config: str = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    from loguru import logger
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
@@ -295,6 +297,7 @@ def gateway(
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
         model_router=config.agents.defaults.model_router,
+        sync_config=config.agents.defaults.sync,
     )
 
     # Set cron callback (needs agent)
@@ -407,6 +410,10 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            try:
+                await agent.sync.shutdown()
+            except Exception as e:
+                logger.warning("Workspace sync shutdown failed: {}", e)
     
     asyncio.run(run())
 
@@ -467,6 +474,7 @@ def agent(
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
         model_router=config.agents.defaults.model_router,
+        sync_config=config.agents.defaults.sync,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -972,6 +980,7 @@ def cron_run(
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
         model_router=config.agents.defaults.model_router,
+        sync_config=config.agents.defaults.sync,
     )
 
     store_path = config.workspace_path / "cron" / "jobs.json"
@@ -1125,6 +1134,261 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# Fleet Commands — agent repo lifecycle
+# ============================================================================
+
+
+fleet_app = typer.Typer(help="Manage the agent fleet (repos, deploy keys, registry)")
+app.add_typer(fleet_app, name="fleet")
+
+_DEFAULT_FLEET_ROOT = Path.home() / ".nanobot" / "fleet"
+_DEFAULT_ORG = "phelps-sg"  # TODO: surface as a config / env override
+
+
+def _fleet_root() -> Path:
+    return Path(os.environ.get("NANOBOT_FLEET_ROOT", _DEFAULT_FLEET_ROOT)).expanduser()
+
+
+def _registry() -> "Registry":
+    from nanobot.fleet import Registry
+    return Registry(_fleet_root() / "REGISTRY.md")
+
+
+def _print_agents_table(reg: "Registry") -> None:
+    table = Table(title="Agent Fleet")
+    for col in ("Name", "Repo", "Host", "Created", "Status", "Description"):
+        table.add_column(col)
+    for a in reg.agents:
+        table.add_row(a.name, a.repo, a.host, a.created, a.status, a.description or "")
+    console.print(table)
+
+
+@fleet_app.command("list")
+def fleet_list():
+    """List agents from REGISTRY.md."""
+    reg = _registry()
+    if not reg.agents:
+        console.print("[yellow]No agents registered yet. Use `nanobot fleet new <name>`.[/yellow]")
+        return
+    _print_agents_table(reg)
+
+
+@fleet_app.command("new")
+def fleet_new(
+    name: str = typer.Argument(..., help="Agent name (kebab-case)"),
+    description: str = typer.Option("", "--description", "-d", help="One-line description"),
+    org: str = typer.Option(_DEFAULT_ORG, "--org", help="GitHub org or user"),
+    host: str = typer.Option("", "--host", help="Hostname where this agent will run"),
+    private: bool = typer.Option(True, "--private/--public", help="Repo visibility"),
+):
+    """Create a new agent: gh repo + keypair + deploy key + REGISTRY entry."""
+    from nanobot.fleet import AgentRecord
+    from nanobot.fleet.provision import (
+        ProvisionError, add_deploy_key, check_gh_auth, create_repo, generate_keypair,
+    )
+
+    reg = _registry()
+    if reg.get(name) is not None:
+        console.print(f"[red]Agent {name!r} already registered.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        check_gh_auth()
+    except ProvisionError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    repo_name = f"agent-{name}"
+    key_dir = _fleet_root() / "keys" / name
+
+    try:
+        repo = create_repo(org, repo_name, description=description, private=private)
+        console.print(f"[green]✓[/green] Created repo {repo.full_name}")
+        keypair = generate_keypair(key_dir, comment=f"{name}@nanobot")
+        console.print(f"[green]✓[/green] Generated keypair at {key_dir}")
+        title = f"nanobot:{name}"
+        add_deploy_key(repo.full_name, keypair.public_key, title=title, read_only=False)
+        console.print(f"[green]✓[/green] Registered deploy key {title!r} with write access")
+    except ProvisionError as e:
+        console.print(f"[red]Provisioning failed: {e}[/red]")
+        raise typer.Exit(1)
+
+    reg.add(AgentRecord(
+        name=name, repo=repo.full_name, host=host,
+        status="active", description=description,
+    ))
+    reg.save()
+    console.print(f"[green]✓[/green] REGISTRY.md updated at {reg.path}")
+
+    console.print()
+    console.print("[bold]Config snippet[/bold] for the agent's host:")
+    console.print("[dim]Add this under `agents.defaults.sync` in config.json:[/dim]")
+    console.print(f"""[cyan]
+{{
+  "enabled": true,
+  "push": true,
+  "branch": "main",
+  "remote": "origin"
+}}[/cyan]""")
+    console.print(f"[dim]Then run on the agent's host:[/dim]")
+    console.print(f"[cyan]  nanobot fleet init {name} \\\\\n      --workspace ~/.nanobot-{name}/workspace[/cyan]")
+
+
+@fleet_app.command("archive")
+def fleet_archive(
+    name: str = typer.Argument(..., help="Agent name"),
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Archive an agent's repo and mark it archived in REGISTRY."""
+    from nanobot.fleet.provision import ProvisionError, archive_repo
+
+    reg = _registry()
+    rec = reg.get(name)
+    if rec is None:
+        console.print(f"[red]No agent named {name!r}.[/red]")
+        raise typer.Exit(1)
+    if rec.status == "archived":
+        console.print(f"[yellow]{name} is already archived.[/yellow]")
+        return
+
+    if not confirm:
+        if not typer.confirm(f"Archive {rec.repo}?"):
+            raise typer.Exit(0)
+
+    try:
+        archive_repo(rec.repo)
+    except ProvisionError as e:
+        console.print(f"[red]gh archive failed: {e}[/red]")
+        raise typer.Exit(1)
+
+    reg.update(name, status="archived")
+    reg.save()
+    console.print(f"[green]✓[/green] Archived {rec.repo}. Local keys kept at {_fleet_root() / 'keys' / name}.")
+
+
+@fleet_app.command("rotate-key")
+def fleet_rotate_key(
+    name: str = typer.Argument(..., help="Agent name"),
+):
+    """Generate a new deploy keypair and swap it on GitHub.
+
+    Old key is removed only after the operator confirms the new key is in
+    place on the agent's host.
+    """
+    from nanobot.fleet.provision import (
+        ProvisionError, add_deploy_key, generate_keypair,
+        list_deploy_keys, remove_deploy_key,
+    )
+
+    reg = _registry()
+    rec = reg.get(name)
+    if rec is None:
+        console.print(f"[red]No agent named {name!r}.[/red]")
+        raise typer.Exit(1)
+
+    new_dir = _fleet_root() / "keys" / f"{name}.next"
+    try:
+        keypair = generate_keypair(new_dir, comment=f"{name}@nanobot (rotated)")
+        new_key = add_deploy_key(rec.repo, keypair.public_key,
+                                  title=f"nanobot:{name}:rotating", read_only=False)
+        console.print(f"[green]✓[/green] New deploy key registered (id={new_key.id})")
+    except ProvisionError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Now update the agent's host to use {new_dir}/id[/yellow]")
+    if not typer.confirm("Done? (Removes old key on confirmation.)"):
+        console.print("[yellow]Rotation paused — new key is live but old key is not removed.[/yellow]")
+        return
+
+    try:
+        existing = list_deploy_keys(rec.repo)
+    except ProvisionError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    for key in existing:
+        title = key.get("title", "")
+        if title == f"nanobot:{name}":
+            try:
+                remove_deploy_key(rec.repo, int(key["id"]))
+                console.print(f"[green]✓[/green] Removed old deploy key (id={key['id']})")
+            except ProvisionError as e:
+                console.print(f"[yellow]Warning:[/yellow] failed to remove old key: {e}")
+
+    # Promote .next/ to canonical location.
+    old_dir = _fleet_root() / "keys" / name
+    if old_dir.exists():
+        import shutil
+        shutil.rmtree(old_dir)
+    new_dir.rename(old_dir)
+    console.print(f"[green]✓[/green] Key directory promoted to {old_dir}")
+
+
+@fleet_app.command("init")
+def fleet_init(
+    name: str = typer.Argument(..., help="Agent name (must exist in REGISTRY)"),
+    workspace: Path = typer.Option(..., "--workspace", "-w", help="Workspace dir to initialise"),
+    branch: str = typer.Option("main", "--branch", help="Initial branch name"),
+):
+    """Initialise an agent's workspace as a git repo bound to its fleet repo."""
+    from nanobot.fleet.templates import WORKSPACE_GITIGNORE
+
+    reg = _registry()
+    rec = reg.get(name)
+    if rec is None:
+        console.print(f"[red]No agent named {name!r}. Run `nanobot fleet new {name}` first.[/red]")
+        raise typer.Exit(1)
+    if not rec.repo:
+        console.print(f"[red]Registry entry for {name} has no repo configured.[/red]")
+        raise typer.Exit(1)
+
+    workspace = workspace.expanduser()
+    if not workspace.exists():
+        console.print(f"[red]Workspace {workspace} does not exist. Run `nanobot onboard` first.[/red]")
+        raise typer.Exit(1)
+
+    key_path = _fleet_root() / "keys" / name / "id"
+    if not key_path.exists():
+        console.print(f"[yellow]Warning:[/yellow] no local key at {key_path}. "
+                       "Push auth will rely on system git credentials.")
+
+    gitignore = workspace / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(WORKSPACE_GITIGNORE)
+        console.print(f"[green]✓[/green] Wrote .gitignore")
+
+    ssh_url = f"git@github.com:{rec.repo}.git"
+    _run_in(workspace, ["git", "init", "-b", branch])
+    _run_in(workspace, ["git", "config", "user.name", "nanobot"])
+    _run_in(workspace, ["git", "config", "user.email", f"{name}@nanobot.local"])
+    if key_path.exists():
+        _run_in(workspace, ["git", "config", "core.sshCommand",
+                              f"ssh -i {key_path} -o IdentitiesOnly=yes"])
+    # Idempotent remote setup.
+    try:
+        _run_in(workspace, ["git", "remote", "add", "origin", ssh_url])
+    except subprocess.CalledProcessError:
+        _run_in(workspace, ["git", "remote", "set-url", "origin", ssh_url])
+
+    _run_in(workspace, ["git", "add", "-A"])
+    # `git commit` exits 1 if nothing to commit; tolerate that.
+    res = subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-m", f"init: {name} snapshot"],
+        capture_output=True, text=True,
+    )
+    if res.returncode == 0:
+        _run_in(workspace, ["git", "push", "-u", "origin", branch])
+        console.print(f"[green]✓[/green] Initial commit pushed to {ssh_url} ({branch})")
+    else:
+        console.print(f"[yellow]Nothing to commit; remote left empty.[/yellow]")
+
+
+def _run_in(cwd: Path, args: list[str]) -> None:
+    """Run a subprocess in `cwd`, raising CalledProcessError on failure."""
+    subprocess.run(args, cwd=str(cwd), check=True, capture_output=True, text=True)
 
 
 if __name__ == "__main__":

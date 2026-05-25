@@ -67,8 +67,10 @@ class AgentLoop:
         web_fetch_config: Any | None = None,
         max_tokens_per_turn: int = 0,
         model_router: Any | None = None,
+        sync_config: Any | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, SyncConfig
+        from nanobot.sync import WorkspaceSync
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -86,6 +88,8 @@ class AgentLoop:
         self.web_fetch_config = web_fetch_config
         self.max_tokens_per_turn = max_tokens_per_turn
         self.model_router = model_router
+        self.sync_config = sync_config or SyncConfig()
+        self.sync = WorkspaceSync(workspace, self.sync_config)
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -650,9 +654,20 @@ class AgentLoop:
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
+                # Strip the runtime-context preamble that build_messages injected.
+                # Saving it would bloat history and re-poison future turns with
+                # stale timestamps.
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    continue
+                    parts = content.split("\n\n", 1)
+                    if len(parts) < 2 or not parts[1].strip():
+                        continue  # nothing left after the preamble
+                    entry["content"] = parts[1]
+                    content = entry["content"]
                 if isinstance(content, list):
+                    # Drop a leading runtime-context text part if build_messages added one.
+                    if content and content[0].get("type") == "text" and \
+                       content[0].get("text", "").startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                        content = content[1:]
                     # Strip base64 images and collapse to plain text for history.
                     # Keep only genuine text parts, dropping [image: /path] markers
                     # that duplicate the base64 vision content.
@@ -678,10 +693,13 @@ class AgentLoop:
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
+        ok = await MemoryStore(self.workspace).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
+        if ok and self.sync_config.commit_on_memory:
+            await self.sync.commit(f"memory: consolidate session {session.key}")
+        return ok
 
     async def process_direct(
         self,
