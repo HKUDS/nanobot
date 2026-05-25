@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+
 from nanobot.agent.evolution.git_store import EvolutionGitStore
 from nanobot.agent.evolution.post_task import format_tool_calls_for_prompt
 from nanobot.agent.evolution.proposals import ProposalMeta, ProposalStore
@@ -107,6 +109,65 @@ def _format_trace_summary(trace_store: TraceStore, trace_id: str) -> str:
     return "\n".join(lines)
 
 
+def _format_trace_section(trace_store: TraceStore, trace_id: str) -> str:
+    trace_ids = [item.strip() for item in trace_id.split(",") if item.strip()]
+    if not trace_ids:
+        return "(no linked trace)"
+    if len(trace_ids) == 1:
+        return _format_trace_summary(trace_store, trace_ids[0])
+    blocks = [_format_trace_summary(trace_store, item) for item in trace_ids]
+    return "\n\n".join(blocks)
+
+
+def _format_gepa_meta_lines(meta: ProposalMeta) -> list[str]:
+    if meta.resolved_proposal_kind() != "update":
+        return []
+
+    lines = [f"- Proposal kind: {meta.resolved_proposal_kind()}"]
+    base_skill = meta.base_skill or meta.skill_name
+    lines.append(f"- Base skill: `{base_skill}`")
+    if meta.base_sha:
+        lines.append(f"- Base SHA: `{meta.base_sha}`")
+    if meta.evaluation_score is not None:
+        lines.append(f"- Evaluation score: {meta.evaluation_score:.3f}")
+    return lines
+
+
+def _format_active_skill_diff_summary(
+    store: ProposalStore,
+    meta: ProposalMeta,
+    proposed_md: str,
+    *,
+    max_lines: int = 20,
+) -> str | None:
+    if meta.resolved_proposal_kind() != "update":
+        return None
+    if not store.workspace_skill_exists(meta.skill_name):
+        return "Active skill not found in workspace; diff unavailable."
+
+    active_path = store.skills_root / meta.skill_name / "SKILL.md"
+    try:
+        base_md = active_path.read_text(encoding="utf-8")
+    except OSError:
+        return "Active skill unreadable; diff unavailable."
+
+    diff_lines = list(
+        difflib.unified_diff(
+            base_md.splitlines(),
+            proposed_md.splitlines(),
+            fromfile=f"skills/{meta.skill_name}/SKILL.md",
+            tofile="proposal/SKILL.md",
+            lineterm="",
+            n=1,
+        )
+    )
+    if not diff_lines:
+        return "No changes from the active skill."
+    if len(diff_lines) > max_lines:
+        diff_lines = diff_lines[:max_lines] + ["… (diff truncated)"]
+    return "\n".join(diff_lines)
+
+
 def _format_evolve_log_content(
     commit: CommitInfo,
     diff: str,
@@ -197,6 +258,7 @@ async def cmd_evolve_show(ctx: CommandContext) -> OutboundMessage:
         return _text_reply(ctx, f"Couldn't load proposal `{proposal_id}`.")
 
     meta = detail.meta
+    store = _proposal_store(ctx)
     skill_preview = detail.skill_md
     if len(skill_preview) > _SKILL_MD_PREVIEW_CHARS:
         skill_preview = skill_preview[:_SKILL_MD_PREVIEW_CHARS] + "\n\n… (truncated)"
@@ -210,16 +272,22 @@ async def cmd_evolve_show(ctx: CommandContext) -> OutboundMessage:
         f"- Confidence: {meta.confidence:.2f}",
         f"- Created: {meta.created_at}",
     ]
+    gepa_lines = _format_gepa_meta_lines(meta)
+    if gepa_lines:
+        lines.extend(gepa_lines)
     if meta.applied_at:
         lines.append(f"- Applied: {meta.applied_at}")
     if meta.rejected_at:
         lines.append(f"- Rejected: {meta.rejected_at}")
     if meta.rationale:
         lines.extend(["", "### Rationale", meta.rationale])
+    diff_summary = _format_active_skill_diff_summary(store, meta, detail.skill_md)
+    if diff_summary is not None:
+        lines.extend(["", "### Active skill diff", "```diff", diff_summary, "```"])
     lines.extend([
         "",
         "### Trace",
-        _format_trace_summary(_trace_store(ctx), meta.trace_id),
+        _format_trace_section(_trace_store(ctx), meta.trace_id),
         "",
         "### SKILL.md",
         "```markdown",

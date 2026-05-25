@@ -124,6 +124,35 @@ async def test_evolve_show_includes_trace_summary(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_evolve_show_includes_gepa_metadata_and_diff(tmp_path: Path) -> None:
+    store = ProposalStore(tmp_path)
+    store.write_active_skill("deploy-k8s", _VALID_SKILL_MD)
+    proposal_id = store.write_gepa_proposal(
+        "deploy-k8s",
+        _UPDATED_SKILL_MD,
+        base_sha="a1b2c3d4",
+        evaluation_score=0.912,
+        trace_ids=["trace-gepa-1", "trace-gepa-2"],
+        rationale="Improved rollout checks",
+    )
+
+    out = await cmd_evolve_show(
+        _make_ctx(tmp_path, "/evolve-show", args=proposal_id[:8]),
+    )
+
+    assert "## Proposal `deploy-k8s`" in out.content
+    assert "- Proposal kind: update" in out.content
+    assert "- Base skill: `deploy-k8s`" in out.content
+    assert "- Base SHA: `a1b2c3d4`" in out.content
+    assert "- Evaluation score: 0.912" in out.content
+    assert "### Active skill diff" in out.content
+    assert "kubectl rollout status" in out.content
+    assert "trace-gepa-1" in out.content
+    assert "trace-gepa-2" in out.content
+    assert "Improved rollout checks" in out.content
+
+
+@pytest.mark.asyncio
 async def test_evolve_apply_promotes_skill_and_warms_index(tmp_path: Path) -> None:
     store = ProposalStore(tmp_path)
     proposal_id = _write_pending(store)
