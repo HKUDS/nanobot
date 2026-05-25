@@ -207,6 +207,7 @@ export interface SettingsPayload {
     api_key_hint?: string | null;
     api_base?: string | null;
     default_api_base?: string | null;
+    api_type?: "auto" | "chat_completions" | "responses";
   }>;
   web_search: {
     provider: string;
@@ -393,6 +394,7 @@ export interface ProviderSettingsUpdate {
   provider: string;
   apiKey?: string;
   apiBase?: string;
+  apiType?: "auto" | "chat_completions" | "responses";
 }
 
 export interface WebSearchSettingsUpdate {

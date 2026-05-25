@@ -274,6 +274,47 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return merged
 
 
+def _merge_unique_list(base: Any, override: Any) -> Any:
+    """Append list values while preserving order and removing duplicates."""
+    if not isinstance(base, list) or not isinstance(override, list):
+        return override
+    result: list[Any] = []
+    seen: set[str] = set()
+    for value in [*base, *override]:
+        try:
+            key = json.dumps(value, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            key = repr(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
+def _merge_responses_extra_body(
+    body: dict[str, Any],
+    extra_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge configured Responses API body fields without clobbering tools."""
+    reserved = {"include", "tools"}
+    regular_extra = {key: value for key, value in extra_body.items() if key not in reserved}
+    merged = _deep_merge(body, regular_extra)
+
+    if "include" in extra_body:
+        merged["include"] = _merge_unique_list(body.get("include"), extra_body["include"])
+
+    if "tools" in extra_body:
+        current_tools = body.get("tools")
+        configured_tools = extra_body["tools"]
+        if isinstance(current_tools, list) and isinstance(configured_tools, list):
+            merged["tools"] = [*current_tools, *configured_tools]
+        else:
+            merged["tools"] = configured_tools
+
+    return merged
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -289,12 +330,14 @@ class OpenAICompatProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
+        api_type: str = "auto",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
         self._extra_body = extra_body or {}
+        self._api_type = api_type if spec and spec.name == "openai" else "auto"
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -692,8 +735,14 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None,
     ) -> bool:
         """Use Responses API only for direct OpenAI requests that benefit from it."""
+        if self._api_type == "chat_completions":
+            return False
         if self._spec and self._spec.name not in ("openai", "github_copilot"):
             return False
+        if self._api_type == "responses":
+            # Explicit configuration means Responses is mandatory; do not
+            # consult the circuit breaker or fall back to Chat Completions.
+            return True
         if self._spec is None or self._spec.name != "github_copilot":
             if not _is_direct_openai_base(self._effective_base):
                 return False
@@ -707,7 +756,14 @@ class OpenAICompatProvider(LLMProvider):
         if not wants:
             return False
 
-        # Circuit breaker: skip after repeated failures, probe periodically.
+        return self._responses_circuit_allows_probe(model, reasoning_effort)
+
+    def _responses_circuit_allows_probe(
+        self,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> bool:
+        """Return False when the Responses API circuit breaker is open."""
         key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         failures = self._responses_failures.get(key, 0)
         if failures >= _RESPONSES_FAILURE_THRESHOLD:
@@ -798,6 +854,10 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
             body["tool_choice"] = tool_choice or "auto"
+
+        extra_body = getattr(self, "_extra_body", {})
+        if extra_body:
+            body = _merge_responses_extra_body(body, extra_body)
 
         return body
 
@@ -1269,6 +1329,8 @@ class OpenAICompatProvider(LLMProvider):
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
                         raise
+                    if self._api_type == "responses":
+                        raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
@@ -1341,6 +1403,8 @@ class OpenAICompatProvider(LLMProvider):
                         # Copilot gateway exposes GPT-5/o-series only via /responses;
                         # falling back to /chat/completions cannot succeed and would
                         # hide the real error.
+                        raise
+                    if self._api_type == "responses":
                         raise
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise

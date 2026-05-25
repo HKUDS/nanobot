@@ -30,7 +30,7 @@ from nanobot.channels.websocket import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.webui.settings_api import settings_payload
+from nanobot.webui.settings_api import settings_payload, update_provider_settings
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -1349,6 +1349,37 @@ def test_settings_payload_normalizes_camel_case_provider(
     body = settings_payload()
 
     assert body["agent"]["provider"] == "minimax_anthropic"
+
+
+def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_type = "responses"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    body = settings_payload()
+    providers = {provider["name"]: provider for provider in body["providers"]}
+
+    assert providers["openai"]["api_type"] == "responses"
+    assert "api_type" not in providers["custom"]
+
+
+def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    body = update_provider_settings({
+        "provider": ["custom"],
+        "api_base": ["https://example.test/v1"],
+        "api_type": ["responses"],
+    })
+
+    assert body["providers"]
+    config = load_config(config_path)
+    assert config.providers.custom.api_base == "https://example.test/v1"
+    assert config.providers.custom.api_type == "auto"
 
 
 @pytest.mark.asyncio
