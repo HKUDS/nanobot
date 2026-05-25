@@ -29,6 +29,11 @@ LENGTH_RECOVERY_PROMPT = (
     "— no recap, no apology. Break remaining work into smaller steps if needed."
 )
 
+SUSTAINED_GOAL_CONTINUE_PROMPT = (
+    "You have an active sustained goal. Please continue working toward the "
+    "objective using your tools, or call complete_goal if the work is truly finished."
+)
+
 
 def empty_tool_result_message(tool_name: str) -> str:
     """Short prompt-safe marker for tools that completed without visible output."""
@@ -63,6 +68,11 @@ def build_finalization_retry_message() -> dict[str, str]:
 def build_length_recovery_message() -> dict[str, str]:
     """Prompt the model to continue after hitting output token limit."""
     return {"role": "user", "content": LENGTH_RECOVERY_PROMPT}
+
+
+def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
+    """Prompt the model to continue when a sustained goal is still active."""
+    return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
 
 
 def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:
