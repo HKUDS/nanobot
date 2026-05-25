@@ -136,11 +136,12 @@ class EvolutionTraceConfig(Base):
 class EvolutionPostTaskConfig(Base):
     """Turn 结束后 skill 创建（MVP 仅 create，update 走 GEPA）。"""
 
-    min_tool_calls: int = Field(default=5, ge=1)  # 单 turn 工具调用数达到此值才考虑触发
-    cooldown_minutes: int = Field(default=5, ge=0)  # 同 session 两次 PostTask 的最小间隔
-    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)  # LLM 判定 create 的置信度下限
+    min_tool_calls: int = Field(default=3, ge=1)  # 单 turn 工具调用数达到此值才考虑触发
+    cooldown_minutes: int = Field(default=10, ge=0)  # 同 session 两次 PostTask 的最小间隔（0 = 不冷却）
+    min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)  # LLM 判定 create 的置信度下限
     auto_apply: bool = False  # true = 直接写入 skills/；false = 提案 + /evolve-apply 审核
     model: str | None = None  # PostTask 路由 LLM；None 时使用主 agent provider
+    llm_timeout_s: float = Field(default=120.0, gt=0, le=300)  # decide + skill-gen LLM 超时（秒）
     proposal_retention_days: int = Field(default=30, ge=1)  # 未 apply 的提案过期天数
 
 
@@ -156,10 +157,11 @@ class EvolutionGepaConfig(Base):
 class EvolutionConfig(Base):
     """Hermes 式自进化：PostTask 创建 skill + GEPA 离线优化。
 
-    默认关闭；在 workspace config 中显式开启。详见 ``.agent/hermes-design.md``。
+    默认开启 trace + PostTask；生产环境可在 config 中设 ``enable: false`` 关闭。
+    详见 ``.agent/hermes-design.md``。
     """
 
-    enable: bool = False  # 总开关：开启后记录 trace，并按子配置运行 PostTask / GEPA
+    enable: bool = True  # 总开关：开启后记录 trace，并按子配置运行 PostTask / GEPA
 
     trace: EvolutionTraceConfig = Field(default_factory=EvolutionTraceConfig)
     post_task: EvolutionPostTaskConfig = Field(default_factory=EvolutionPostTaskConfig)

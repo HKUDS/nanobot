@@ -19,11 +19,12 @@ def test_evolution_trace_config_defaults() -> None:
 
 def test_evolution_post_task_config_defaults() -> None:
     cfg = EvolutionPostTaskConfig()
-    assert cfg.min_tool_calls == 5
-    assert cfg.cooldown_minutes == 5
-    assert cfg.min_confidence == 0.7
+    assert cfg.min_tool_calls == 3
+    assert cfg.cooldown_minutes == 10
+    assert cfg.min_confidence == 0.8
     assert cfg.auto_apply is False
     assert cfg.model is None
+    assert cfg.llm_timeout_s == 120.0
     assert cfg.proposal_retention_days == 30
 
 
@@ -35,16 +36,19 @@ def test_evolution_gepa_config_defaults() -> None:
     assert cfg.max_budget_usd == 10.0
 
 
-def test_evolution_config_defaults_are_conservative() -> None:
+def test_evolution_config_defaults() -> None:
     cfg = EvolutionConfig()
 
-    assert cfg.enable is False
+    assert cfg.enable is True
     assert cfg.trace.retention_days == 30
-    assert cfg.post_task.min_tool_calls == 5
+    assert cfg.post_task.min_tool_calls == 3
+    assert cfg.post_task.cooldown_minutes == 10
+    assert cfg.post_task.min_confidence == 0.8
+    assert cfg.post_task.llm_timeout_s == 120.0
     assert cfg.post_task.auto_apply is False
     assert cfg.gepa.enable is False
-    assert cfg.recording_enabled() is False
-    assert cfg.post_task_enabled() is False
+    assert cfg.recording_enabled() is True
+    assert cfg.post_task_enabled() is True
     assert cfg.gepa_enabled() is False
 
 
@@ -98,7 +102,7 @@ def test_evolution_config_serializes_nested_camel_case() -> None:
     assert dumped["enable"] is True
     assert dumped["trace"]["retentionDays"] == 30
     assert dumped["postTask"]["autoApply"] is True
-    assert dumped["postTask"]["minToolCalls"] == 5
+    assert dumped["postTask"]["minToolCalls"] == 3
     assert dumped["gepa"]["enable"] is True
     assert dumped["gepa"]["maxBudgetUsd"] == 10.0
 
@@ -107,7 +111,7 @@ def test_agent_defaults_includes_evolution() -> None:
     defaults = AgentDefaults()
 
     assert isinstance(defaults.evolution, EvolutionConfig)
-    assert defaults.evolution.enable is False
+    assert defaults.evolution.enable is True
 
 
 def test_agent_defaults_nested_evolution_from_json() -> None:

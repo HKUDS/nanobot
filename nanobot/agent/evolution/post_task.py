@@ -21,7 +21,7 @@ from nanobot.agent.evolution.proposals import (
     validate_skill_md,
 )
 from nanobot.config.schema import EvolutionConfig
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.utils.prompt_templates import render_template
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
@@ -29,9 +29,10 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _UPDATE_ACTIONS = frozenset({"update_skill", "update", "modify_skill", "modify"})
 
-POST_TASK_LLM_TIMEOUT_S = 30.0
-POST_TASK_LLM_MAX_TOKENS = 512
+POST_TASK_LLM_TIMEOUT_S = 120.0
+POST_TASK_LLM_MAX_TOKENS = 2048  # small JSON; 512 can truncate on reasoning models (finish_reason=length)
 POST_TASK_SKILL_LLM_MAX_TOKENS = 4096
+_TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
 
 PostTaskAction = Literal["none", "create_skill"]
 
@@ -53,10 +54,22 @@ class PostTaskDecision:
     skill_name: str = ""
     rationale: str = ""
     confidence: float = 0.0
+    parsed: bool = False  # True when model output was valid JSON (even if action is none)
 
     @classmethod
-    def none(cls, *, rationale: str = "") -> PostTaskDecision:
-        return cls(action="none", rationale=rationale)
+    def none(
+        cls,
+        *,
+        rationale: str = "",
+        confidence: float = 0.0,
+        parsed: bool = False,
+    ) -> PostTaskDecision:
+        return cls(
+            action="none",
+            rationale=rationale,
+            confidence=confidence,
+            parsed=parsed,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,21 +215,25 @@ def parse_post_task_response(
         return PostTaskDecision.none()
 
     action = _normalize_action(data.get("action"))
-    if action in _UPDATE_ACTIONS:
-        logger.info("PostTask LLM requested update; deferred to GEPA")
-        return PostTaskDecision.none(rationale="update deferred to GEPA")
-
     rationale = str(data.get("rationale") or "").strip()
     confidence = _parse_confidence(data.get("confidence"))
     if confidence is None:
         confidence = 0.0
 
+    if action in _UPDATE_ACTIONS:
+        logger.info("PostTask LLM requested update; deferred to GEPA")
+        return PostTaskDecision.none(
+            rationale="update deferred to GEPA",
+            confidence=confidence,
+            parsed=True,
+        )
+
     if action != "create_skill":
-        return PostTaskDecision.none(rationale=rationale)
+        return PostTaskDecision.none(rationale=rationale, confidence=confidence, parsed=True)
 
     skill_name = _normalize_skill_name(data.get("skill_name"))
     if not skill_name or not _SKILL_NAME_RE.fullmatch(skill_name):
-        return PostTaskDecision.none(rationale=rationale)
+        return PostTaskDecision.none(rationale=rationale, confidence=confidence, parsed=True)
 
     if confidence < min_confidence:
         logger.info(
@@ -224,13 +241,14 @@ def parse_post_task_response(
             confidence,
             min_confidence,
         )
-        return PostTaskDecision.none(rationale=rationale)
+        return PostTaskDecision.none(rationale=rationale, confidence=confidence, parsed=True)
 
     return PostTaskDecision(
         action="create_skill",
         skill_name=skill_name,
         rationale=rationale,
         confidence=confidence,
+        parsed=True,
     )
 
 
@@ -266,7 +284,7 @@ class PostTaskEvolver:
         *,
         cooldown_store: PostTaskCooldownStore | None = None,
         proposal_store: ProposalStore | None = None,
-        llm_timeout_s: float = POST_TASK_LLM_TIMEOUT_S,
+        llm_timeout_s: float | None = None,
         llm_max_tokens: int = POST_TASK_LLM_MAX_TOKENS,
         skill_llm_max_tokens: int = POST_TASK_SKILL_LLM_MAX_TOKENS,
     ) -> None:
@@ -275,7 +293,9 @@ class PostTaskEvolver:
         self._provider = provider
         self._cooldown = cooldown_store or PostTaskCooldownStore(self._workspace)
         self._proposals = proposal_store or ProposalStore(self._workspace)
-        self._llm_timeout_s = llm_timeout_s
+        self._llm_timeout_s = (
+            llm_timeout_s if llm_timeout_s is not None else config.post_task.llm_timeout_s
+        )
         self._llm_max_tokens = llm_max_tokens
         self._skill_llm_max_tokens = skill_llm_max_tokens
 
@@ -346,44 +366,101 @@ class PostTaskEvolver:
         model = post_task.model
 
         logger.info(
-            "PostTask decide [start]: trace_id={} session={} model={} tool_calls={}",
+            "PostTask decide [start]: trace_id={} session={} model={} tool_calls={} timeout={}s",
             trace.trace_id,
             trace.session_key,
             model or "(provider default)",
             trace.tool_call_count,
+            self._llm_timeout_s,
         )
 
-        try:
-            async with asyncio.timeout(self._llm_timeout_s):
-                response = await self._provider.chat_with_retry(
-                    messages=messages,
-                    model=model,
-                    max_tokens=self._llm_max_tokens,
-                    temperature=0,
-                    retry_mode="standard",
-                )
-        except TimeoutError:
-            logger.warning("PostTask LLM decision timed out after {}s", self._llm_timeout_s)
-            return PostTaskDecision.none()
-        except Exception as exc:
-            logger.warning("PostTask LLM decision failed: {}", exc)
+        max_tokens = self._llm_max_tokens
+        response = await self._chat_post_task_decide(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+        )
+        if response is None:
             return PostTaskDecision.none()
 
         if response.finish_reason == "error":
             logger.warning("PostTask LLM provider error: {}", response.content)
             return PostTaskDecision.none()
 
+        raw_content = response.content or ""
+        if (
+            response.finish_reason in _TRUNCATED_FINISH_REASONS
+            and not raw_content.strip()
+        ):
+            logger.warning(
+                "PostTask decide truncated with empty body (max_tokens={}); retrying",
+                max_tokens,
+            )
+            response = await self._chat_post_task_decide(
+                messages=messages,
+                model=model,
+                max_tokens=min(max_tokens * 4, 4096),
+            )
+            if response is None:
+                return PostTaskDecision.none()
+            raw_content = response.content or ""
+
+        logger.info(
+            "PostTask decide [response]: finish_reason={} has_content={} content={!r}",
+            response.finish_reason,
+            bool(raw_content.strip()),
+            raw_content[:500],
+        )
+
+        if response.finish_reason in _TRUNCATED_FINISH_REASONS and not parse_post_task_response(
+            raw_content,
+            min_confidence=0.0,
+        ).parsed:
+            logger.warning(
+                "PostTask decide still truncated/unparseable after retry (finish_reason={})",
+                response.finish_reason,
+            )
+
         decision = parse_post_task_response(
-            response.content,
+            raw_content,
             min_confidence=post_task.min_confidence,
         )
         logger.info(
-            "PostTask decide [done]: action={} skill_name={!r} confidence={:.2f}",
+            "PostTask decide [done]: action={} skill_name={!r} confidence={:.2f} "
+            "parsed={} rationale={!r}",
             decision.action,
             decision.skill_name,
             decision.confidence,
+            decision.parsed,
+            (decision.rationale or "")[:200],
         )
         return decision
+
+    async def _chat_post_task_decide(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        model: str | None,
+        max_tokens: int,
+    ) -> LLMResponse | None:
+        """Call the decide LLM; return ``None`` on timeout/error."""
+        if self._provider is None:
+            return None
+        try:
+            async with asyncio.timeout(self._llm_timeout_s):
+                return await self._provider.chat_with_retry(
+                    messages=messages,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=0,
+                    retry_mode="standard",
+                )
+        except TimeoutError:
+            logger.warning("PostTask LLM decision timed out after {}s", self._llm_timeout_s)
+            return None
+        except Exception as exc:
+            logger.warning("PostTask LLM decision failed: {}", exc)
+            return None
 
     async def generate_skill_content(
         self,
@@ -396,6 +473,13 @@ class PostTaskEvolver:
             return None
 
         post_task = self._config.post_task
+        model = post_task.model
+        logger.info(
+            "PostTask skill-gen [start]: skill={!r} model={}",
+            decision.skill_name,
+            model or "(provider default)",
+        )
+
         existing = self._proposals.list_workspace_skill_summaries()
         existing_text = "\n".join(f"- {line}" for line in existing) if existing else "(none)"
 
@@ -416,27 +500,49 @@ class PostTaskEvolver:
             {"role": "user", "content": user_prompt},
         ]
 
-        try:
-            async with asyncio.timeout(self._llm_timeout_s):
-                response = await self._provider.chat_with_retry(
-                    messages=messages,
-                    model=post_task.model,
-                    max_tokens=self._skill_llm_max_tokens,
-                    temperature=0,
-                    retry_mode="standard",
-                )
-        except TimeoutError:
-            logger.warning("PostTask skill generation timed out after {}s", self._llm_timeout_s)
-            return None
-        except Exception as exc:
-            logger.warning("PostTask skill generation failed: {}", exc)
+        max_tokens = self._skill_llm_max_tokens
+        response = await self._chat_post_task_decide(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+        )
+        if response is None:
             return None
 
         if response.finish_reason == "error":
             logger.warning("PostTask skill generation provider error: {}", response.content)
             return None
 
-        return normalize_skill_md_content(response.content)
+        raw_content = response.content or ""
+        if (
+            response.finish_reason in _TRUNCATED_FINISH_REASONS
+            and not raw_content.strip()
+        ):
+            logger.warning(
+                "PostTask skill-gen truncated with empty body (max_tokens={}); retrying",
+                max_tokens,
+            )
+            response = await self._chat_post_task_decide(
+                messages=messages,
+                model=model,
+                max_tokens=min(max_tokens * 2, 8192),
+            )
+            if response is None:
+                return None
+            raw_content = response.content or ""
+
+        logger.info(
+            "PostTask skill-gen [response]: finish_reason={} has_content={} chars={}",
+            response.finish_reason,
+            bool(raw_content.strip()),
+            len(raw_content),
+        )
+
+        skill_md = normalize_skill_md_content(raw_content)
+        if not skill_md:
+            logger.warning("PostTask skill-gen produced empty content after normalize")
+            return None
+        return skill_md
 
     async def create_proposal(
         self,
@@ -448,6 +554,8 @@ class PostTaskEvolver:
             return PostTaskCreateResult.skipped("not a create_skill decision")
 
         skill_name = decision.skill_name
+        logger.info("PostTask create [start]: skill={!r}", skill_name)
+
         dedup_reason = self._proposals.check_dedup(skill_name)
         if dedup_reason:
             logger.info("PostTask create skipped (dedup): {} for {!r}", dedup_reason, skill_name)
@@ -455,14 +563,16 @@ class PostTaskEvolver:
 
         skill_md = await self.generate_skill_content(trace, decision)
         if not skill_md:
+            logger.warning("PostTask create skipped for {!r}: skill generation failed", skill_name)
             return PostTaskCreateResult.skipped("skill generation failed", skill_name=skill_name)
 
         validation_error = validate_skill_md(skill_md, skill_name=skill_name)
         if validation_error:
             logger.warning(
-                "PostTask skill validation failed for {!r}: {}",
+                "PostTask skill validation failed for {!r}: {} (preview={!r})",
                 skill_name,
                 validation_error,
+                skill_md[:300],
             )
             return PostTaskCreateResult.skipped(validation_error, skill_name=skill_name)
 

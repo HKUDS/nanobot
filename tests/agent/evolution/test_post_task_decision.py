@@ -66,6 +66,27 @@ def test_parse_none_action() -> None:
     decision = parse_post_task_response(raw, min_confidence=0.7)
     assert decision.action == "none"
     assert decision.skill_name == ""
+    assert decision.confidence == pytest.approx(0.95)
+    assert decision.parsed is True
+    assert decision.rationale == "one-off"
+
+
+def test_parse_none_preserves_confidence_when_below_min_for_create() -> None:
+    raw = (
+        '{"action":"create_skill","skill_name":"k8s-deploy","rationale":"maybe",'
+        '"confidence":0.5}'
+    )
+    decision = parse_post_task_response(raw, min_confidence=0.7)
+    assert decision.action == "none"
+    assert decision.confidence == pytest.approx(0.5)
+    assert decision.parsed is True
+
+
+def test_parse_malformed_json_sets_parsed_false() -> None:
+    decision = parse_post_task_response("not json", min_confidence=0.7)
+    assert decision.action == "none"
+    assert decision.parsed is False
+    assert decision.confidence == 0.0
 
 
 def test_parse_update_intent_deferred_to_none() -> None:
@@ -96,9 +117,10 @@ def test_parse_invalid_skill_name_becomes_none() -> None:
     assert decision.action == "none"
 
 
-def test_parse_malformed_json_becomes_none() -> None:
-    assert parse_post_task_response("not json", min_confidence=0.7).action == "none"
-    assert parse_post_task_response(None, min_confidence=0.7).action == "none"
+def test_parse_empty_content_sets_parsed_false() -> None:
+    decision = parse_post_task_response(None, min_confidence=0.7)
+    assert decision.action == "none"
+    assert decision.parsed is False
 
 
 def test_format_tool_calls_for_prompt() -> None:
@@ -150,7 +172,7 @@ def test_decide_passes_prompt_and_llm_options(tmp_path: Path) -> None:
     provider.chat_with_retry.assert_awaited_once()
     call_kwargs = provider.chat_with_retry.await_args.kwargs
     assert call_kwargs["temperature"] == 0
-    assert call_kwargs["max_tokens"] == 512
+    assert call_kwargs["max_tokens"] == 2048
     user_content = call_kwargs["messages"][1]["content"]
     assert "deploy nginx to k8s" in user_content
     assert "github" in user_content

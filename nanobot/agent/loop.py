@@ -905,8 +905,8 @@ class AgentLoop:
 
             result = await evolver.create_proposal(trace, decision)
             if not result.created:
-                logger.info(
-                    "PostTask create skipped for {!r}: {}",
+                logger.warning(
+                    "PostTask create failed for {!r}: {}",
                     decision.skill_name,
                     result.skip_reason,
                 )

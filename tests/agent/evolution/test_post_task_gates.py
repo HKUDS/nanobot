@@ -64,7 +64,7 @@ def test_should_trigger_skips_subagent(tmp_path: Path) -> None:
 
 def test_should_trigger_skips_low_tool_call_count(tmp_path: Path) -> None:
     evolver = PostTaskEvolver(tmp_path, EvolutionConfig(enable=True))
-    assert evolver.should_trigger(_trace(tool_call_count=4), is_subagent=False) == SKIP_TOOL_CALLS_LOW
+    assert evolver.should_trigger(_trace(tool_call_count=2), is_subagent=False) == SKIP_TOOL_CALLS_LOW
 
 
 def test_should_trigger_respects_custom_min_tool_calls(tmp_path: Path) -> None:
