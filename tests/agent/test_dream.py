@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.utils.gitstore import LineAge
 
 
@@ -99,32 +98,31 @@ class TestDreamRun:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert all(e["cursor"] > 0 for e in entries)
 
-    async def test_skill_phase_uses_builtin_skill_creator_path(self, dream, mock_provider, mock_runner, store):
-        """Dream should point skill creation guidance at the builtin skill-creator template."""
+    async def test_dream_tools_exclude_skill_write(self, dream):
+        """Dream must not register write_file — skills are created by evolution, not Dream."""
+        assert dream._tools.get("write_file") is None
+        assert dream._tools.get("read_file") is not None
+        assert dream._tools.get("edit_file") is not None
+
+    async def test_dream_phase_prompts_exclude_skill_creation(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """Dream prompts should not mention [SKILL] or skill-creator guidance."""
         store.append_history("Repeated workflow one")
         store.append_history("Repeated workflow two")
-        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKILL] test-skill: test description")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
 
-        spec = mock_runner.run.call_args[0][0]
-        system_prompt = spec.initial_messages[0]["content"]
-        expected = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
-        assert expected in system_prompt
-
-    async def test_skill_write_tool_accepts_workspace_relative_skill_path(self, dream, store):
-        """Dream skill creation should allow skills/<name>/SKILL.md relative to workspace root."""
-        write_tool = dream._tools.get("write_file")
-        assert write_tool is not None
-
-        result = await write_tool.execute(
-            path="skills/test-skill/SKILL.md",
-            content="---\nname: test-skill\ndescription: Test\n---\n",
-        )
-
-        assert "Successfully wrote" in result
-        assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
+        phase1_system = mock_provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
+        phase2_system = mock_runner.run.call_args[0][0].initial_messages[0]["content"]
+        phase2_user = mock_runner.run.call_args[0][0].initial_messages[1]["content"]
+        assert "[SKILL]" not in phase1_system
+        assert "[SKILL]" not in phase2_system
+        assert "skill-creator" not in phase2_system
+        assert "Skill creation rules" not in phase2_system
+        assert "## Existing Skills" not in phase2_user
 
     async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
         """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
