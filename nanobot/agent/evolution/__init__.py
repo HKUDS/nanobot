@@ -1,6 +1,22 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
 from nanobot.agent.evolution.deps import evolution_extra_available, require_evolution_extra
+from nanobot.agent.evolution.gepa_dataset import (
+    DEFAULT_MIN_TRACES,
+    SKIP_INSUFFICIENT_TRACES,
+    GepaDatasetResult,
+    GepaEvalExample,
+    build_gepa_dataset,
+    trace_relates_to_skill,
+)
+from nanobot.agent.evolution.gepa_skill_module import (
+    GepaSkillModule,
+    GepaSkillState,
+    SkillMdParts,
+    extract_body_from_dspy_module,
+    merge_skill_md,
+    split_skill_md,
+)
 from nanobot.agent.evolution.gepa_status import (
     GEPA_SKIP_ALREADY_RUNNING,
     GepaRunLock,
@@ -33,9 +49,14 @@ from nanobot.agent.evolution.trace_recorder import TraceRecorder, build_turn_tra
 from nanobot.agent.evolution.trace_store import TraceStore
 
 __all__ = [
+    "DEFAULT_MIN_TRACES",
     "EvolutionGitStore",
     "GEPA_SKIP_ALREADY_RUNNING",
+    "GepaDatasetResult",
+    "GepaEvalExample",
     "GepaRunLock",
+    "GepaSkillModule",
+    "GepaSkillState",
     "GepaRunPhase",
     "GepaRunStatus",
     "GepaRunStore",
@@ -50,16 +71,23 @@ __all__ = [
     "ProposalKind",
     "ProposalMeta",
     "ProposalStore",
+    "SKIP_INSUFFICIENT_TRACES",
+    "SkillMdParts",
     "ToolCallRecord",
     "TraceRecorder",
     "TraceStore",
     "TurnTrace",
     "TurnTraceOutcome",
     "build_turn_trace",
+    "build_gepa_dataset",
     "evolution_extra_available",
+    "extract_body_from_dspy_module",
+    "merge_skill_md",
     "normalize_skill_md_content",
     "parse_post_task_response",
     "require_evolution_extra",
     "resolve_post_task_provider",
+    "split_skill_md",
+    "trace_relates_to_skill",
     "validate_skill_md",
 ]
