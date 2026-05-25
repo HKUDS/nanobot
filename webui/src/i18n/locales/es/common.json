@@ -63,7 +63,8 @@
     "language": {
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
-    }
+    },
+    "apps": "Apps"
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -83,7 +84,8 @@
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Apps"
     },
     "sections": {
       "interface": "Interfaz",
@@ -101,7 +103,8 @@
       "capabilities": "Capacidades",
       "integrations": "Integrations",
       "cliApps": "Apps CLI",
-      "mcp": "MCP"
+      "mcp": "Servicios MCP",
+      "apps": "Apps"
     },
     "rows": {
       "theme": "Tema",
@@ -380,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
+    },
+    "apps": {
+      "description": "Añade CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Todo",
+      "filterCli": "Apps CLI",
+      "filterMcp": "Servicios MCP",
+      "enabledSummary": "{{count}} activados",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Buscar apps",
+      "featured": "Destacadas",
+      "loading": "Cargando apps...",
+      "empty": "Ninguna app coincide con este filtro."
     }
   },
   "chat": {
@@ -607,10 +624,10 @@
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
-        "ariaLabel": "Apps y MCP",
-        "label": "Plugins",
+        "ariaLabel": "Apps",
+        "label": "Apps",
         "cliGroup": "Apps CLI",
-        "mcpGroup": "Servidores MCP",
+        "mcpGroup": "Servicios MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Usar @{{name}} como app CLI local",

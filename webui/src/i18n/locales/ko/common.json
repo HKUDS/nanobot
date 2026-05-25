@@ -63,7 +63,8 @@
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
-    }
+    },
+    "apps": "앱"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -83,7 +84,8 @@
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 앱",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "앱"
     },
     "sections": {
       "interface": "인터페이스",
@@ -101,7 +103,8 @@
       "capabilities": "기능",
       "integrations": "Integrations",
       "cliApps": "CLI 앱",
-      "mcp": "MCP"
+      "mcp": "MCP 서비스",
+      "apps": "앱"
     },
     "rows": {
       "theme": "테마",
@@ -380,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
+    },
+    "apps": {
+      "description": "채팅에서 nanobot이 사용할 수 있는 앱 CLI와 MCP 서비스를 추가합니다.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "전체",
+      "filterCli": "CLI 앱",
+      "filterMcp": "MCP 서비스",
+      "enabledSummary": "{{count}}개 활성화됨",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "앱 검색",
+      "featured": "추천",
+      "loading": "앱 불러오는 중...",
+      "empty": "이 필터와 일치하는 앱이 없습니다."
     }
   },
   "chat": {
@@ -607,10 +624,10 @@
         "io": "이 파일을 읽을 수 없습니다"
       },
       "mentions": {
-        "ariaLabel": "앱 및 MCP",
-        "label": "플러그인",
+        "ariaLabel": "앱",
+        "label": "앱",
         "cliGroup": "CLI 앱",
-        "mcpGroup": "MCP 서버",
+        "mcpGroup": "MCP 서비스",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}}을 로컬 CLI 앱으로 사용",

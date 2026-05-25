@@ -43,6 +43,15 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
     assert browserbase["install_supported"] is True
     assert browserbase["required_fields"][0]["configured"] is False
     assert "browserbaseApiKey" not in browserbase["connection_summary"]
+    manifest = browserbase["manifest"]
+    assert manifest["schema"] == "agent-app.v1"
+    assert manifest["id"] == "browserbase"
+    assert manifest["source"] == "mcp-preset"
+    assert manifest["capabilities"][0]["type"] == "mcp"
+    assert manifest["capabilities"][0]["transport"] == "streamableHttp"
+    assert manifest["install"]["strategy"] == "config"
+    assert manifest["remove"]["verification"] == ["config_absent"]
+    assert manifest["trust"]["review_status"] == "builtin_preset"
 
 
 def test_enable_browserbase_writes_scrubbed_config_payload(
@@ -61,6 +70,8 @@ def test_enable_browserbase_writes_scrubbed_config_payload(
 
     assert payload["requires_restart"] is True
     assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["installed"] is True
+    assert payload["last_action"]["verification"] == ["config_present"]
     preset = next(row for row in payload["presets"] if row["name"] == "browserbase")
     assert preset["installed"] is True
     assert preset["configured"] is True
@@ -149,12 +160,41 @@ def test_enable_firecrawl_writes_scrubbed_env(tmp_path, monkeypatch: pytest.Monk
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
     mcp_presets_action("enable", {"name": ["playwright"]})
+    managed_cwd = tmp_path / "mcp" / "playwright"
+    (managed_cwd / "cache.txt").write_text("managed runtime data", encoding="utf-8")
 
     payload = mcp_presets_action("remove", {"name": ["playwright"]})
 
     assert payload["requires_restart"] is True
+    assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["removed"] is True
+    assert payload["last_action"]["managed_paths_removed"] == ["runtime:mcp/playwright"]
+    assert not managed_cwd.exists()
     config = load_config()
     assert "playwright" not in config.tools.mcp_servers
+
+
+def test_remove_custom_mcp_server_preserves_user_cwd(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_config(tmp_path, monkeypatch)
+    user_cwd = tmp_path / "user-cwd"
+    user_cwd.mkdir()
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["internal-docs"],
+            "transport": ["stdio"],
+            "command": ["node"],
+            "args": ['["server.js"]'],
+            "cwd": [str(user_cwd)],
+        },
+    )
+
+    payload = mcp_presets_action("remove", {"name": ["internal-docs"]})
+
+    assert payload["last_action"]["ok"] is True
+    assert user_cwd.exists()
+    config = load_config()
+    assert "internal-docs" not in config.tools.mcp_servers
 
 
 def test_test_mcp_preset_reports_missing_dependency(
@@ -282,6 +322,10 @@ def test_custom_mcp_server_writes_config_and_catalog_row(
     assert row["source"] == "custom"
     assert row["transport"] == "stdio"
     assert row["connection_summary"] == "node server.js"
+    assert row["manifest"]["schema"] == "agent-app.v1"
+    assert row["manifest"]["source"] == "mcp-custom"
+    assert row["manifest"]["capabilities"][0]["command"] == "node"
+    assert "server.js" not in str(row["manifest"])
     assert "docs-secret-value" not in str(payload)
     config = load_config()
     assert config.tools.mcp_servers["internal-docs"].args == ["server.js"]
