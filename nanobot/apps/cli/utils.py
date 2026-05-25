@@ -46,7 +46,7 @@ def _cli_app_runtime_lines(
     if "@" not in text:
         return []
     try:
-        from nanobot.cli_apps import CliAppManager
+        from nanobot.apps.cli import CliAppManager
 
         mentions = CliAppManager(workspace=workspace).mentioned_installed_apps(text)
     except Exception:

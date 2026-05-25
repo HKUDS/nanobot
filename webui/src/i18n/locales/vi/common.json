@@ -63,7 +63,8 @@
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
-    }
+    },
+    "apps": "Ứng dụng"
   },
   "settings": {
     "backToChat": "Quay lại trò chuyện",
@@ -83,7 +84,8 @@
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Ứng dụng CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Ứng dụng"
     },
     "sections": {
       "interface": "Giao diện",
@@ -101,7 +103,8 @@
       "capabilities": "Khả năng",
       "integrations": "Integrations",
       "cliApps": "Ứng dụng CLI",
-      "mcp": "MCP"
+      "mcp": "Dịch vụ MCP",
+      "apps": "Ứng dụng"
     },
     "rows": {
       "theme": "Giao diện",
@@ -380,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
+    },
+    "apps": {
+      "description": "Thêm CLI ứng dụng và dịch vụ MCP để nanobot dùng trong trò chuyện.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Tất cả",
+      "filterCli": "Ứng dụng CLI",
+      "filterMcp": "Dịch vụ MCP",
+      "enabledSummary": "{{count}} đã bật",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Tìm ứng dụng",
+      "featured": "Nổi bật",
+      "loading": "Đang tải ứng dụng...",
+      "empty": "Không có ứng dụng nào khớp với bộ lọc này."
     }
   },
   "chat": {
@@ -607,10 +624,10 @@
         "io": "Không thể đọc tệp này"
       },
       "mentions": {
-        "ariaLabel": "Ứng dụng và MCP",
-        "label": "Plugin",
+        "ariaLabel": "Ứng dụng",
+        "label": "Ứng dụng",
         "cliGroup": "Ứng dụng CLI",
-        "mcpGroup": "Máy chủ MCP",
+        "mcpGroup": "Dịch vụ MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",

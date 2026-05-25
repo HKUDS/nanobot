@@ -4,7 +4,7 @@ import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Sidebar } from "@/components/Sidebar";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
-import { SettingsView } from "@/components/settings/SettingsView";
+import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
@@ -46,7 +46,7 @@ const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings";
+type ShellView = "chat" | "settings" | "apps";
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
   return Date.now() + Math.max(0, expiresInSeconds) * 1000;
@@ -325,6 +325,7 @@ function Shell({
     useSidebarState(sessions, !loading);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [view, setView] = useState<ShellView>("chat");
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>("overview");
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -588,9 +589,17 @@ function Shell({
     [onSelectChat],
   );
 
-  const onOpenSettings = useCallback(() => {
+  const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
+    setSettingsInitialSection(section);
     setView("settings");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onOpenApps = useCallback(() => {
+    setSessionSearchOpen(false);
+    setSettingsInitialSection("apps");
+    setView("apps");
     setMobileSidebarOpen(false);
   }, []);
 
@@ -711,6 +720,12 @@ function Shell({
       });
       return;
     }
+    if (view === "apps") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.apps", { defaultValue: "Apps" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -728,7 +743,9 @@ function Shell({
     onRequestRename,
     onToggleArchive,
     onOpenSettings,
+    onOpenApps,
     onOpenSearch: onOpenSessionSearch,
+    activeUtility: view === "apps" ? "apps" as const : null,
     onToggleArchived,
     onUpdateView: onUpdateSidebarView,
     pinnedKeys: sidebarState.pinned_keys,
@@ -805,7 +822,7 @@ function Shell({
           <div
             className={cn(
               "absolute inset-0 flex flex-col",
-              view === "settings" && "invisible pointer-events-none",
+              view !== "chat" && "invisible pointer-events-none",
             )}
           >
             <ThreadShell
@@ -820,10 +837,12 @@ function Shell({
               hideSidebarToggleOnDesktop
             />
           </div>
-          {view === "settings" && (
+          {view !== "chat" && (
             <div className="absolute inset-0 flex flex-col">
               <SettingsView
                 theme={theme}
+                initialSection={settingsInitialSection}
+                showSidebar={view === "settings"}
                 onToggleTheme={toggle}
                 onBackToChat={onBackToChat}
                 onModelNameChange={onModelNameChange}

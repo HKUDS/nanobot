@@ -280,6 +280,59 @@ export interface SettingsPayload {
   restart_required_sections?: Array<"runtime" | "web" | "image">;
 }
 
+export interface AppPackageRef {
+  manager: string;
+  name?: string;
+}
+
+export interface AppCapability {
+  type: "cli" | "mcp" | "skill" | string;
+  entry_point?: string;
+  package?: AppPackageRef;
+  path?: string;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  fields?: Array<{
+    name: string;
+    target?: string;
+    required?: boolean;
+    secret?: boolean;
+    env_var?: string | null;
+  }>;
+}
+
+export interface AppPlan {
+  supported: boolean;
+  strategy?: string;
+  managed_paths?: string[];
+  verification?: string[];
+}
+
+export interface AppTrust {
+  registry: string;
+  level: string;
+  review_status: string;
+}
+
+export interface AppManifest {
+  schema: "agent-app.v1" | string;
+  id: string;
+  display_name: string;
+  version?: string;
+  description: string;
+  category: string;
+  source: string;
+  logo_url?: string | null;
+  brand_color?: string | null;
+  docs_url?: string | null;
+  capabilities: AppCapability[];
+  install: AppPlan;
+  remove: AppPlan;
+  trust: AppTrust;
+}
+
 export interface CliAppInfo {
   name: string;
   display_name: string;
@@ -295,6 +348,7 @@ export interface CliAppInfo {
   logo_url?: string | null;
   brand_color?: string | null;
   skill_installed: boolean;
+  manifest?: AppManifest;
 }
 
 export interface CliAppsPayload {
@@ -304,7 +358,12 @@ export interface CliAppsPayload {
   last_action?: {
     ok: boolean;
     message: string;
+    installed?: boolean;
+    removed?: boolean;
     output?: string | null;
+    still_available?: boolean;
+    verification?: string[];
+    verification_failed?: string[];
   };
 }
 
@@ -342,6 +401,7 @@ export interface McpPresetInfo {
   error?: string | null;
   enabled_tools?: string[];
   source?: "preset" | "custom" | string;
+  manifest?: AppManifest;
 }
 
 export interface McpPresetsPayload {
@@ -364,6 +424,11 @@ export interface McpPresetsPayload {
   last_action?: {
     ok: boolean;
     message: string;
+    installed?: boolean;
+    removed?: boolean;
+    managed_paths_removed?: string[];
+    verification?: string[];
+    verification_failed?: string[];
     tool_count?: number;
     tool_names?: string[];
     checked_at?: string | null;

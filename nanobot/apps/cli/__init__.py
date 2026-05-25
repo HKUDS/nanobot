@@ -1,6 +1,6 @@
-"""CLI Apps integration helpers."""
+"""CLI app adapter for the unified Apps domain."""
 
-from nanobot.cli_apps.service import (
+from nanobot.apps.cli.service import (
     CliAppError,
     CliAppManager,
     CliAppsRuntimeConfig,

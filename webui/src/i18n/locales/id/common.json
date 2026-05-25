@@ -63,7 +63,8 @@
     "language": {
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
-    }
+    },
+    "apps": "Aplikasi"
   },
   "settings": {
     "backToChat": "Kembali ke obrolan",
@@ -83,7 +84,8 @@
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Aplikasi CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Aplikasi"
     },
     "sections": {
       "interface": "Antarmuka",
@@ -100,8 +102,9 @@
       "safety": "Safety",
       "capabilities": "Kapabilitas",
       "integrations": "Integrations",
-      "cliApps": "Aplikasi CLI",
-      "mcp": "MCP"
+      "cliApps": "App CLI",
+      "mcp": "Layanan MCP",
+      "apps": "Aplikasi"
     },
     "rows": {
       "theme": "Tema",
@@ -380,6 +383,20 @@
     },
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
+    },
+    "apps": {
+      "description": "Tambahkan CLI app dan layanan MCP yang dapat digunakan nanobot dari chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Semua",
+      "filterCli": "App CLI",
+      "filterMcp": "Layanan MCP",
+      "enabledSummary": "{{count}} aktif",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Cari aplikasi",
+      "featured": "Unggulan",
+      "loading": "Memuat aplikasi...",
+      "empty": "Tidak ada aplikasi yang cocok dengan filter ini."
     }
   },
   "chat": {
@@ -607,10 +624,10 @@
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
-        "ariaLabel": "Aplikasi dan MCP",
-        "label": "Plugin",
-        "cliGroup": "Aplikasi CLI",
-        "mcpGroup": "Server MCP",
+        "ariaLabel": "Aplikasi",
+        "label": "Aplikasi",
+        "cliGroup": "App CLI",
+        "mcpGroup": "Layanan MCP",
         "cliBadge": "CLI",
         "mcpBadge": "MCP",
         "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",

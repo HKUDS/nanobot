@@ -6,6 +6,7 @@ import {
   Search,
   Settings,
   SquarePen,
+  Blocks,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -41,7 +42,9 @@ interface SidebarProps {
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   onOpenSettings: () => void;
+  onOpenApps: () => void;
   onOpenSearch: () => void;
+  activeUtility?: "apps" | null;
   onToggleArchived: () => void;
   onUpdateView: (view: Partial<SidebarViewState>) => void;
   onCollapse: () => void;
@@ -129,6 +132,13 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenSearch}
           icon={<Search className="h-4 w-4" />}
         />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.apps")}
+          onClick={props.onOpenApps}
+          active={props.activeUtility === "apps"}
+          icon={<Blocks className="h-4 w-4" />}
+        />
         <SidebarViewMenu
           compact={collapsed}
           view={props.viewState}
@@ -201,12 +211,14 @@ function SidebarActionButton({
   label,
   icon,
   onClick,
+  active = false,
   className,
 }: {
   collapsed: boolean;
   label: string;
   icon: ReactNode;
   onClick: () => void;
+  active?: boolean;
   className?: string;
 }) {
   return (
@@ -214,14 +226,16 @@ function SidebarActionButton({
       type="button"
       variant="ghost"
       aria-label={label}
+      aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
-      onClick={onClick}
+      onClick={() => onClick()}
       className={cn(
         "group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
         "transition-[width,padding,border-radius,color,background-color] duration-300 ease-out",
         collapsed
           ? "w-9 justify-center gap-0 rounded-xl px-0"
           : "w-full justify-start gap-2 px-3 text-[12.5px]",
+        active && "bg-sidebar-accent text-sidebar-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
         className,
       )}
     >
