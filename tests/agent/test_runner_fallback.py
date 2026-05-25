@@ -611,3 +611,128 @@ class TestGenerationForwarded:
         )
         assert fb.generation.temperature == 0.5
         assert fb.generation.max_tokens == 1024
+
+
+class TestHasFallbacks:
+    def test_true_when_presets_configured(self) -> None:
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[_fallback("a")],
+            provider_factory=MagicMock(),
+        )
+        assert fb.has_fallbacks is True
+
+    def test_false_when_empty(self) -> None:
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[],
+            provider_factory=MagicMock(),
+        )
+        assert fb.has_fallbacks is False
+
+
+class TestTryOnEmptyResponse:
+    @pytest.mark.asyncio
+    async def test_first_fallback_blank_second_succeeds(self) -> None:
+        fallback_a = _FakeProvider("a", _make_response(content=""))
+        fallback_b = _FakeProvider("b", _make_response("fallback ok"))
+        factory = MagicMock(side_effect=[fallback_a, fallback_b])
+
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[_fallback("fallback-a"), _fallback("fallback-b")],
+            provider_factory=factory,
+        )
+
+        async def request_fn(provider: LLMProvider, preset) -> LLMResponse:
+            return await provider.chat(model=preset.model)
+
+        result = await fb.try_on_empty_response(request_fn)
+        assert result is not None
+        assert result.content == "fallback ok"
+        assert factory.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_skip_if_streamed(self) -> None:
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(),
+        )
+
+        async def request_fn(provider: LLMProvider, preset) -> LLMResponse:
+            return await provider.chat(model=preset.model)
+
+        assert await fb.try_on_empty_response(request_fn, skip_if_streamed=True) is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_fallbacks(self) -> None:
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[],
+            provider_factory=MagicMock(),
+        )
+
+        async def request_fn(provider: LLMProvider, preset) -> LLMResponse:
+            return await provider.chat(model=preset.model)
+
+        assert await fb.try_on_empty_response(request_fn) is None
+
+    @pytest.mark.asyncio
+    async def test_accepts_tool_calls_only_response_by_default(self) -> None:
+        """A fallback response with tool_calls and no text content is success.
+
+        Counterpart to the production failure where a model returned
+        ``finish_reason=tool_calls`` with zero tool_calls and fallback model correctly
+        proposed an ``edit_file`` tool call. The wrapper must
+        treat the tool-call fallback as successful instead of discarding it.
+        """
+        from nanobot.providers.base import ToolCallRequest
+
+        tool_response = LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="tc1", name="edit_file", arguments={"path": "x"})],
+            finish_reason="tool_calls",
+        )
+        fallback_a = _FakeProvider("a", tool_response)
+        factory = MagicMock(return_value=fallback_a)
+
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        async def request_fn(provider: LLMProvider, preset) -> LLMResponse:
+            return await provider.chat(model=preset.model)
+
+        result = await fb.try_on_empty_response(request_fn)
+        assert result is tool_response
+        assert len(result.tool_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_rejects_tool_calls_when_text_required(self) -> None:
+        """When ``accept_tool_calls=False`` (finalization recovery path), a
+        tool-call-only response must NOT count as success — the caller
+        explicitly needs a textual answer."""
+        from nanobot.providers.base import ToolCallRequest
+
+        tool_response = LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="tc1", name="edit_file", arguments={"path": "x"})],
+            finish_reason="tool_calls",
+        )
+        fallback_a = _FakeProvider("a", tool_response)
+        factory = MagicMock(return_value=fallback_a)
+
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary"),
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        async def request_fn(provider: LLMProvider, preset) -> LLMResponse:
+            return await provider.chat(model=preset.model)
+
+        result = await fb.try_on_empty_response(request_fn, accept_tool_calls=False)
+        assert result is None
