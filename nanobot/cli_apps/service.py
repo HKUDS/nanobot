@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
@@ -564,7 +565,85 @@ class CliAppManager:
             "logo_url": logo_url,
             "brand_color": brand_color,
             "skill_installed": self._skill_path(name).is_file(),
+            "manifest": self._manifest_payload(app, logo_url=logo_url, brand_color=brand_color),
         }
+
+    def _package_ref(self, app: dict[str, Any]) -> dict[str, Any] | None:
+        strategy = self._strategy(app)
+        name = ""
+        if strategy == "pip":
+            try:
+                uninstall = self._pip_uninstall_argv(app)
+            except CliAppError:
+                uninstall = None
+            name = uninstall[-1] if uninstall else ""
+        elif strategy == "npm":
+            name = str(app.get("npm_package") or "").strip()
+        elif strategy in {"brew", "uv"}:
+            try:
+                uninstall = self._argv_for_action(app, "uninstall")
+            except CliAppError:
+                uninstall = None
+            if uninstall:
+                name = uninstall[-1]
+        if not strategy or strategy in {"unsupported", "bundled"}:
+            return None
+        return compact_dict({"manager": strategy, "name": name})
+
+    def _manifest_payload(
+        self,
+        app: dict[str, Any],
+        *,
+        logo_url: str | None,
+        brand_color: str | None,
+    ) -> dict[str, Any]:
+        name = str(app["name"])
+        entry_point = str(app.get("entry_point") or "")
+        strategy = self._strategy(app)
+        skill_path = f"skills/{_safe_skill_name(name)}/SKILL.md"
+        capabilities = [
+            compact_dict({
+                "type": "cli",
+                "entry_point": entry_point,
+                "package": self._package_ref(app),
+            }),
+            {"type": "skill", "path": skill_path},
+        ]
+        install_supported = self._install_supported(app)
+        install = compact_dict({
+            "supported": install_supported,
+            "strategy": strategy,
+            "managed_paths": [skill_path],
+            "verification": ["entry_point_available"] if entry_point else [],
+        })
+        remove = compact_dict({
+            "supported": strategy != "unsupported",
+            "strategy": strategy,
+            "managed_paths": [skill_path],
+            "verification": (
+                ["package_manager_ok", "entry_point_absent", "managed_paths_absent"]
+                if strategy not in {"bundled", "unsupported"}
+                else ["nanobot_state_absent", "managed_paths_absent"]
+            ),
+        })
+        return app_manifest(
+            app_id=name,
+            display_name=str(app.get("display_name") or name),
+            version=str(app.get("version") or ""),
+            description=str(app.get("description") or ""),
+            category=str(app.get("category") or "uncategorized"),
+            source=f"cli-anything:{app.get('_source') or 'harness'}",
+            logo_url=logo_url,
+            brand_color=brand_color,
+            capabilities=capabilities,
+            install=install,
+            remove=remove,
+            trust={
+                "registry": "cli-anything",
+                "level": "catalog",
+                "review_status": "catalog_entry",
+            },
+        )
 
     def payload(self, *, force_refresh: bool = False) -> dict[str, Any]:
         apps, updated = self.catalog(force_refresh=force_refresh)
@@ -793,7 +872,14 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             detect_cmd = str(app.get("detect_cmd") or app.get("entry_point") or "")
             if detect_cmd and _command_exists(detect_cmd):
                 self._record_installed(app)
-                return self.payload() | {"last_action": {"ok": True, "message": f"CLI for {app['display_name']} is available."}}
+                return self.payload() | {
+                    "last_action": {
+                        "ok": True,
+                        "message": f"CLI for {app['display_name']} is available.",
+                        "installed": True,
+                        "verification": ["entry_point_available", "state_recorded"],
+                    }
+                }
             note = app.get("install_notes") or f"{app['display_name']} is bundled with its parent app."
             raise CliAppError(str(note))
         argv = self._argv_for_action(app, "install")
@@ -802,7 +888,14 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if result.returncode != 0:
             raise CliAppError(_truncate(result.stderr or result.stdout or "install failed"), status=500)
         self._record_installed(app)
-        return self.payload() | {"last_action": {"ok": True, "message": f"Installed CLI for {app['display_name']}."}}
+        return self.payload() | {
+            "last_action": {
+                "ok": True,
+                "message": f"Installed CLI for {app['display_name']}.",
+                "installed": True,
+                "verification": ["package_manager_ok", "state_recorded", "managed_paths_present"],
+            }
+        }
 
     def update(self, name: str) -> dict[str, Any]:
         app = self.get_app(name, force_refresh=True)
@@ -810,14 +903,28 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             raise CliAppError("CLI app is not installed")
         if self._strategy(app) == "bundled":
             self._record_installed(app)
-            return self.payload() | {"last_action": {"ok": True, "message": f"Checked {app['display_name']}."}}
+            return self.payload() | {
+                "last_action": {
+                    "ok": True,
+                    "message": f"Checked {app['display_name']}.",
+                    "installed": True,
+                    "verification": ["state_recorded"],
+                }
+            }
         argv = self._argv_for_action(app, "update")
         assert argv is not None
         result = self._run_argv(argv, timeout=self.runtime.install_timeout)
         if result.returncode != 0:
             raise CliAppError(_truncate(result.stderr or result.stdout or "update failed"), status=500)
         self._record_installed(app)
-        return self.payload() | {"last_action": {"ok": True, "message": f"Updated CLI for {app['display_name']}."}}
+        return self.payload() | {
+            "last_action": {
+                "ok": True,
+                "message": f"Updated CLI for {app['display_name']}.",
+                "installed": True,
+                "verification": ["package_manager_ok", "state_recorded", "managed_paths_present"],
+            }
+        }
 
     def uninstall(self, name: str) -> dict[str, Any]:
         app = self.get_app(name)
@@ -851,7 +958,9 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                     "last_action": {
                         "ok": False,
                         "message": message,
+                        "removed": False,
                         "still_available": True,
+                        "verification_failed": ["entry_point_absent"],
                     }
                 }
         else:
@@ -875,7 +984,11 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             "last_action": {
                 "ok": True,
                 "message": message,
+                "removed": True,
                 "still_available": still_available,
+                "verification": ["state_absent", "managed_paths_absent"]
+                if still_available
+                else ["entry_point_absent", "state_absent", "managed_paths_absent"],
             }
         }
 

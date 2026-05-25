@@ -147,6 +147,15 @@ def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -
     assert apps["jimeng"]["install_supported"] is False
     assert apps["suno"]["install_supported"] is True
     assert apps["gimp"]["logo_url"]
+    gimp_manifest = apps["gimp"]["manifest"]
+    assert gimp_manifest["schema"] == "agent-app.v1"
+    assert gimp_manifest["id"] == "gimp"
+    assert gimp_manifest["source"] == "cli-anything:harness+public"
+    assert gimp_manifest["capabilities"][0]["type"] == "cli"
+    assert gimp_manifest["capabilities"][0]["entry_point"] == "cli-anything-gimp"
+    assert gimp_manifest["install"]["verification"] == ["entry_point_available"]
+    assert "entry_point_absent" in gimp_manifest["remove"]["verification"]
+    assert gimp_manifest["trust"]["review_status"] == "catalog_entry"
     assert apps["dify-workflow"]["logo_url"] == "https://cdn.simpleicons.org/dify/155EEF"
     assert apps["feishu"]["logo_url"] == (
         "https://www.google.com/s2/favicons?domain=larksuite.com&sz=64"
@@ -207,6 +216,8 @@ def test_install_dispatches_safe_pip_and_installs_skill(
 
     assert calls == [[sys.executable, "-m", "pip", "install", "cli-anything-gimp"]]
     assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["installed"] is True
+    assert "state_recorded" in payload["last_action"]["verification"]
     installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
     assert installed["gimp"]["entry_point"] == "cli-anything-gimp"
     skill = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
@@ -389,6 +400,8 @@ def test_uninstall_uses_recorded_pip_distribution(
 
     assert calls == [[sys.executable, "-m", "pip", "uninstall", "-y", "actual-dist-name"]]
     assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["removed"] is True
+    assert "entry_point_absent" in payload["last_action"]["verification"]
     assert "gimp" not in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
 
 
@@ -412,7 +425,9 @@ def test_uninstall_keeps_state_when_entry_point_still_available(
     payload = manager.uninstall("gimp")
 
     assert payload["last_action"]["ok"] is False
+    assert payload["last_action"]["removed"] is False
     assert payload["last_action"]["still_available"] is True
+    assert payload["last_action"]["verification_failed"] == ["entry_point_absent"]
     assert "kept it installed" in payload["last_action"]["message"]
     assert "gimp" in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
 
