@@ -8,10 +8,13 @@ import shutil
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.agent.evolution.git_store import EvolutionGitStore
 
 _PROPOSALS_DIR = ".proposals"
 _REJECTED_DIR = ".rejected"
@@ -99,6 +102,7 @@ class ProposalActionResult:
     proposal_id: str = ""
     skill_name: str = ""
     skill_path: str = ""
+    commit_sha: str = ""
     skip_reason: str = ""
 
     @classmethod
@@ -353,12 +357,33 @@ class ProposalStore:
         return ProposalDetail(meta=meta, skill_md=skill_md, proposal_dir=proposal_dir)
 
     def apply(self, proposal_id: str) -> ProposalActionResult:
-        """Promote a pending proposal to ``skills/<name>/SKILL.md``."""
+        """
+        将指定 proposal_id 的待处理技能提案（pending proposal）应用到正式技能目录 ``skills/<name>/SKILL.md``。
+
+        步骤如下：
+        1. 检查 proposal 元数据（meta.json）是否存在，不存在则返回失败。
+        2. 判断 proposal 状态：
+           - 已应用（applied）：若 workspace 已存在同名技能，则直接返回成功，否则报错。
+           - 已拒绝（rejected）：返回“提案已被拒绝”错误。
+           - 非待处理（非 pending）：返回“提案不可用”错误。
+        3. 检查 proposal 目录下 SKILL.md 是否存在，不存在则返回失败。
+        4. 尝试读取 SKILL.md 内容，不可读则返回失败。
+        5. 校验 SKILL.md 内容格式，若无效则返回失败。
+        6. 再次检查民用空间（workspace）是否已有同名技能，若存在则返回失败（优先 GEPA 方案）。
+        7. 尝试将 SKILL.md 写入正式技能目录（skills/<name>/SKILL.md）。
+           - 若已存在则返回失败。
+           - 若写入异常则警告并返回失败。
+        8. 更新 proposal 元数据为已应用（applied），记录应用时间。
+        9. 日志记录应用行为并返回成功，返回包括 proposal_id、技能名称和相对技能路径。
+
+        注：本函数为自动化审核 / 通过提案时调用，未直接暴露于外部接口。
+        """
         proposal_dir = self._proposals_root / proposal_id
         meta = self._read_meta_file(proposal_dir / "meta.json")
         if meta is None:
             return ProposalActionResult.fail(ERR_PROPOSAL_NOT_FOUND, proposal_id=proposal_id)
 
+        # 已应用：若已存在技能直接返回成功，否则失败
         if meta.status == "applied":
             if self.workspace_skill_exists(meta.skill_name):
                 return ProposalActionResult.success(
@@ -372,6 +397,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 已拒绝：直接返回失败
         if meta.status == "rejected":
             return ProposalActionResult.fail(
                 ERR_PROPOSAL_ALREADY_REJECTED,
@@ -379,6 +405,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 不是“待处理”状态也不能继续应用
         if meta.status != "pending":
             return ProposalActionResult.fail(
                 ERR_PROPOSAL_NOT_PENDING,
@@ -386,6 +413,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 检查 proposal 下的 SKILL.md 文件是否存在
         skill_path = proposal_dir / "SKILL.md"
         if not skill_path.is_file():
             return ProposalActionResult.fail(
@@ -394,6 +422,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 读取 SKILL.md 文件内容
         try:
             skill_md = skill_path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -404,6 +433,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 校验 SKILL.md 内容合法性
         validation_error = validate_skill_md(skill_md, skill_name=meta.skill_name)
         if validation_error:
             return ProposalActionResult.fail(
@@ -412,6 +442,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 防御性判断 —— 若已存在同名技能则返回失败
         if self.workspace_skill_exists(meta.skill_name):
             return ProposalActionResult.fail(
                 ERR_APPLY_ACTIVE_SKILL_EXISTS,
@@ -419,6 +450,7 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 写入正式技能目录
         try:
             active_path = self.write_active_skill(meta.skill_name, skill_md)
         except FileExistsError:
@@ -435,12 +467,15 @@ class ProposalStore:
                 skill_name=meta.skill_name,
             )
 
+        # 标记提案已被应用，并更新 applied_at 时间戳
         applied_meta = replace(
             meta,
             status="applied",
             applied_at=datetime.now(UTC).isoformat(),
         )
         self._write_meta(proposal_dir, applied_meta)
+
+        # 构造相对路径用于返回和日志
         rel = active_path.relative_to(self._workspace).as_posix()
         logger.info(
             "Proposal applied: id={} skill={} active={}",
@@ -453,6 +488,24 @@ class ProposalStore:
             skill_name=meta.skill_name,
             skill_path=rel,
         )
+
+    def apply_and_commit(
+        self,
+        proposal_id: str,
+        git_store: EvolutionGitStore | None = None,
+    ) -> ProposalActionResult:
+        """Apply a pending proposal and record an evolve git commit."""
+        from nanobot.agent.evolution.git_store import EvolutionGitStore
+
+        result = self.apply(proposal_id)
+        if not result.ok:
+            return result
+
+        gs = git_store or EvolutionGitStore(self._workspace)
+        sha = gs.commit_create(result.skill_name)
+        if not sha:
+            return result
+        return replace(result, commit_sha=sha)
 
     def reject(self, proposal_id: str) -> ProposalActionResult:
         """Move a pending proposal to ``skills/.rejected/<id>/``."""

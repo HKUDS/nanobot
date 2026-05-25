@@ -588,6 +588,9 @@ class PostTaskEvolver:
             except OSError as exc:
                 logger.warning("PostTask auto_apply write failed: {}", exc)
                 return PostTaskCreateResult.skipped("write failed", skill_name=skill_name)
+            from nanobot.agent.evolution.git_store import EvolutionGitStore
+
+            EvolutionGitStore(self._workspace).commit_create(skill_name)
             rel = skill_path.relative_to(self._workspace).as_posix()
             return PostTaskCreateResult.ok(
                 skill_name=skill_name,

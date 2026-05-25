@@ -1,5 +1,6 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
+from nanobot.agent.evolution.git_store import EvolutionGitStore
 from nanobot.agent.evolution.models import ToolCallRecord, TurnTrace, TurnTraceOutcome
 from nanobot.agent.evolution.post_task import (
     PostTaskCooldownStore,
@@ -22,6 +23,7 @@ from nanobot.agent.evolution.trace_recorder import TraceRecorder, build_turn_tra
 from nanobot.agent.evolution.trace_store import TraceStore
 
 __all__ = [
+    "EvolutionGitStore",
     "PostTaskCooldownStore",
     "PostTaskCreateResult",
     "PostTaskDecision",
