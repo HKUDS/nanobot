@@ -139,6 +139,26 @@ def _short_tool_id() -> str:
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
+def _warn_if_degenerate_tool_calls(response: LLMResponse, model: str | None) -> None:
+    """Log when a response signals tool_calls but emits an empty tool_calls list.
+
+    Some upstreams (notably Moonshot Kimi via OpenRouter) occasionally return
+    ``finish_reason="tool_calls"`` with a missing/malformed ``tool_calls``
+    payload, which the runner then treats as an empty response. Surfacing the
+    shape explicitly makes it easier to correlate with provider-side logs.
+    """
+    if response.finish_reason in ("tool_calls", "function_call") and not response.tool_calls:
+        logger.warning(
+            "Provider returned finish_reason='{}' with zero tool_calls "
+            "(model={}, content_len={}, reasoning_len={}); treating as empty. "
+            "Likely the provider dropped a malformed tool_calls payload.",
+            response.finish_reason,
+            model or "?",
+            len(response.content or ""),
+            len(response.reasoning_content or ""),
+        )
+
+
 def _get(obj: Any, key: str) -> Any:
     """Get a value from dict or object attribute, returning None if absent."""
     if isinstance(obj, dict):
@@ -1339,7 +1359,9 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            parsed = self._parse(await self._client.chat.completions.create(**kwargs))
+            _warn_if_degenerate_tool_calls(parsed, model or self.default_model)
+            return parsed
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
@@ -1469,7 +1491,9 @@ class OpenAICompatProvider(LLMProvider):
                                 "name": str(_get(function_call, "name") or ""),
                                 "arguments_delta": str(_get(function_call, "arguments") or ""),
                             })
-            return self._parse_chunks(chunks)
+            parsed = self._parse_chunks(chunks)
+            _warn_if_degenerate_tool_calls(parsed, model or self.default_model)
+            return parsed
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(
