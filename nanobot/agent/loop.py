@@ -31,6 +31,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.agent.skill_selector import resolve_skill_retrieval_provider
 from nanobot.cli_apps import utils as cli_app_utils
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.agent.evolution.models import TurnTrace
+from nanobot.agent.evolution.post_task import PostTaskEvolver, resolve_post_task_provider
 from nanobot.agent.evolution.trace_recorder import TraceRecorder
 from nanobot.config.schema import (
     AgentDefaults,
@@ -194,6 +196,7 @@ class AgentLoop:
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
         evolution: EvolutionConfig | None = None,
+        provider_config: Any | None = None,
         skill_llm_provider: LLMProvider | None = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
@@ -254,7 +257,9 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
         self._evolution = evolution or EvolutionConfig()
+        self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
+        self._post_task_evolver: PostTaskEvolver | None = None
 
         self.context = ContextBuilder(
             workspace, 
@@ -409,6 +414,7 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             skill_retrieval=skill_retrieval,
             evolution=defaults.evolution,
+            provider_config=config,
             skill_llm_provider=skill_llm_provider,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
@@ -860,6 +866,65 @@ class AgentLoop:
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
+    def _get_post_task_evolver(self) -> PostTaskEvolver:
+        if self._post_task_evolver is None:
+            provider = (
+                resolve_post_task_provider(
+                    self._provider_config,
+                    self._evolution,
+                    self.provider,
+                )
+                if self._provider_config is not None
+                else self.provider
+            )
+            self._post_task_evolver = PostTaskEvolver(
+                self.workspace,
+                self._evolution,
+                provider=provider,
+            )
+        return self._post_task_evolver
+
+    def _schedule_post_task(self, trace: TurnTrace, *, is_subagent: bool) -> None:
+        """Run PostTask evolution in the background after a trace is stored."""
+        if not self._evolution.post_task_enabled():
+            return
+        self._schedule_background(self._run_post_task(trace, is_subagent=is_subagent))
+
+    async def _run_post_task(self, trace: TurnTrace, *, is_subagent: bool) -> None:
+        """Gate → decide → create proposal; fail-open on any error."""
+        try:
+            evolver = self._get_post_task_evolver()
+            gate = evolver.evaluate_gate(trace, is_subagent=is_subagent)
+            if not gate.should_run:
+                logger.debug("PostTask skipped: {}", gate.skip_reason)
+                return
+
+            decision = await evolver.decide(trace)
+            if decision.action != "create_skill":
+                return
+
+            result = await evolver.create_proposal(trace, decision)
+            if not result.created:
+                logger.info(
+                    "PostTask create skipped for {!r}: {}",
+                    decision.skill_name,
+                    result.skip_reason,
+                )
+                return
+
+            evolver.cooldown_store.mark(trace.session_key)
+            if result.auto_applied:
+                self.context.warm_skill_index()
+            logger.info(
+                "PostTask {} skill {!r} at {} (proposal_id={})",
+                "auto-applied" if result.auto_applied else "proposal",
+                result.skill_name,
+                result.skill_path,
+                result.proposal_id or "n/a",
+            )
+        except Exception as exc:
+            logger.warning("PostTask evolution failed: {}", exc)
+
     def _record_turn_trace(
         self,
         *,
@@ -871,9 +936,9 @@ class AgentLoop:
         tools_used: list[str] | None = None,
         turn_id: str = "",
         baseline_len: int | None = None,
-    ) -> None:
+    ) -> TurnTrace | None:
         """Persist a turn execution trace when evolution recording is enabled."""
-        self._trace_recorder.record_turn(
+        return self._trace_recorder.record_turn(
             session_key=session_key,
             query=query,
             messages=messages,
@@ -1182,7 +1247,7 @@ class AgentLoop:
         skill_names = (
             [str(entry["name"]) for entry in skill_entries] if skill_entries else []
         )
-        self._record_turn_trace(
+        trace = self._record_turn_trace(
             session_key=key,
             query=retrieval_query,
             messages=all_msgs,
@@ -1191,6 +1256,8 @@ class AgentLoop:
             tools_used=tools_used,
             baseline_len=baseline_len,
         )
+        if trace is not None:
+            self._schedule_post_task(trace, is_subagent=is_subagent)
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
         if channel == "websocket":
             self._pending_turn_latency_ms[key] = latency_ms
@@ -1477,7 +1544,7 @@ class AgentLoop:
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
 
         ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
-        self._record_turn_trace(
+        trace = self._record_turn_trace(
             session_key=ctx.session_key,
             query=ctx.retrieval_query,
             messages=ctx.all_messages,
@@ -1487,6 +1554,11 @@ class AgentLoop:
             turn_id=ctx.turn_id,
             baseline_len=ctx.trace_baseline_len,
         )
+        if trace is not None:
+            self._schedule_post_task(
+                trace,
+                is_subagent=ctx.msg.sender_id == "subagent",
+            )
         self._save_turn(
             ctx.session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
