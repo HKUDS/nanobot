@@ -9,7 +9,7 @@ from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import ArraySchema, BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.cli_apps import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import Base
 
 

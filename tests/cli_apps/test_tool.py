@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
-from nanobot.cli_apps.service import CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -46,7 +46,7 @@ def test_run_cli_app_uses_installed_registry_app(
     )
     resolved = str(tmp_path / "bin" / "cli-anything-gimp")
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
+        "nanobot.apps.cli.service.shutil.which",
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
@@ -59,8 +59,8 @@ def test_run_cli_app_uses_installed_registry_app(
             stderr="",
         )
 
-    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
-    monkeypatch.setattr("nanobot.cli_apps.service.get_runtime_subdir", lambda _name: data_dir)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
 
     tool = CliAppsTool(
         workspace=workspace,
@@ -102,7 +102,7 @@ def test_run_cli_app_rejects_uninstalled_app(tmp_path: Path, monkeypatch) -> Non
     }
     _write_cache(data_dir / "harness_registry_cache.json", registry)
     _write_cache(data_dir / "public_registry_cache.json", {"meta": {}, "clis": []})
-    monkeypatch.setattr("nanobot.cli_apps.service.get_runtime_subdir", lambda _name: data_dir)
+    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
     tool = CliAppsTool(workspace=workspace, restrict_to_workspace=True)
 
     result = asyncio.run(tool.execute(name="gimp"))
@@ -117,7 +117,7 @@ def test_run_cli_app_description_names_only_settings_installed_apps(tmp_path: Pa
     CliAppManager(workspace=workspace, data_dir=data_dir)._save_installed(
         {"drawio": {"entry_point": "cli-anything-drawio"}}
     )
-    monkeypatch.setattr("nanobot.cli_apps.service.get_runtime_subdir", lambda _name: data_dir)
+    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
 
     tool = CliAppsTool(workspace=workspace)
 

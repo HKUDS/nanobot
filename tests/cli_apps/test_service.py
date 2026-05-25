@@ -9,7 +9,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.cli_apps.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+
+
+def test_legacy_cli_apps_imports_alias_apps_cli_module() -> None:
+    import nanobot.apps.cli.service as canonical_service
+    import nanobot.cli_apps.service as legacy_service
+    from nanobot.cli_apps import CliAppManager as LegacyCliAppManager
+
+    assert legacy_service is canonical_service
+    assert LegacyCliAppManager is CliAppManager
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -246,11 +255,11 @@ def test_install_records_entry_point_path_and_pip_distribution(
         lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
     )
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
+        "nanobot.apps.cli.service.shutil.which",
         lambda command: str(resolved) if command == "cli-anything-gimp" else None,
     )
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.importlib_metadata.distributions",
+        "nanobot.apps.cli.service.importlib_metadata.distributions",
         lambda: [
             SimpleNamespace(
                 entry_points=[
@@ -288,7 +297,7 @@ def test_fetch_skill_content_rejects_untrusted_urls(
     def fail_get(*args, **kwargs):
         raise AssertionError("untrusted skill URL should not be fetched")
 
-    monkeypatch.setattr("nanobot.cli_apps.service.httpx.get", fail_get)
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
 
     assert manager._fetch_skill_content({
         "name": "evil",
@@ -318,7 +327,7 @@ def test_fetch_skill_content_allows_cli_anything_raw_skill_url(
         seen.append(url)
         return Response()
 
-    monkeypatch.setattr("nanobot.cli_apps.service.httpx.get", fake_get)
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fake_get)
 
     content = manager._fetch_skill_content({
         "name": "gimp",
@@ -418,7 +427,7 @@ def test_uninstall_keeps_state_when_entry_point_still_available(
         lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
     )
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
+        "nanobot.apps.cli.service.shutil.which",
         lambda command: "/usr/local/bin/cli-anything-gimp" if command == "cli-anything-gimp" else None,
     )
 
@@ -508,7 +517,7 @@ def test_run_installed_cli_uses_argv_without_shell(
     _seed_catalog(manager)
     resolved = str(tmp_path / "bin" / "cli-anything-gimp")
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
+        "nanobot.apps.cli.service.shutil.which",
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
@@ -521,7 +530,7 @@ def test_run_installed_cli_uses_argv_without_shell(
             stderr="",
         )
 
-    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
     manager._save_installed(
         {
             "gimp": {
@@ -547,7 +556,7 @@ def test_run_reports_created_artifacts(
     _seed_catalog(manager)
     resolved = str(tmp_path / "bin" / "cli-anything-gimp")
     monkeypatch.setattr(
-        "nanobot.cli_apps.service.shutil.which",
+        "nanobot.apps.cli.service.shutil.which",
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
@@ -556,7 +565,7 @@ def test_run_reports_created_artifacts(
         (cwd / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
         return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
 
-    monkeypatch.setattr("nanobot.cli_apps.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
     manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
 
     result = manager.run("gimp", ["render"])

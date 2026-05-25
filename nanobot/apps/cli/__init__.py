@@ -1,9 +1,6 @@
-"""Compatibility imports for the CLI app adapter.
+"""CLI app adapter for the unified Apps domain."""
 
-New code should import from :mod:`nanobot.apps.cli`.
-"""
-
-from nanobot.apps.cli import (
+from nanobot.apps.cli.service import (
     CliAppError,
     CliAppManager,
     CliAppsRuntimeConfig,
