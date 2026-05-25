@@ -36,8 +36,8 @@ def test_provider_api_type_accepts_exact_values_only() -> None:
         })
 
 
-def test_provider_api_type_is_openai_only() -> None:
-    with pytest.raises(ValueError, match="only supported"):
+def test_provider_api_type_uses_registry_field_capabilities() -> None:
+    with pytest.raises(ValueError, match="not supported"):
         Config.model_validate({
             "providers": {
                 "custom": {
@@ -46,6 +46,57 @@ def test_provider_api_type_is_openai_only() -> None:
                 }
             }
         })
+
+
+def test_resolve_provider_ref_exposes_registry_metadata() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "openai": {
+                "apiKey": "sk-test",
+                "apiType": "responses",
+            },
+        },
+        "agents": {
+            "defaults": {
+                "model": "openai/gpt-4.1",
+                "provider": "auto",
+            }
+        },
+    })
+
+    provider_ref = config.resolve_provider_ref()
+
+    assert provider_ref.requested_name == "auto"
+    assert provider_ref.name == "openai"
+    assert provider_ref.spec is not None
+    assert provider_ref.spec.supports_config_field("api_type")
+    assert provider_ref.api_type == "responses"
+
+
+def test_bedrock_provider_ref_exposes_region_and_profile() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "bedrock": {
+                "region": "us-east-1",
+                "profile": "work",
+            },
+        },
+        "agents": {
+            "defaults": {
+                "model": "bedrock/anthropic.claude-opus-4-5",
+                "provider": "bedrock",
+            }
+        },
+    })
+
+    provider_ref = config.resolve_provider_ref()
+
+    assert provider_ref.name == "bedrock"
+    assert provider_ref.spec is not None
+    assert provider_ref.spec.supports_config_field("region")
+    assert provider_ref.spec.supports_config_field("profile")
+    assert provider_ref.region == "us-east-1"
+    assert provider_ref.profile == "work"
 
 
 def test_legacy_defaults_config_without_presets_still_resolves() -> None:

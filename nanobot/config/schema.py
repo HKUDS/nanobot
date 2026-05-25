@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.self import MyToolConfig
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
+    from nanobot.providers.registry import ProviderResolution
 
 
 class Base(BaseModel):
@@ -228,12 +229,18 @@ class ProvidersConfig(Base):
 
     @model_validator(mode="after")
     def _validate_api_type_scope(self) -> "ProvidersConfig":
+        from nanobot.providers.registry import find_by_name
+
         for name in self.__class__.model_fields:
-            if name == "openai":
-                continue
+            spec = find_by_name(name)
             provider = getattr(self, name, None)
-            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
-                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+            if (
+                spec is not None
+                and isinstance(provider, ProviderConfig)
+                and provider.api_type != "auto"
+                and not spec.supports_config_field("api_type")
+            ):
+                raise ValueError("providers.<name>.api_type is not supported for this provider")
         return self
 
 
@@ -365,13 +372,14 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    def _match_provider(
-        self, model: str | None = None,
+    def resolve_provider_ref(
+        self,
+        model: str | None = None,
         *,
         preset: ModelPresetConfig | None = None,
-    ) -> tuple["ProviderConfig | None", str | None]:
-        """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name
+    ) -> "ProviderResolution":
+        """Resolve a preset provider reference to registry metadata and config."""
+        from nanobot.providers.registry import PROVIDERS, ProviderResolution, find_by_name
 
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
@@ -379,8 +387,14 @@ class Config(BaseSettings):
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
-                return (p, spec.name) if p else (None, None)
-            return None, None
+                if p:
+                    return ProviderResolution(
+                        requested_name=forced,
+                        name=spec.name,
+                        spec=spec,
+                        config=p,
+                    )
+            return ProviderResolution(requested_name=forced, name=None, spec=None, config=None)
 
         model_lower = (model or resolved.model).lower()
         model_normalized = model_lower.replace("-", "_")
@@ -396,20 +410,32 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
-                    return p, spec.name
+                    return ProviderResolution(
+                        requested_name=forced,
+                        name=spec.name,
+                        spec=spec,
+                        config=p,
+                        is_auto=True,
+                    )
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
-                    return p, spec.name
+                    return ProviderResolution(
+                        requested_name=forced,
+                        name=spec.name,
+                        spec=spec,
+                        config=p,
+                        is_auto=True,
+                    )
 
         # Fallback: configured local providers can route models without
         # provider-specific keywords (for example plain "llama3.2" on Ollama).
         # Prefer providers whose detect_by_base_keyword matches the configured api_base
         # (e.g. Ollama's "11434" in "http://localhost:11434") over plain registry order.
-        local_fallback: tuple[ProviderConfig, str] | None = None
+        local_fallback = None
         for spec in PROVIDERS:
             if not spec.is_local:
                 continue
@@ -417,9 +443,21 @@ class Config(BaseSettings):
             if not (p and p.api_base):
                 continue
             if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
-                return p, spec.name
+                return ProviderResolution(
+                    requested_name=forced,
+                    name=spec.name,
+                    spec=spec,
+                    config=p,
+                    is_auto=True,
+                )
             if local_fallback is None:
-                local_fallback = (p, spec.name)
+                local_fallback = ProviderResolution(
+                    requested_name=forced,
+                    name=spec.name,
+                    spec=spec,
+                    config=p,
+                    is_auto=True,
+                )
         if local_fallback:
             return local_fallback
 
@@ -430,8 +468,14 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
-                return p, spec.name
-        return None, None
+                return ProviderResolution(
+                    requested_name=forced,
+                    name=spec.name,
+                    spec=spec,
+                    config=p,
+                    is_auto=True,
+                )
+        return ProviderResolution(requested_name=forced, name=None, spec=None, config=None, is_auto=True)
 
     def get_provider(
         self,
@@ -440,8 +484,7 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model, preset=preset)
-        return p
+        return self.resolve_provider_ref(model, preset=preset).config
 
     def get_provider_name(
         self,
@@ -450,8 +493,7 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model, preset=preset)
-        return name
+        return self.resolve_provider_ref(model, preset=preset).name
 
     def get_api_key(
         self,
@@ -470,16 +512,7 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> str | None:
         """Get API base URL for the given model, falling back to the provider default when present."""
-        from nanobot.providers.registry import find_by_name
-
-        p, name = self._match_provider(model, preset=preset)
-        if p and p.api_base:
-            return p.api_base
-        if name:
-            spec = find_by_name(name)
-            if spec and spec.default_api_base:
-                return spec.default_api_base
-        return None
+        return self.resolve_provider_ref(model, preset=preset).api_base
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
 

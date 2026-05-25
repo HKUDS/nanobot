@@ -108,6 +108,7 @@ import type {
   McpPresetsPayload,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
+  ProviderSettingsUpdate,
   SettingsPayload,
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
@@ -164,7 +165,15 @@ type RestartAwarePayload = {
   runtime_capabilities?: SettingsPayload["runtime_capabilities"];
 };
 type ProviderApiType = "auto" | "chat_completions" | "responses";
-type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
+type ProviderConfigField = "api_type" | "region" | "profile";
+type ProviderTextConfigField = "region" | "profile";
+type ProviderForm = {
+  apiKey: string;
+  apiBase: string;
+  apiType: ProviderApiType;
+  region: string;
+  profile: string;
+};
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
@@ -235,6 +244,28 @@ const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> 
   { value: "chat_completions", label: "Chat Completions" },
   { value: "responses", label: "Responses" },
 ];
+const PROVIDER_TEXT_CONFIG_FIELD_DEFS: Record<
+  ProviderTextConfigField,
+  {
+    labelKey: string;
+    label: string;
+    placeholderKey: string;
+    placeholder: string;
+  }
+> = {
+  region: {
+    labelKey: "settings.byok.region",
+    label: "Region",
+    placeholderKey: "settings.byok.regionPlaceholder",
+    placeholder: "us-east-1",
+  },
+  profile: {
+    labelKey: "settings.byok.profile",
+    label: "Profile",
+    placeholderKey: "settings.byok.profilePlaceholder",
+    placeholder: "default",
+  },
+};
 
 const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
   ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
@@ -250,6 +281,36 @@ const EMPTY_PENDING_RESTART_SECTIONS: PendingRestartSections = {
   browser: false,
   image: false,
 };
+
+function providerFormDefaults(
+  provider: SettingsPayload["providers"][number],
+  existing?: ProviderForm,
+): ProviderForm {
+  return {
+    apiKey: existing?.apiKey ?? "",
+    apiBase: existing?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
+    apiType: existing?.apiType ?? provider.api_type ?? "auto",
+    region: existing?.region ?? provider.region ?? "",
+    profile: existing?.profile ?? provider.profile ?? "",
+  };
+}
+
+function providerSupportsConfigField(
+  provider: SettingsPayload["providers"][number],
+  field: ProviderConfigField,
+): boolean {
+  return provider.config_fields?.includes(field) ?? false;
+}
+
+function isProviderTextConfigField(field: string): field is ProviderTextConfigField {
+  return field === "region" || field === "profile";
+}
+
+function providerTextConfigFields(
+  provider: SettingsPayload["providers"][number],
+): ProviderTextConfigField[] {
+  return (provider.config_fields ?? []).filter(isProviderTextConfigField);
+}
 
 const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   name: "",
@@ -541,11 +602,7 @@ export function SettingsView({
     setProviderForms((prev) => {
       const next = { ...prev };
       for (const provider of settings.providers) {
-        next[provider.name] = {
-          apiKey: next[provider.name]?.apiKey ?? "",
-          apiBase: next[provider.name]?.apiBase ?? provider.api_base ?? provider.default_api_base ?? "",
-          apiType: next[provider.name]?.apiType ?? provider.api_type ?? "auto",
-        };
+        next[provider.name] = providerFormDefaults(provider, next[provider.name]);
       }
       return next;
     });
@@ -807,7 +864,7 @@ export function SettingsView({
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
     if (provider.auth_type === "oauth") return;
-    const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "", apiType: "auto" };
+    const providerForm = providerForms[providerName] ?? providerFormDefaults(provider);
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
     if (!provider.configured && apiKeyRequired && !apiKey) {
@@ -816,12 +873,21 @@ export function SettingsView({
     }
     setProviderSaving(providerName);
     try {
-      const payload = await updateProviderSettings(token, {
+      const update: ProviderSettingsUpdate = {
         provider: providerName,
         apiKey: apiKey || undefined,
         apiBase: providerForm.apiBase.trim(),
-        apiType: providerForm.apiType,
-      });
+      };
+      if (providerSupportsConfigField(provider, "api_type")) {
+        update.apiType = providerForm.apiType;
+      }
+      if (providerSupportsConfigField(provider, "region")) {
+        update.region = providerForm.region.trim();
+      }
+      if (providerSupportsConfigField(provider, "profile")) {
+        update.profile = providerForm.profile.trim();
+      }
+      const payload = await updateProviderSettings(token, update);
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
@@ -833,6 +899,8 @@ export function SettingsView({
           apiKey: "",
           apiBase: providerForm.apiBase.trim(),
           apiType: providerForm.apiType,
+          region: providerForm.region.trim(),
+          profile: providerForm.profile.trim(),
         },
       }));
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -925,11 +993,7 @@ export function SettingsView({
     if (!provider) return;
     setProviderForms((prev) => ({
       ...prev,
-      [providerName]: {
-        apiKey: "",
-        apiBase: provider.api_base ?? provider.default_api_base ?? "",
-        apiType: provider.api_type ?? "auto",
-      },
+      [providerName]: providerFormDefaults(provider),
     }));
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
     setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
@@ -983,6 +1047,8 @@ export function SettingsView({
             apiKey: "",
             apiBase: forms[providerName]?.apiBase ?? "",
             apiType: forms[providerName]?.apiType ?? "auto",
+            region: forms[providerName]?.region ?? "",
+            profile: forms[providerName]?.profile ?? "",
           },
         }));
         setVisibleProviderKeys((visible) => ({ ...visible, [providerName]: false }));
@@ -1176,6 +1242,8 @@ export function SettingsView({
                     apiKey: prev[provider]?.apiKey ?? "",
                     apiBase: prev[provider]?.apiBase ?? "",
                     apiType: prev[provider]?.apiType ?? "auto",
+                    region: prev[provider]?.region ?? "",
+                    profile: prev[provider]?.profile ?? "",
                     ...value,
                   },
                 }))
@@ -2089,11 +2157,7 @@ function ProvidersSettings({
   const filteredUnconfigured = filterProviders(unconfiguredProviders, query);
   const renderProviderRow = (provider: SettingsPayload["providers"][number]) => {
     const expanded = expandedProvider === provider.name;
-    const form = providerForms[provider.name] ?? {
-      apiKey: "",
-      apiBase: provider.api_base ?? provider.default_api_base ?? "",
-      apiType: provider.api_type ?? "auto",
-    };
+    const form = providerForms[provider.name] ?? providerFormDefaults(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
     const keyVisible = !!visibleProviderKeys[provider.name];
@@ -2101,9 +2165,11 @@ function ProvidersSettings({
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
+    const textConfigFields = providerTextConfigFields(provider);
+    const hasTextConfigValue = textConfigFields.some((field) => form[field].trim());
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
-      !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
+      !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase && !hasTextConfigValue;
     return (
       <div key={provider.name} className="divide-y divide-border/45">
         <button
@@ -2254,7 +2320,7 @@ function ProvidersSettings({
                 className="h-9 rounded-full text-[13px]"
               />
             </label>
-            {provider.name === "openai" ? (
+            {providerSupportsConfigField(provider, "api_type") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
                   {tx("settings.byok.apiType", "API type")}
@@ -2286,6 +2352,24 @@ function ProvidersSettings({
                 </DropdownMenu>
               </label>
             ) : null}
+            {textConfigFields.map((field) => {
+              const fieldDef = PROVIDER_TEXT_CONFIG_FIELD_DEFS[field];
+              return (
+                <label key={field} className="block space-y-1.5">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx(fieldDef.labelKey, fieldDef.label)}
+                  </span>
+                  <Input
+                    value={form[field]}
+                    onChange={(event) =>
+                      onChangeProviderForm(provider.name, { [field]: event.target.value })
+                    }
+                    placeholder={tx(fieldDef.placeholderKey, fieldDef.placeholder)}
+                    className="h-9 rounded-full text-[13px]"
+                  />
+                </label>
+              );
+            })}
             <div className="flex items-center justify-end gap-2">
               <Button
                 size="sm"

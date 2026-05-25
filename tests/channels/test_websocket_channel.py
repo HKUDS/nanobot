@@ -1385,7 +1385,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
-        "nanobot.webui.settings_api._oauth_provider_status",
+        "nanobot.webui.settings_api.oauth_provider_status",
         lambda _spec: {
             "configured": False,
             "account": None,
