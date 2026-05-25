@@ -762,7 +762,7 @@ def _run_gateway(
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
-    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.events import InboundMessage, OutboundMessage
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
         return (
@@ -810,13 +810,13 @@ def _run_gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            try:
-                await agent.dream.run()
-                logger.info("Dream cron job completed")
-            except Exception:
-                logger.exception("Dream cron job failed")
+            await bus.publish_inbound(InboundMessage(
+                channel="system",
+                sender_id="dream",
+                chat_id="dream",
+                content="",
+            ))
             return None
 
         from nanobot.utils.evaluator import evaluate_response
@@ -1027,11 +1027,10 @@ def _run_gateway(
             await server.serve_forever()
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model_override:
-        agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
+    agent.dream.edit_user_skills = dream_cfg.dream_edit_user_skills
     from nanobot.cron.types import CronJob, CronPayload
     cron.register_system_job(CronJob(
         id="dream",

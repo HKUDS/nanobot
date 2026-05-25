@@ -265,6 +265,7 @@ export interface SettingsPayload {
       max_batch_size: number;
       max_iterations: number;
       annotate_line_ages: boolean;
+      dream_edit_user_skills: boolean;
     };
     unified_session: boolean;
   };

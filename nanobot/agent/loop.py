@@ -8,6 +8,7 @@ import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -19,7 +20,13 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, CompositeHook
-from nanobot.agent.memory import Consolidator, Dream
+from nanobot.agent.memory import (
+    _STALE_THRESHOLD_DAYS,
+    Consolidator,
+    Dream,
+    _estimate_tokens,
+    _strip_skip_lines,
+)
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
@@ -34,7 +41,10 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
+    GOAL_STATE_KEY,
+    goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
+    sustained_goal_active,
 )
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.webui_turns import (
@@ -47,7 +57,11 @@ from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+from nanobot.utils.prompt_templates import _TEMPLATES_ROOT, render_template
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    SUSTAINED_GOAL_CONTINUE_PROMPT,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -191,6 +205,7 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        dream_model_override: str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -203,6 +218,7 @@ class AgentLoop:
         self._preset_snapshot_loader = preset_snapshot_loader
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
+        self._dream_model_override = dream_model_override
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -310,6 +326,7 @@ class AgentLoop:
         self._active_preset: str | None = None
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
+        self._configure_dream()
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -369,6 +386,7 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            dream_model_override=config.agents.defaults.dream.model_override,
             **extra,
         )
 
@@ -394,7 +412,7 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
-        self.dream.set_provider(provider, model)
+        self._configure_dream()
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(
@@ -402,6 +420,20 @@ class AgentLoop:
                 model_preset if model_preset is not None else self.model_preset,
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+
+    def _configure_dream(self) -> None:
+        """Apply dream.model_override, resolving preset names if needed."""
+        if not self._dream_model_override:
+            self.dream.set_provider(self.provider, self.model)
+            return
+
+        if self._dream_model_override in self.model_presets:
+            snapshot = self._build_model_preset_snapshot(self._dream_model_override)
+            self.dream.set_provider(snapshot.provider, snapshot.model)
+            return
+
+        # Raw model name fallback — same provider, different model
+        self.dream.set_provider(self.provider, self._dream_model_override)
 
     def _refresh_provider_snapshot(self) -> None:
         if self._provider_snapshot_loader is None:
@@ -729,6 +761,15 @@ class AgentLoop:
 
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        # Build continuation message that embeds the active goal objective so
+        # the LLM can see it even if earlier Runtime Context was truncated.
+        _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
+        _goal_continue = (
+            "You have an active sustained goal:\n\n"
+            + "\n".join(_goal_lines)
+            + "\n\nPlease continue working toward the objective using your tools, "
+            "or call complete_goal if the work is truly finished."
+        ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -756,6 +797,8 @@ class AgentLoop:
                     session.key if session is not None else session_key,
                     metadata=(session.metadata if session is not None else None),
                 ),
+                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
+                goal_continue_message=_goal_continue,
             ))
         finally:
             reset_file_states(file_state_token)
@@ -1006,6 +1049,28 @@ class AgentLoop:
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
         logger.info("Processing system message from {}", msg.sender_id)
+        if msg.sender_id == "dream":
+            session_key = "system:dream"
+            session = self.sessions.get_or_create(session_key)
+            session.metadata["is_dream"] = True
+            # Capture trigger source on first batch so _dream_finalize_commit
+            # can notify the user who ran /dream (cron-triggered runs have no trigger).
+            if "_dream_trigger_channel" not in session.metadata:
+                trigger_ch = msg.metadata.get("trigger_channel")
+                trigger_ci = msg.metadata.get("trigger_chat_id")
+                if trigger_ch and trigger_ci:
+                    session.metadata["_dream_trigger_channel"] = trigger_ch
+                    session.metadata["_dream_trigger_chat_id"] = trigger_ci
+            if not sustained_goal_active(session.metadata):
+                session.metadata[GOAL_STATE_KEY] = {
+                    "status": "active",
+                    "objective": "Dream: consolidate unprocessed memory backlog into MEMORY.md, SOUL.md, USER.md",
+                    "started_at": datetime.now().isoformat(),
+                }
+                self.sessions.save(session)
+            await self._process_dream_batch(session, msg)
+            await self._dream_finalize_commit(session)
+            return None
         key = msg.session_key_override or f"{channel}:{chat_id}"
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
@@ -1081,6 +1146,205 @@ class AgentLoop:
             content=content,
             metadata=outbound_metadata,
         )
+
+    async def _process_dream_batch(self, session: Session, msg: InboundMessage) -> None:
+        """Process the full Dream backlog in batches within a single invocation."""
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        # System prompt caching with mtime invalidation
+        template_path = _TEMPLATES_ROOT / "agent" / "dream.md"
+        cached_prompt = session.metadata.get("_dream_system_prompt")
+        cached_mtime = session.metadata.get("_dream_system_prompt_mtime")
+        current_mtime = template_path.stat().st_mtime if template_path.exists() else None
+
+        if cached_prompt is None or cached_mtime != current_mtime:
+            skill_creator_path = BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"
+            workspace = self.dream.store.workspace
+            cached_prompt = render_template(
+                "agent/dream.md",
+                strip=True,
+                skill_creator_path=str(skill_creator_path),
+                soul_path=str(workspace / "SOUL.md"),
+                user_path=str(workspace / "USER.md"),
+                memory_path=str(workspace / "memory" / "MEMORY.md"),
+                stale_threshold_days=_STALE_THRESHOLD_DAYS,
+                dream_edit_user_skills=self.dream.edit_user_skills,
+            )
+            session.metadata["_dream_system_prompt"] = cached_prompt
+            session.metadata["_dream_system_prompt_mtime"] = current_mtime
+
+        while True:
+            last_cursor = self.dream.store.get_last_dream_cursor()
+            entries = self.dream.store.read_unprocessed_history(since_cursor=last_cursor)
+            if not entries:
+                return
+
+            batch = entries[: self.dream.max_batch_size]
+            logger.info(
+                "Dream: processing {}/{} entries (cursor {}→{})",
+                len(batch), len(entries), last_cursor, batch[-1]["cursor"],
+            )
+
+            # Build history text — cap each entry and strip [skip] lines
+            history_text = "\n".join(
+                f"[{e['timestamp']}] "
+                f"{truncate_text_fn(_strip_skip_lines(e['content']), self.dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS)}"
+                for e in batch
+            )
+
+            # Current file contents + per-line age annotations
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            annotate = self.dream.annotate_line_ages
+            raw_memory = self.dream.store.read_memory() or "(empty)"
+            raw_soul = self.dream.store.read_soul() or "(empty)"
+            raw_user = self.dream.store.read_user() or "(empty)"
+            annotated_memory = (
+                self.dream._annotate_with_ages(raw_memory, "memory/MEMORY.md")
+                if annotate else raw_memory
+            )
+            annotated_soul = (
+                self.dream._annotate_with_ages(raw_soul, "SOUL.md")
+                if annotate else raw_soul
+            )
+            annotated_user = (
+                self.dream._annotate_with_ages(raw_user, "USER.md")
+                if annotate else raw_user
+            )
+            current_memory = truncate_text_fn(annotated_memory, self.dream._MEMORY_FILE_MAX_CHARS)
+            current_soul = truncate_text_fn(annotated_soul, self.dream._SOUL_FILE_MAX_CHARS)
+            current_user = truncate_text_fn(annotated_user, self.dream._USER_FILE_MAX_CHARS)
+
+            file_context = (
+                f"## Current Date\n{current_date}\n\n"
+                f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
+                f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
+                f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
+            )
+
+            existing_skills = self.dream._list_existing_skills(tag_origin=True)
+            skills_section = ""
+            if existing_skills:
+                skills_section = (
+                    "\n\n## Existing Skills\n"
+                    + "\n".join(f"- {s}" for s in existing_skills)
+                )
+
+            user_prompt = f"## Conversation History\n{history_text}\n\n{file_context}{skills_section}"
+            logger.info("Dream prompt: {} chars, ~{} tokens", len(user_prompt), _estimate_tokens(user_prompt))
+
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": cached_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            t_start = time.perf_counter()
+            try:
+                result = await self.dream._runner.run(AgentRunSpec(
+                    initial_messages=messages,
+                    tools=self.dream._tools,
+                    model=self.dream.model,
+                    max_iterations=self.dream.max_iterations,
+                    max_tool_result_chars=self.dream.max_tool_result_chars,
+                    context_window_tokens=self.context_window_tokens,
+                    fail_on_tool_error=False,
+                ))
+                elapsed = time.perf_counter() - t_start
+                logger.info(
+                    "Dream run complete in {:.1f}s: stop_reason={}, tool_events={}",
+                    elapsed, result.stop_reason, len(result.tool_events),
+                )
+            except Exception:
+                elapsed = time.perf_counter() - t_start
+                logger.exception("Dream run failed after {:.1f}s", elapsed)
+                result = None
+
+            # Build changelog from tool events
+            changelog: list[str] = []
+            if result and result.tool_events:
+                for event in result.tool_events:
+                    if event.get("status") == "ok":
+                        changelog.append(f"{event['name']}: {event['detail']}")
+
+            success = result is not None and result.stop_reason == "completed"
+            if success:
+                new_cursor = batch[-1]["cursor"]
+                self.dream.store.set_last_dream_cursor(new_cursor)
+                session.metadata.setdefault("_dream_changelog", []).extend(changelog)
+                self.sessions.save(session)
+                logger.info(
+                    "Dream done: {} change(s), cursor advanced to {}",
+                    len(changelog), new_cursor,
+                )
+            else:
+                reason = result.stop_reason if result else "exception"
+                logger.warning(
+                    "Dream incomplete ({}): cursor NOT advanced, stopping",
+                    reason,
+                )
+                return
+
+            self.dream.store.compact_history()
+
+            # Persist session record for debugging / visualization
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "batch": {
+                    "from_cursor": last_cursor,
+                    "to_cursor": batch[-1]["cursor"],
+                    "count": len(batch),
+                },
+                "prompt_chars": len(user_prompt),
+                "elapsed_seconds": elapsed,
+                "stop_reason": result.stop_reason,
+                "usage": result.usage,
+                "tool_events": result.tool_events,
+                "changelog": changelog,
+                "commit_sha": None,
+                "messages": result.messages,
+            }
+            self.dream.store.write_dream_session(record)
+            session.metadata["_dream_last_record"] = record
+
+
+    async def _dream_finalize_commit(self, session: Session) -> None:
+        """Collapse accumulated changelog into a single git commit, clear caches, and complete the goal."""
+        changelog = session.metadata.pop("_dream_changelog", [])
+        sha = None
+        if changelog and self.dream.store.git.is_initialized():
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            summary = f"dream: {ts}, {len(changelog)} change(s)"
+            commit_msg = f"{summary}\n\n" + "\n".join(changelog)
+            sha = self.dream.store.git.auto_commit(commit_msg)
+            if sha:
+                logger.info("Dream commit: {}", sha)
+        record = session.metadata.pop("_dream_last_record", None)
+        if record and sha:
+            record["commit_sha"] = sha
+            self.dream.store.write_dream_session(record)
+        session.metadata.pop("_dream_system_prompt", None)
+        session.metadata.pop("_dream_system_prompt_mtime", None)
+        trigger_channel = session.metadata.pop("_dream_trigger_channel", None)
+        trigger_chat_id = session.metadata.pop("_dream_trigger_chat_id", None)
+        goal = session.metadata.get(GOAL_STATE_KEY)
+        if isinstance(goal, dict) and goal.get("status") == "active":
+            session.metadata[GOAL_STATE_KEY] = {
+                **goal,
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "recap": f"Memory backlog consolidated ({len(changelog)} change(s)).",
+            }
+        self.sessions.save(session)
+        session.metadata["_dream_finalized"] = True
+        # Notify the user who triggered /dream
+        if trigger_channel and trigger_chat_id:
+            content = f"Dream completed: {len(changelog)} change(s) committed."
+            if not changelog:
+                content = "Dream: nothing to process."
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=trigger_channel,
+                chat_id=trigger_chat_id,
+                content=content,
+            ))
 
     async def _process_message(
         self,

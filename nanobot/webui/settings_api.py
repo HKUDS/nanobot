@@ -307,6 +307,7 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
                 "max_batch_size": defaults.dream.max_batch_size,
                 "max_iterations": defaults.dream.max_iterations,
                 "annotate_line_ages": defaults.dream.annotate_line_ages,
+                "dream_edit_user_skills": defaults.dream.dream_edit_user_skills,
             },
             "unified_session": defaults.unified_session,
         },

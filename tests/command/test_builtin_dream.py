@@ -114,6 +114,52 @@ async def test_dream_restore_lists_versions_with_next_steps() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dream_log_shows_summary_and_analysis() -> None:
+    commit = CommitInfo(
+        sha="abcd1234",
+        message="dream: 2026-04-04, 2 change(s)\n\n[ADD] fact A →USER\n[REMOVE] old fact",
+        timestamp="2026-04-04 12:00",
+    )
+    diff = (
+        "diff --git a/SOUL.md b/SOUL.md\n"
+        "--- a/SOUL.md\n"
+        "+++ b/SOUL.md\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    git = _FakeGit(commits=[commit], diff_map={commit.sha: (commit, diff)})
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "## Dream Update" in out.content
+    assert "- Summary: dream: 2026-04-04, 2 change(s)" in out.content
+    assert "### Analysis" in out.content
+    assert "[ADD] fact A →USER" in out.content
+    assert "[REMOVE] old fact" in out.content
+
+
+@pytest.mark.asyncio
+async def test_dream_log_with_empty_commit_message() -> None:
+    commit = CommitInfo(sha="abcd1234", message="", timestamp="2026-04-04 12:00")
+    diff = (
+        "diff --git a/SOUL.md b/SOUL.md\n"
+        "--- a/SOUL.md\n"
+        "+++ b/SOUL.md\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    git = _FakeGit(commits=[commit], diff_map={commit.sha: (commit, diff)})
+
+    out = await cmd_dream_log(_make_ctx("/dream-log", git))
+
+    assert "## Dream Update" in out.content
+    assert "- Summary:" not in out.content
+    assert "### Analysis" not in out.content
+
+
+@pytest.mark.asyncio
 async def test_dream_restore_success_mentions_files_and_followup() -> None:
     commit = CommitInfo(sha="abcd1234", message="dream: latest", timestamp="2026-04-04 12:00")
     diff = (

@@ -292,3 +292,95 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
         loop = AgentLoop.from_config(config)
     assert loop._provider_snapshot_loader is None
     assert loop._preset_snapshot_loader is not None
+
+
+class TestDreamModelOverride:
+    def test_dream_follows_main_when_no_override(self, tmp_path) -> None:
+        provider = _provider("base-model")
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            model="base-model",
+            context_window_tokens=1000,
+        )
+        assert loop.dream.model == "base-model"
+        assert loop.dream.provider is provider
+
+    def test_dream_raw_model_override(self, tmp_path) -> None:
+        provider = _provider("base-model")
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            model="base-model",
+            context_window_tokens=1000,
+            dream_model_override="custom-model-v2",
+        )
+        assert loop.dream.model == "custom-model-v2"
+        assert loop.dream.provider is provider
+
+    def test_dream_preset_override(self, tmp_path) -> None:
+        cheap_provider = _provider("openai/gpt-4.1-mini", max_tokens=2048)
+        preset = ModelPresetConfig(
+            model="openai/gpt-4.1-mini",
+            provider="openai",
+            max_tokens=2048,
+            context_window_tokens=128_000,
+        )
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=_provider("base-model"),
+            workspace=tmp_path,
+            model="base-model",
+            context_window_tokens=1000,
+            model_presets={"cheap": preset},
+            dream_model_override="cheap",
+            preset_snapshot_loader=lambda _name: ProviderSnapshot(
+                provider=cheap_provider,
+                model=preset.model,
+                context_window_tokens=preset.context_window_tokens,
+                signature=("cheap", preset.model),
+            ),
+        )
+        assert loop.dream.model == "openai/gpt-4.1-mini"
+        assert loop.dream.provider is cheap_provider
+        assert loop.dream._runner.provider is cheap_provider
+
+    def test_dream_override_survives_main_preset_switch(self, tmp_path) -> None:
+        base_provider = _provider("base-model")
+        fast_provider = _provider("openai/gpt-4.1", max_tokens=4096)
+        cheap_provider = _provider("openai/gpt-4.1-mini", max_tokens=2048)
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=base_provider,
+            workspace=tmp_path,
+            model="base-model",
+            context_window_tokens=1000,
+            model_presets={
+                "fast": ModelPresetConfig(model="openai/gpt-4.1"),
+                "cheap": ModelPresetConfig(model="openai/gpt-4.1-mini"),
+            },
+            dream_model_override="cheap",
+            preset_snapshot_loader=lambda name: ProviderSnapshot(
+                provider=fast_provider if name == "fast" else cheap_provider,
+                model="openai/gpt-4.1" if name == "fast" else "openai/gpt-4.1-mini",
+                context_window_tokens=32_768 if name == "fast" else 128_000,
+                signature=(name, "model"),
+            ),
+        )
+        # Initially dream is on cheap
+        assert loop.dream.model == "openai/gpt-4.1-mini"
+        assert loop.dream.provider is cheap_provider
+
+        # Switch main preset to fast
+        loop.set_model_preset("fast")
+
+        # Main agent should be on fast
+        assert loop.model == "openai/gpt-4.1"
+        assert loop.provider is fast_provider
+
+        # Dream should still be on cheap override
+        assert loop.dream.model == "openai/gpt-4.1-mini"
+        assert loop.dream.provider is cheap_provider
+        assert loop.dream._runner.provider is cheap_provider

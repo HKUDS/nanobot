@@ -299,30 +299,22 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
-    import time
+    from nanobot.bus.events import InboundMessage
 
-    loop = ctx.loop
-    msg = ctx.msg
-
-    async def _run_dream():
-        t0 = time.monotonic()
-        try:
-            did_work = await loop.dream.run()
-            elapsed = time.monotonic() - t0
-            if did_work:
-                content = f"Dream completed in {elapsed:.1f}s."
-            else:
-                content = "Dream: nothing to process."
-        except Exception as e:
-            elapsed = time.monotonic() - t0
-            content = f"Dream failed after {elapsed:.1f}s: {e}"
-        await loop.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=content,
-        ))
-
-    asyncio.create_task(_run_dream())
+    await ctx.loop.bus.publish_inbound(InboundMessage(
+        channel="system",
+        sender_id="dream",
+        chat_id="dream",
+        content="",
+        metadata={
+            "trigger_channel": ctx.msg.channel,
+            "trigger_chat_id": ctx.msg.chat_id,
+        },
+    ))
     return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="Dream started. It will process memory backlog and report when done.",
     )
 
 
@@ -355,6 +347,18 @@ def _format_changed_files(diff: str) -> str:
 
 def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = None) -> str:
     files_line = _format_changed_files(diff)
+    msg_lines = commit.message.splitlines() if commit.message else []
+    msg_summary = msg_lines[0] if msg_lines else ""
+    msg_body = []
+    in_body = False
+    for line in msg_lines[1:]:
+        if not in_body:
+            if not line:
+                in_body = True
+            continue
+        msg_body.append(line)
+    body_text = "\n".join(msg_body).strip()
+
     lines = [
         "## Dream Update",
         "",
@@ -362,8 +366,12 @@ def _format_dream_log_content(commit, diff: str, *, requested_sha: str | None = 
         "",
         f"- Commit: `{commit.sha}`",
         f"- Time: {commit.timestamp}",
-        f"- Changed files: {files_line}",
     ]
+    if msg_summary:
+        lines.append(f"- Summary: {msg_summary}")
+    lines.append(f"- Changed files: {files_line}")
+    if body_text:
+        lines.extend(["", "### Analysis", "", body_text])
     if diff:
         lines.extend([
             "",
@@ -389,7 +397,8 @@ def _format_dream_restore_list(commits: list) -> str:
         "",
     ]
     for c in commits:
-        lines.append(f"- `{c.sha}` {c.timestamp} - {c.message.splitlines()[0]}")
+        summary = c.message.splitlines()[0] if c.message else "(no message)"
+        lines.append(f"- `{c.sha}` {c.timestamp} - {summary}")
     lines.extend([
         "",
         "Preview a version with `/dream-log <sha>` before restoring it.",
