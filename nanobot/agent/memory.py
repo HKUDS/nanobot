@@ -12,7 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
-import tiktoken
 from loguru import logger
 
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
@@ -24,6 +23,7 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
+    get_tokenizer_encoding,
     strip_think,
     truncate_text,
 )
@@ -624,7 +624,7 @@ class Consolidator:
         if budget <= 0:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
         try:
-            enc = tiktoken.get_encoding("cl100k_base")
+            enc = get_tokenizer_encoding()
             tokens = enc.encode(text)
             if len(tokens) <= budget:
                 return text

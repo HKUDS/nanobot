@@ -31,6 +31,26 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
 
 
 @pytest.mark.asyncio
+async def test_process_direct_warms_tokenizer_before_processing(tmp_path, monkeypatch) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    calls: list[str] = []
+
+    def fake_warmup() -> None:
+        calls.append("warmup")
+
+    async def fake_run_agent_loop(*_args, **_kwargs):
+        calls.append("run")
+        return "ok", [], [{"role": "assistant", "content": "ok"}], "stop", False
+
+    monkeypatch.setattr("nanobot.agent.loop.warmup_tokenizer", fake_warmup)
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    assert calls == ["warmup", "run"]
+
+
+@pytest.mark.asyncio
 async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]

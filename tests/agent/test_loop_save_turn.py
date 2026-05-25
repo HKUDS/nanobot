@@ -1050,6 +1050,48 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_startup_warms_tokenizer_after_mcp_connect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    calls: list[str] = []
+
+    async def fake_connect_mcp() -> None:
+        calls.append("mcp")
+
+    def sync_warmup() -> None:
+        calls.append("warmup")
+
+    loop._connect_mcp = fake_connect_mcp  # type: ignore[method-assign]
+    monkeypatch.setattr("nanobot.agent.loop.warmup_tokenizer", sync_warmup)
+
+    await loop.startup()
+
+    assert calls == ["mcp", "warmup"]
+
+
+@pytest.mark.asyncio
+async def test_startup_continues_when_tokenizer_warmup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    async def fake_connect_mcp() -> None:
+        return None
+
+    def failing_get_encoding(_name: str):
+        raise RuntimeError("tokenizer unavailable")
+
+    loop._connect_mcp = fake_connect_mcp  # type: ignore[method-assign]
+    monkeypatch.setattr("nanobot.utils.helpers._TOKENIZER_ENCODING", None)
+    monkeypatch.setattr("nanobot.utils.helpers.tiktoken.get_encoding", failing_get_encoding)
+
+    await loop.startup()
+
+
+@pytest.mark.asyncio
 async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]

@@ -53,7 +53,10 @@ from nanobot.session.goal_state import (
 )
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
-from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import (
+    image_placeholder_text,
+    warmup_tokenizer,
+)
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -840,7 +843,7 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
+        await self.startup()
         logger.info("Agent loop started")
 
         while self._running:
@@ -1078,6 +1081,11 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
+
+    async def startup(self) -> None:
+        """Initialize resources needed before accepting messages."""
+        await self._connect_mcp()
+        warmup_tokenizer()
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -1767,7 +1775,7 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
-        await self._connect_mcp()
+        await self.startup()
         msg = InboundMessage(
             channel=channel, sender_id="user", chat_id=chat_id,
             content=content, media=media or [],

@@ -696,7 +696,7 @@ def serve(
     api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
 
     async def on_startup(_app):
-        await agent_loop._connect_mcp()
+        await agent_loop.startup()
 
     async def on_cleanup(_app):
         await agent_loop.close_mcp()
