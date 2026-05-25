@@ -16,12 +16,14 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
+    StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_error_event,
     build_file_edit_start_event,
-    prepare_file_edit_tracker as _prepare_file_edit_tracker,
     prepare_file_edit_trackers,
-    StreamingFileEditTracker,
+)
+from nanobot.utils.file_edit_events import (
+    prepare_file_edit_tracker as _prepare_file_edit_tracker,
 )
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
@@ -179,16 +181,19 @@ class AgentRunner:
         and *iteration* are both provided) and return (True, cycles+1) so the
         caller continues the iteration loop.  Otherwise return (False, cycles).
         """
-        if injection_cycles >= _MAX_INJECTION_CYCLES:
-            return False, injection_cycles
-        injections = await self._drain_injections(spec)
+        injections: list[dict[str, Any]] = []
+        real_injection = False
+        if injection_cycles < _MAX_INJECTION_CYCLES:
+            injections = await self._drain_injections(spec)
+            real_injection = bool(injections)
         if not injections and allow_goal_continue and assistant_message is not None:
             predicate = spec.goal_active_predicate
             if predicate is not None and predicate():
                 injections = [build_goal_continue_message(spec.goal_continue_message)]
         if not injections:
             return False, injection_cycles
-        injection_cycles += 1
+        if real_injection:
+            injection_cycles += 1
         if assistant_message is not None:
             messages.append(assistant_message)
             if iteration is not None:
@@ -204,10 +209,13 @@ class AgentRunner:
                     },
                 )
         self._append_injected_messages(messages, injections)
-        logger.info(
-            "Injected {} follow-up message(s) {} ({}/{})",
-            len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
-        )
+        if real_injection:
+            logger.info(
+                "Injected {} follow-up message(s) {} ({}/{})",
+                len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
+            )
+        else:
+            logger.info("Injected sustained-goal continuation {}", phase)
         return True, injection_cycles
 
     async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:

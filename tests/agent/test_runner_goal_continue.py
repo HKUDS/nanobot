@@ -130,6 +130,33 @@ async def test_runner_respects_max_iterations_even_with_active_goal():
 
 
 @pytest.mark.asyncio
+async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
+    """Synthetic goal continuation should be governed by max_iterations."""
+    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage={},
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    max_iterations = _MAX_INJECTION_CYCLES + 3
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=max_iterations,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert provider.chat_with_retry.await_count == max_iterations
+
+
+@pytest.mark.asyncio
 async def test_runner_does_not_force_continue_on_error():
     """Even with active goal, an LLM error should exit with stop_reason="error"."""
     from nanobot.agent.runner import AgentRunner, AgentRunSpec
