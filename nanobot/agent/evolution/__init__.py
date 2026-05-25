@@ -1,7 +1,14 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
 from nanobot.agent.evolution.deps import evolution_extra_available, require_evolution_extra
-from nanobot.agent.evolution.gepa_status import GepaRunPhase, GepaRunStatus, GepaRunStore, GepaRunTrigger
+from nanobot.agent.evolution.gepa_status import (
+    GEPA_SKIP_ALREADY_RUNNING,
+    GepaRunLock,
+    GepaRunPhase,
+    GepaRunStatus,
+    GepaRunStore,
+    GepaRunTrigger,
+)
 from nanobot.agent.evolution.git_store import EvolutionGitStore
 from nanobot.agent.evolution.models import ToolCallRecord, TurnTrace, TurnTraceOutcome
 from nanobot.agent.evolution.post_task import (
@@ -26,6 +33,8 @@ from nanobot.agent.evolution.trace_store import TraceStore
 
 __all__ = [
     "EvolutionGitStore",
+    "GEPA_SKIP_ALREADY_RUNNING",
+    "GepaRunLock",
     "GepaRunPhase",
     "GepaRunStatus",
     "GepaRunStore",

@@ -3,8 +3,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
 
-from nanobot.agent.evolution.gepa_status import GepaRunStatus, GepaRunStore
+from nanobot.agent.evolution.gepa_status import (
+    GEPA_SKIP_ALREADY_RUNNING,
+    GepaRunLock,
+    GepaRunStatus,
+    GepaRunStore,
+)
 
 
 def test_gepa_run_store_round_trip(tmp_path) -> None:
@@ -94,3 +104,54 @@ def test_gepa_run_status_with_updates() -> None:
     assert running.phase == "starting"
     assert running.message == "acquiring lock"
     assert idle.phase == "idle"
+
+
+def test_gepa_run_lock_blocks_second_holder_until_release(tmp_path) -> None:
+    first = GepaRunLock(tmp_path)
+    second = GepaRunLock(tmp_path)
+
+    assert first.try_acquire_run_lock() is True
+    assert second.try_acquire_run_lock() is False
+
+    first.release_run_lock()
+    assert second.try_acquire_run_lock() is True
+    second.release_run_lock()
+
+
+def test_gepa_run_lock_cross_process_single_flight(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    child_code = textwrap.dedent(
+        f"""
+        import sys
+        import time
+        from pathlib import Path
+
+        sys.path.insert(0, {str(repo_root)!r})
+        from nanobot.agent.evolution.gepa_status import GepaRunLock
+
+        lock = GepaRunLock(Path({str(tmp_path)!r}))
+        assert lock.try_acquire_run_lock()
+        time.sleep(2)
+        lock.release_run_lock()
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", child_code],
+        cwd=str(repo_root),
+    )
+    try:
+        time.sleep(0.3)
+        peer = GepaRunLock(tmp_path)
+        assert peer.try_acquire_run_lock() is False
+
+        assert proc.wait(timeout=10) == 0
+        assert peer.try_acquire_run_lock() is True
+        peer.release_run_lock()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+def test_gepa_skip_already_running_constant() -> None:
+    assert GEPA_SKIP_ALREADY_RUNNING == "already running"

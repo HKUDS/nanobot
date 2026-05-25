@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from filelock import FileLock, Timeout
 from loguru import logger
 
 GepaRunPhase = Literal[
@@ -25,6 +26,8 @@ _PHASES: frozenset[str] = frozenset(
     {"idle", "starting", "selecting", "optimizing", "writing", "completed", "failed", "skipped"}
 )
 _TRIGGERS: frozenset[str] = frozenset({"cron", "cli", "slash"})
+
+GEPA_SKIP_ALREADY_RUNNING = "already running"
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +140,38 @@ class GepaRunStore:
             json.dumps(status.to_dict(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+class GepaRunLock:
+    """Cross-process single-flight lock at ``{workspace}/.nanobot/gepa_run.lock``."""
+
+    def __init__(self, workspace: Path) -> None:
+        self._path = workspace.expanduser().resolve() / ".nanobot" / "gepa_run.lock"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = FileLock(str(self._path))
+        self._held = False
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def try_acquire_run_lock(self) -> bool:
+        """Try to acquire the lock without blocking."""
+        if self._held:
+            return True
+        try:
+            self._lock.acquire(timeout=0)
+        except Timeout:
+            return False
+        self._held = True
+        return True
+
+    def release_run_lock(self) -> None:
+        """Release the lock when held by this instance."""
+        if not self._held:
+            return
+        self._lock.release()
+        self._held = False
 
 
 def _coerce_str_list(value: Any) -> list[str]:
