@@ -6,7 +6,7 @@ import {
   Search,
   Settings,
   SquarePen,
-  Store,
+  Blocks,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -42,7 +42,7 @@ interface SidebarProps {
   onRequestRename: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   onOpenSettings: () => void;
-  onOpenStore: () => void;
+  onOpenApps: () => void;
   onOpenSearch: () => void;
   onToggleArchived: () => void;
   onUpdateView: (view: Partial<SidebarViewState>) => void;
@@ -133,9 +133,9 @@ export function Sidebar(props: SidebarProps) {
         />
         <SidebarActionButton
           collapsed={collapsed}
-          label={t("sidebar.store")}
-          onClick={props.onOpenStore}
-          icon={<Store className="h-4 w-4" />}
+          label={t("sidebar.apps")}
+          onClick={props.onOpenApps}
+          icon={<Blocks className="h-4 w-4" />}
         />
         <SidebarViewMenu
           compact={collapsed}

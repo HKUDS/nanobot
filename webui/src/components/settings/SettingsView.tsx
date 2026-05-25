@@ -42,7 +42,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  Store,
+  Blocks,
   Trash2,
   Triangle,
   Waves,
@@ -109,14 +109,14 @@ export type SettingsSectionKey =
   | "models"
   | "image"
   | "web"
-  | "plugins"
+  | "apps"
   | "runtime"
   | "advanced";
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
-type StoreKindFilter = "all" | "cli" | "mcp";
-type StoreCatalogItem =
+type AppsKindFilter = "all" | "cli" | "mcp";
+type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
 
@@ -301,11 +301,11 @@ export function SettingsView({
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
-  const [storeQuery, setStoreQuery] = useState("");
+  const [appsQuery, setAppsQuery] = useState("");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [storeKindFilter, setStoreKindFilter] = useState<StoreKindFilter>("all");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
@@ -1029,15 +1029,15 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.web}
           />
         );
-      case "plugins":
+      case "apps":
         return (
-          <StoreCatalogSettings
+          <AppsCatalogSettings
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             cliAppsLoading={cliAppsLoading}
             mcpPresetsLoading={mcpPresetsLoading}
-            query={storeQuery}
-            filter={storeKindFilter}
+            query={appsQuery}
+            filter={appsKindFilter}
             cliActionKey={cliAppsAction}
             mcpActionKey={mcpPresetAction}
             cliMessage={cliAppsMessage}
@@ -1050,8 +1050,8 @@ export function SettingsView({
             mcpConfigImport={mcpConfigImport}
             showBrandLogos={localPrefs.brandLogos}
             requiresRestartPending={pendingRestartSections.runtime}
-            onQueryChange={setStoreQuery}
-            onFilterChange={setStoreKindFilter}
+            onQueryChange={setAppsQuery}
+            onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
             onMcpAction={handleMcpPresetAction}
             onBackToChat={onBackToChat}
@@ -1158,7 +1158,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
-  { key: "plugins", icon: Store, fallback: "Store" },
+  { key: "apps", icon: Blocks, fallback: "Apps" },
   { key: "runtime", icon: Server, fallback: "Runtime" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
@@ -1272,14 +1272,14 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
-  const cliStoreCount = cliApps?.installed_count ?? 0;
-  const mcpStoreCount = mcpPresets?.installed_count ?? settings.advanced.mcp_server_count;
-  const storeCount = cliStoreCount + mcpStoreCount;
-  const storeValue = tx("settings.store.enabledSummary", "{{count}} enabled")
-    .replace("{{count}}", String(storeCount));
-  const storeCaption = tx("settings.store.caption", "{{cli}} CLI · {{mcp}} MCP")
-    .replace("{{cli}}", String(cliStoreCount))
-    .replace("{{mcp}}", String(mcpStoreCount));
+  const cliAppsEnabledCount = cliApps?.installed_count ?? 0;
+  const mcpAppsEnabledCount = mcpPresets?.installed_count ?? settings.advanced.mcp_server_count;
+  const appsCount = cliAppsEnabledCount + mcpAppsEnabledCount;
+  const appsValue = tx("settings.apps.enabledSummary", "{{count}} enabled")
+    .replace("{{count}}", String(appsCount));
+  const appsCaption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
+    .replace("{{cli}}", String(cliAppsEnabledCount))
+    .replace("{{mcp}}", String(mcpAppsEnabledCount));
   return (
     <div className="space-y-7">
       <section>
@@ -1361,11 +1361,11 @@ function OverviewSettings({
             onClick={() => onSelectSection("image")}
           />
           <OverviewListRow
-            icon={Store}
-            title={tx("settings.nav.plugins", "Store")}
-            value={storeValue}
-            caption={storeCaption}
-            onClick={() => onSelectSection("plugins")}
+            icon={Blocks}
+            title={tx("settings.nav.apps", "Apps")}
+            value={appsValue}
+            caption={appsCaption}
+            onClick={() => onSelectSection("apps")}
           />
         </SettingsGroup>
       </section>
@@ -2390,7 +2390,7 @@ function WebSettings({
   );
 }
 
-function StoreCatalogSettings({
+function AppsCatalogSettings({
   cliApps,
   mcpPresets,
   cliAppsLoading,
@@ -2428,7 +2428,7 @@ function StoreCatalogSettings({
   cliAppsLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
-  filter: StoreKindFilter;
+  filter: AppsKindFilter;
   cliActionKey: string | null;
   mcpActionKey: string | null;
   cliMessage: string | null;
@@ -2442,7 +2442,7 @@ function StoreCatalogSettings({
   showBrandLogos: boolean;
   requiresRestartPending: boolean;
   onQueryChange: (value: string) => void;
-  onFilterChange: (value: StoreKindFilter) => void;
+  onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
   onBackToChat: () => void;
@@ -2458,12 +2458,12 @@ function StoreCatalogSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
-    { value: "all", label: tx("settings.store.filterAll", "All") },
-    { value: "cli", label: tx("settings.store.filterCli", "App CLIs") },
-    { value: "mcp", label: tx("settings.store.filterMcp", "MCP services") },
+    { value: "all", label: tx("settings.apps.filterAll", "All") },
+    { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
+    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
-  const items: StoreCatalogItem[] = [
+  const items: AppsCatalogItem[] = [
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
     ...(mcpPresets?.presets ?? []).map((preset) => ({
       id: `mcp:${preset.name}`,
@@ -2472,10 +2472,10 @@ function StoreCatalogSettings({
     })),
   ]
     .filter((item) => filter === "all" || item.kind === filter)
-    .filter((item) => !normalizedQuery || storeSearchText(item).includes(normalizedQuery))
+    .filter((item) => !normalizedQuery || appsSearchText(item).includes(normalizedQuery))
     .sort((left, right) => {
-      const rank = Number(!storeReady(left)) - Number(!storeReady(right));
-      return rank || storeTitle(left).localeCompare(storeTitle(right));
+      const rank = Number(!appsReady(left)) - Number(!appsReady(right));
+      return rank || appsTitle(left).localeCompare(appsTitle(right));
     });
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
@@ -2483,7 +2483,7 @@ function StoreCatalogSettings({
   const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
   const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
-  const caption = tx("settings.store.caption", "{{cli}} CLI · {{mcp}} MCP")
+  const caption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
     .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
     .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0));
 
@@ -2493,7 +2493,7 @@ function StoreCatalogSettings({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
-              "settings.store.description",
+              "settings.apps.description",
               "Add local app adapters and connected tool servers that nanobot can use from chat.",
             )}
           </p>
@@ -2505,14 +2505,14 @@ function StoreCatalogSettings({
             <Input
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={tx("settings.store.searchPlaceholder", "Search Store")}
+              placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
               className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
             />
           </div>
           <SegmentedControl
             value={filter}
             options={filterOptions}
-            onChange={(value) => onFilterChange(value as StoreKindFilter)}
+            onChange={(value) => onFilterChange(value as AppsKindFilter)}
           />
         </div>
       </section>
@@ -2559,7 +2559,7 @@ function StoreCatalogSettings({
 
       <section>
         <div className="flex items-center justify-between border-b border-border/45 pb-3">
-          <SettingsSectionTitle>{tx("settings.store.featured", "Featured")}</SettingsSectionTitle>
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
           <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
             {items.length}
           </span>
@@ -2567,13 +2567,13 @@ function StoreCatalogSettings({
         {loading ? (
           <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {tx("settings.store.loading", "Loading Store...")}
+            {tx("settings.apps.loading", "Loading Apps...")}
           </div>
         ) : items.length ? (
           <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
             {items.map((item) =>
               item.kind === "cli" ? (
-                <CliStoreCatalogRow
+                <CliAppsCatalogRow
                   key={item.id}
                   app={item.app}
                   actionKey={cliActionKey}
@@ -2581,7 +2581,7 @@ function StoreCatalogSettings({
                   onAction={onCliAction}
                 />
               ) : (
-                <McpStoreCatalogRow
+                <McpAppsCatalogRow
                   key={item.id}
                   preset={item.preset}
                   values={mcpFieldValues[item.preset.name] ?? {}}
@@ -2596,7 +2596,7 @@ function StoreCatalogSettings({
           </div>
         ) : (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
-            {tx("settings.store.empty", "No Store items match this filter.")}
+            {tx("settings.apps.empty", "No apps match this filter.")}
           </div>
         )}
       </section>
@@ -2618,7 +2618,7 @@ function StoreCatalogSettings({
   );
 }
 
-function CliStoreCatalogRow({
+function CliAppsCatalogRow({
   app,
   actionKey,
   showBrandLogos,
@@ -2644,7 +2644,7 @@ function CliStoreCatalogRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
-          <StoreTypeBadge>{tx("settings.store.cliLabel", "CLI")}</StoreTypeBadge>
+          <AppsTypeBadge>{tx("settings.apps.cliLabel", "CLI")}</AppsTypeBadge>
         </div>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
@@ -2652,13 +2652,13 @@ function CliStoreCatalogRow({
         {app.installed ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <StoreActionButton
+              <AppsActionButton
                 ariaLabel={tx("settings.cliApps.statusInstalled", "CLI installed")}
                 busy={busy}
                 tone="installed"
               >
                 <Check className="h-4 w-4" aria-hidden />
-              </StoreActionButton>
+              </AppsActionButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
@@ -2676,24 +2676,24 @@ function CliStoreCatalogRow({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : app.install_supported ? (
-          <StoreActionButton
+          <AppsActionButton
             ariaLabel={tx("settings.cliApps.install", "Install CLI")}
             busy={installBusy}
             onClick={() => onAction("install", app.name)}
           >
             <Plus className="h-4 w-4" aria-hidden />
-          </StoreActionButton>
+          </AppsActionButton>
         ) : (
-          <StoreActionButton ariaLabel={tx("settings.cliApps.unavailable", "Unavailable")} disabled>
+          <AppsActionButton ariaLabel={tx("settings.cliApps.unavailable", "Unavailable")} disabled>
             <Plus className="h-4 w-4" aria-hidden />
-          </StoreActionButton>
+          </AppsActionButton>
         )}
       </div>
     </article>
   );
 }
 
-function McpStoreCatalogRow({
+function McpAppsCatalogRow({
   preset,
   values,
   actionKey,
@@ -2764,7 +2764,7 @@ function McpStoreCatalogRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
-            <StoreTypeBadge>{tx("settings.store.mcpLabel", "MCP")}</StoreTypeBadge>
+            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
@@ -2772,9 +2772,9 @@ function McpStoreCatalogRow({
           {readyInstalled ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <StoreActionButton ariaLabel={statusLabel} busy={busy} tone="installed">
+                <AppsActionButton ariaLabel={statusLabel} busy={busy} tone="installed">
                   <Check className="h-4 w-4" aria-hidden />
-                </StoreActionButton>
+                </AppsActionButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
@@ -2794,7 +2794,7 @@ function McpStoreCatalogRow({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : preset.installed && !preset.configured ? (
-            <StoreActionButton
+            <AppsActionButton
               ariaLabel={hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
               busy={enableBusy}
               onClick={() => {
@@ -2803,19 +2803,19 @@ function McpStoreCatalogRow({
               }}
             >
               <Plus className="h-4 w-4" aria-hidden />
-            </StoreActionButton>
+            </AppsActionButton>
           ) : preset.install_supported ? (
-            <StoreActionButton
+            <AppsActionButton
               ariaLabel={needsSetupInput ? tx("settings.mcp.setup", "Set up") : tx("settings.mcp.enable", "Enable")}
               busy={enableBusy}
               onClick={enableOrOpenSetup}
             >
               <Plus className="h-4 w-4" aria-hidden />
-            </StoreActionButton>
+            </AppsActionButton>
           ) : (
-            <StoreActionButton ariaLabel={tx("settings.mcp.comingSoon", "Coming soon")} disabled>
+            <AppsActionButton ariaLabel={tx("settings.mcp.comingSoon", "Coming soon")} disabled>
               <Plus className="h-4 w-4" aria-hidden />
-            </StoreActionButton>
+            </AppsActionButton>
           )}
         </div>
       </div>
@@ -2944,7 +2944,7 @@ function McpStoreCatalogRow({
   );
 }
 
-function StoreTypeBadge({ children }: { children: ReactNode }) {
+function AppsTypeBadge({ children }: { children: ReactNode }) {
   return (
     <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-[0.06em] text-muted-foreground">
       {children}
@@ -2952,7 +2952,7 @@ function StoreTypeBadge({ children }: { children: ReactNode }) {
   );
 }
 
-function StoreActionButton({
+function AppsActionButton({
   ariaLabel,
   busy,
   disabled,
@@ -2987,15 +2987,15 @@ function StoreActionButton({
   );
 }
 
-function storeTitle(item: StoreCatalogItem): string {
+function appsTitle(item: AppsCatalogItem): string {
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
 }
 
-function storeReady(item: StoreCatalogItem): boolean {
+function appsReady(item: AppsCatalogItem): boolean {
   return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
 }
 
-function storeSearchText(item: StoreCatalogItem): string {
+function appsSearchText(item: AppsCatalogItem): string {
   if (item.kind === "cli") {
     const app = item.app;
     return [

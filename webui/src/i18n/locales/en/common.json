@@ -64,7 +64,7 @@
       "label": "Language",
       "ariaLabel": "Change language"
     },
-    "store": "Store"
+    "apps": "Apps"
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Store",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
       "runtime": "Runtime",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "apps": "Apps"
     },
     "sections": {
       "interface": "Interface",
@@ -98,13 +98,13 @@
       "imageDefaults": "Defaults",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
-      "plugins": "Store",
       "cliApps": "CLI apps",
       "mcp": "MCP services",
       "identity": "Identity",
       "safety": "Safety",
       "capabilities": "Capabilities",
-      "integrations": "Integrations"
+      "integrations": "Integrations",
+      "apps": "Apps"
     },
     "models": {
       "selectModel": "Select model",
@@ -384,7 +384,7 @@
       "configureProvider": "Configure provider",
       "missingCredential": "Configure this provider before enabling image generation."
     },
-    "store": {
+    "apps": {
       "description": "Add app CLIs and MCP services nanobot can use from chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
@@ -393,10 +393,10 @@
       "filterMcp": "MCP services",
       "enabledSummary": "{{count}} enabled",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Search Store",
+      "searchPlaceholder": "Search Apps",
       "featured": "Featured",
-      "loading": "Loading Store...",
-      "empty": "No Store items match this filter."
+      "loading": "Loading Apps...",
+      "empty": "No apps match this filter."
     }
   },
   "chat": {
@@ -613,8 +613,8 @@
         }
       },
       "mentions": {
-        "ariaLabel": "Store",
-        "label": "Store",
+        "ariaLabel": "Apps",
+        "label": "Apps",
         "cliGroup": "CLI apps",
         "mcpGroup": "MCP services",
         "cliBadge": "CLI",

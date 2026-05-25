@@ -64,7 +64,7 @@
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
     },
-    "store": "Toko"
+    "apps": "Aplikasi"
   },
   "settings": {
     "backToChat": "Kembali ke obrolan",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Toko",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Aplikasi CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Aplikasi"
     },
     "sections": {
       "interface": "Antarmuka",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Kapabilitas",
       "integrations": "Integrations",
-      "plugins": "Toko",
       "cliApps": "App CLI",
-      "mcp": "Layanan MCP"
+      "mcp": "Layanan MCP",
+      "apps": "Aplikasi"
     },
     "rows": {
       "theme": "Tema",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "Nama produk, logo, dan merek adalah milik pemiliknya masing-masing. Penggunaan hanya untuk identifikasi dan tidak menyiratkan dukungan."
     },
-    "store": {
-      "description": "Tambahkan app CLI dan layanan MCP yang bisa digunakan nanobot dari chat.",
+    "apps": {
+      "description": "Tambahkan CLI app dan layanan MCP yang dapat digunakan nanobot dari chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Semua",
@@ -393,10 +393,10 @@
       "filterMcp": "Layanan MCP",
       "enabledSummary": "{{count}} aktif",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Cari di toko",
+      "searchPlaceholder": "Cari aplikasi",
       "featured": "Unggulan",
-      "loading": "Memuat toko...",
-      "empty": "Tidak ada item toko yang cocok."
+      "loading": "Memuat aplikasi...",
+      "empty": "Tidak ada aplikasi yang cocok dengan filter ini."
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "Tidak dapat membaca file ini"
       },
       "mentions": {
-        "ariaLabel": "Toko",
-        "label": "Toko",
+        "ariaLabel": "Aplikasi",
+        "label": "Aplikasi",
         "cliGroup": "App CLI",
         "mcpGroup": "Layanan MCP",
         "cliBadge": "CLI",

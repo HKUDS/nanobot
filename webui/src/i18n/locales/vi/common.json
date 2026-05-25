@@ -64,7 +64,7 @@
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
     },
-    "store": "Cửa hàng"
+    "apps": "Ứng dụng"
   },
   "settings": {
     "backToChat": "Quay lại trò chuyện",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Cửa hàng",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Ứng dụng CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Ứng dụng"
     },
     "sections": {
       "interface": "Giao diện",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Khả năng",
       "integrations": "Integrations",
-      "plugins": "Cửa hàng",
       "cliApps": "Ứng dụng CLI",
-      "mcp": "Dịch vụ MCP"
+      "mcp": "Dịch vụ MCP",
+      "apps": "Ứng dụng"
     },
     "rows": {
       "theme": "Giao diện",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
     },
-    "store": {
-      "description": "Thêm ứng dụng CLI và dịch vụ MCP mà nanobot có thể dùng trong chat.",
+    "apps": {
+      "description": "Thêm CLI ứng dụng và dịch vụ MCP để nanobot dùng trong trò chuyện.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Tất cả",
@@ -393,10 +393,10 @@
       "filterMcp": "Dịch vụ MCP",
       "enabledSummary": "{{count}} đã bật",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Tìm trong cửa hàng",
+      "searchPlaceholder": "Tìm ứng dụng",
       "featured": "Nổi bật",
-      "loading": "Đang tải cửa hàng...",
-      "empty": "Không có mục cửa hàng phù hợp."
+      "loading": "Đang tải ứng dụng...",
+      "empty": "Không có ứng dụng nào khớp với bộ lọc này."
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "Không thể đọc tệp này"
       },
       "mentions": {
-        "ariaLabel": "Cửa hàng",
-        "label": "Cửa hàng",
+        "ariaLabel": "Ứng dụng",
+        "label": "Ứng dụng",
         "cliGroup": "Ứng dụng CLI",
         "mcpGroup": "Dịch vụ MCP",
         "cliBadge": "CLI",

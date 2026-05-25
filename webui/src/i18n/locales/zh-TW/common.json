@@ -64,7 +64,7 @@
       "label": "語言",
       "ariaLabel": "切換語言"
     },
-    "store": "商店"
+    "apps": "應用"
   },
   "settings": {
     "backToChat": "返回對話",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "商店",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI 應用",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "應用"
     },
     "sections": {
       "interface": "介面",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "功能",
       "integrations": "Integrations",
-      "plugins": "商店",
       "cliApps": "CLI 應用",
-      "mcp": "MCP 服務"
+      "mcp": "MCP 服務",
+      "apps": "應用"
     },
     "rows": {
       "theme": "主題",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "產品名稱、標誌與品牌均屬於其各自擁有者。使用僅為識別用途，並不代表背書。"
     },
-    "store": {
-      "description": "新增可在聊天中使用的 CLI 應用與 MCP 服務。",
+    "apps": {
+      "description": "新增 nanobot 可在聊天中使用的 App CLI 與 MCP 服務。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "全部",
@@ -393,10 +393,10 @@
       "filterMcp": "MCP 服務",
       "enabledSummary": "已啟用 {{count}} 個",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "搜尋商店",
-      "featured": "推薦",
-      "loading": "正在載入商店...",
-      "empty": "沒有符合的商店項目。"
+      "searchPlaceholder": "搜尋應用",
+      "featured": "精選",
+      "loading": "正在載入應用...",
+      "empty": "沒有符合篩選條件的應用。"
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "無法讀取這個檔案"
       },
       "mentions": {
-        "ariaLabel": "商店",
-        "label": "商店",
+        "ariaLabel": "應用",
+        "label": "應用",
         "cliGroup": "CLI 應用",
         "mcpGroup": "MCP 服務",
         "cliBadge": "CLI",

@@ -28,7 +28,7 @@ const SETTINGS_NAV_KEYS = [
   "models",
   "image",
   "web",
-  "plugins",
+  "apps",
   "runtime",
   "advanced",
 ];

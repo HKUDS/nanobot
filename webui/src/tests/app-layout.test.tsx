@@ -710,8 +710,8 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
-    const storeButton = within(sidebar).getByRole("button", { name: "Store" });
-    expect(searchButton.compareDocumentPosition(storeButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
+    expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
@@ -734,7 +734,7 @@ describe("App layout", () => {
     expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Store" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Apps" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));

@@ -64,7 +64,7 @@
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
     },
-    "store": "Tienda"
+    "apps": "Apps"
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Tienda",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Apps"
     },
     "sections": {
       "interface": "Interfaz",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Capacidades",
       "integrations": "Integrations",
-      "plugins": "Tienda",
       "cliApps": "Apps CLI",
-      "mcp": "Servicios MCP"
+      "mcp": "Servicios MCP",
+      "apps": "Apps"
     },
     "rows": {
       "theme": "Tema",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "Los nombres, logotipos y marcas de productos pertenecen a sus respectivos propietarios. Su uso es solo identificativo y no implica respaldo."
     },
-    "store": {
-      "description": "Agrega apps CLI y servicios MCP que nanobot puede usar desde el chat.",
+    "apps": {
+      "description": "Añade CLI de apps y servicios MCP que nanobot puede usar desde el chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Todo",
@@ -393,10 +393,10 @@
       "filterMcp": "Servicios MCP",
       "enabledSummary": "{{count}} activados",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Buscar en la tienda",
-      "featured": "Destacados",
-      "loading": "Cargando tienda...",
-      "empty": "No hay elementos de la tienda que coincidan."
+      "searchPlaceholder": "Buscar apps",
+      "featured": "Destacadas",
+      "loading": "Cargando apps...",
+      "empty": "Ninguna app coincide con este filtro."
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "No se pudo leer este archivo"
       },
       "mentions": {
-        "ariaLabel": "Tienda",
-        "label": "Tienda",
+        "ariaLabel": "Apps",
+        "label": "Apps",
         "cliGroup": "Apps CLI",
         "mcpGroup": "Servicios MCP",
         "cliBadge": "CLI",

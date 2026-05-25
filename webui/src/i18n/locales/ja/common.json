@@ -64,7 +64,7 @@
       "label": "言語",
       "ariaLabel": "言語を変更"
     },
-    "store": "ストア"
+    "apps": "アプリ"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "ストア",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "CLI アプリ",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "アプリ"
     },
     "sections": {
       "interface": "インターフェース",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "機能",
       "integrations": "Integrations",
-      "plugins": "ストア",
       "cliApps": "CLI アプリ",
-      "mcp": "MCP サービス"
+      "mcp": "MCP サービス",
+      "apps": "アプリ"
     },
     "rows": {
       "theme": "テーマ",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
     },
-    "store": {
-      "description": "チャットから使える CLI アプリと MCP サービスを追加します。",
+    "apps": {
+      "description": "チャットから nanobot が使えるアプリ CLI と MCP サービスを追加します。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "すべて",
@@ -393,10 +393,10 @@
       "filterMcp": "MCP サービス",
       "enabledSummary": "{{count}} 件有効",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "ストアを検索",
+      "searchPlaceholder": "アプリを検索",
       "featured": "おすすめ",
-      "loading": "ストアを読み込み中...",
-      "empty": "一致するストア項目はありません。"
+      "loading": "アプリを読み込み中...",
+      "empty": "このフィルターに一致するアプリはありません。"
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "このファイルを読み込めません"
       },
       "mentions": {
-        "ariaLabel": "ストア",
-        "label": "ストア",
+        "ariaLabel": "アプリ",
+        "label": "アプリ",
         "cliGroup": "CLI アプリ",
         "mcpGroup": "MCP サービス",
         "cliBadge": "CLI",

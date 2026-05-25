@@ -64,7 +64,7 @@
       "label": "Langue",
       "ariaLabel": "Changer de langue"
     },
-    "store": "Boutique"
+    "apps": "Apps"
   },
   "settings": {
     "backToChat": "Retour à la discussion",
@@ -81,11 +81,11 @@
       "providers": "Providers",
       "image": "Image",
       "web": "Web",
-      "plugins": "Boutique",
       "runtime": "Runtime",
       "advanced": "Advanced",
       "cliApps": "Apps CLI",
-      "mcp": "MCP"
+      "mcp": "MCP",
+      "apps": "Apps"
     },
     "sections": {
       "interface": "Interface",
@@ -102,9 +102,9 @@
       "safety": "Safety",
       "capabilities": "Capacités",
       "integrations": "Integrations",
-      "plugins": "Boutique",
       "cliApps": "Apps CLI",
-      "mcp": "Services MCP"
+      "mcp": "Services MCP",
+      "apps": "Apps"
     },
     "rows": {
       "theme": "Thème",
@@ -384,8 +384,8 @@
     "legal": {
       "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
     },
-    "store": {
-      "description": "Ajoutez des apps CLI et des services MCP utilisables par nanobot dans le chat.",
+    "apps": {
+      "description": "Ajoutez des CLI d’apps et des services MCP que nanobot peut utiliser dans le chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Tout",
@@ -393,10 +393,10 @@
       "filterMcp": "Services MCP",
       "enabledSummary": "{{count}} activés",
       "caption": "{{cli}} CLI · {{mcp}} MCP",
-      "searchPlaceholder": "Rechercher dans la boutique",
+      "searchPlaceholder": "Rechercher des apps",
       "featured": "En vedette",
-      "loading": "Chargement de la boutique...",
-      "empty": "Aucun élément de la boutique ne correspond."
+      "loading": "Chargement des apps...",
+      "empty": "Aucune app ne correspond à ce filtre."
     }
   },
   "chat": {
@@ -624,8 +624,8 @@
         "io": "Impossible de lire ce fichier"
       },
       "mentions": {
-        "ariaLabel": "Boutique",
-        "label": "Boutique",
+        "ariaLabel": "Apps",
+        "label": "Apps",
         "cliGroup": "Apps CLI",
         "mcpGroup": "Services MCP",
         "cliBadge": "CLI",

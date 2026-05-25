@@ -730,7 +730,7 @@ function Shell({
     onRequestRename,
     onToggleArchive,
     onOpenSettings,
-    onOpenStore: () => onOpenSettings("plugins"),
+    onOpenApps: () => onOpenSettings("apps"),
     onOpenSearch: onOpenSessionSearch,
     onToggleArchived,
     onUpdateView: onUpdateSidebarView,
