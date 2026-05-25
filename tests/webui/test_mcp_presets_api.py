@@ -149,12 +149,39 @@ def test_enable_firecrawl_writes_scrubbed_env(tmp_path, monkeypatch: pytest.Monk
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_config(tmp_path, monkeypatch)
     mcp_presets_action("enable", {"name": ["playwright"]})
+    managed_cwd = tmp_path / "mcp" / "playwright"
+    (managed_cwd / "cache.txt").write_text("managed runtime data", encoding="utf-8")
 
     payload = mcp_presets_action("remove", {"name": ["playwright"]})
 
     assert payload["requires_restart"] is True
+    assert payload["last_action"]["ok"] is True
+    assert not managed_cwd.exists()
     config = load_config()
     assert "playwright" not in config.tools.mcp_servers
+
+
+def test_remove_custom_mcp_server_preserves_user_cwd(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_config(tmp_path, monkeypatch)
+    user_cwd = tmp_path / "user-cwd"
+    user_cwd.mkdir()
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["internal-docs"],
+            "transport": ["stdio"],
+            "command": ["node"],
+            "args": ['["server.js"]'],
+            "cwd": [str(user_cwd)],
+        },
+    )
+
+    payload = mcp_presets_action("remove", {"name": ["internal-docs"]})
+
+    assert payload["last_action"]["ok"] is True
+    assert user_cwd.exists()
+    config = load_config()
+    assert "internal-docs" not in config.tools.mcp_servers
 
 
 def test_test_mcp_preset_reports_missing_dependency(

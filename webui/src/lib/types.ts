@@ -305,6 +305,7 @@ export interface CliAppsPayload {
     ok: boolean;
     message: string;
     output?: string | null;
+    still_available?: boolean;
   };
 }
 

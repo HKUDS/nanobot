@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -139,7 +140,7 @@ _BRANDS: dict[str, tuple[str, str]] = {
 
 _BRAND_DOMAINS: dict[str, tuple[str, str]] = {
     "3mf": ("3mf.io", "#00A1DE"),
-    "anygen": ("anygen.com", "#111827"),
+    "anygen": ("anygen.io", "#111827"),
     "clibrowser": ("github.com/allthingssecurity/clibrowser", "#24292F"),
     "cloudanalyzer": ("github.com/rsasaki0109/CloudAnalyzer", "#2563EB"),
     "cloudcompare": ("cloudcompare.org", "#4D83C3"),
@@ -242,6 +243,29 @@ def _pip_uninstall_args_from_command(command: str) -> list[str] | None:
     if not packages or any(arg.startswith("-") for arg in packages):
         return None
     return packages
+
+
+def _console_script_distribution(entry_point: str) -> str | None:
+    if not entry_point:
+        return None
+    try:
+        distributions = importlib_metadata.distributions()
+    except Exception:
+        return None
+    for distribution in distributions:
+        try:
+            entry_points = distribution.entry_points
+        except Exception:
+            continue
+        for item in entry_points:
+            if item.group != "console_scripts" or item.name != entry_point:
+                continue
+            try:
+                name = distribution.metadata.get("Name")
+            except Exception:
+                name = None
+            return str(name or getattr(distribution, "name", "") or "").strip() or None
+    return None
 
 
 def _brand_key(value: str) -> str:
@@ -581,7 +605,14 @@ class CliAppManager:
             prefix.extend(["--upgrade", "--force-reinstall"])
         return prefix + args
 
-    def _pip_uninstall_argv(self, app: dict[str, Any]) -> list[str]:
+    def _pip_uninstall_argv(
+        self,
+        app: dict[str, Any],
+        installed_entry: dict[str, Any] | None = None,
+    ) -> list[str]:
+        distribution = str((installed_entry or {}).get("pip_distribution") or "").strip()
+        if distribution:
+            return [sys.executable, "-m", "pip", "uninstall", "-y", distribution]
         uninstall_cmd = str(app.get("uninstall_cmd") or "")
         packages = _pip_uninstall_args_from_command(uninstall_cmd)
         if packages:
@@ -619,14 +650,19 @@ class CliAppManager:
             raise CliAppError(f"unsupported {expected} command")
         return argv
 
-    def _argv_for_action(self, app: dict[str, Any], action: str) -> list[str] | None:
+    def _argv_for_action(
+        self,
+        app: dict[str, Any],
+        action: str,
+        installed_entry: dict[str, Any] | None = None,
+    ) -> list[str] | None:
         strategy = self._strategy(app)
         if strategy == "pip":
             if action == "install":
                 return self._pip_install_argv(app)
             if action == "update":
                 return self._pip_install_argv(app, update=True)
-            return self._pip_uninstall_argv(app)
+            return self._pip_uninstall_argv(app, installed_entry=installed_entry)
         if strategy == "npm":
             return self._npm_argv(app, action)
         if strategy == "brew":
@@ -648,13 +684,23 @@ class CliAppManager:
         )
 
     def _installed_entry(self, app: dict[str, Any]) -> dict[str, Any]:
-        return {
+        entry_point = str(app.get("entry_point") or "")
+        strategy = self._strategy(app)
+        entry: dict[str, Any] = {
             "version": app.get("version") or "unknown",
-            "entry_point": app.get("entry_point") or "",
+            "entry_point": entry_point,
             "source": app.get("_source") or "harness",
-            "strategy": self._strategy(app),
+            "strategy": strategy,
             "installed_at": int(_now()),
         }
+        resolved = shutil.which(entry_point) if entry_point else None
+        if resolved:
+            entry["entry_point_path"] = resolved
+        if strategy == "pip":
+            distribution = _console_script_distribution(entry_point)
+            if distribution:
+                entry["pip_distribution"] = distribution
+        return entry
 
     def _fetch_skill_content(self, app: dict[str, Any]) -> str | None:
         skill_md = str(app.get("skill_md") or "").strip()
@@ -730,11 +776,13 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if skill_dir.is_dir():
             shutil.rmtree(skill_dir)
 
-    def _record_installed(self, app: dict[str, Any]) -> None:
+    def _record_installed(self, app: dict[str, Any]) -> dict[str, Any]:
         installed = self._load_installed()
-        installed[str(app["name"])] = self._installed_entry(app)
+        entry = self._installed_entry(app)
+        installed[str(app["name"])] = entry
         self._save_installed(installed)
         self.install_skill(app)
+        return entry
 
     def install(self, name: str) -> dict[str, Any]:
         app = self.get_app(name)
@@ -776,16 +824,60 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         installed = self._load_installed()
         if str(app["name"]) not in installed:
             raise CliAppError("CLI app is not installed")
-        if self._strategy(app) != "bundled":
-            argv = self._argv_for_action(app, "uninstall")
+        raw_installed_entry = installed.get(str(app["name"]))
+        installed_entry = raw_installed_entry if isinstance(raw_installed_entry, dict) else {}
+        strategy = self._strategy(app)
+        entry_point = str(app.get("entry_point") or "").strip()
+        managed_entry_path = str(installed_entry.get("entry_point_path") or "").strip()
+        if strategy != "bundled":
+            argv = self._argv_for_action(app, "uninstall", installed_entry=installed_entry)
             assert argv is not None
             result = self._run_argv(argv, timeout=self.runtime.install_timeout)
             if result.returncode != 0:
                 raise CliAppError(_truncate(result.stderr or result.stdout or "uninstall failed"), status=500)
+            still_managed = bool(managed_entry_path and Path(managed_entry_path).exists())
+            still_available = bool(entry_point and shutil.which(entry_point))
+            if still_managed or (not managed_entry_path and still_available):
+                reason = (
+                    f"the recorded entry point at {managed_entry_path} still exists"
+                    if still_managed
+                    else f"{entry_point} is still available on PATH"
+                )
+                message = (
+                    f"Uninstall for {app['display_name']} completed, but {reason}, "
+                    "so nanobot kept it installed."
+                )
+                return self.payload() | {
+                    "last_action": {
+                        "ok": False,
+                        "message": message,
+                        "still_available": True,
+                    }
+                }
+        else:
+            still_available = bool(entry_point and shutil.which(entry_point))
         installed.pop(str(app["name"]), None)
         self._save_installed(installed)
         self.remove_skill(str(app["name"]))
-        return self.payload() | {"last_action": {"ok": True, "message": f"Uninstalled CLI for {app['display_name']}."}}
+        if strategy == "bundled" and still_available:
+            message = (
+                f"Removed {app['display_name']} from nanobot. {entry_point} "
+                "is still available because it is managed outside nanobot."
+            )
+        elif still_available:
+            message = (
+                f"Uninstalled CLI for {app['display_name']}, but another {entry_point} "
+                "is still available on PATH."
+            )
+        else:
+            message = f"Uninstalled CLI for {app['display_name']}."
+        return self.payload() | {
+            "last_action": {
+                "ok": True,
+                "message": message,
+                "still_available": still_available,
+            }
+        }
 
     def test(self, name: str) -> dict[str, Any]:
         app = self.get_app(name)

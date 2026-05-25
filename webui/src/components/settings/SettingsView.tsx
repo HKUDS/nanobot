@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  forwardRef,
   useMemo,
   useState,
   type Dispatch,
@@ -2648,33 +2649,45 @@ function CliAppsCatalogRow({
         </div>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
       </div>
-      <div className="shrink-0">
+      <div className="flex shrink-0 items-center gap-1">
         {app.installed ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <AppsActionButton
-                ariaLabel={tx("settings.cliApps.statusInstalled", "CLI installed")}
-                busy={busy}
-                tone="installed"
-              >
-                <Check className="h-4 w-4" aria-hidden />
-              </AppsActionButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
-                <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.test", "Test CLI")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
-                <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.update", "Update CLI")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("uninstall", app.name)}>
-                <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.uninstall", "Uninstall CLI")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <AppsActionButton
+                  ariaLabel={tx("settings.cliApps.statusInstalled", "CLI installed")}
+                  busy={testBusy || updateBusy}
+                  disabled={busy}
+                  tone="installed"
+                >
+                  <Check className="h-4 w-4" aria-hidden />
+                </AppsActionButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
+                  <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.test", "Test CLI")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
+                  <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.update", "Update CLI")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("uninstall", app.name)}>
+                  <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.uninstall", "Uninstall CLI")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <AppsActionButton
+              ariaLabel={tx("settings.cliApps.uninstall", "Uninstall CLI")}
+              busy={uninstallBusy}
+              disabled={busy && !uninstallBusy}
+              tone="danger"
+              onClick={() => onAction("uninstall", app.name)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
+          </>
         ) : app.install_supported ? (
           <AppsActionButton
             ariaLabel={tx("settings.cliApps.install", "Install CLI")}
@@ -2768,31 +2781,47 @@ function McpAppsCatalogRow({
           </div>
           <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 items-center gap-1">
           {readyInstalled ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <AppsActionButton ariaLabel={statusLabel} busy={busy} tone="installed">
-                  <Check className="h-4 w-4" aria-hidden />
-                </AppsActionButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
-                  <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.mcp.test", "Test")}
-                </DropdownMenuItem>
-                {toolNames.length ? (
-                  <DropdownMenuItem disabled={busy} onClick={() => setToolsOpen((open) => !open)}>
-                    <SlidersHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.mcp.toolScope", "Tools")}
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <AppsActionButton
+                    ariaLabel={statusLabel}
+                    busy={testBusy || toolsBusy}
+                    disabled={busy}
+                    tone="installed"
+                  >
+                    <Check className="h-4 w-4" aria-hidden />
+                  </AppsActionButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
+                    <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
+                    {tx("settings.mcp.test", "Test")}
                   </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuItem disabled={busy} onClick={() => onAction("remove", preset.name)}>
-                  <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.mcp.remove", "Remove")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {toolNames.length ? (
+                    <DropdownMenuItem disabled={busy} onClick={() => setToolsOpen((open) => !open)}>
+                      <SlidersHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.mcp.toolScope", "Tools")}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem disabled={busy} onClick={() => onAction("remove", preset.name)}>
+                    <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                    {tx("settings.mcp.remove", "Remove")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <AppsActionButton
+                ariaLabel={tx("settings.mcp.remove", "Remove")}
+                busy={removeBusy}
+                disabled={busy && !removeBusy}
+                tone="danger"
+                onClick={() => onAction("remove", preset.name)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </AppsActionButton>
+            </>
           ) : preset.installed && !preset.configured ? (
             <AppsActionButton
               ariaLabel={hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
@@ -2952,40 +2981,42 @@ function AppsTypeBadge({ children }: { children: ReactNode }) {
   );
 }
 
-function AppsActionButton({
+const AppsActionButton = forwardRef<HTMLButtonElement, {
+  ariaLabel: string;
+  busy?: boolean;
+  disabled?: boolean;
+  tone?: "default" | "installed" | "danger";
+  onClick?: () => void;
+  children: ReactNode;
+}>(function AppsActionButton({
   ariaLabel,
   busy,
   disabled,
   tone = "default",
   onClick,
   children,
-}: {
-  ariaLabel: string;
-  busy?: boolean;
-  disabled?: boolean;
-  tone?: "default" | "installed";
-  onClick?: () => void;
-  children: ReactNode;
-}) {
+}, ref) {
   return (
     <Button
+      ref={ref}
       type="button"
       size="icon"
       variant="ghost"
       aria-label={ariaLabel}
+      title={ariaLabel}
       disabled={disabled || busy}
       onClick={onClick}
       className={cn(
         "h-9 w-9 rounded-full text-muted-foreground transition-colors",
-        tone === "installed"
-          ? "bg-transparent hover:bg-muted/70 hover:text-foreground"
-          : "bg-muted/70 hover:bg-muted hover:text-foreground",
+        tone === "installed" && "bg-transparent hover:bg-muted/70 hover:text-foreground",
+        tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
+        tone === "default" && "bg-muted/70 hover:bg-muted hover:text-foreground",
       )}
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : children}
     </Button>
   );
-}
+});
 
 function appsTitle(item: AppsCatalogItem): string {
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -156,6 +157,33 @@ def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -
     )
 
 
+def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
+    _write_cache(
+        manager._cache_path("public"),
+        {
+            "meta": {"updated": "2026-04-18"},
+            "clis": [
+                {
+                    "name": "anygen",
+                    "display_name": "AnyGen",
+                    "description": "Generate docs, slides, websites and more via AnyGen cloud API",
+                    "category": "generation",
+                    "install_cmd": "pip install cli-anything-anygen",
+                    "entry_point": "cli-anything-anygen",
+                }
+            ],
+        },
+    )
+
+    payload = manager.payload()
+
+    app = payload["apps"][0]
+    assert app["name"] == "anygen"
+    assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
+
+
 def test_install_dispatches_safe_pip_and_installs_skill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -184,6 +212,49 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     skill = manager.workspace / "skills" / "cli-app-gimp" / "SKILL.md"
     assert skill.is_file()
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
+
+
+def test_install_records_entry_point_path_and_pip_distribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    resolved = tmp_path / "bin" / "cli-anything-gimp"
+    resolved.parent.mkdir()
+    resolved.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        manager,
+        "_run_argv",
+        lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_fetch_skill_content",
+        lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
+    )
+    monkeypatch.setattr(
+        "nanobot.cli_apps.service.shutil.which",
+        lambda command: str(resolved) if command == "cli-anything-gimp" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.cli_apps.service.importlib_metadata.distributions",
+        lambda: [
+            SimpleNamespace(
+                entry_points=[
+                    SimpleNamespace(group="console_scripts", name="cli-anything-gimp"),
+                ],
+                metadata={"Name": "cli-anything-gimp"},
+            )
+        ],
+    )
+
+    manager.install("gimp")
+
+    installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+    assert installed["gimp"]["entry_point_path"] == str(resolved)
+    assert installed["gimp"]["pip_distribution"] == "cli-anything-gimp"
 
 
 def test_installed_state_writes_atomically_without_temp_leftovers(tmp_path: Path) -> None:
@@ -291,6 +362,87 @@ def test_uninstall_uses_safe_python_m_pip_uninstall_command(
 
     assert calls == [[sys.executable, "-m", "pip", "uninstall", "-y", "suno-cli"]]
     assert payload["last_action"]["ok"] is True
+
+
+def test_uninstall_uses_recorded_pip_distribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "cli-anything-gimp",
+            "pip_distribution": "actual-dist-name",
+            "entry_point_path": str(tmp_path / "bin" / "cli-anything-gimp"),
+        }
+    })
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(manager, "_run_argv", fake_run)
+
+    payload = manager.uninstall("gimp")
+
+    assert calls == [[sys.executable, "-m", "pip", "uninstall", "-y", "actual-dist-name"]]
+    assert payload["last_action"]["ok"] is True
+    assert "gimp" not in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+
+
+def test_uninstall_keeps_state_when_entry_point_still_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
+    monkeypatch.setattr(
+        manager,
+        "_run_argv",
+        lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli_apps.service.shutil.which",
+        lambda command: "/usr/local/bin/cli-anything-gimp" if command == "cli-anything-gimp" else None,
+    )
+
+    payload = manager.uninstall("gimp")
+
+    assert payload["last_action"]["ok"] is False
+    assert payload["last_action"]["still_available"] is True
+    assert "kept it installed" in payload["last_action"]["message"]
+    assert "gimp" in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+
+
+def test_uninstall_keeps_state_when_recorded_entry_point_still_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    resolved = tmp_path / "bin" / "cli-anything-gimp"
+    resolved.parent.mkdir()
+    resolved.write_text("#!/bin/sh\n", encoding="utf-8")
+    manager._save_installed({
+        "gimp": {
+            "entry_point": "cli-anything-gimp",
+            "entry_point_path": str(resolved),
+        }
+    })
+    monkeypatch.setattr(
+        manager,
+        "_run_argv",
+        lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
+    )
+
+    payload = manager.uninstall("gimp")
+
+    assert payload["last_action"]["ok"] is False
+    assert str(resolved) in payload["last_action"]["message"]
+    assert "gimp" in json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
 
 
 def test_mentioned_installed_apps_only_returns_installed_mentions(tmp_path: Path) -> None:

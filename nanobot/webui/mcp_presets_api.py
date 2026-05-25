@@ -475,6 +475,20 @@ def _with_managed_stdio_cwd(name: str, cfg: MCPServerConfig) -> MCPServerConfig:
     return cfg
 
 
+def _remove_managed_stdio_cwd(name: str, cfg: MCPServerConfig | None) -> bool:
+    if cfg is None or not cfg.cwd:
+        return False
+    cwd = Path(cfg.cwd).expanduser().resolve(strict=False)
+    managed = (get_runtime_subdir("mcp") / name).resolve(strict=False)
+    if cwd != managed or not cwd.exists():
+        return False
+    if cwd.is_symlink() or cwd.is_file():
+        cwd.unlink()
+    else:
+        shutil.rmtree(cwd)
+    return True
+
+
 def _url_with_param(url: str, key: str, value: str) -> str:
     parsed = urllib.parse.urlsplit(url)
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -1113,7 +1127,14 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
     if action == "remove":
         if preset is None and name not in config.tools.mcp_servers:
             raise McpPresetError("unknown MCP server", status=404)
+        removed_runtime_files = False
+        cleanup_error = ""
         if name in config.tools.mcp_servers:
+            existing_cfg = config.tools.mcp_servers[name]
+            try:
+                removed_runtime_files = _remove_managed_stdio_cwd(name, existing_cfg)
+            except OSError as exc:
+                cleanup_error = str(exc)
             del config.tools.mcp_servers[name]
             save_config(config)
         last_action = (
@@ -1121,6 +1142,13 @@ def mcp_presets_action(action: str, query: QueryParams) -> dict[str, Any]:
             if preset is not None
             else _server_action_message(action, name)
         )
+        if removed_runtime_files:
+            last_action["message"] = f"{last_action['message']} Removed managed runtime files."
+        if cleanup_error:
+            last_action["ok"] = False
+            last_action["message"] = (
+                f"{last_action['message']} Could not remove managed runtime files: {cleanup_error}"
+            )
         payload = mcp_presets_payload(last_action=last_action)
         payload["requires_restart"] = True
         return payload
