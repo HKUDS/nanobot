@@ -183,5 +183,9 @@ describe("SettingsView Apps catalog", () => {
       ),
     );
     expect(await screen.findByText("Uninstalled CLI for AnyGen.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
   });
 });

@@ -47,6 +47,7 @@ import {
   Trash2,
   Triangle,
   Waves,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -1057,6 +1058,12 @@ export function SettingsView({
             onFilterChange={setAppsKindFilter}
             onCliAction={handleCliAppAction}
             onMcpAction={handleMcpPresetAction}
+            onDismissStatus={() => {
+              setCliAppsMessage(null);
+              setCliAppsError(null);
+              setMcpMessage(null);
+              setMcpError(null);
+            }}
             onBackToChat={onBackToChat}
             onMcpFieldChange={(presetName, fieldName, value) => {
               setMcpFieldValues((prev) => ({
@@ -2418,6 +2425,7 @@ function AppsCatalogSettings({
   onFilterChange,
   onCliAction,
   onMcpAction,
+  onDismissStatus,
   onBackToChat,
   onMcpFieldChange,
   onCustomMcpFormChange,
@@ -2450,6 +2458,7 @@ function AppsCatalogSettings({
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onDismissStatus: () => void;
   onBackToChat: () => void;
   onMcpFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onCustomMcpFormChange: Dispatch<SetStateAction<CustomMcpForm>>;
@@ -2525,13 +2534,27 @@ function AppsCatalogSettings({
       {statusMessage ? (
         <div
           className={cn(
-            "rounded-[12px] border px-4 py-3 text-[13px]",
+            "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
             statusIsError
               ? "border-destructive/20 bg-destructive/5 text-destructive"
               : "border-border/55 bg-muted/35 text-muted-foreground",
           )}
         >
-          {statusMessage}
+          <span className="min-w-0">{statusMessage}</span>
+          <button
+            type="button"
+            aria-label={tx("settings.actions.dismiss", "Dismiss")}
+            title={tx("settings.actions.dismiss", "Dismiss")}
+            onClick={onDismissStatus}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+              statusIsError
+                ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+                : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
         </div>
       ) : null}
 
