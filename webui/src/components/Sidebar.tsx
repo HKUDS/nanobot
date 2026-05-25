@@ -44,6 +44,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenApps: () => void;
   onOpenSearch: () => void;
+  activeUtility?: "apps" | null;
   onToggleArchived: () => void;
   onUpdateView: (view: Partial<SidebarViewState>) => void;
   onCollapse: () => void;
@@ -135,6 +136,7 @@ export function Sidebar(props: SidebarProps) {
           collapsed={collapsed}
           label={t("sidebar.apps")}
           onClick={props.onOpenApps}
+          active={props.activeUtility === "apps"}
           icon={<Blocks className="h-4 w-4" />}
         />
         <SidebarViewMenu
@@ -209,12 +211,14 @@ function SidebarActionButton({
   label,
   icon,
   onClick,
+  active = false,
   className,
 }: {
   collapsed: boolean;
   label: string;
   icon: ReactNode;
   onClick: () => void;
+  active?: boolean;
   className?: string;
 }) {
   return (
@@ -222,6 +226,7 @@ function SidebarActionButton({
       type="button"
       variant="ghost"
       aria-label={label}
+      aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
       onClick={() => onClick()}
       className={cn(
@@ -230,6 +235,7 @@ function SidebarActionButton({
         collapsed
           ? "w-9 justify-center gap-0 rounded-xl px-0"
           : "w-full justify-start gap-2 px-3 text-[12.5px]",
+        active && "bg-sidebar-accent text-sidebar-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.55)]",
         className,
       )}
     >

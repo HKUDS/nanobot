@@ -230,6 +230,7 @@ const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 interface SettingsViewProps {
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
+  showSidebar?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
@@ -270,6 +271,7 @@ function editableDefaultProvider(payload: SettingsPayload): string {
 export function SettingsView({
   theme,
   initialSection = "overview",
+  showSidebar = true,
   onToggleTheme,
   onBackToChat,
   onModelNameChange,
@@ -1097,12 +1099,14 @@ export function SettingsView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)] md:flex-row">
-      <SettingsSidebar
-        activeSection={activeSection}
-        onSelectSection={setActiveSection}
-        onBackToChat={onBackToChat}
-        onLogout={onLogout}
-      />
+      {showSidebar ? (
+        <SettingsSidebar
+          activeSection={activeSection}
+          onSelectSection={setActiveSection}
+          onBackToChat={onBackToChat}
+          onLogout={onLogout}
+        />
+      ) : null}
 
       <NewModelConfigurationDialog
         open={modelConfigurationOpen}
