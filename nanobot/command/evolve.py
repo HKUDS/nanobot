@@ -244,7 +244,17 @@ async def cmd_evolve_apply(ctx: CommandContext) -> OutboundMessage:
 
     store = _proposal_store(ctx)
     git = _git_store(ctx)
-    result = store.apply_and_commit(proposal_id, git_store=git)
+    meta = store.read_meta(proposal_id)
+    if meta is None:
+        return _text_reply(
+            ctx,
+            f"Couldn't apply proposal `{proposal_id[:8]}`: proposal not found",
+        )
+
+    if meta.resolved_proposal_kind() == "update":
+        result = store.apply_update(proposal_id, git_store=git)
+    else:
+        result = store.apply_and_commit(proposal_id, git_store=git)
     if not result.ok:
         return _text_reply(
             ctx,

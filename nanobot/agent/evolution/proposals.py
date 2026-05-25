@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Sequence
 from uuid import uuid4
 
 from loguru import logger
@@ -27,14 +27,19 @@ _MAX_SKILL_WORDS = 2000
 
 ProposalStatus = Literal["pending", "applied", "rejected"]
 ProposalSource = Literal["post_task", "gepa"]
+ProposalKind = Literal["create", "update"]
 
 SKIP_ACTIVE_SKILL_EXISTS = "workspace skill already exists"
 SKIP_PENDING_PROPOSAL = "pending proposal with same skill_name"
+SKIP_PENDING_GEPA_UPDATE = "pending GEPA update proposal with same skill_name"
 
 ERR_PROPOSAL_NOT_FOUND = "proposal not found"
 ERR_PROPOSAL_NOT_PENDING = "proposal is not pending"
 ERR_PROPOSAL_ALREADY_REJECTED = "proposal already rejected"
 ERR_APPLY_ACTIVE_SKILL_EXISTS = "workspace skill already exists (update deferred to GEPA)"
+ERR_APPLY_NOT_GEPA = "proposal is not a GEPA update"
+ERR_APPLY_ACTIVE_SKILL_MISSING = "active skill does not exist"
+ERR_APPLY_BASE_SKILL_MISMATCH = "base_skill does not match skill_name"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +56,16 @@ class ProposalMeta:
     status: ProposalStatus = "pending"
     applied_at: str = ""
     rejected_at: str = ""
+    base_skill: str = ""
+    base_sha: str = ""
+    evaluation_score: float | None = None
+    proposal_kind: ProposalKind | None = None
+
+    def resolved_proposal_kind(self) -> ProposalKind:
+        """Return explicit kind or infer from ``source`` for legacy meta files."""
+        if self.proposal_kind is not None:
+            return self.proposal_kind
+        return "update" if self.source == "gepa" else "create"
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -67,10 +82,31 @@ class ProposalMeta:
             payload["applied_at"] = self.applied_at
         if self.rejected_at:
             payload["rejected_at"] = self.rejected_at
+        if self.base_skill:
+            payload["base_skill"] = self.base_skill
+        if self.base_sha:
+            payload["base_sha"] = self.base_sha
+        if self.evaluation_score is not None:
+            payload["evaluation_score"] = self.evaluation_score
+        if self.proposal_kind is not None:
+            payload["proposal_kind"] = self.proposal_kind
         return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProposalMeta:
+        kind_raw = data.get("proposal_kind")
+        proposal_kind: ProposalKind | None = None
+        if kind_raw in ("create", "update"):
+            proposal_kind = kind_raw  # type: ignore[assignment]
+
+        score_raw = data.get("evaluation_score")
+        evaluation_score: float | None = None
+        if score_raw is not None:
+            try:
+                evaluation_score = float(score_raw)
+            except (TypeError, ValueError):
+                evaluation_score = None
+
         return cls(
             proposal_id=str(data.get("proposal_id") or ""),
             source=data.get("source") or "post_task",  # type: ignore[arg-type]
@@ -82,6 +118,10 @@ class ProposalMeta:
             status=data.get("status") or "pending",  # type: ignore[arg-type]
             applied_at=str(data.get("applied_at") or ""),
             rejected_at=str(data.get("rejected_at") or ""),
+            base_skill=str(data.get("base_skill") or ""),
+            base_sha=str(data.get("base_sha") or ""),
+            evaluation_score=evaluation_score,
+            proposal_kind=proposal_kind,
         )
 
 
@@ -243,6 +283,13 @@ class ProposalStore:
                 return True
         return False
 
+    def pending_gepa_update_exists(self, skill_name: str) -> bool:
+        """Return True when a pending GEPA update proposal already targets *skill_name*."""
+        for meta in self.list_pending():
+            if meta.skill_name == skill_name and meta.resolved_proposal_kind() == "update":
+                return True
+        return False
+
     def check_dedup(self, skill_name: str) -> str | None:
         """Return a skip reason when *skill_name* cannot be created, else ``None``."""
         if self.workspace_skill_exists(skill_name):
@@ -321,6 +368,49 @@ class ProposalStore:
             "PostTask proposal written: id={} skill={} path={}",
             proposal_id,
             skill_name,
+            proposal_dir,
+        )
+        return proposal_id
+
+    def write_gepa_proposal(
+        self,
+        skill_name: str,
+        skill_md: str,
+        *,
+        base_sha: str,
+        evaluation_score: float | None,
+        trace_ids: Sequence[str],
+        rationale: str,
+    ) -> str:
+        """Write a pending GEPA update proposal under ``skills/.proposals/<uuid>/``."""
+        if self.pending_gepa_update_exists(skill_name):
+            raise ValueError(SKIP_PENDING_GEPA_UPDATE)
+
+        proposal_id = str(uuid4())
+        proposal_dir = self._proposals_root / proposal_id
+        proposal_dir.mkdir(parents=True, exist_ok=False)
+        trace_id = ",".join(item.strip() for item in trace_ids if item and item.strip())
+        meta = ProposalMeta(
+            proposal_id=proposal_id,
+            source="gepa",
+            trace_id=trace_id,
+            skill_name=skill_name,
+            rationale=rationale,
+            confidence=1.0,
+            created_at=datetime.now(UTC).isoformat(),
+            status="pending",
+            base_skill=skill_name,
+            base_sha=base_sha,
+            evaluation_score=evaluation_score,
+            proposal_kind="update",
+        )
+        (proposal_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+        self._write_meta(proposal_dir, meta)
+        logger.info(
+            "GEPA proposal written: id={} skill={} base_sha={} path={}",
+            proposal_id,
+            skill_name,
+            base_sha,
             proposal_dir,
         )
         return proposal_id
@@ -529,6 +619,136 @@ class ProposalStore:
             return result
         return replace(result, commit_sha=sha)
 
+    def apply_update(
+        self,
+        proposal_id: str,
+        git_store: EvolutionGitStore | None = None,
+    ) -> ProposalActionResult:
+        """Apply a pending GEPA update proposal to the active skill and git-commit."""
+        from nanobot.agent.evolution.git_store import EvolutionGitStore
+
+        proposal_dir = self._proposals_root / proposal_id
+        meta = self._read_meta_file(proposal_dir / "meta.json")
+        if meta is None:
+            return ProposalActionResult.fail(ERR_PROPOSAL_NOT_FOUND, proposal_id=proposal_id)
+
+        if meta.source != "gepa" or meta.resolved_proposal_kind() != "update":
+            return ProposalActionResult.fail(
+                ERR_APPLY_NOT_GEPA,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status == "applied":
+            if self.workspace_skill_exists(meta.skill_name):
+                return ProposalActionResult.success(
+                    proposal_id=proposal_id,
+                    skill_name=meta.skill_name,
+                    skill_path=self._active_skill_rel_path(meta.skill_name),
+                )
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status == "rejected":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_ALREADY_REJECTED,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if meta.status != "pending":
+            return ProposalActionResult.fail(
+                ERR_PROPOSAL_NOT_PENDING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        base_skill = meta.base_skill or meta.skill_name
+        if base_skill != meta.skill_name:
+            return ProposalActionResult.fail(
+                ERR_APPLY_BASE_SKILL_MISMATCH,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        if not self.workspace_skill_exists(meta.skill_name):
+            return ProposalActionResult.fail(
+                ERR_APPLY_ACTIVE_SKILL_MISSING,
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        skill_path = proposal_dir / "SKILL.md"
+        if not skill_path.is_file():
+            return ProposalActionResult.fail(
+                "proposal SKILL.md invalid: missing SKILL.md",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        active_path = self._skills_root / meta.skill_name / "SKILL.md"
+        try:
+            skill_md = skill_path.read_text(encoding="utf-8")
+            base_md = active_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("GEPA update apply read failed: {}", exc)
+            return ProposalActionResult.fail(
+                "proposal SKILL.md invalid: unreadable",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        validation_error = validate_gepa_update(
+            skill_md,
+            base_md,
+            skill_name=meta.skill_name,
+            base_skill=base_skill,
+        )
+        if validation_error:
+            return ProposalActionResult.fail(
+                f"proposal SKILL.md invalid: {validation_error}",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        try:
+            active_path.write_text(skill_md, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("GEPA update apply write failed: {}", exc)
+            return ProposalActionResult.fail(
+                "write failed",
+                proposal_id=proposal_id,
+                skill_name=meta.skill_name,
+            )
+
+        applied_meta = replace(
+            meta,
+            status="applied",
+            applied_at=datetime.now(UTC).isoformat(),
+        )
+        self._write_meta(proposal_dir, applied_meta)
+
+        rel = active_path.relative_to(self._workspace).as_posix()
+        logger.info(
+            "GEPA proposal applied: id={} skill={} active={}",
+            proposal_id,
+            meta.skill_name,
+            rel,
+        )
+
+        gs = git_store or EvolutionGitStore(self._workspace)
+        sha = gs.commit_update(meta.skill_name, source="gepa")
+        return ProposalActionResult(
+            ok=True,
+            proposal_id=proposal_id,
+            skill_name=meta.skill_name,
+            skill_path=rel,
+            commit_sha=sha or "",
+        )
+
     def reject(self, proposal_id: str) -> ProposalActionResult:
         """Move a pending proposal to ``skills/.rejected/<id>/``."""
         if self.rejected_root.is_dir() and (self.rejected_root / proposal_id).is_dir():
@@ -597,6 +817,47 @@ def normalize_skill_md_content(content: str | None) -> str:
     text = content.strip()
     text = _MD_FENCE_RE.sub("", text).strip()
     return text
+
+
+def _frontmatter_field(content: str, pattern: re.Pattern[str]) -> str | None:
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        return None
+    field_match = pattern.search(match.group(1))
+    if not field_match:
+        return None
+    return field_match.group(1).strip()
+
+
+def validate_gepa_update(
+    proposed_md: str,
+    base_md: str,
+    *,
+    skill_name: str,
+    base_skill: str,
+) -> str | None:
+    """Return an error when a GEPA update proposal drifts from the active skill."""
+    if base_skill != skill_name:
+        return ERR_APPLY_BASE_SKILL_MISMATCH
+
+    error = validate_skill_md(proposed_md, skill_name=skill_name)
+    if error:
+        return error
+
+    if not _FRONTMATTER_RE.match(base_md):
+        return "active skill missing YAML frontmatter"
+
+    proposed_name = _frontmatter_field(proposed_md, _NAME_RE)
+    if proposed_name != base_skill:
+        return f"frontmatter name must remain {base_skill}"
+
+    base_description = _frontmatter_field(base_md, _DESC_RE)
+    proposed_description = _frontmatter_field(proposed_md, _DESC_RE)
+    if base_description is None:
+        return "active skill missing description"
+    if proposed_description != base_description:
+        return "description drift not allowed"
+    return None
 
 
 def validate_skill_md(content: str, *, skill_name: str) -> str | None:

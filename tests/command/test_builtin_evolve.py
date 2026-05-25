@@ -32,6 +32,18 @@ description: Deploy workloads to Kubernetes clusters
 # Deploy K8s
 """
 
+_UPDATED_SKILL_MD = """---
+name: deploy-k8s
+description: Deploy workloads to Kubernetes clusters
+---
+
+# Deploy K8s
+
+## Steps
+1. kubectl apply
+2. kubectl rollout status
+"""
+
 
 def _write_pending(store: ProposalStore, *, trace_id: str = "trace-abc") -> str:
     return store.write_proposal(
@@ -127,6 +139,39 @@ async def test_evolve_apply_promotes_skill_and_warms_index(tmp_path: Path) -> No
         (tmp_path / "skills" / ".proposals" / proposal_id / "meta.json").read_text(encoding="utf-8")
     )
     assert meta["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_evolve_apply_routes_gepa_update_proposal(tmp_path: Path) -> None:
+    from nanobot.agent.evolution.git_store import EvolutionGitStore
+
+    store = ProposalStore(tmp_path)
+    git = EvolutionGitStore(tmp_path)
+    git.init()
+    store.write_active_skill("deploy-k8s", _VALID_SKILL_MD)
+    git.commit_create("deploy-k8s")
+    proposal_id = store.write_gepa_proposal(
+        "deploy-k8s",
+        _UPDATED_SKILL_MD,
+        base_sha="a1b2c3d4",
+        evaluation_score=0.9,
+        trace_ids=["trace-gepa"],
+        rationale="GEPA improved rollout checks",
+    )
+    warm = MagicMock()
+    ctx = _make_ctx(tmp_path, "/evolve-apply", args=proposal_id[:8], warm_skill_index=warm)
+
+    out = await cmd_evolve_apply(ctx)
+
+    assert "Applied skill **deploy-k8s**" in out.content
+    assert (tmp_path / "skills" / "deploy-k8s" / "SKILL.md").read_text(encoding="utf-8") == _UPDATED_SKILL_MD
+    warm.assert_called_once_with()
+    meta = json.loads(
+        (tmp_path / "skills" / ".proposals" / proposal_id / "meta.json").read_text(encoding="utf-8")
+    )
+    assert meta["status"] == "applied"
+    assert meta["source"] == "gepa"
+    assert git.log()[0].message == "evolve: update skill deploy-k8s (gepa)"
 
 
 @pytest.mark.asyncio
