@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  forwardRef,
   useMemo,
   useState,
   type Dispatch,
@@ -31,7 +32,6 @@ import {
   Loader2,
   LogOut,
   Moon,
-  Package,
   PlayCircle,
   Plus,
   Orbit,
@@ -43,9 +43,11 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Blocks,
   Trash2,
   Triangle,
   Waves,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -103,19 +105,22 @@ import type {
   WebSearchSettingsUpdate,
 } from "@/lib/types";
 
-type SettingsSectionKey =
+export type SettingsSectionKey =
   | "overview"
   | "appearance"
   | "models"
   | "image"
   | "web"
-  | "cliApps"
-  | "mcp"
+  | "apps"
   | "runtime"
   | "advanced";
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
+type AppsKindFilter = "all" | "cli" | "mcp";
+type AppsCatalogItem =
+  | { id: string; kind: "cli"; app: CliAppInfo }
+  | { id: string; kind: "mcp"; preset: McpPresetInfo };
 
 interface LocalPreferences {
   density: LocalDensity;
@@ -225,6 +230,8 @@ const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 
 interface SettingsViewProps {
   theme: "light" | "dark";
+  initialSection?: SettingsSectionKey;
+  showSidebar?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
@@ -264,6 +271,8 @@ function editableDefaultProvider(payload: SettingsPayload): string {
 
 export function SettingsView({
   theme,
+  initialSection = "overview",
+  showSidebar = true,
   onToggleTheme,
   onBackToChat,
   onModelNameChange,
@@ -293,18 +302,14 @@ export function SettingsView({
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSectionKey>("overview");
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
-  const [cliAppsQuery, setCliAppsQuery] = useState("");
-  const [cliAppsCategory, setCliAppsCategory] = useState("all");
-  const [cliAppsInstallFilter, setCliAppsInstallFilter] = useState<"all" | "installed" | "notInstalled">("all");
+  const [appsQuery, setAppsQuery] = useState("");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [mcpQuery, setMcpQuery] = useState("");
-  const [mcpCategory, setMcpCategory] = useState("all");
-  const [mcpInstallFilter, setMcpInstallFilter] = useState<"all" | "installed" | "notInstalled">("all");
+  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
@@ -333,6 +338,10 @@ export function SettingsView({
     defaultImageSize: "1K",
     maxImagesPerTurn: 4,
   });
+
+  useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
   const [form, setForm] = useState<AgentSettingsDraft>({
@@ -925,6 +934,8 @@ export function SettingsView({
             onRestart={onRestart}
             isRestarting={isRestarting}
             showBrandLogos={localPrefs.brandLogos}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
             onSelectSection={setActiveSection}
           />
         );
@@ -1022,48 +1033,39 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.web}
           />
         );
-      case "cliApps":
+      case "apps":
         return (
-          <CliAppsSettings
-            payload={cliApps}
-            loading={cliAppsLoading}
-            query={cliAppsQuery}
-            category={cliAppsCategory}
-            installFilter={cliAppsInstallFilter}
-            actionKey={cliAppsAction}
-            message={cliAppsMessage}
-            error={cliAppsError}
-            focusName={cliAppsFocusName}
-            showBrandLogos={localPrefs.brandLogos}
-            onQueryChange={setCliAppsQuery}
-            onCategoryChange={setCliAppsCategory}
-            onInstallFilterChange={setCliAppsInstallFilter}
-            onAction={handleCliAppAction}
-            onBackToChat={onBackToChat}
-          />
-        );
-      case "mcp":
-        return (
-          <McpPresetsSettings
-            payload={mcpPresets}
-            loading={mcpPresetsLoading}
-            query={mcpQuery}
-            category={mcpCategory}
-            installFilter={mcpInstallFilter}
-            actionKey={mcpPresetAction}
-            message={mcpMessage}
-            error={mcpError}
-            fieldValues={mcpFieldValues}
-            customForm={customMcpForm}
-            configImport={mcpConfigImport}
+          <AppsCatalogSettings
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            cliAppsLoading={cliAppsLoading}
+            mcpPresetsLoading={mcpPresetsLoading}
+            query={appsQuery}
+            filter={appsKindFilter}
+            cliActionKey={cliAppsAction}
+            mcpActionKey={mcpPresetAction}
+            cliMessage={cliAppsMessage}
+            cliError={cliAppsError}
+            cliFocusName={cliAppsFocusName}
+            mcpMessage={mcpMessage}
+            mcpError={mcpError}
+            mcpFieldValues={mcpFieldValues}
+            customMcpForm={customMcpForm}
+            mcpConfigImport={mcpConfigImport}
             showBrandLogos={localPrefs.brandLogos}
             requiresRestartPending={pendingRestartSections.runtime}
-            onQueryChange={setMcpQuery}
-            onCategoryChange={setMcpCategory}
-            onInstallFilterChange={setMcpInstallFilter}
-            onCustomFormChange={setCustomMcpForm}
-            onConfigImportChange={setMcpConfigImport}
-            onFieldChange={(presetName, fieldName, value) => {
+            onQueryChange={setAppsQuery}
+            onFilterChange={setAppsKindFilter}
+            onCliAction={handleCliAppAction}
+            onMcpAction={handleMcpPresetAction}
+            onDismissStatus={() => {
+              setCliAppsMessage(null);
+              setCliAppsError(null);
+              setMcpMessage(null);
+              setMcpError(null);
+            }}
+            onBackToChat={onBackToChat}
+            onMcpFieldChange={(presetName, fieldName, value) => {
               setMcpFieldValues((prev) => ({
                 ...prev,
                 [presetName]: {
@@ -1072,10 +1074,11 @@ export function SettingsView({
                 },
               }));
             }}
-            onAction={handleMcpPresetAction}
-            onSaveCustom={handleSaveCustomMcp}
-            onImportConfig={handleImportMcpConfig}
-            onToolsChange={handleMcpToolsChange}
+            onCustomMcpFormChange={setCustomMcpForm}
+            onMcpConfigImportChange={setMcpConfigImport}
+            onSaveCustomMcp={handleSaveCustomMcp}
+            onImportMcpConfig={handleImportMcpConfig}
+            onMcpToolsChange={handleMcpToolsChange}
             onRestart={onRestart}
             isRestarting={isRestarting}
           />
@@ -1103,12 +1106,14 @@ export function SettingsView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)] md:flex-row">
-      <SettingsSidebar
-        activeSection={activeSection}
-        onSelectSection={setActiveSection}
-        onBackToChat={onBackToChat}
-        onLogout={onLogout}
-      />
+      {showSidebar ? (
+        <SettingsSidebar
+          activeSection={activeSection}
+          onSelectSection={setActiveSection}
+          onBackToChat={onBackToChat}
+          onLogout={onLogout}
+        />
+      ) : null}
 
       <NewModelConfigurationDialog
         open={modelConfigurationOpen}
@@ -1165,8 +1170,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
-  { key: "cliApps", icon: Package, fallback: "CLI Apps" },
-  { key: "mcp", icon: Layers, fallback: "MCP" },
+  { key: "apps", icon: Blocks, fallback: "Apps" },
   { key: "runtime", icon: Server, fallback: "Runtime" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
 ];
@@ -1253,6 +1257,8 @@ function OverviewSettings({
   isRestarting,
   onSelectSection,
   showBrandLogos,
+  cliApps,
+  mcpPresets,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
@@ -1260,6 +1266,8 @@ function OverviewSettings({
   isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  cliApps: CliAppsPayload | null;
+  mcpPresets: McpPresetsPayload | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1276,6 +1284,14 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
+  const cliAppsEnabledCount = cliApps?.installed_count ?? 0;
+  const mcpAppsEnabledCount = mcpPresets?.installed_count ?? settings.advanced.mcp_server_count;
+  const appsCount = cliAppsEnabledCount + mcpAppsEnabledCount;
+  const appsValue = tx("settings.apps.enabledSummary", "{{count}} enabled")
+    .replace("{{count}}", String(appsCount));
+  const appsCaption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
+    .replace("{{cli}}", String(cliAppsEnabledCount))
+    .replace("{{mcp}}", String(mcpAppsEnabledCount));
   return (
     <div className="space-y-7">
       <section>
@@ -1355,6 +1371,13 @@ function OverviewSettings({
             caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
+          />
+          <OverviewListRow
+            icon={Blocks}
+            title={tx("settings.nav.apps", "Apps")}
+            value={appsValue}
+            caption={appsCaption}
+            onClick={() => onSelectSection("apps")}
           />
         </SettingsGroup>
       </section>
@@ -2379,316 +2402,168 @@ function WebSettings({
   );
 }
 
-function CliAppsSettings({
-  payload,
-  loading,
+function AppsCatalogSettings({
+  cliApps,
+  mcpPresets,
+  cliAppsLoading,
+  mcpPresetsLoading,
   query,
-  category,
-  installFilter,
-  actionKey,
-  message,
-  error,
-  focusName,
-  showBrandLogos,
-  onQueryChange,
-  onCategoryChange,
-  onInstallFilterChange,
-  onAction,
-  onBackToChat,
-}: {
-  payload: CliAppsPayload | null;
-  loading: boolean;
-  query: string;
-  category: string;
-  installFilter: "all" | "installed" | "notInstalled";
-  actionKey: string | null;
-  message: string | null;
-  error: string | null;
-  focusName: string | null;
-  showBrandLogos: boolean;
-  onQueryChange: (value: string) => void;
-  onCategoryChange: (value: string) => void;
-  onInstallFilterChange: (value: "all" | "installed" | "notInstalled") => void;
-  onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onBackToChat: () => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const apps = payload?.apps ?? [];
-  const categories = useMemo(
-    () => ["all", ...Array.from(new Set(apps.map((app) => app.category))).sort()],
-    [apps],
-  );
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredApps = apps.filter((app) => {
-    const categoryMatch = category === "all" || app.category === category;
-    if (!categoryMatch) return false;
-    if (installFilter === "installed" && !app.installed) return false;
-    if (installFilter === "notInstalled" && app.installed) return false;
-    if (!normalizedQuery) return true;
-    return (
-      app.display_name.toLowerCase().includes(normalizedQuery) ||
-      app.name.toLowerCase().includes(normalizedQuery) ||
-      app.description.toLowerCase().includes(normalizedQuery) ||
-      app.category.toLowerCase().includes(normalizedQuery)
-    );
-  });
-  const categoryLabel =
-    category === "all"
-      ? tx("settings.cliApps.allCategories", "All categories")
-      : category;
-  const installFilterOptions = [
-    { value: "all", label: tx("settings.cliApps.filterAll", "All") },
-    { value: "installed", label: tx("settings.cliApps.filterInstalled", "Installed CLIs") },
-    { value: "notInstalled", label: tx("settings.cliApps.filterNotInstalled", "Not installed") },
-  ];
-  const focusedApp = focusName
-    ? apps.find((app) => app.name === focusName && app.installed)
-    : null;
-  const visibleStatusMessage = error || (!focusedApp ? message : null);
-
-  return (
-    <div className="space-y-5">
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <SettingsSectionTitle>{tx("settings.sections.cliApps", "CLI Apps")}</SettingsSectionTitle>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              {tx("settings.cliApps.summary", "{{installed}} of {{total}} CLIs installed")
-                .replace("{{installed}}", String(payload?.installed_count ?? 0))
-                .replace("{{total}}", String(apps.length))}
-            </p>
-          </div>
-          <SegmentedControl
-            value={installFilter}
-            options={installFilterOptions}
-            onChange={(value) => onInstallFilterChange(value as "all" | "installed" | "notInstalled")}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={tx("settings.cliApps.searchPlaceholder", "Search CLIs")}
-              className="h-10 w-full rounded-full border-border/65 bg-card/80 pl-9 text-[13px] shadow-sm sm:max-w-[320px]"
-            />
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-10 justify-between rounded-full bg-card/80 px-4">
-                <span className="max-w-[180px] truncate">{categoryLabel}</span>
-                <ChevronDown className="ml-2 h-3.5 w-3.5" aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-[320px] overflow-y-auto">
-              {categories.map((item) => (
-                <DropdownMenuItem key={item} onClick={() => onCategoryChange(item)}>
-                  {item === "all" ? tx("settings.cliApps.allCategories", "All categories") : item}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </section>
-
-      {visibleStatusMessage ? (
-        <div
-          className={cn(
-            "rounded-[10px] border px-3.5 py-2.5 text-[12.5px]",
-            error
-              ? "border-destructive/20 bg-destructive/5 text-destructive"
-              : "border-border/55 bg-muted/35 text-muted-foreground",
-          )}
-        >
-          {visibleStatusMessage}
-        </div>
-      ) : null}
-
-      {focusedApp ? (
-        <CliAppReadyPanel
-          app={focusedApp}
-          showBrandLogos={showBrandLogos}
-          onBackToChat={onBackToChat}
-        />
-      ) : null}
-
-      {loading ? (
-        <div className="flex h-36 items-center justify-center rounded-[8px] border border-border/45 bg-card/82 text-sm text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-          {tx("settings.cliApps.loading", "Loading CLI Apps...")}
-        </div>
-      ) : (
-        <section>
-          <div className="grid gap-2">
-            {filteredApps.map((app) => (
-              <CliAppCard
-                key={app.name}
-                app={app}
-                actionKey={actionKey}
-                showBrandLogos={showBrandLogos}
-                onAction={onAction}
-              />
-            ))}
-          </div>
-          {!filteredApps.length ? (
-            <div className="rounded-[8px] border border-border/45 bg-card/82 px-4 py-8 text-center text-sm text-muted-foreground">
-              {tx("settings.cliApps.empty", "No CLI Apps match this filter.")}
-            </div>
-          ) : null}
-        </section>
-      )}
-      <ThirdPartyBrandNotice />
-    </div>
-  );
-}
-
-function McpPresetsSettings({
-  payload,
-  loading,
-  query,
-  category,
-  installFilter,
-  actionKey,
-  message,
-  error,
-  fieldValues,
-  customForm,
-  configImport,
+  filter,
+  cliActionKey,
+  mcpActionKey,
+  cliMessage,
+  cliError,
+  cliFocusName,
+  mcpMessage,
+  mcpError,
+  mcpFieldValues,
+  customMcpForm,
+  mcpConfigImport,
   showBrandLogos,
   requiresRestartPending,
   onQueryChange,
-  onCategoryChange,
-  onInstallFilterChange,
-  onCustomFormChange,
-  onConfigImportChange,
-  onFieldChange,
-  onAction,
-  onSaveCustom,
-  onImportConfig,
-  onToolsChange,
+  onFilterChange,
+  onCliAction,
+  onMcpAction,
+  onDismissStatus,
+  onBackToChat,
+  onMcpFieldChange,
+  onCustomMcpFormChange,
+  onMcpConfigImportChange,
+  onSaveCustomMcp,
+  onImportMcpConfig,
+  onMcpToolsChange,
   onRestart,
   isRestarting,
 }: {
-  payload: McpPresetsPayload | null;
-  loading: boolean;
+  cliApps: CliAppsPayload | null;
+  mcpPresets: McpPresetsPayload | null;
+  cliAppsLoading: boolean;
+  mcpPresetsLoading: boolean;
   query: string;
-  category: string;
-  installFilter: "all" | "installed" | "notInstalled";
-  actionKey: string | null;
-  message: string | null;
-  error: string | null;
-  fieldValues: Record<string, Record<string, string>>;
-  customForm: CustomMcpForm;
-  configImport: string;
+  filter: AppsKindFilter;
+  cliActionKey: string | null;
+  mcpActionKey: string | null;
+  cliMessage: string | null;
+  cliError: string | null;
+  cliFocusName: string | null;
+  mcpMessage: string | null;
+  mcpError: string | null;
+  mcpFieldValues: Record<string, Record<string, string>>;
+  customMcpForm: CustomMcpForm;
+  mcpConfigImport: string;
   showBrandLogos: boolean;
   requiresRestartPending: boolean;
   onQueryChange: (value: string) => void;
-  onCategoryChange: (value: string) => void;
-  onInstallFilterChange: (value: "all" | "installed" | "notInstalled") => void;
-  onCustomFormChange: Dispatch<SetStateAction<CustomMcpForm>>;
-  onConfigImportChange: (value: string) => void;
-  onFieldChange: (presetName: string, fieldName: string, value: string) => void;
-  onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
-  onSaveCustom: () => void;
-  onImportConfig: () => void;
-  onToolsChange: (name: string, enabledTools: string[]) => void;
+  onFilterChange: (value: AppsKindFilter) => void;
+  onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+  onMcpAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onDismissStatus: () => void;
+  onBackToChat: () => void;
+  onMcpFieldChange: (presetName: string, fieldName: string, value: string) => void;
+  onCustomMcpFormChange: Dispatch<SetStateAction<CustomMcpForm>>;
+  onMcpConfigImportChange: (value: string) => void;
+  onSaveCustomMcp: () => void;
+  onImportMcpConfig: () => void;
+  onMcpToolsChange: (name: string, enabledTools: string[]) => void;
   onRestart?: () => void;
   isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const presets = payload?.presets ?? [];
-  const categories = useMemo(
-    () => ["all", ...Array.from(new Set(presets.map((preset) => preset.category))).sort()],
-    [presets],
-  );
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredPresets = presets.filter((preset) => {
-    const categoryMatch = category === "all" || preset.category === category;
-    if (!categoryMatch) return false;
-    if (installFilter === "installed" && !preset.installed) return false;
-    if (installFilter === "notInstalled" && preset.installed) return false;
-    if (!normalizedQuery) return true;
-    return (
-      preset.display_name.toLowerCase().includes(normalizedQuery) ||
-      preset.name.toLowerCase().includes(normalizedQuery) ||
-      preset.description.toLowerCase().includes(normalizedQuery) ||
-      preset.category.toLowerCase().includes(normalizedQuery)
-    );
-  });
-  const installFilterOptions = [
-    { value: "all", label: tx("settings.mcp.filterAll", "All") },
-    { value: "installed", label: tx("settings.mcp.filterInstalled", "Enabled") },
-    { value: "notInstalled", label: tx("settings.mcp.filterNotInstalled", "Not enabled") },
+  const filterOptions = [
+    { value: "all", label: tx("settings.apps.filterAll", "All") },
+    { value: "cli", label: tx("settings.apps.filterCli", "App CLIs") },
+    { value: "mcp", label: tx("settings.apps.filterMcp", "MCP services") },
   ];
-  const categoryLabel = category === "all" ? tx("settings.mcp.allCategories", "All categories") : category;
-  const visibleStatusMessage = error || message;
-  const testToolNames = payload?.last_action?.tool_names ?? [];
-  const testToolCount = payload?.last_action?.tool_count;
-  const showTestDetails = typeof testToolCount === "number" || testToolNames.length > 0 || !!payload?.last_action?.error;
+  const normalizedQuery = query.trim().toLowerCase();
+  const items: AppsCatalogItem[] = [
+    ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
+    ...(mcpPresets?.presets ?? []).map((preset) => ({
+      id: `mcp:${preset.name}`,
+      kind: "mcp" as const,
+      preset,
+    })),
+  ]
+    .filter((item) => filter === "all" || item.kind === filter)
+    .filter((item) => !normalizedQuery || appsSearchText(item).includes(normalizedQuery))
+    .sort((left, right) => {
+      const rank = Number(!appsReady(left)) - Number(!appsReady(right));
+      return rank || appsTitle(left).localeCompare(appsTitle(right));
+    });
+  const focusedApp = cliFocusName
+    ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
+    : null;
+  const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
+  const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
+  const statusIsError = Boolean(cliError || mcpError);
+  const caption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
+    .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
+    .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0));
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-7">
       <section className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <SettingsSectionTitle>{tx("settings.sections.mcp", "MCP")}</SettingsSectionTitle>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              {tx("settings.mcp.summary", "{{installed}} of {{total}} presets enabled")
-                .replace("{{installed}}", String(payload?.installed_count ?? 0))
-                .replace("{{total}}", String(presets.length))}
-            </p>
-          </div>
-          <SegmentedControl
-            value={installFilter}
-            options={installFilterOptions}
-            onChange={(value) => onInstallFilterChange(value as "all" | "installed" | "notInstalled")}
-          />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
+            {tx(
+              "settings.apps.description",
+              "Add local app adapters and connected tool servers that nanobot can use from chat.",
+            )}
+          </p>
+          <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
         </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={tx("settings.mcp.searchPlaceholder", "Search MCP presets")}
-              className="h-10 w-full rounded-full border-border/65 bg-card/80 pl-9 text-[13px] shadow-sm sm:max-w-[320px]"
+              placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
+              className="h-12 rounded-[14px] border-border/70 bg-card/90 pl-11 text-[15px] shadow-sm"
             />
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-10 justify-between rounded-full bg-card/80 px-4">
-                <span className="max-w-[180px] truncate">{categoryLabel}</span>
-                <ChevronDown className="ml-2 h-3.5 w-3.5" aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-[320px] overflow-y-auto">
-              {categories.map((item) => (
-                <DropdownMenuItem key={item} onClick={() => onCategoryChange(item)}>
-                  {item === "all" ? tx("settings.mcp.allCategories", "All categories") : item}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SegmentedControl
+            value={filter}
+            options={filterOptions}
+            onChange={(value) => onFilterChange(value as AppsKindFilter)}
+          />
         </div>
       </section>
 
-      <McpCustomServerPanel
-        form={customForm}
-        configImport={configImport}
-        actionKey={actionKey}
-        onFormChange={onCustomFormChange}
-        onConfigImportChange={onConfigImportChange}
-        onSave={onSaveCustom}
-        onImportConfig={onImportConfig}
-      />
+      {statusMessage ? (
+        <div
+          className={cn(
+            "flex items-center justify-between gap-3 rounded-[12px] border py-2.5 pl-4 pr-2 text-[13px]",
+            statusIsError
+              ? "border-destructive/20 bg-destructive/5 text-destructive"
+              : "border-border/55 bg-muted/35 text-muted-foreground",
+          )}
+        >
+          <span className="min-w-0">{statusMessage}</span>
+          <button
+            type="button"
+            aria-label={tx("settings.actions.dismiss", "Dismiss")}
+            title={tx("settings.actions.dismiss", "Dismiss")}
+            onClick={onDismissStatus}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+              statusIsError
+                ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+                : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      ) : null}
+
+      {focusedApp ? (
+        <CliAppReadyPanel app={focusedApp} showBrandLogos={showBrandLogos} onBackToChat={onBackToChat} />
+      ) : null}
 
       {requiresRestartPending ? (
-        <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-3.5 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
           <span>{tx("settings.mcp.restartRequired", "Restart nanobot to connect updated MCP tools.")}</span>
           {onRestart ? (
             <Button
@@ -2699,86 +2574,513 @@ function McpPresetsSettings({
               disabled={isRestarting}
               className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
             >
-              {isRestarting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+              {isRestarting ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              )}
               {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
             </Button>
           ) : null}
         </div>
       ) : null}
 
-      {visibleStatusMessage ? (
-        <div
-          className={cn(
-            "rounded-[10px] border px-3.5 py-2.5 text-[12.5px]",
-            error
-              ? "border-destructive/20 bg-destructive/5 text-destructive"
-              : "border-border/55 bg-muted/35 text-muted-foreground",
-          )}
-        >
-          {visibleStatusMessage}
+      <section>
+        <div className="flex items-center justify-between border-b border-border/45 pb-3">
+          <SettingsSectionTitle>{tx("settings.apps.featured", "Featured")}</SettingsSectionTitle>
+          <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
+            {items.length}
+          </span>
         </div>
+        {loading ? (
+          <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {tx("settings.apps.loading", "Loading Apps...")}
+          </div>
+        ) : items.length ? (
+          <div className="grid gap-x-10 gap-y-1 py-3 md:grid-cols-2">
+            {items.map((item) =>
+              item.kind === "cli" ? (
+                <CliAppsCatalogRow
+                  key={item.id}
+                  app={item.app}
+                  actionKey={cliActionKey}
+                  showBrandLogos={showBrandLogos}
+                  onAction={onCliAction}
+                />
+              ) : (
+                <McpAppsCatalogRow
+                  key={item.id}
+                  preset={item.preset}
+                  values={mcpFieldValues[item.preset.name] ?? {}}
+                  actionKey={mcpActionKey}
+                  showBrandLogos={showBrandLogos}
+                  onFieldChange={onMcpFieldChange}
+                  onAction={onMcpAction}
+                  onToolsChange={onMcpToolsChange}
+                />
+              ),
+            )}
+          </div>
+        ) : (
+          <div className="px-3 py-12 text-center text-sm text-muted-foreground">
+            {tx("settings.apps.empty", "No apps match this filter.")}
+          </div>
+        )}
+      </section>
+
+      {filter !== "cli" ? (
+        <McpCustomServerPanel
+          form={customMcpForm}
+          configImport={mcpConfigImport}
+          actionKey={mcpActionKey}
+          onFormChange={onCustomMcpFormChange}
+          onConfigImportChange={onMcpConfigImportChange}
+          onSave={onSaveCustomMcp}
+          onImportConfig={onImportMcpConfig}
+        />
       ) : null}
 
-      {showTestDetails ? (
-        <div className="rounded-[10px] border border-border/55 bg-card/82 px-3.5 py-3 text-[12px] text-muted-foreground">
-          <div className="flex flex-wrap items-center gap-2">
-            {typeof testToolCount === "number" ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/80">
-                {tx("settings.mcp.toolsFound", "{{count}} tools").replace("{{count}}", String(testToolCount))}
-              </span>
-            ) : null}
-            {payload?.last_action?.checked_at ? (
-              <span>{payload.last_action.checked_at}</span>
-            ) : null}
-          </div>
-          {testToolNames.length ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {testToolNames.map((toolName) => (
-                <span key={toolName} className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-foreground/80">
-                  {toolName}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {payload?.last_action?.error ? (
-            <p className="mt-2 font-mono text-[11px] text-destructive/75">
-              {payload.last_action.error}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="flex h-36 items-center justify-center rounded-[8px] border border-border/45 bg-card/82 text-sm text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-          {tx("settings.mcp.loading", "Loading MCP presets...")}
-        </div>
-      ) : (
-        <section>
-          <div className="grid gap-2">
-            {filteredPresets.map((preset) => (
-              <McpPresetCard
-                key={preset.name}
-                preset={preset}
-                values={fieldValues[preset.name] ?? {}}
-                actionKey={actionKey}
-                showBrandLogos={showBrandLogos}
-                onFieldChange={onFieldChange}
-                onAction={onAction}
-                onToolsChange={onToolsChange}
-              />
-            ))}
-          </div>
-          {!filteredPresets.length ? (
-            <div className="rounded-[8px] border border-border/45 bg-card/82 px-4 py-8 text-center text-sm text-muted-foreground">
-              {tx("settings.mcp.empty", "No MCP presets match this filter.")}
-            </div>
-          ) : null}
-        </section>
-      )}
       <ThirdPartyBrandNotice />
     </div>
   );
+}
+
+function CliAppsCatalogRow({
+  app,
+  actionKey,
+  showBrandLogos,
+  onAction,
+}: {
+  app: CliAppInfo;
+  actionKey: string | null;
+  showBrandLogos: boolean;
+  onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const installBusy = actionKey === `install:${app.name}`;
+  const updateBusy = actionKey === `update:${app.name}`;
+  const uninstallBusy = actionKey === `uninstall:${app.name}`;
+  const testBusy = actionKey === `test:${app.name}`;
+  const busy = installBusy || updateBusy || uninstallBusy || testBusy;
+  const description = app.description || app.requires || app.entry_point || app.name;
+
+  return (
+    <article className="group flex min-w-0 items-center gap-3 rounded-[14px] px-3 py-3 transition-colors hover:bg-muted/45">
+      <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{app.display_name}</h3>
+          <AppsTypeBadge>{tx("settings.apps.cliLabel", "CLI")}</AppsTypeBadge>
+        </div>
+        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {app.installed ? (
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <AppsActionButton
+                  ariaLabel={tx("settings.cliApps.statusInstalled", "CLI installed")}
+                  busy={testBusy || updateBusy}
+                  disabled={busy}
+                  tone="installed"
+                >
+                  <Check className="h-4 w-4" aria-hidden />
+                </AppsActionButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
+                  <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.test", "Test CLI")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
+                  <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.update", "Update CLI")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={busy} onClick={() => onAction("uninstall", app.name)}>
+                  <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.cliApps.uninstall", "Uninstall CLI")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <AppsActionButton
+              ariaLabel={tx("settings.cliApps.uninstall", "Uninstall CLI")}
+              busy={uninstallBusy}
+              disabled={busy && !uninstallBusy}
+              tone="danger"
+              onClick={() => onAction("uninstall", app.name)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
+          </>
+        ) : app.install_supported ? (
+          <AppsActionButton
+            ariaLabel={tx("settings.cliApps.install", "Install CLI")}
+            busy={installBusy}
+            onClick={() => onAction("install", app.name)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        ) : (
+          <AppsActionButton ariaLabel={tx("settings.cliApps.unavailable", "Unavailable")} disabled>
+            <Plus className="h-4 w-4" aria-hidden />
+          </AppsActionButton>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function McpAppsCatalogRow({
+  preset,
+  values,
+  actionKey,
+  showBrandLogos,
+  onFieldChange,
+  onAction,
+  onToolsChange,
+}: {
+  preset: McpPresetInfo;
+  values: Record<string, string>;
+  actionKey: string | null;
+  showBrandLogos: boolean;
+  onFieldChange: (presetName: string, fieldName: string, value: string) => void;
+  onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
+  onToolsChange: (name: string, enabledTools: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const enableBusy = actionKey === `enable:${preset.name}`;
+  const removeBusy = actionKey === `remove:${preset.name}`;
+  const testBusy = actionKey === `test:${preset.name}`;
+  const toolsBusy = actionKey === `tools:${preset.name}`;
+  const busy = enableBusy || removeBusy || testBusy || toolsBusy;
+  const missingFields = preset.required_fields.filter((field) => field.required && !field.configured);
+  const hasFields = preset.required_fields.length > 0;
+  const needsSetupInput = missingFields.length > 0;
+  const readyInstalled = preset.installed && preset.configured;
+  const canEnable =
+    preset.install_supported &&
+    (missingFields.length === 0 || missingFields.every((field) => Boolean(values[field.name]?.trim())));
+  const toolNames = preset.tool_names ?? [];
+  const enabledTools = preset.enabled_tools ?? ["*"];
+  const allowAllTools = enabledTools.includes("*");
+  const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
+  const description = preset.description || preset.note || preset.requires || preset.name;
+  const statusLabel = mcpPresetStatusLabel(preset.status, tx);
+
+  useEffect(() => {
+    if (preset.configured || !preset.install_supported) setSetupOpen(false);
+  }, [preset.configured, preset.install_supported]);
+
+  const enableOrOpenSetup = () => {
+    if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
+      setSetupOpen(true);
+      return;
+    }
+    onAction("enable", preset.name, values);
+  };
+  const submitSetup = () => {
+    if (!canEnable) return;
+    onAction("enable", preset.name, values);
+  };
+  const setTools = (next: string[]) => onToolsChange(preset.name, next);
+  const toggleTool = (toolName: string) => {
+    const next = new Set(allowAllTools ? toolNames : enabledTools);
+    if (next.has(toolName)) next.delete(toolName);
+    else next.add(toolName);
+    const nextValues = Array.from(next);
+    setTools(nextValues.length === toolNames.length ? ["*"] : nextValues);
+  };
+
+  return (
+    <article className="rounded-[14px] transition-colors hover:bg-muted/45">
+      <div className="group flex min-w-0 items-center gap-3 px-3 py-3">
+        <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
+            <AppsTypeBadge>{tx("settings.apps.mcpLabel", "MCP")}</AppsTypeBadge>
+          </div>
+          <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {readyInstalled ? (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <AppsActionButton
+                    ariaLabel={statusLabel}
+                    busy={testBusy || toolsBusy}
+                    disabled={busy}
+                    tone="installed"
+                  >
+                    <Check className="h-4 w-4" aria-hidden />
+                  </AppsActionButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
+                    <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
+                    {tx("settings.mcp.test", "Test")}
+                  </DropdownMenuItem>
+                  {toolNames.length ? (
+                    <DropdownMenuItem disabled={busy} onClick={() => setToolsOpen((open) => !open)}>
+                      <SlidersHorizontal className="mr-2 h-3.5 w-3.5" aria-hidden />
+                      {tx("settings.mcp.toolScope", "Tools")}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem disabled={busy} onClick={() => onAction("remove", preset.name)}>
+                    <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                    {tx("settings.mcp.remove", "Remove")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <AppsActionButton
+                ariaLabel={tx("settings.mcp.remove", "Remove")}
+                busy={removeBusy}
+                disabled={busy && !removeBusy}
+                tone="danger"
+                onClick={() => onAction("remove", preset.name)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </AppsActionButton>
+            </>
+          ) : preset.installed && !preset.configured ? (
+            <AppsActionButton
+              ariaLabel={hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
+              busy={enableBusy}
+              onClick={() => {
+                if (hasFields) setSetupOpen(true);
+                else onAction("enable", preset.name, values);
+              }}
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
+          ) : preset.install_supported ? (
+            <AppsActionButton
+              ariaLabel={needsSetupInput ? tx("settings.mcp.setup", "Set up") : tx("settings.mcp.enable", "Enable")}
+              busy={enableBusy}
+              onClick={enableOrOpenSetup}
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
+          ) : (
+            <AppsActionButton ariaLabel={tx("settings.mcp.comingSoon", "Coming soon")} disabled>
+              <Plus className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
+          )}
+        </div>
+      </div>
+
+      {setupOpen && preset.install_supported && hasFields ? (
+        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[12.5px] font-semibold text-foreground">
+                {tx("settings.mcp.connectTitle", "Connect {{name}}").replace("{{name}}", preset.display_name)}
+              </div>
+              <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                {tx("settings.mcp.connectHint", "Add the key from your account settings.")}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setSetupOpen(false)}
+              className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold text-muted-foreground"
+            >
+              {tx("actions.cancel", "Cancel")}
+            </Button>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {preset.required_fields.map((field) => (
+              <label key={field.name} className="min-w-0">
+                <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
+                  {field.label}
+                  {field.configured ? (
+                    <span className="ml-1 font-normal text-emerald-600 dark:text-emerald-300">
+                      {tx("settings.mcp.configured", "configured")}
+                    </span>
+                  ) : null}
+                </span>
+                <Input
+                  type={field.secret ? "password" : "text"}
+                  value={values[field.name] ?? ""}
+                  onChange={(event) => onFieldChange(preset.name, field.name, event.target.value)}
+                  placeholder={
+                    field.configured
+                      ? tx("settings.mcp.keepExisting", "Leave blank to keep existing")
+                      : field.placeholder
+                  }
+                  className="h-9 rounded-full bg-background/80 text-[12.5px]"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !canEnable}
+              onClick={submitSetup}
+              className="h-8 rounded-full px-3 text-[12px] font-semibold"
+            >
+              {enableBusy ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              )}
+              {preset.installed
+                ? tx("settings.mcp.updateSetup", "Update setup")
+                : tx("settings.mcp.saveAndEnable", "Save and enable")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {toolsOpen && readyInstalled && toolNames.length ? (
+        <div className="mx-3 mb-3 rounded-[14px] border border-border/45 bg-card/85 p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11.5px] font-medium text-muted-foreground">
+              {tx("settings.mcp.toolScope", "Tools")}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={allowAllTools ? "default" : "outline"}
+                disabled={toolsBusy}
+                onClick={() => setTools(["*"])}
+                className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold"
+              >
+                {tx("settings.mcp.allTools", "All")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={!allowAllTools && enabledSet.size === 0 ? "default" : "outline"}
+                disabled={toolsBusy}
+                onClick={() => setTools([])}
+                className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold"
+              >
+                {tx("settings.mcp.noTools", "None")}
+              </Button>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {toolNames.map((toolName) => {
+              const selected = enabledSet.has(toolName);
+              return (
+                <button
+                  key={toolName}
+                  type="button"
+                  disabled={toolsBusy}
+                  onClick={() => toggleTool(toolName)}
+                  className={cn(
+                    "max-w-full rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors",
+                    selected
+                      ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                      : "border-border/55 bg-muted/30 text-muted-foreground hover:bg-muted/60",
+                  )}
+                >
+                  <span className="block max-w-[220px] truncate">{toolName}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function AppsTypeBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-[0.06em] text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+const AppsActionButton = forwardRef<HTMLButtonElement, {
+  ariaLabel: string;
+  busy?: boolean;
+  disabled?: boolean;
+  tone?: "default" | "installed" | "danger";
+  onClick?: () => void;
+  children: ReactNode;
+}>(function AppsActionButton({
+  ariaLabel,
+  busy,
+  disabled,
+  tone = "default",
+  onClick,
+  children,
+}, ref) {
+  return (
+    <Button
+      ref={ref}
+      type="button"
+      size="icon"
+      variant="ghost"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      disabled={disabled || busy}
+      onClick={onClick}
+      className={cn(
+        "h-9 w-9 rounded-full text-muted-foreground transition-colors",
+        tone === "installed" && "bg-transparent hover:bg-muted/70 hover:text-foreground",
+        tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
+        tone === "default" && "bg-muted/70 hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : children}
+    </Button>
+  );
+});
+
+function appsTitle(item: AppsCatalogItem): string {
+  return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
+}
+
+function appsReady(item: AppsCatalogItem): boolean {
+  return item.kind === "cli" ? item.app.installed : item.preset.installed && item.preset.configured;
+}
+
+function appsSearchText(item: AppsCatalogItem): string {
+  if (item.kind === "cli") {
+    const app = item.app;
+    return [
+      app.display_name,
+      app.name,
+      app.category,
+      app.description,
+      app.requires,
+      app.entry_point,
+      app.source,
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
+  const preset = item.preset;
+  return [
+    preset.display_name,
+    preset.name,
+    preset.category,
+    preset.description,
+    preset.requires,
+    preset.note,
+    preset.transport,
+    preset.source ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function McpCustomServerPanel({
@@ -3017,292 +3319,6 @@ function McpCustomServerPanel({
   );
 }
 
-function McpPresetCard({
-  preset,
-  values,
-  actionKey,
-  showBrandLogos,
-  onFieldChange,
-  onAction,
-  onToolsChange,
-}: {
-  preset: McpPresetInfo;
-  values: Record<string, string>;
-  actionKey: string | null;
-  showBrandLogos: boolean;
-  onFieldChange: (presetName: string, fieldName: string, value: string) => void;
-  onAction: (action: "enable" | "remove" | "test", name: string, values?: Record<string, string>) => void;
-  onToolsChange: (name: string, enabledTools: string[]) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const enableBusy = actionKey === `enable:${preset.name}`;
-  const removeBusy = actionKey === `remove:${preset.name}`;
-  const testBusy = actionKey === `test:${preset.name}`;
-  const toolsBusy = actionKey === `tools:${preset.name}`;
-  const busy = enableBusy || removeBusy || testBusy || toolsBusy;
-  const [setupOpen, setSetupOpen] = useState(false);
-  const missingFields = preset.required_fields.filter((field) => field.required && !field.configured);
-  const hasFields = preset.required_fields.length > 0;
-  const needsSetupInput = missingFields.length > 0;
-  const showSetup = setupOpen && preset.install_supported && hasFields;
-  const readyInstalled = preset.installed && preset.configured;
-  const statusLabel = mcpPresetStatusLabel(preset.status, tx);
-  const canEnable = preset.install_supported && (
-    missingFields.length === 0 || missingFields.every((field) => Boolean(values[field.name]?.trim()))
-  );
-  const toolNames = preset.tool_names ?? [];
-  const enabledTools = preset.enabled_tools ?? ["*"];
-  const allowAllTools = enabledTools.includes("*");
-  const enabledSet = new Set(allowAllTools ? toolNames : enabledTools);
-  const showToolControls = preset.installed && toolNames.length > 0;
-  const setTools = (next: string[]) => onToolsChange(preset.name, next);
-  useEffect(() => {
-    if (preset.configured || !preset.install_supported) setSetupOpen(false);
-  }, [preset.configured, preset.install_supported]);
-  const enableOrOpenSetup = () => {
-    if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
-      setSetupOpen(true);
-      return;
-    }
-    onAction("enable", preset.name, values);
-  };
-  const submitSetup = () => {
-    if (!canEnable) return;
-    onAction("enable", preset.name, values);
-  };
-  const toggleTool = (toolName: string) => {
-    const next = new Set(allowAllTools ? toolNames : enabledTools);
-    if (next.has(toolName)) {
-      next.delete(toolName);
-    } else {
-      next.add(toolName);
-    }
-    const nextValues = Array.from(next);
-    setTools(nextValues.length === toolNames.length ? ["*"] : nextValues);
-  };
-
-  return (
-    <article className="rounded-[8px] border border-border/45 bg-card/82 px-4 py-3 shadow-[0_6px_22px_rgba(15,23,42,0.045)]">
-      <div className="flex min-w-0 items-start gap-3">
-        <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-              {preset.display_name}
-            </h3>
-            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
-              {preset.category}
-            </span>
-            <span className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium",
-              preset.installed
-                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                : "bg-muted text-muted-foreground",
-            )}>
-              {statusLabel}
-            </span>
-          </div>
-          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-            {preset.description}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {preset.docs_url ? (
-            <a
-              className="inline-flex h-8 items-center rounded-full px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              href={preset.docs_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={tx("settings.mcp.openDocs", "Open docs")}
-            >
-              <Info className="h-3.5 w-3.5" aria-hidden />
-            </a>
-          ) : null}
-          {readyInstalled ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  className="h-8 rounded-full border-emerald-500/20 bg-emerald-500/10 px-3 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-500/12 dark:text-emerald-300"
-                >
-                  {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-                  {tx("settings.mcp.enabled", "Enabled")}
-                  <ChevronDown className="ml-1.5 h-3 w-3" aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={busy} onClick={() => onAction("test", preset.name)}>
-                  <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.mcp.test", "Test")}
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={busy} onClick={() => onAction("remove", preset.name)}>
-                  <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.mcp.remove", "Remove")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : preset.installed && !preset.configured ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                if (hasFields) setSetupOpen(true);
-                else onAction("enable", preset.name, values);
-              }}
-              className="h-8 rounded-full border-amber-500/25 bg-amber-500/8 px-3 text-[12px] font-semibold text-amber-700 hover:bg-amber-500/12 dark:text-amber-300"
-            >
-              {enableBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-              {hasFields ? tx("settings.mcp.configure", "Configure") : tx("settings.mcp.enable", "Enable")}
-            </Button>
-          ) : preset.install_supported ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={enableOrOpenSetup}
-              className="h-8 rounded-full px-4 text-[12px] font-semibold"
-            >
-              {enableBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-              {needsSetupInput ? tx("settings.mcp.setup", "Set up") : tx("settings.mcp.enable", "Enable")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled
-              className="h-8 rounded-full px-3 text-[12px] font-semibold"
-            >
-              {tx("settings.mcp.comingSoon", "Coming soon")}
-            </Button>
-          )}
-        </div>
-      </div>
-      {showSetup ? (
-        <div className="mt-3 rounded-[12px] border border-border/45 bg-muted/18 p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="text-[12px] font-semibold text-foreground">
-                {tx("settings.mcp.connectTitle", "Connect {{name}}").replace("{{name}}", preset.display_name)}
-              </div>
-              <p className="mt-0.5 text-[11.5px] leading-4 text-muted-foreground">
-                {tx("settings.mcp.connectHint", "Add the key from your account settings.")}
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => setSetupOpen(false)}
-              className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold text-muted-foreground"
-            >
-              {tx("actions.cancel", "Cancel")}
-            </Button>
-          </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {preset.required_fields.map((field) => (
-              <label key={field.name} className="min-w-0">
-                <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                  {field.label}
-                  {field.configured ? (
-                    <span className="ml-1 font-normal text-emerald-600 dark:text-emerald-300">
-                      {tx("settings.mcp.configured", "configured")}
-                    </span>
-                  ) : null}
-                </span>
-                <Input
-                  type={field.secret ? "password" : "text"}
-                  value={values[field.name] ?? ""}
-                  onChange={(event) => onFieldChange(preset.name, field.name, event.target.value)}
-                  placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep existing") : field.placeholder}
-                  className="h-9 rounded-full bg-background/80 text-[12.5px]"
-                />
-              </label>
-            ))}
-          </div>
-          <div className="mt-3 flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy || !canEnable}
-              onClick={submitSetup}
-              className="h-8 rounded-full px-3 text-[12px] font-semibold"
-            >
-              {enableBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-              {preset.installed ? tx("settings.mcp.updateSetup", "Update setup") : tx("settings.mcp.saveAndEnable", "Save and enable")}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {showToolControls ? (
-        <div className="mt-3 border-t border-border/35 pt-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[11.5px] font-medium text-muted-foreground">
-              {toolsBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />}
-              {tx("settings.mcp.toolScope", "Tools")}
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                size="sm"
-                variant={allowAllTools ? "default" : "outline"}
-                disabled={toolsBusy}
-                onClick={() => setTools(["*"])}
-                className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold"
-              >
-                {tx("settings.mcp.allTools", "All")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={!allowAllTools && enabledSet.size === 0 ? "default" : "outline"}
-                disabled={toolsBusy}
-                onClick={() => setTools([])}
-                className="h-7 rounded-full px-2.5 text-[11.5px] font-semibold"
-              >
-                {tx("settings.mcp.noTools", "None")}
-              </Button>
-            </div>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {toolNames.map((toolName) => {
-              const selected = enabledSet.has(toolName);
-              return (
-                <button
-                  key={toolName}
-                  type="button"
-                  disabled={toolsBusy}
-                  onClick={() => toggleTool(toolName)}
-                  className={cn(
-                    "max-w-full rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors",
-                    selected
-                      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                      : "border-border/55 bg-muted/30 text-muted-foreground hover:bg-muted/60",
-                  )}
-                >
-                  <span className="block max-w-[220px] truncate">{toolName}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : preset.installed && !testBusy ? (
-        <div className="mt-3 border-t border-border/35 pt-3 text-[11.5px] text-muted-foreground">
-          {tx("settings.mcp.testForTools", "Run Test to inspect and choose individual tools.")}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
 function mcpPresetStatusLabel(status: string, tx: (key: string, fallback: string) => string): string {
   switch (status) {
     case "configured":
@@ -3432,105 +3448,6 @@ function CliAppReadyPanel({
         </div>
       </div>
     </section>
-  );
-}
-
-function CliAppCard({
-  app,
-  actionKey,
-  showBrandLogos,
-  onAction,
-}: {
-  app: CliAppInfo;
-  actionKey: string | null;
-  showBrandLogos: boolean;
-  onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const installBusy = actionKey === `install:${app.name}`;
-  const updateBusy = actionKey === `update:${app.name}`;
-  const uninstallBusy = actionKey === `uninstall:${app.name}`;
-  const testBusy = actionKey === `test:${app.name}`;
-  const busy = installBusy || updateBusy || uninstallBusy || testBusy;
-
-  return (
-    <article className="flex min-w-0 items-center gap-3 rounded-[8px] border border-border/45 bg-card/82 px-4 py-3 shadow-[0_6px_22px_rgba(15,23,42,0.045)]">
-      <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-            {app.display_name}
-          </h3>
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
-            {app.category}
-          </span>
-        </div>
-        <div className="mt-0.5 truncate text-[12px] text-muted-foreground">
-          {app.entry_point || app.name}
-        </div>
-        <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground">
-          {app.requires
-            ? `${tx("settings.cliApps.requires", "Requires")}: ${app.requires}`
-            : app.description || tx("settings.cliApps.noDescription", "No description available.")}
-        </p>
-      </div>
-      <div className="shrink-0">
-        {app.installed ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                className="h-8 rounded-full border-emerald-500/20 bg-emerald-500/10 px-3 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-500/12 dark:text-emerald-300"
-              >
-                {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-                {tx("settings.cliApps.statusInstalled", "CLI installed")}
-                <ChevronDown className="ml-1.5 h-3 w-3" aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
-                <PlayCircle className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.test", "Test CLI")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("update", app.name)}>
-                <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.update", "Update CLI")}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={busy} onClick={() => onAction("uninstall", app.name)}>
-                <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.cliApps.uninstall", "Uninstall CLI")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : app.install_supported ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => onAction("install", app.name)}
-            className="h-8 rounded-full px-4 text-[12px] font-semibold"
-          >
-            {installBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            {tx("settings.cliApps.install", "Install CLI")}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled
-            className="h-8 rounded-full px-3 text-[12px] font-semibold"
-          >
-            {tx("settings.cliApps.unavailable", "Unavailable")}
-          </Button>
-        )}
-      </div>
-    </article>
   );
 }
 

@@ -13,7 +13,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
-from nanobot.cli_apps import utils as cli_app_utils
+from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
