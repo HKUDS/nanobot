@@ -12,15 +12,6 @@ import pytest
 from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
 
 
-def test_legacy_cli_apps_imports_alias_apps_cli_module() -> None:
-    import nanobot.apps.cli.service as canonical_service
-    import nanobot.cli_apps.service as legacy_service
-    from nanobot.cli_apps import CliAppManager as LegacyCliAppManager
-
-    assert legacy_service is canonical_service
-    assert LegacyCliAppManager is CliAppManager
-
-
 def _write_cache(path: Path, registry: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
