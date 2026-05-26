@@ -1,0 +1,52 @@
+spec_version: "0.1.0"
+name: nanobot
+version: 0.2.0
+description: >
+  nanobot is a lightweight, open-source personal AI agent framework built in
+  Python. It keeps a small, readable core agent loop — receive messages from
+  chat channels (Telegram, Discord, Slack, Feishu, WhatsApp, and more), invoke
+  an LLM provider (Anthropic, OpenAI, Azure, Bedrock, GitHub Copilot, DeepSeek,
+  NVIDIA NIM, and others), execute tools, and persist session memory. Ships with
+  a Vite/React WebUI, an OpenAI-compatible HTTP API, MCP server support,
+  image generation, audio transcription, sustained long-horizon goals, and cron
+  scheduling — all deployable with a single pip install.
+license: MIT
+model:
+  preferred: anthropic:claude-sonnet-4-6
+  fallback:
+    - openai:gpt-4o
+    - openai:gpt-4-turbo
+runtime:
+  max_turns: 100
+  entrypoint: nanobot gateway
+skills:
+  - name: chat-channels
+    description: >
+      Integrates with Telegram, Discord, Slack, Feishu, Matrix, WhatsApp, QQ,
+      WeChat, WeCom, DingTalk, MS Teams, Email, and MoChat via an async
+      MessageBus that decouples channels from the agent core.
+  - name: tools
+    description: >
+      Exposes filesystem (read/write/edit/list), shell execution (sandboxed),
+      web search and fetch, MCP servers, cron scheduling, notebook editing,
+      sub-agent spawning, long-running tasks, image generation, and
+      self-modification tools to the LLM.
+  - name: memory
+    description: >
+      Persists session history with Dream two-phase memory consolidation and
+      atomic writes. Supports per-session TTL-based auto-compaction and
+      sustained goal state tracking across turns.
+  - name: multi-provider
+    description: >
+      Supports Anthropic, OpenAI, OpenAI Responses API, Azure OpenAI, AWS
+      Bedrock, GitHub Copilot, OpenAI Codex, DeepSeek, NVIDIA NIM, Hugging
+      Face, and more via a pluggable provider registry with automatic fallback.
+  - name: webui
+    description: >
+      Ships a Vite-based React SPA bundled inside the Python wheel that
+      communicates with the gateway over WebSocket multiplex; also exposes an
+      OpenAI-compatible HTTP API at /v1/chat/completions.
+compliance:
+  risk_tier: standard
+  supervision:
+    human_in_the_loop: destructive
