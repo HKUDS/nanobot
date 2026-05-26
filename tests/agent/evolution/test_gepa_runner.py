@@ -83,7 +83,7 @@ def _insert_traces(store: TraceStore, skill_name: str, count: int = 3) -> None:
             TurnTrace(
                 session_key="cli:direct",
                 query=f"deploy task {index}",
-                trace_id=f"trace-{index}",
+                trace_id=f"{skill_name}-trace-{index}",
                 skills_injected=(skill_name,),
                 tool_calls=(
                     ToolCallRecord(name="exec", args_summary="kubectl apply -f nginx.yaml"),
@@ -115,6 +115,17 @@ async def test_list_active_skill_names(tmp_path: Path) -> None:
     (tmp_path / "skills" / ".proposals").mkdir()
 
     assert list_active_skill_names(tmp_path) == ["deploy-k8s"]
+
+
+def test_runner_uses_gepa_config_limits(tmp_path: Path) -> None:
+    evolution = EvolutionConfig(
+        enable=True,
+        gepa=EvolutionGepaConfig(enable=True, min_traces=5, max_skills_per_run=2),
+    )
+    runner = GepaRunner(tmp_path, evolution, _DummyProvider())
+
+    assert runner._min_traces == 5
+    assert runner._max_skills_per_run == 2
 
 
 @pytest.mark.asyncio
@@ -177,6 +188,40 @@ async def test_run_emits_structured_gepa_logs(
     assert "GEPA [optimized]" in joined
     assert "GEPA [proposal]" in joined
     assert "GEPA [done]" in joined
+
+
+@pytest.mark.asyncio
+async def test_run_respects_max_skills_per_run(
+    tmp_path: Path,
+    _patch_evolution_extra: None,
+) -> None:
+    for name in ("alpha-skill", "zulu-skill"):
+        skill_dir = tmp_path / "skills" / name
+        skill_dir.mkdir(parents=True)
+        md = _SKILL_MD.replace("deploy-k8s", name).replace("Deploy workloads", f"Skill {name}")
+        (skill_dir / "SKILL.md").write_text(md, encoding="utf-8")
+
+    trace_store = TraceStore(tmp_path)
+    _insert_traces(trace_store, "alpha-skill")
+    _insert_traces(trace_store, "zulu-skill")
+
+    optimizer = _MockOptimizer()
+    evolution = EvolutionConfig(
+        enable=True,
+        gepa=EvolutionGepaConfig(enable=True, max_skills_per_run=1),
+    )
+    runner = GepaRunner(
+        tmp_path,
+        evolution,
+        _DummyProvider(),
+        optimizer=optimizer,
+        evaluator=None,
+    )
+    result = await runner.run(trigger="cli")
+
+    assert result.phase == "completed"
+    assert optimizer.calls == 1
+    assert result.skills_processed == 1
 
 
 @pytest.mark.asyncio

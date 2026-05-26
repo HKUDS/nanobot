@@ -143,8 +143,8 @@ class GepaRunner:
         fallback_model: str = "",
         optimizer: GepaOptimizer | None = None,
         evaluator: GepaEvaluator | None = None,
-        min_traces: int = DEFAULT_MIN_TRACES,
-        max_skills_per_run: int = DEFAULT_MAX_SKILLS_PER_RUN,
+        min_traces: int | None = None,
+        max_skills_per_run: int | None = None,
     ) -> None:
         self._workspace = workspace.expanduser().resolve()
         self._evolution = evolution
@@ -153,8 +153,12 @@ class GepaRunner:
         self._fallback_model = fallback_model
         self._optimizer = optimizer
         self._evaluator = evaluator
-        self._min_traces = min_traces
-        self._max_skills_per_run = max(1, max_skills_per_run)
+        gepa = evolution.gepa
+        self._min_traces = min_traces if min_traces is not None else gepa.min_traces
+        self._max_skills_per_run = max(
+            1,
+            max_skills_per_run if max_skills_per_run is not None else gepa.max_skills_per_run,
+        )
         self._store = GepaRunStore(self._workspace)
         self._trace_store = TraceStore(self._workspace)
         self._proposals = ProposalStore(self._workspace)

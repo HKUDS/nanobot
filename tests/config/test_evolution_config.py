@@ -34,6 +34,8 @@ def test_evolution_gepa_config_defaults() -> None:
     assert cfg.interval_hours is None
     assert cfg.model is None
     assert cfg.max_budget_usd == 10.0
+    assert cfg.min_traces == 3
+    assert cfg.max_skills_per_run == 1
     assert cfg.notify_on_complete is False
     assert cfg.notify_channel is None
     assert cfg.notify_chat_id is None
@@ -92,6 +94,8 @@ def test_evolution_config_accepts_nested_camel_case() -> None:
                 "intervalHours": 168.0,
                 "model": "openrouter/sonnet",
                 "maxBudgetUsd": 5.0,
+                "minTraces": 5,
+                "maxSkillsPerRun": 2,
             },
         }
     )
@@ -108,6 +112,8 @@ def test_evolution_config_accepts_nested_camel_case() -> None:
     assert cfg.gepa.interval_hours == 168.0
     assert cfg.gepa.model == "openrouter/sonnet"
     assert cfg.gepa.max_budget_usd == 5.0
+    assert cfg.gepa.min_traces == 5
+    assert cfg.gepa.max_skills_per_run == 2
     assert cfg.recording_enabled() is True
     assert cfg.post_task_enabled() is True
     assert cfg.gepa_enabled() is True
@@ -127,6 +133,8 @@ def test_evolution_config_serializes_nested_camel_case() -> None:
     assert dumped["postTask"]["minToolCalls"] == 3
     assert dumped["gepa"]["enable"] is True
     assert dumped["gepa"]["maxBudgetUsd"] == 10.0
+    assert dumped["gepa"]["minTraces"] == 3
+    assert dumped["gepa"]["maxSkillsPerRun"] == 1
 
 
 def test_agent_defaults_includes_evolution() -> None:
@@ -166,6 +174,8 @@ def test_gepa_disabled_when_master_switch_off() -> None:
         (EvolutionPostTaskConfig, "min_tool_calls", 0),
         (EvolutionTraceConfig, "retention_days", 0),
         (EvolutionGepaConfig, "max_budget_usd", 0),
+        (EvolutionGepaConfig, "min_traces", 0),
+        (EvolutionGepaConfig, "max_skills_per_run", 0),
         (EvolutionGepaConfig, "interval_hours", -1),
     ],
 )

@@ -154,6 +154,8 @@ class EvolutionGepaConfig(Base):
     interval_hours: float | None = Field(default=None, gt=0)  # None = 仅手动 / CLI 触发
     model: str | None = None  # GEPA 运行模型；None 时使用主 agent provider
     max_budget_usd: float = Field(default=10.0, gt=0)  # 单次 GEPA 运行预算上限（USD）
+    min_traces: int = Field(default=3, ge=1)  # 构建数据集所需最少 trace 数
+    max_skills_per_run: int = Field(default=1, ge=1)  # 单次运行最多优化的 active skill 数
     notify_on_complete: bool = False  # cron 完成且有 proposal 时是否 bus 通知（需 notify_channel/chat_id）
     notify_channel: str | None = None  # cron 通知目标 channel（如 telegram）
     notify_chat_id: str | None = None  # cron 通知目标 chat_id
