@@ -35,7 +35,9 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
+    goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
+    sustained_goal_active,
 )
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.webui_turns import (
@@ -48,7 +50,10 @@ from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    SUSTAINED_GOAL_CONTINUE_PROMPT,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -731,6 +736,15 @@ class AgentLoop:
 
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        # Build continuation message that embeds the active goal objective so
+        # the LLM can see it even if earlier Runtime Context was truncated.
+        _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
+        _goal_continue = (
+            "You have an active sustained goal:\n\n"
+            + "\n".join(_goal_lines)
+            + "\n\nPlease continue working toward the objective using your tools, "
+            "or call complete_goal if the work is truly finished."
+        ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -758,6 +772,8 @@ class AgentLoop:
                     session.key if session is not None else session_key,
                     metadata=(session.metadata if session is not None else None),
                 ),
+                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
+                goal_continue_message=_goal_continue,
             ))
         finally:
             reset_file_states(file_state_token)
