@@ -56,7 +56,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     loop = _make_loop(tmp_path)
     attempts = 0
 
-    async def _fake_connect(_servers, _registry):
+    async def _fake_connect(_servers, _registry, *, on_disconnected=None):
         nonlocal attempts
         attempts += 1
         return {}
@@ -90,7 +90,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, on_disconnected=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -142,7 +142,7 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, on_disconnected=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -198,7 +198,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     )
     save_config(config)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, on_disconnected=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
