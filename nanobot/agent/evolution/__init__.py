@@ -1,6 +1,18 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
 from nanobot.agent.evolution.deps import evolution_extra_available, require_evolution_extra
+from nanobot.agent.evolution.gepa_evaluator import (
+    DEFAULT_MAX_CONCURRENCY,
+    SKIP_BUDGET_EXCEEDED,
+    GepaBatchEvalResult,
+    GepaBudgetTracker,
+    GepaEvalScore,
+    GepaEvaluator,
+    GepaEvaluatorConfig,
+    composite_score,
+    estimate_llm_cost_usd,
+    format_tool_calls,
+)
 from nanobot.agent.evolution.gepa_dataset import (
     DEFAULT_MIN_TRACES,
     SKIP_INSUFFICIENT_TRACES,
@@ -49,11 +61,17 @@ from nanobot.agent.evolution.trace_recorder import TraceRecorder, build_turn_tra
 from nanobot.agent.evolution.trace_store import TraceStore
 
 __all__ = [
+    "DEFAULT_MAX_CONCURRENCY",
     "DEFAULT_MIN_TRACES",
     "EvolutionGitStore",
     "GEPA_SKIP_ALREADY_RUNNING",
+    "GepaBatchEvalResult",
+    "GepaBudgetTracker",
     "GepaDatasetResult",
     "GepaEvalExample",
+    "GepaEvalScore",
+    "GepaEvaluator",
+    "GepaEvaluatorConfig",
     "GepaRunLock",
     "GepaSkillModule",
     "GepaSkillState",
@@ -71,6 +89,7 @@ __all__ = [
     "ProposalKind",
     "ProposalMeta",
     "ProposalStore",
+    "SKIP_BUDGET_EXCEEDED",
     "SKIP_INSUFFICIENT_TRACES",
     "SkillMdParts",
     "ToolCallRecord",
@@ -80,6 +99,9 @@ __all__ = [
     "TurnTraceOutcome",
     "build_turn_trace",
     "build_gepa_dataset",
+    "composite_score",
+    "estimate_llm_cost_usd",
+    "format_tool_calls",
     "evolution_extra_available",
     "extract_body_from_dspy_module",
     "merge_skill_md",
