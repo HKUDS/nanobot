@@ -1,6 +1,18 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
 from nanobot.agent.evolution.deps import evolution_extra_available, require_evolution_extra
+from nanobot.agent.evolution.gepa_optimizer import (
+    GepaAutoBudget,
+    GepaOptimizeResult,
+    GepaOptimizer,
+    GepaOptimizerConfig,
+    build_trace_metric,
+    examples_to_dspy,
+    fast_trace_score,
+    make_dspy_lm,
+    resolve_gepa_optimizer_model,
+    split_train_val,
+)
 from nanobot.agent.evolution.gepa_evaluator import (
     DEFAULT_MAX_CONCURRENCY,
     SKIP_BUDGET_EXCEEDED,
@@ -72,6 +84,10 @@ __all__ = [
     "GepaEvalScore",
     "GepaEvaluator",
     "GepaEvaluatorConfig",
+    "GepaAutoBudget",
+    "GepaOptimizeResult",
+    "GepaOptimizer",
+    "GepaOptimizerConfig",
     "GepaRunLock",
     "GepaSkillModule",
     "GepaSkillState",
@@ -99,17 +115,23 @@ __all__ = [
     "TurnTraceOutcome",
     "build_turn_trace",
     "build_gepa_dataset",
+    "build_trace_metric",
     "composite_score",
+    "examples_to_dspy",
+    "fast_trace_score",
     "estimate_llm_cost_usd",
     "format_tool_calls",
     "evolution_extra_available",
     "extract_body_from_dspy_module",
+    "make_dspy_lm",
     "merge_skill_md",
     "normalize_skill_md_content",
+    "resolve_gepa_optimizer_model",
     "parse_post_task_response",
     "require_evolution_extra",
     "resolve_post_task_provider",
     "split_skill_md",
+    "split_train_val",
     "trace_relates_to_skill",
     "validate_skill_md",
 ]
