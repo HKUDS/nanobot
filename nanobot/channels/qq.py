@@ -25,6 +25,7 @@ import os
 import re
 import time
 from collections import deque
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import unquote, urlparse
@@ -38,6 +39,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 try:
     from nanobot.config.paths import get_media_dir
@@ -134,6 +136,7 @@ class QQConfig(Base):
     secret: str = ""
     allow_from: list[str] = Field(default_factory=list)
     msg_format: Literal["plain", "markdown"] = "plain"
+    ack_message: str = "⏳ Processing..."
 
     # Optional: directory to save inbound attachments. If empty, use nanobot get_media_dir("qq").
     media_dir: str = ""
@@ -185,24 +188,25 @@ class QQChannel(BaseChannel):
             root = Path.home() / ".nanobot" / "media" / "qq"
 
         root.mkdir(parents=True, exist_ok=True)
-        logger.info("QQ media directory: {}", str(root))
+        self.logger.info("media directory: {}", str(root))
         return root
 
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
+        redirect_lib_logging("botpy", level="WARNING")
         if not QQ_AVAILABLE:
-            logger.error("QQ SDK not installed. Run: pip install qq-botpy")
+            self.logger.error("SDK not installed. Run: pip install qq-botpy")
             return
 
         if not self.config.app_id or not self.config.secret:
-            logger.error("QQ app_id and secret not configured")
+            self.logger.error("app_id and secret not configured")
             return
 
         self._running = True
         self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
         self._client = _make_bot_class(self)()
-        logger.info("QQ bot started (C2C & Group supported)")
+        self.logger.info("bot started (C2C & Group supported)")
         await self._run_bot()
 
     async def _run_bot(self) -> None:
@@ -211,29 +215,25 @@ class QQChannel(BaseChannel):
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
-                logger.warning("QQ bot error: {}", e)
+                self.logger.warning("bot error: {}", e)
             if self._running:
-                logger.info("Reconnecting QQ bot in 5 seconds...")
+                self.logger.info("Reconnecting bot in 5 seconds...")
                 await asyncio.sleep(5)
 
     async def stop(self) -> None:
         """Stop bot and cleanup resources."""
         self._running = False
         if self._client:
-            try:
+            with suppress(Exception):
                 await self._client.close()
-            except Exception:
-                pass
         self._client = None
 
         if self._http:
-            try:
+            with suppress(Exception):
                 await self._http.close()
-            except Exception:
-                pass
         self._http = None
 
-        logger.info("QQ bot stopped")
+        self.logger.info("bot stopped")
 
     # ---------------------------
     # Outbound (send)
@@ -241,43 +241,49 @@ class QQChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
-        if not self._client:
-            logger.warning("QQ client not initialized")
-            return
+        try:
+            if not self._client:
+                self.logger.warning("client not initialized")
+                return
 
-        msg_id = msg.metadata.get("message_id")
-        chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
-        is_group = chat_type == "group"
+            msg_id = msg.metadata.get("message_id")
+            chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
+            is_group = chat_type == "group"
 
-        # 1) Send media
-        for media_ref in msg.media or []:
-            ok = await self._send_media(
-                chat_id=msg.chat_id,
-                media_ref=media_ref,
-                msg_id=msg_id,
-                is_group=is_group,
-            )
-            if not ok:
-                filename = (
-                    os.path.basename(urlparse(media_ref).path)
-                    or os.path.basename(media_ref)
-                    or "file"
+            # 1) Send media
+            for media_ref in msg.media or []:
+                ok = await self._send_media(
+                    chat_id=msg.chat_id,
+                    media_ref=media_ref,
+                    msg_id=msg_id,
+                    is_group=is_group,
                 )
+                if not ok:
+                    filename = (
+                        os.path.basename(urlparse(media_ref).path)
+                        or os.path.basename(media_ref)
+                        or "file"
+                    )
+                    await self._send_text_only(
+                        chat_id=msg.chat_id,
+                        is_group=is_group,
+                        msg_id=msg_id,
+                        content=f"[Attachment send failed: {filename}]",
+                    )
+
+            # 2) Send text
+            if msg.content and msg.content.strip():
                 await self._send_text_only(
                     chat_id=msg.chat_id,
                     is_group=is_group,
                     msg_id=msg_id,
-                    content=f"[Attachment send failed: {filename}]",
+                    content=msg.content.strip(),
                 )
-
-        # 2) Send text
-        if msg.content and msg.content.strip():
-            await self._send_text_only(
-                chat_id=msg.chat_id,
-                is_group=is_group,
-                msg_id=msg_id,
-                content=msg.content.strip(),
-            )
+        except (aiohttp.ClientError, OSError):
+            # Network / transport errors — propagate so ChannelManager can retry
+            raise
+        except Exception:
+            self.logger.exception("Error sending message to chat_id={}", msg.chat_id)
 
     async def _send_text_only(
         self,
@@ -335,7 +341,7 @@ class QQChannel(BaseChannel):
                 srv_send_msg=False,
             )
             if not media_obj:
-                logger.error("QQ media upload failed: empty response")
+                self.logger.error("media upload failed: empty response")
                 return False
 
             self._msg_seq += 1
@@ -356,10 +362,15 @@ class QQChannel(BaseChannel):
                     media=media_obj,
                 )
 
-            logger.info("QQ media sent: {}", filename)
+            self.logger.info("media sent: {}", filename)
             return True
-        except Exception as e:
-            logger.error("QQ send media failed filename={} err={}", filename, e)
+        except (aiohttp.ClientError, OSError) as e:
+            # Network / transport errors — propagate for retry by caller
+            self.logger.warning("send media network error filename={} err={}", filename, e)
+            raise
+        except Exception:
+            # API-level or other non-network errors — return False so send() can fallback
+            self.logger.exception("send media failed filename={}", filename)
             return False
 
     async def _read_media_bytes(self, media_ref: str) -> tuple[bytes | None, str | None]:
@@ -380,19 +391,19 @@ class QQChannel(BaseChannel):
                     local_path = Path(os.path.expanduser(media_ref))
 
                 if not local_path.is_file():
-                    logger.warning("QQ outbound media file not found: {}", str(local_path))
+                    self.logger.warning("outbound media file not found: {}", str(local_path))
                     return None, None
 
                 data = await asyncio.to_thread(local_path.read_bytes)
                 return data, local_path.name
             except Exception as e:
-                logger.warning("QQ outbound media read error ref={} err={}", media_ref, e)
+                self.logger.warning("outbound media read error ref={} err={}", media_ref, e)
                 return None, None
 
         # Remote URL
         ok, err = validate_url_target(media_ref)
         if not ok:
-            logger.warning("QQ outbound media URL validation failed url={} err={}", media_ref, err)
+            self.logger.warning("outbound media URL validation failed url={} err={}", media_ref, err)
             return None, None
 
         if not self._http:
@@ -400,8 +411,8 @@ class QQChannel(BaseChannel):
         try:
             async with self._http.get(media_ref, allow_redirects=True) as resp:
                 if resp.status >= 400:
-                    logger.warning(
-                        "QQ outbound media download failed status={} url={}",
+                    self.logger.warning(
+                        "outbound media download failed status={} url={}",
                         resp.status,
                         media_ref,
                     )
@@ -412,7 +423,7 @@ class QQChannel(BaseChannel):
                 filename = os.path.basename(urlparse(media_ref).path) or "file.bin"
                 return data, filename
         except Exception as e:
-            logger.warning("QQ outbound media download error url={} err={}", media_ref, e)
+            self.logger.warning("outbound media download error url={} err={}", media_ref, e)
             return None, None
 
     # https://github.com/tencent-connect/botpy/issues/198
@@ -437,15 +448,26 @@ class QQChannel(BaseChannel):
             endpoint = "/v2/users/{openid}/files"
             id_key = "openid"
 
-        payload = {
+        payload: dict[str, Any] = {
             id_key: chat_id,
             "file_type": file_type,
             "file_data": file_data,
-            "file_name": file_name,
             "srv_send_msg": srv_send_msg,
         }
+        # Only pass file_name for non-image types (file_type=4).
+        # Passing file_name for images causes QQ client to render them as
+        # file attachments instead of inline images.
+        if file_type != QQ_FILE_TYPE_IMAGE and file_name:
+            payload["file_name"] = file_name
+
         route = Route("POST", endpoint, **{id_key: chat_id})
-        return await self._client.api._http.request(route, json=payload)
+        result = await self._client.api._http.request(route, json=payload)
+
+        # Extract only the file_info field to avoid extra fields (file_uuid, ttl, etc.)
+        # that may confuse QQ client when sending the media object.
+        if isinstance(result, dict) and "file_info" in result:
+            return {"file_info": result["file_info"]}
+        return result
 
     # ---------------------------
     # Inbound (receive)
@@ -453,47 +475,72 @@ class QQChannel(BaseChannel):
 
     async def _on_message(self, data: C2CMessage | GroupMessage, is_group: bool = False) -> None:
         """Parse inbound message, download attachments, and publish to the bus."""
-        if data.id in self._processed_ids:
-            return
-        self._processed_ids.append(data.id)
+        try:
+            if is_group:
+                chat_id = data.group_openid
+                user_id = data.author.member_openid
+                chat_type = "group"
+            else:
+                chat_id = str(
+                    getattr(data.author, "id", None)
+                    or getattr(data.author, "user_openid", "unknown")
+                )
+                user_id = chat_id
+                chat_type = "c2c"
 
-        if is_group:
-            chat_id = data.group_openid
-            user_id = data.author.member_openid
-            self._chat_type_cache[chat_id] = "group"
-        else:
-            chat_id = str(
-                getattr(data.author, "id", None) or getattr(data.author, "user_openid", "unknown")
+            content = (data.content or "").strip()
+
+            if not self.is_allowed(user_id):
+                return
+
+            if data.id in self._processed_ids:
+                return
+            self._processed_ids.append(data.id)
+            self._chat_type_cache[chat_id] = chat_type
+
+            # the data used by tests don't contain attachments property
+            # so we use getattr with a default of [] to avoid AttributeError in tests
+            attachments = getattr(data, "attachments", None) or []
+            media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+
+            # Compose content that always contains actionable saved paths
+            if recv_lines:
+                tag = (
+                    "[Image]"
+                    if any(_is_image_name(Path(p).name) for p in media_paths)
+                    else "[File]"
+                )
+                file_block = "Received files:\n" + "\n".join(recv_lines)
+                content = (
+                    f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
+                )
+
+            if not content and not media_paths:
+                return
+
+            if self.config.ack_message:
+                try:
+                    await self._send_text_only(
+                        chat_id=chat_id,
+                        is_group=is_group,
+                        msg_id=data.id,
+                        content=self.config.ack_message,
+                    )
+                except Exception:
+                    self.logger.debug("ack message failed for chat_id={}", chat_id)
+
+            await self._handle_message(
+                sender_id=user_id,
+                chat_id=chat_id,
+                content=content,
+                media=media_paths if media_paths else None,
+                metadata={
+                    "message_id": data.id,
+                    "attachments": att_meta,
+                },
             )
-            user_id = chat_id
-            self._chat_type_cache[chat_id] = "c2c"
-
-        content = (data.content or "").strip()
-
-        # the data used by tests don't contain attachments property
-        # so we use getattr with a default of [] to avoid AttributeError in tests
-        attachments = getattr(data, "attachments", None) or []
-        media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
-
-        # Compose content that always contains actionable saved paths
-        if recv_lines:
-            tag = "[Image]" if any(_is_image_name(Path(p).name) for p in media_paths) else "[File]"
-            file_block = "Received files:\n" + "\n".join(recv_lines)
-            content = f"{content}\n\n{file_block}".strip() if content else f"{tag}\n{file_block}"
-
-        if not content and not media_paths:
-            return
-
-        await self._handle_message(
-            sender_id=user_id,
-            chat_id=chat_id,
-            content=content,
-            media=media_paths if media_paths else None,
-            metadata={
-                "message_id": data.id,
-                "attachments": att_meta,
-            },
-        )
+        except Exception:
+            self.logger.exception("Error handling inbound message id={}", getattr(data, "id", "?"))
 
     async def _handle_attachments(
         self,
@@ -508,9 +555,11 @@ class QQChannel(BaseChannel):
             return media_paths, recv_lines, att_meta
 
         for att in attachments:
-            url, filename, ctype = att.url, att.filename, att.content_type
+            url = getattr(att, "url", None) or ""
+            filename = getattr(att, "filename", None) or ""
+            ctype = getattr(att, "content_type", None) or ""
 
-            logger.info("Downloading file from QQ: {}", filename or url)
+            self.logger.info("Downloading file: {}", filename or url)
             local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
 
             att_meta.append(
@@ -543,6 +592,10 @@ class QQChannel(BaseChannel):
         Enforces a max download size and writes to a .part temp file
         that is atomically renamed on success.
         """
+        # Handle protocol-relative URLs (e.g. "//multimedia.nt.qq.com/...")
+        if url.startswith("//"):
+            url = f"https:{url}"
+
         if not self._http:
             self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
@@ -557,7 +610,7 @@ class QQChannel(BaseChannel):
                 allow_redirects=True,
             ) as resp:
                 if resp.status != 200:
-                    logger.warning("QQ download failed: status={} url={}", resp.status, url)
+                    self.logger.warning("download failed: status={} url={}", resp.status, url)
                     return None
 
                 ctype = (resp.headers.get("Content-Type") or "").lower()
@@ -611,8 +664,8 @@ class QQChannel(BaseChannel):
                             continue
                         downloaded += len(chunk)
                         if downloaded > max_bytes:
-                            logger.warning(
-                                "QQ download exceeded max_bytes={} url={} -> abort",
+                            self.logger.warning(
+                                "download exceeded max_bytes={} url={} -> abort",
                                 max_bytes,
                                 url,
                             )
@@ -624,16 +677,14 @@ class QQChannel(BaseChannel):
                 # Atomic rename
                 await asyncio.to_thread(os.replace, tmp_path, target)
                 tmp_path = None  # mark as moved
-                logger.info("QQ file saved: {}", str(target))
+                self.logger.info("file saved: {}", str(target))
                 return str(target)
 
-        except Exception as e:
-            logger.error("QQ download error: {}", e)
+        except Exception:
+            self.logger.exception("download error")
             return None
         finally:
             # Cleanup partial file
             if tmp_path is not None:
-                try:
+                with suppress(Exception):
                     tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass

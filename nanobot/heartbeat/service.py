@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
-if TYPE_CHECKING:
-    from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider
+from nanobot.utils.llm_runtime import LLMRuntimeResolver, static_llm_runtime
 
 _HEARTBEAT_TOOL = [
     {
@@ -53,17 +53,21 @@ class HeartbeatService:
     def __init__(
         self,
         workspace: Path,
-        provider: LLMProvider,
-        model: str,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
+        llm_runtime: LLMRuntimeResolver | None = None,
     ):
         self.workspace = workspace
-        self.provider = provider
-        self.model = model
+        if llm_runtime is None:
+            if provider is None or model is None:
+                raise ValueError("HeartbeatService requires either llm_runtime or provider/model")
+            llm_runtime = static_llm_runtime(provider, model)
+        self._llm_runtime = llm_runtime
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.interval_s = interval_s
@@ -91,7 +95,9 @@ class HeartbeatService:
         """
         from nanobot.utils.helpers import current_time_str
 
-        response = await self.provider.chat_with_retry(
+        llm = self._llm_runtime()
+
+        response = await llm.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
@@ -101,10 +107,15 @@ class HeartbeatService:
                 )},
             ],
             tools=_HEARTBEAT_TOOL,
-            model=self.model,
+            model=llm.model,
         )
 
-        if not response.has_tool_calls:
+        if not response.should_execute_tools:
+            if response.has_tool_calls:
+                logger.warning(
+                    "Ignoring heartbeat tool calls under finish_reason='{}'",
+                    response.finish_reason,
+                )
             return "skip", ""
 
         args = response.tool_calls[0].arguments
@@ -139,8 +150,42 @@ class HeartbeatService:
                     await self._tick()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error("Heartbeat error: {}", e)
+            except Exception:
+                logger.exception("Heartbeat error")
+
+    @staticmethod
+    def _is_deliverable(response: str) -> bool:
+        """Check if a heartbeat response is suitable for user delivery.
+
+        Filters out two classes of bad output before the evaluator runs:
+
+        1. **Finalization fallback** — the runner hit empty-response retries
+           and produced a canned error message.  For heartbeat, empty output
+           is a valid "nothing to report" outcome, not a failure.
+        2. **Leaked reasoning** — the model reflected internal file names,
+           decision logic, or meta-commentary instead of a user-facing report.
+        """
+        text = response.lower()
+
+        # Runner finalization fallback
+        if "couldn't produce a final answer" in text:
+            return False
+
+        # Leaked internal reasoning patterns
+        leaked_patterns = [
+            "heartbeat.md",
+            "awareness.md",
+            "judgment call:",
+            "decision logic",
+            "valid options are",
+            "my instructions",
+            "i am supposed to",
+            "strict heartbeat interpretation",
+        ]
+        if any(pattern in text for pattern in leaked_patterns):
+            return False
+
+        return True
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
@@ -164,15 +209,26 @@ class HeartbeatService:
             if self.on_execute:
                 response = await self.on_execute(tasks)
 
-                if response:
-                    should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
+                if not response:
+                    logger.info("Heartbeat: no response from execution")
+                    return
+
+                if not self._is_deliverable(response):
+                    logger.info(
+                        "Heartbeat: suppressed non-deliverable response ({})",
+                        response[:80],
                     )
-                    if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
-                        await self.on_notify(response)
-                    else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
+                    return
+
+                llm = self._llm_runtime()
+                should_notify = await evaluate_response(
+                    response, tasks, llm.provider, llm.model,
+                )
+                if should_notify and self.on_notify:
+                    logger.info("Heartbeat: completed, delivering response")
+                    await self.on_notify(response)
+                else:
+                    logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 

@@ -9,7 +9,6 @@ from nanobot.agent.tools.filesystem import (
     _find_match,
 )
 
-
 # ---------------------------------------------------------------------------
 # ReadFileTool
 # ---------------------------------------------------------------------------
@@ -319,6 +318,22 @@ class TestWorkspaceRestriction:
         )
         result = await tool.execute(path=str(skill_file))
         assert "Test Skill" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_read_allowed_in_media_dir(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        media_file = media_dir / "photo.txt"
+        media_file.write_text("shared media", encoding="utf-8")
+
+        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(path=str(media_file))
+        assert "shared media" in result
         assert "Error" not in result
 
     @pytest.mark.asyncio

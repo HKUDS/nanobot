@@ -145,10 +145,11 @@ def create_memory_store_from_config(
     return create_memory_store(enabled_backend, workspace=workspace, **backend_settings)
 
 
-# ── Backward-compatible aliases ──────────────────────────────────────────
+# ── Full-featured file store (used by Consolidator and Dream) ────────────
 
-MemoryStore = LongTermMemoryStore
-"""Backward-compatible alias for ``LongTermMemoryStore``."""
+from nanobot.agent.memory.file_store import MemoryStore  # noqa: E402
+from nanobot.agent.memory.consolidator import Consolidator  # noqa: E402
+from nanobot.agent.memory.dream import Dream  # noqa: E402
 
 
 class MemoryConsolidator:
@@ -344,6 +345,8 @@ __all__ = [
     "BaseMemoryStore",
     "LongTermMemoryStore",
     "MemoryStore",
+    "Consolidator",
+    "Dream",
     "MemoryConsolidator",
     "create_memory_store",
     "create_memory_store_from_config",

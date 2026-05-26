@@ -2,9 +2,12 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJobState, CronSchedule
+from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -215,8 +218,10 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
     assert "Asia/Shanghai" in result
 
 
-def test_list_shows_last_run_state(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_last_run_state(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Stateful job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
@@ -232,9 +237,10 @@ def test_list_shows_last_run_state(tmp_path) -> None:
     assert "ok" in result
     assert "(UTC)" in result
 
-
-def test_list_shows_error_message(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_error_message(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Failed job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
@@ -262,11 +268,44 @@ def test_list_shows_next_run(tmp_path) -> None:
     assert "(UTC)" in result
 
 
+def test_list_includes_protected_dream_system_job_with_memory_purpose(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+
+    result = tool._list_jobs()
+
+    assert "- dream (id: dream, cron: 0 */2 * * * (UTC))" in result
+    assert "Dream memory consolidation for long-term memory." in result
+    assert "cannot be removed" in result
+
+
+def test_remove_protected_dream_job_returns_clear_feedback(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+
+    result = tool._remove_job("dream")
+
+    assert "Cannot remove job `dream`." in result
+    assert "Dream memory consolidation job for long-term memory" in result
+    assert "cannot be removed" in result
+    assert tool._cron.get_job("dream") is not None
+
+
 def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
-    tool.set_context("telegram", "chat-1")
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
 
-    result = tool._add_job("Morning standup", None, "0 8 * * *", None, None)
+    result = tool._add_job(None, "Morning standup", None, "0 8 * * *", None, None)
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
@@ -275,14 +314,90 @@ def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
 
 def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
-    tool.set_context("telegram", "chat-1")
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
 
-    result = tool._add_job("Morning reminder", None, None, None, "2026-03-25T08:00:00")
+    result = tool._add_job(None, "Morning reminder", None, None, None, "2026-03-25T08:00:00")
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
     expected = int(datetime(2026, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
     assert job.schedule.at_ms == expected
+
+
+def test_add_job_delivers_by_default(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
+
+    result = tool._add_job(None, "Morning standup", 60, None, None, None)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is True
+
+
+def test_add_job_can_disable_delivery(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
+
+    result = tool._add_job(None, "Background refresh", 60, None, None, None, deliver=False)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is False
+
+
+def test_cron_schema_advertises_action_specific_requirements(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    # Only ``action`` is required at the schema root — per-action requirements
+    # are enforced at runtime via ``validate_params`` and surfaced to the LLM
+    # through field descriptions. We intentionally do NOT set top-level
+    # ``oneOf``/``anyOf``/``allOf``/``enum``/``not``: OpenAI Codex/Responses
+    # reject those at the root of function parameters (#3265 regression).
+    assert tool.parameters["required"] == ["action"]
+    for disallowed in ("oneOf", "anyOf", "allOf", "not"):
+        assert disallowed not in tool.parameters, (
+            f"Top-level '{disallowed}' is rejected by OpenAI Codex/Responses tool schemas"
+        )
+    message_desc = tool.parameters["properties"]["message"]["description"]
+    assert "REQUIRED" in message_desc and "action='add'" in message_desc
+    job_id_desc = tool.parameters["properties"]["job_id"]["description"]
+    assert "REQUIRED" in job_id_desc and "action='remove'" in job_id_desc
+
+
+def test_validate_params_requires_message_only_for_add(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    assert "message is required when action='add'" in tool.validate_params({"action": "add"})
+    assert tool.validate_params({"action": "list"}) == []
+    assert "job_id is required when action='remove'" in tool.validate_params({"action": "remove"})
+
+
+def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
+
+    result = tool._add_job(None, "", 60, None, None, None)
+
+    assert "action='add' requires a non-empty 'message'" in result
+    assert "Retry including message=" in result
+
+
+def test_add_job_captures_metadata_and_session_key(tmp_path) -> None:
+    """CronTool stores channel metadata and session_key when adding a job."""
+    tool = _make_tool(tmp_path)
+    meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
+    tool.set_context(RequestContext(
+        channel="slack", chat_id="C99", metadata=meta, session_key="slack:C99:111.222"
+    ))
+
+    result = tool._add_job("test", "say hi", 60, None, None, None)
+    assert "Created job" in result
+
+    jobs = tool._cron.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.channel_meta == meta
+    assert jobs[0].payload.session_key == "slack:C99:111.222"
 
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:
