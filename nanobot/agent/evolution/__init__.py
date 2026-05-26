@@ -1,6 +1,13 @@
 """Hermes-style self-evolution: traces, PostTask skill creation, GEPA updates."""
 
 from nanobot.agent.evolution.deps import evolution_extra_available, require_evolution_extra
+from nanobot.agent.evolution.gepa_runner import (
+    DEFAULT_MAX_SKILLS_PER_RUN,
+    GepaRunResult,
+    GepaRunner,
+    list_active_skill_names,
+    resolve_gepa_provider,
+)
 from nanobot.agent.evolution.gepa_optimizer import (
     GepaAutoBudget,
     GepaOptimizeResult,
@@ -74,6 +81,7 @@ from nanobot.agent.evolution.trace_store import TraceStore
 
 __all__ = [
     "DEFAULT_MAX_CONCURRENCY",
+    "DEFAULT_MAX_SKILLS_PER_RUN",
     "DEFAULT_MIN_TRACES",
     "EvolutionGitStore",
     "GEPA_SKIP_ALREADY_RUNNING",
@@ -88,6 +96,8 @@ __all__ = [
     "GepaOptimizeResult",
     "GepaOptimizer",
     "GepaOptimizerConfig",
+    "GepaRunResult",
+    "GepaRunner",
     "GepaRunLock",
     "GepaSkillModule",
     "GepaSkillState",
@@ -126,7 +136,9 @@ __all__ = [
     "make_dspy_lm",
     "merge_skill_md",
     "normalize_skill_md_content",
+    "list_active_skill_names",
     "resolve_gepa_optimizer_model",
+    "resolve_gepa_provider",
     "parse_post_task_response",
     "require_evolution_extra",
     "resolve_post_task_provider",
