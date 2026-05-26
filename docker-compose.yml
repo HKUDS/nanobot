@@ -5,7 +5,10 @@ x-common-config: &common-config
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
     - /usr/local/bin/gws:/usr/local/bin/gws:ro
+    - /usr/local/bin/agentmail:/usr/local/bin/agentmail:ro
     - ~/.config/gws:/home/nanobot/.config/gws
+  environment:
+    - AGENTMAIL_API_KEY=${AGENTMAIL_API_KEY}
   cap_drop:
     - ALL
   cap_add:
