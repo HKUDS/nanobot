@@ -148,10 +148,28 @@ class EvolutionPostTaskConfig(Base):
 class EvolutionGepaConfig(Base):
     """离线 DSPy + GEPA skill 优化（仅 update 已有 skill）。"""
 
+    _HOUR_MS = 3_600_000
+
     enable: bool = False
     interval_hours: float | None = Field(default=None, gt=0)  # None = 仅手动 / CLI 触发
     model: str | None = None  # GEPA 运行模型；None 时使用主 agent provider
     max_budget_usd: float = Field(default=10.0, gt=0)  # 单次 GEPA 运行预算上限（USD）
+
+    def build_schedule(self, timezone: str) -> CronSchedule | None:
+        """Build cron schedule when ``interval_hours`` is set; otherwise manual-only."""
+        if self.interval_hours is None:
+            return None
+        every_ms = int(self.interval_hours * self._HOUR_MS)
+        return CronSchedule(kind="every", every_ms=every_ms, tz=timezone)
+
+    def describe_schedule(self) -> str:
+        """Human-readable schedule for gateway startup logs."""
+        if self.interval_hours is None:
+            return "manual only"
+        hours = self.interval_hours
+        if hours == int(hours):
+            return f"every {int(hours)}h"
+        return f"every {hours}h"
 
 
 class EvolutionConfig(Base):

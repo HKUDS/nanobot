@@ -140,6 +140,19 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "[sha]",
     ),
     BuiltinCommandSpec(
+        "/evolve-run",
+        "Run GEPA optimization",
+        "Start offline GEPA skill optimization in the background.",
+        "sparkles",
+        "[skill]",
+    ),
+    BuiltinCommandSpec(
+        "/evolve-status",
+        "GEPA run status",
+        "Show the latest GEPA optimization run status.",
+        "activity",
+    ),
+    BuiltinCommandSpec(
         "/help",
         "Show help",
         "List available slash commands.",

@@ -29,6 +29,15 @@ _TRIGGERS: frozenset[str] = frozenset({"cron", "cli", "slash"})
 
 GEPA_SKIP_ALREADY_RUNNING = "already running"
 
+GEPA_ACTIVE_PHASES: frozenset[str] = frozenset(
+    {"starting", "selecting", "optimizing", "writing"}
+)
+
+
+def gepa_run_in_progress(status: GepaRunStatus) -> bool:
+    """Return True when a GEPA run is actively in flight."""
+    return status.phase in GEPA_ACTIVE_PHASES
+
 
 @dataclass(frozen=True, slots=True)
 class GepaRunStatus:

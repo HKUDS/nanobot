@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Sequence
+
 import pytest
+from loguru import logger
 
 from nanobot.agent.evolution.gepa_dataset import GepaEvalExample
 from nanobot.agent.evolution.gepa_optimizer import GepaOptimizeResult
@@ -138,6 +140,43 @@ async def test_run_skipped_when_lock_held(tmp_path: Path, _patch_evolution_extra
     assert result.phase == "skipped"
     assert result.message == GEPA_SKIP_ALREADY_RUNNING
     lock.release_run_lock()
+
+
+@pytest.mark.asyncio
+async def test_run_emits_structured_gepa_logs(
+    tmp_path: Path,
+    _patch_evolution_extra: None,
+) -> None:
+    skill_dir = tmp_path / "skills" / "deploy-k8s"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_SKILL_MD, encoding="utf-8")
+
+    trace_store = TraceStore(tmp_path)
+    _insert_traces(trace_store, "deploy-k8s")
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(message), format="{message}", level="DEBUG")
+
+    try:
+        runner = GepaRunner(
+            tmp_path,
+            _evolution_enabled(),
+            _DummyProvider(),
+            optimizer=_MockOptimizer(improved=True),
+            evaluator=None,
+        )
+        await runner.run(skill_name="deploy-k8s", trigger="cli")
+    finally:
+        logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "GEPA [start]" in joined
+    assert "GEPA [select]" in joined
+    assert "GEPA [optimize]" in joined
+    assert "GEPA [dataset]" in joined
+    assert "GEPA [optimized]" in joined
+    assert "GEPA [proposal]" in joined
+    assert "GEPA [done]" in joined
 
 
 @pytest.mark.asyncio

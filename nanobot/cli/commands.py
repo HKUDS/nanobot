@@ -819,6 +819,15 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             return None
 
+        if job.name == "evolve-gepa":
+            if agent._evolution.gepa_enabled():
+                try:
+                    await agent._run_gepa(trigger="cron")
+                    logger.info("GEPA cron job completed")
+                except Exception:
+                    logger.exception("GEPA cron job failed")
+            return None
+
         from nanobot.utils.evaluator import evaluate_response
 
         reminder_note = (
@@ -1040,6 +1049,19 @@ def _run_gateway(
         payload=CronPayload(kind="system_event"),
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+
+    evolution_cfg = config.agents.defaults.evolution
+    if evolution_cfg.gepa_enabled():
+        gepa_cfg = evolution_cfg.gepa
+        gepa_schedule = gepa_cfg.build_schedule(config.agents.defaults.timezone)
+        if gepa_schedule is not None:
+            cron.register_system_job(CronJob(
+                id="evolve-gepa",
+                name="evolve-gepa",
+                schedule=gepa_schedule,
+                payload=CronPayload(kind="system_event"),
+            ))
+            console.print(f"[green]✓[/green] GEPA: {gepa_cfg.describe_schedule()}")
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
@@ -1697,6 +1719,84 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+evolve_app = typer.Typer(help="Skill evolution (GEPA offline optimization)")
+app.add_typer(evolve_app, name="evolve")
+
+
+async def _run_gepa_cli(
+    config: Config,
+    *,
+    skill_name: str | None,
+) -> None:
+    from nanobot.agent.evolution.gepa_runner import GepaRunner, resolve_gepa_provider
+    from nanobot.command.evolve import format_gepa_run_status
+    from nanobot.providers.factory import build_provider_snapshot
+
+    evolution = config.agents.defaults.evolution
+    snapshot = build_provider_snapshot(config)
+    provider = resolve_gepa_provider(config, evolution, snapshot.provider)
+    runner = GepaRunner(
+        config.workspace_path,
+        evolution,
+        provider,
+        provider_config=config,
+        fallback_model=snapshot.model,
+    )
+    console.print("[cyan]Starting GEPA run...[/cyan]")
+    result = await runner.run(skill_name=skill_name, trigger="cli")
+    console.print(format_gepa_run_status(runner.status_store.get()))
+    if result.error:
+        console.print(f"[red]Error:[/red] {result.error}")
+        raise typer.Exit(1)
+    if result.skipped:
+        console.print(f"[yellow]Skipped:[/yellow] {result.message}")
+        raise typer.Exit(1)
+
+
+@evolve_app.command("run")
+def evolve_run(
+    skill: str | None = typer.Option(None, "--skill", "-s", help="Optimize a single skill"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Run GEPA offline skill optimization."""
+    cfg = _load_runtime_config(config, workspace)
+    if not cfg.agents.defaults.evolution.gepa_enabled():
+        console.print(
+            "[yellow]GEPA is disabled. Enable "
+            "`agents.defaults.evolution.gepa.enable` in config.[/yellow]"
+        )
+        raise typer.Exit(1)
+
+    from nanobot.agent.evolution.deps import require_evolution_extra
+
+    missing = require_evolution_extra()
+    if missing:
+        console.print(f"[red]{missing}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        asyncio.run(_run_gepa_cli(cfg, skill_name=skill))
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        console.print(f"[red]GEPA run failed: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+@evolve_app.command("status")
+def evolve_status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Show the latest GEPA run status."""
+    cfg = _load_runtime_config(config, workspace)
+    from nanobot.agent.evolution.gepa_status import GepaRunStore
+    from nanobot.command.evolve import format_gepa_run_status
+
+    console.print(format_gepa_run_status(GepaRunStore(cfg.workspace_path).get()))
 
 
 if __name__ == "__main__":

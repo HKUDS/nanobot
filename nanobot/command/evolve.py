@@ -5,6 +5,11 @@ from __future__ import annotations
 import difflib
 
 from nanobot.agent.evolution.git_store import EvolutionGitStore
+from nanobot.agent.evolution.gepa_status import (
+    GepaRunStatus,
+    GepaRunStore,
+    gepa_run_in_progress,
+)
 from nanobot.agent.evolution.post_task import format_tool_calls_for_prompt
 from nanobot.agent.evolution.proposals import ProposalMeta, ProposalStore
 from nanobot.agent.evolution.trace_store import TraceStore
@@ -131,6 +136,43 @@ def _format_gepa_meta_lines(meta: ProposalMeta) -> list[str]:
     if meta.evaluation_score is not None:
         lines.append(f"- Evaluation score: {meta.evaluation_score:.3f}")
     return lines
+
+
+def format_gepa_run_status(status: GepaRunStatus) -> str:
+    """Format ``gepa_run.json`` state for slash commands and CLI."""
+    if status.phase == "idle" and not status.run_id:
+        return "GEPA is idle — no run recorded yet."
+
+    lines = [f"GEPA status: {status.phase}"]
+    if status.run_id:
+        lines.append(f"- Run: `{status.run_id[:8]}`")
+    if status.trigger:
+        lines.append(f"- Trigger: {status.trigger}")
+    if status.skill_name:
+        lines.append(f"- Skill: `{status.skill_name}`")
+    if status.started_at:
+        lines.append(f"- Started: {status.started_at}")
+    if status.finished_at and not gepa_run_in_progress(status):
+        lines.append(f"- Finished: {status.finished_at}")
+    if status.message:
+        lines.append(f"- Message: {status.message}")
+    if status.proposals_created:
+        ids = ", ".join(f"`{item[:8]}`" for item in status.proposals_created)
+        lines.append(f"- Proposals: {ids}")
+    if status.traces_consumed:
+        lines.append(f"- Traces consumed: {len(status.traces_consumed)}")
+    if status.budget_usd_spent:
+        lines.append(f"- Budget spent: ${status.budget_usd_spent:.2f}")
+    if status.error:
+        lines.append(f"- Error: {status.error}")
+
+    if gepa_run_in_progress(status):
+        lines.append("")
+        lines.append("Run in progress — check again with `/evolve-status`.")
+    elif status.phase == "completed" and status.proposals_created:
+        lines.append("")
+        lines.append("Inspect with `/evolve-show <id>`.")
+    return "\n".join(lines)
 
 
 def _format_active_skill_diff_summary(
@@ -441,6 +483,37 @@ async def cmd_evolve_restore(ctx: CommandContext) -> OutboundMessage:
     return _text_reply(ctx, content)
 
 
+async def cmd_evolve_run(ctx: CommandContext) -> OutboundMessage:
+    """Start a background GEPA optimization run."""
+    loop = ctx.loop
+    evolution = getattr(loop, "_evolution", None)
+    if evolution is None or not evolution.gepa_enabled():
+        return _text_reply(
+            ctx,
+            "GEPA is disabled in config (`agents.defaults.evolution.gepa.enable`).",
+        )
+
+    if gepa_run_in_progress(GepaRunStore(_workspace(ctx)).get()):
+        return _text_reply(
+            ctx,
+            "GEPA is already running. Check `/evolve-status`.",
+        )
+
+    skill_name = ctx.args.strip().split()[0] if ctx.args.strip() else None
+    schedule = getattr(loop, "_schedule_gepa_run", None)
+    if schedule is None:
+        return _text_reply(ctx, "GEPA runner is not available on this agent loop.")
+
+    schedule(skill_name=skill_name, trigger="slash")
+    return _text_reply(ctx, "GEPA run started. Check `/evolve-status`.")
+
+
+async def cmd_evolve_status(ctx: CommandContext) -> OutboundMessage:
+    """Show the latest GEPA run status."""
+    status = GepaRunStore(_workspace(ctx)).get()
+    return _text_reply(ctx, format_gepa_run_status(status))
+
+
 def register_evolve_commands(router: CommandRouter) -> None:
     """Register `/evolve-*` slash commands."""
     router.exact("/evolve-list", cmd_evolve_list)
@@ -454,3 +527,6 @@ def register_evolve_commands(router: CommandRouter) -> None:
     router.prefix("/evolve-log ", cmd_evolve_log)
     router.exact("/evolve-restore", cmd_evolve_restore)
     router.prefix("/evolve-restore ", cmd_evolve_restore)
+    router.exact("/evolve-run", cmd_evolve_run)
+    router.prefix("/evolve-run ", cmd_evolve_run)
+    router.exact("/evolve-status", cmd_evolve_status)

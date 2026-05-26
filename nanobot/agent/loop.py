@@ -260,6 +260,7 @@ class AgentLoop:
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
+        self._gepa_runner: Any | None = None
 
         self.context = ContextBuilder(
             workspace, 
@@ -924,6 +925,63 @@ class AgentLoop:
             )
         except Exception as exc:
             logger.warning("PostTask evolution failed: {}", exc)
+
+    def _get_gepa_runner(self) -> Any:
+        if self._gepa_runner is None:
+            from nanobot.agent.evolution.gepa_runner import GepaRunner, resolve_gepa_provider
+
+            provider = (
+                resolve_gepa_provider(
+                    self._provider_config,
+                    self._evolution,
+                    self.provider,
+                )
+                if self._provider_config is not None
+                else self.provider
+            )
+            self._gepa_runner = GepaRunner(
+                self.workspace,
+                self._evolution,
+                provider,
+                provider_config=self._provider_config,
+                fallback_model=self.model,
+            )
+        return self._gepa_runner
+
+    def _schedule_gepa_run(
+        self,
+        *,
+        skill_name: str | None = None,
+        trigger: str = "slash",
+    ) -> None:
+        """Run GEPA in the background (non-blocking for the caller)."""
+        if not self._evolution.gepa_enabled():
+            return
+        self._schedule_background(
+            self._run_gepa(skill_name=skill_name, trigger=trigger),
+        )
+
+    async def _run_gepa(
+        self,
+        *,
+        skill_name: str | None = None,
+        trigger: str = "slash",
+    ) -> None:
+        """Execute a GEPA run; errors are logged and reflected in ``gepa_run.json``."""
+        try:
+            result = await self._get_gepa_runner().run(
+                skill_name=skill_name,
+                trigger=trigger,  # type: ignore[arg-type]
+            )
+            logger.debug(
+                "GEPA [loop] trigger={} phase={} proposals={} message={!r}",
+                trigger,
+                result.phase,
+                len(result.proposals_created),
+                result.message,
+            )
+        except Exception as exc:
+            logger.warning("GEPA run failed: {}", exc)
 
     def _record_turn_trace(
         self,

@@ -269,6 +269,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("evolve_list", "List pending skill evolution proposals"),
         BotCommand("evolve_apply", "Apply a pending skill proposal"),
+        BotCommand("evolve_run", "Run GEPA skill optimization"),
+        BotCommand("evolve_status", "Show GEPA run status"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -332,6 +334,8 @@ class TelegramChannel(BaseChannel):
             ("/evolve-reject", "/evolve_reject"),
             ("/evolve-log", "/evolve_log"),
             ("/evolve-restore", "/evolve_restore"),
+            ("/evolve-run", "/evolve_run"),
+            ("/evolve-status", "/evolve_status"),
         ):
             if content == alias or content.startswith(f"{alias} "):
                 return content.replace(alias, canonical, 1)
@@ -385,7 +389,8 @@ class TelegramChannel(BaseChannel):
                     r"^/(?:dream-log|dream_log|dream-restore|dream_restore|"
                     r"evolve-list|evolve_list|evolve-show|evolve_show|"
                     r"evolve-apply|evolve_apply|evolve-reject|evolve_reject|"
-                    r"evolve-log|evolve_log|evolve-restore|evolve_restore)"
+                    r"evolve-log|evolve_log|evolve-restore|evolve_restore|"
+                    r"evolve-run|evolve_run|evolve-status|evolve_status)"
                     r"(?:@\w+)?(?:\s+.*)?$"
                 ),
                 self._forward_command,

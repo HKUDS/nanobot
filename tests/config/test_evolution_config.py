@@ -36,6 +36,25 @@ def test_evolution_gepa_config_defaults() -> None:
     assert cfg.max_budget_usd == 10.0
 
 
+def test_evolution_gepa_build_schedule_manual_only() -> None:
+    cfg = EvolutionGepaConfig(enable=True)
+
+    assert cfg.build_schedule("UTC") is None
+    assert cfg.describe_schedule() == "manual only"
+
+
+def test_evolution_gepa_build_schedule_every_hours() -> None:
+    cfg = EvolutionGepaConfig(enable=True, interval_hours=168)
+
+    schedule = cfg.build_schedule("Asia/Shanghai")
+
+    assert schedule is not None
+    assert schedule.kind == "every"
+    assert schedule.every_ms == 168 * 3_600_000
+    assert schedule.tz == "Asia/Shanghai"
+    assert cfg.describe_schedule() == "every 168h"
+
+
 def test_evolution_config_defaults() -> None:
     cfg = EvolutionConfig()
 
