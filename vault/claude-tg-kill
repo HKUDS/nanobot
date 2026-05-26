@@ -1,0 +1,9 @@
+#!/bin/bash
+# Stop the Claude Code Telegram session and prevent any auto-restart.
+set -e
+touch "$HOME/.claude/KILLSWITCH"
+systemctl --user stop claude-code-telegram.service 2>/dev/null || true
+echo "✓ Killswitch set ($HOME/.claude/KILLSWITCH)"
+echo "✓ claude-code-telegram.service stopped"
+echo ""
+echo "To resume: claude-tg-resume"

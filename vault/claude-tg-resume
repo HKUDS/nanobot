@@ -1,0 +1,9 @@
+#!/bin/bash
+# Clear the kill switch and start the Claude Code Telegram session.
+set -e
+rm -f "$HOME/.claude/KILLSWITCH"
+systemctl --user start claude-code-telegram.service
+echo "✓ Killswitch cleared"
+echo "✓ claude-code-telegram.service started"
+echo ""
+systemctl --user status claude-code-telegram.service --no-pager -n 8 || true

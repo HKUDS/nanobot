@@ -1,0 +1,33 @@
+[Unit]
+Description=Claude Code with Telegram channel (nanobot dev session)
+Documentation=https://github.com/anthropics/claude-code
+After=network-online.target
+Wants=network-online.target
+# Kill switch: `touch ~/.claude/KILLSWITCH` blocks (re)starts.
+ConditionPathExists=!%h/.claude/KILLSWITCH
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vcs/coding/nanobot
+Environment="PATH=%h/.local/bin:%h/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="TERM=xterm-256color"
+Environment="HOME=%h"
+# `script -qfec` allocates a pty so claude thinks it's interactive and
+# stays alive (without a pty, claude auto-switches to --print mode and
+# exits when stdin is /dev/null). `--resume` doesn't work here because
+# it requires a "deferred tool marker" or a positional prompt (which
+# makes claude single-shot). Fresh session per restart; prior transcripts
+# remain on disk under ~/.claude/projects/.
+ExecStart=/usr/bin/script -qfec "%h/.local/bin/claude --channels plugin:telegram@claude-plugins-official" /dev/null
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=15
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
