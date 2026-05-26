@@ -154,6 +154,9 @@ class EvolutionGepaConfig(Base):
     interval_hours: float | None = Field(default=None, gt=0)  # None = 仅手动 / CLI 触发
     model: str | None = None  # GEPA 运行模型；None 时使用主 agent provider
     max_budget_usd: float = Field(default=10.0, gt=0)  # 单次 GEPA 运行预算上限（USD）
+    notify_on_complete: bool = False  # cron 完成且有 proposal 时是否 bus 通知（需 notify_channel/chat_id）
+    notify_channel: str | None = None  # cron 通知目标 channel（如 telegram）
+    notify_chat_id: str | None = None  # cron 通知目标 chat_id
 
     def build_schedule(self, timezone: str) -> CronSchedule | None:
         """Build cron schedule when ``interval_hours`` is set; otherwise manual-only."""

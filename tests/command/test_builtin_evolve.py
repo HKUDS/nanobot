@@ -13,6 +13,7 @@ from nanobot.agent.evolution.models import ToolCallRecord, TurnTrace
 from nanobot.agent.evolution.proposals import ProposalStore
 from nanobot.agent.evolution.trace_store import TraceStore
 from nanobot.bus.events import InboundMessage
+from nanobot.agent.evolution.gepa_runner import GepaRunResult
 from nanobot.command.evolve import (
     cmd_evolve_apply,
     cmd_evolve_list,
@@ -22,7 +23,9 @@ from nanobot.command.evolve import (
     cmd_evolve_run,
     cmd_evolve_show,
     cmd_evolve_status,
+    format_gepa_completion_message,
     format_gepa_run_status,
+    resolve_gepa_notify_delivery,
 )
 from nanobot.config.schema import EvolutionConfig, EvolutionGepaConfig
 from nanobot.agent.evolution.gepa_status import GepaRunStatus
@@ -346,7 +349,11 @@ async def test_evolve_run_schedules_background(tmp_path: Path) -> None:
 
     out = await cmd_evolve_run(ctx)
 
-    schedule.assert_called_once_with(skill_name="deploy-k8s", trigger="slash")
+    schedule.assert_called_once_with(
+        skill_name="deploy-k8s",
+        trigger="slash",
+        notify_to=("cli", "direct"),
+    )
     assert "GEPA run started" in out.content
 
 
@@ -388,6 +395,99 @@ async def test_evolve_run_rejects_when_already_running(tmp_path: Path) -> None:
 
     assert "already running" in out.content.lower()
     loop._schedule_gepa_run.assert_not_called()
+
+
+def test_format_gepa_completion_message_empty() -> None:
+    assert format_gepa_completion_message(GepaRunResult()) is None
+
+
+def test_format_gepa_completion_message_lists_proposals() -> None:
+    text = format_gepa_completion_message(
+        GepaRunResult(proposals_created=("abcdef12-3456-7890", "fedcba98-7654")),
+    )
+
+    assert "2 GEPA proposals ready" in text
+    assert "abcdef12" in text
+    assert "fedcba98" in text
+    assert "/evolve-show" in text
+
+
+def test_resolve_gepa_notify_slash_with_proposals() -> None:
+    evolution = EvolutionConfig(enable=True, gepa=EvolutionGepaConfig(enable=True))
+    result = GepaRunResult(proposals_created=("proposal-1",))
+
+    delivery = resolve_gepa_notify_delivery(
+        result=result,
+        trigger="slash",
+        evolution=evolution,
+        notify_to=("telegram", "chat-42"),
+    )
+
+    assert delivery == ("telegram", "chat-42")
+
+
+def test_resolve_gepa_notify_slash_skips_without_proposals() -> None:
+    evolution = EvolutionConfig(enable=True, gepa=EvolutionGepaConfig(enable=True))
+
+    assert (
+        resolve_gepa_notify_delivery(
+            result=GepaRunResult(),
+            trigger="slash",
+            evolution=evolution,
+            notify_to=("cli", "direct"),
+        )
+        is None
+    )
+
+
+def test_resolve_gepa_notify_cron_when_configured() -> None:
+    evolution = EvolutionConfig(
+        enable=True,
+        gepa=EvolutionGepaConfig(
+            enable=True,
+            notify_on_complete=True,
+            notify_channel="telegram",
+            notify_chat_id="user-1",
+        ),
+    )
+    result = GepaRunResult(proposals_created=("proposal-1",))
+
+    delivery = resolve_gepa_notify_delivery(
+        result=result,
+        trigger="cron",
+        evolution=evolution,
+    )
+
+    assert delivery == ("telegram", "user-1")
+
+
+def test_resolve_gepa_notify_cron_off_by_default() -> None:
+    evolution = EvolutionConfig(enable=True, gepa=EvolutionGepaConfig(enable=True))
+    result = GepaRunResult(proposals_created=("proposal-1",))
+
+    assert (
+        resolve_gepa_notify_delivery(
+            result=result,
+            trigger="cron",
+            evolution=evolution,
+        )
+        is None
+    )
+
+
+def test_resolve_gepa_notify_cli_never_notifies() -> None:
+    evolution = EvolutionConfig(enable=True, gepa=EvolutionGepaConfig(enable=True))
+    result = GepaRunResult(proposals_created=("proposal-1",))
+
+    assert (
+        resolve_gepa_notify_delivery(
+            result=result,
+            trigger="cli",
+            evolution=evolution,
+            notify_to=("cli", "direct"),
+        )
+        is None
+    )
 
 
 def test_format_gepa_run_status_idle() -> None:

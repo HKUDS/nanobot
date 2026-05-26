@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import difflib
 
+from nanobot.agent.evolution.gepa_runner import GepaRunResult
 from nanobot.agent.evolution.git_store import EvolutionGitStore
 from nanobot.agent.evolution.gepa_status import (
     GepaRunStatus,
     GepaRunStore,
+    GepaRunTrigger,
     gepa_run_in_progress,
 )
+from nanobot.config.schema import EvolutionConfig
 from nanobot.agent.evolution.post_task import format_tool_calls_for_prompt
 from nanobot.agent.evolution.proposals import ProposalMeta, ProposalStore
 from nanobot.agent.evolution.trace_store import TraceStore
@@ -136,6 +139,45 @@ def _format_gepa_meta_lines(meta: ProposalMeta) -> list[str]:
     if meta.evaluation_score is not None:
         lines.append(f"- Evaluation score: {meta.evaluation_score:.3f}")
     return lines
+
+
+def format_gepa_completion_message(result: GepaRunResult) -> str | None:
+    """User-visible summary when GEPA created one or more proposals."""
+    if not result.proposals_created:
+        return None
+    count = len(result.proposals_created)
+    noun = "proposal" if count == 1 else "proposals"
+    lines = [f"{count} GEPA {noun} ready:"]
+    for proposal_id in result.proposals_created:
+        short = proposal_id[:8]
+        lines.append(f"- `{short}` — `/evolve-show {short}`")
+    return "\n".join(lines)
+
+
+def resolve_gepa_notify_delivery(
+    *,
+    result: GepaRunResult,
+    trigger: GepaRunTrigger,
+    evolution: EvolutionConfig,
+    notify_to: tuple[str, str] | None = None,
+) -> tuple[str, str] | None:
+    """Return ``(channel, chat_id)`` when a completion outbound should be sent."""
+    if not result.proposals_created:
+        return None
+    if trigger == "slash":
+        if notify_to and notify_to[0] and notify_to[1]:
+            return notify_to
+        return None
+    if trigger == "cron":
+        gepa = evolution.gepa
+        if (
+            gepa.notify_on_complete
+            and gepa.notify_channel
+            and gepa.notify_chat_id
+        ):
+            return gepa.notify_channel, gepa.notify_chat_id
+        return None
+    return None
 
 
 def format_gepa_run_status(status: GepaRunStatus) -> str:
@@ -504,7 +546,11 @@ async def cmd_evolve_run(ctx: CommandContext) -> OutboundMessage:
     if schedule is None:
         return _text_reply(ctx, "GEPA runner is not available on this agent loop.")
 
-    schedule(skill_name=skill_name, trigger="slash")
+    schedule(
+        skill_name=skill_name,
+        trigger="slash",
+        notify_to=(ctx.msg.channel, ctx.msg.chat_id),
+    )
     return _text_reply(ctx, "GEPA run started. Check `/evolve-status`.")
 
 

@@ -953,12 +953,17 @@ class AgentLoop:
         *,
         skill_name: str | None = None,
         trigger: str = "slash",
+        notify_to: tuple[str, str] | None = None,
     ) -> None:
         """Run GEPA in the background (non-blocking for the caller)."""
         if not self._evolution.gepa_enabled():
             return
         self._schedule_background(
-            self._run_gepa(skill_name=skill_name, trigger=trigger),
+            self._run_gepa(
+                skill_name=skill_name,
+                trigger=trigger,
+                notify_to=notify_to,
+            ),
         )
 
     async def _run_gepa(
@@ -966,8 +971,14 @@ class AgentLoop:
         *,
         skill_name: str | None = None,
         trigger: str = "slash",
+        notify_to: tuple[str, str] | None = None,
     ) -> None:
         """Execute a GEPA run; errors are logged and reflected in ``gepa_run.json``."""
+        from nanobot.command.evolve import (
+            format_gepa_completion_message,
+            resolve_gepa_notify_delivery,
+        )
+
         try:
             result = await self._get_gepa_runner().run(
                 skill_name=skill_name,
@@ -980,6 +991,30 @@ class AgentLoop:
                 len(result.proposals_created),
                 result.message,
             )
+            delivery = resolve_gepa_notify_delivery(
+                result=result,
+                trigger=trigger,  # type: ignore[arg-type]
+                evolution=self._evolution,
+                notify_to=notify_to,
+            )
+            if delivery is not None:
+                content = format_gepa_completion_message(result)
+                if content:
+                    channel, chat_id = delivery
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=channel,
+                            chat_id=chat_id,
+                            content=content,
+                            metadata={"render_as": "text"},
+                        ),
+                    )
+                    logger.info(
+                        "GEPA [notify] channel={} chat_id={} proposals={}",
+                        channel,
+                        chat_id,
+                        len(result.proposals_created),
+                    )
         except Exception as exc:
             logger.warning("GEPA run failed: {}", exc)
 

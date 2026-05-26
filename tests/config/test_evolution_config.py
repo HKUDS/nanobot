@@ -34,6 +34,9 @@ def test_evolution_gepa_config_defaults() -> None:
     assert cfg.interval_hours is None
     assert cfg.model is None
     assert cfg.max_budget_usd == 10.0
+    assert cfg.notify_on_complete is False
+    assert cfg.notify_channel is None
+    assert cfg.notify_chat_id is None
 
 
 def test_evolution_gepa_build_schedule_manual_only() -> None:
