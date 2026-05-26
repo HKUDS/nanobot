@@ -65,7 +65,7 @@ def _fake_mcp_module(
             self.cwd = cwd
 
     class _FakeClientSession:
-        def __init__(self, _read: object, _write: object) -> None:
+        def __init__(self, _read: object, _write: object, *, message_handler=None) -> None:
             self._session = fake_mcp_runtime["session"]
 
         async def __aenter__(self) -> object:
@@ -493,7 +493,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     sessions = {"good": _make_fake_session(["demo"])}
 
     class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
+        def __init__(self, read: object, _write: object, *, message_handler=None) -> None:
             self._session = sessions[read]
 
         async def __aenter__(self) -> object:
