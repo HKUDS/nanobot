@@ -270,11 +270,73 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
 
     loop._save_turn(
         session,
-        [{"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": content}],
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "name": "read_file",
+                "content": content,
+            },
+        ],
         skip=0,
     )
 
-    assert session.messages[0]["content"] == content
+    assert session.messages[1]["content"] == content
+
+
+def test_save_turn_drops_tool_results_without_matching_tool_call() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:orphan-tool-result")
+
+    loop._save_turn(
+        session,
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_ok",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_ok", "name": "exec", "content": "ok"},
+            {
+                "role": "tool",
+                "tool_call_id": "call_orphan",
+                "name": "exec",
+                "content": "stale",
+            },
+            {"role": "assistant", "content": "done"},
+        ],
+        skip=0,
+    )
+
+    assert [
+        {
+            k: v
+            for k, v in message.items()
+            if k in {"role", "content", "tool_call_id", "name"}
+        }
+        for message in session.messages
+    ] == [
+        {"role": "assistant", "content": ""},
+        {"role": "tool", "tool_call_id": "call_ok", "name": "exec", "content": "ok"},
+        {"role": "assistant", "content": "done"},
+    ]
 
 
 def test_save_turn_stamps_latency_on_last_assistant() -> None:
@@ -345,6 +407,64 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
     assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+
+
+def test_restore_runtime_checkpoint_drops_orphan_tool_results() -> None:
+    loop = _mk_loop()
+    session = Session(
+        key="test:checkpoint-orphan",
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "working",
+                    "tool_calls": [
+                        {
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"},
+                        },
+                    ],
+                },
+                "completed_tool_results": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_done",
+                        "name": "read_file",
+                        "content": "ok",
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_orphan",
+                        "name": "exec",
+                        "content": "stale",
+                    },
+                ],
+                "pending_tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    }
+                ],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert [
+        {
+            k: v
+            for k, v in message.items()
+            if k in {"role", "content", "tool_call_id", "name"}
+        }
+        for message in session.messages
+    ] == [
+        {"role": "assistant", "content": "working"},
+        {"role": "tool", "tool_call_id": "call_done", "name": "read_file", "content": "ok"},
+    ]
 
 
 def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:

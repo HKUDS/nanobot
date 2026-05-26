@@ -1430,12 +1430,25 @@ class AgentLoop:
         from datetime import datetime
 
         last_assistant_idx: int | None = None
+        declared_tool_call_ids = self._collect_tool_call_ids(session.messages)
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
+            if role == "assistant":
+                for tc in entry.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared_tool_call_ids.add(str(tc["id"]))
             if role == "tool":
+                tool_call_id = entry.get("tool_call_id")
+                if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
+                    logger.warning(
+                        "Skipping orphan tool result {} while saving session {}",
+                        tool_call_id or "(missing id)",
+                        session.key,
+                    )
+                    continue
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
@@ -1464,6 +1477,16 @@ class AgentLoop:
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()
+
+    @staticmethod
+    def _collect_tool_call_ids(messages: list[dict[str, Any]]) -> set[str]:
+        return {
+            str(tc["id"])
+            for message in messages
+            if message.get("role") == "assistant"
+            for tc in (message.get("tool_calls") or [])
+            if isinstance(tc, dict) and tc.get("id")
+        }
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
         """Persist subagent follow-ups before prompt assembly so history stays durable.
@@ -1529,12 +1552,22 @@ class AgentLoop:
         pending_tool_calls = checkpoint.get("pending_tool_calls") or []
 
         restored_messages: list[dict[str, Any]] = []
+        declared_tool_call_ids = self._collect_tool_call_ids(session.messages)
         if isinstance(assistant_message, dict):
             restored = dict(assistant_message)
             restored.setdefault("timestamp", datetime.now().isoformat())
             restored_messages.append(restored)
+            declared_tool_call_ids.update(self._collect_tool_call_ids([restored]))
         for message in completed_tool_results:
             if isinstance(message, dict):
+                tool_call_id = message.get("tool_call_id")
+                if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
+                    logger.warning(
+                        "Skipping orphan checkpoint tool result {} in session {}",
+                        tool_call_id or "(missing id)",
+                        session.key,
+                    )
+                    continue
                 restored = dict(message)
                 restored.setdefault("timestamp", datetime.now().isoformat())
                 restored_messages.append(restored)
@@ -1542,6 +1575,13 @@ class AgentLoop:
             if not isinstance(tool_call, dict):
                 continue
             tool_id = tool_call.get("id")
+            if not tool_id or str(tool_id) not in declared_tool_call_ids:
+                logger.warning(
+                    "Skipping orphan pending checkpoint tool result {} in session {}",
+                    tool_id or "(missing id)",
+                    session.key,
+                )
+                continue
             name = ((tool_call.get("function") or {}).get("name")) or "tool"
             restored_messages.append(
                 {
