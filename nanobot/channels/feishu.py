@@ -10,7 +10,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
@@ -256,6 +256,7 @@ class FeishuConfig(Base):
     done_emoji: str | None = None  # Emoji to show when task is completed (e.g., "DONE", "OK")
     tool_hint_prefix: str = "\U0001f527"  # Prefix for inline tool hints (default: 🔧)
     group_policy: Literal["open", "mention"] = "mention"
+    group_debounce_seconds: float = Field(default=0.0, ge=0.0)
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
     domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark
@@ -273,6 +274,21 @@ class _FeishuStreamBuf:
     card_id: str | None = None
     sequence: int = 0
     last_edit: float = 0.0
+
+
+@dataclass
+class _BufferedGroupTurn:
+    """Buffered inbound group turn for short-lived debouncing."""
+
+    sender_id: str
+    chat_id: str
+    session_key: str | None
+    thread_scope: str
+    contents: list[str] = field(default_factory=list)
+    media: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    message_ids: list[str] = field(default_factory=list)
+    generation: int = 0
 
 
 class FeishuChannel(BaseChannel):
@@ -309,6 +325,8 @@ class FeishuChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
+        self._group_buffers: dict[str, _BufferedGroupTurn] = {}
+        self._group_tasks: dict[str, asyncio.Task] = {}
         self._bot_open_id: str | None = None
         self._background_tasks: set[asyncio.Task] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
@@ -440,6 +458,12 @@ class FeishuChannel(BaseChannel):
         Reference: https://github.com/larksuite/oapi-sdk-python/blob/v2_main/lark_oapi/ws/client.py#L86
         """
         self._running = False
+
+        for task in self._group_tasks.values():
+            task.cancel()
+        self._group_tasks.clear()
+        self._group_buffers.clear()
+
         self.logger.info("bot stopped")
 
     def _fetch_bot_open_id(self) -> str | None:
@@ -531,6 +555,93 @@ class FeishuChannel(BaseChannel):
         if self.config.group_policy == "open":
             return True
         return self._is_bot_mentioned(message)
+
+    def _group_buffer_key(self, chat_id: str, sender_id: str, thread_scope: str) -> str:
+        """Return a stable key for short-lived group debouncing."""
+        return f"{chat_id}:{sender_id}:{thread_scope}"
+
+    def _schedule_reaction(self, message_id: str) -> None:
+        """Track a best-effort reaction update without blocking the turn."""
+        task = asyncio.create_task(self._add_reaction(message_id, self.config.react_emoji))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
+
+    async def _queue_group_turn(
+        self,
+        *,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str],
+        metadata: dict[str, Any],
+        session_key: str | None,
+        message_id: str,
+        thread_scope: str,
+    ) -> None:
+        """Buffer a group turn and reschedule the flush timer."""
+        key = self._group_buffer_key(chat_id, sender_id, thread_scope)
+        buf = self._group_buffers.get(key)
+        if buf is None:
+            buf = _BufferedGroupTurn(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                session_key=session_key,
+                thread_scope=thread_scope,
+                metadata=dict(metadata),
+            )
+            self._group_buffers[key] = buf
+            self._schedule_reaction(message_id)
+
+        if content:
+            buf.contents.append(content)
+        buf.media.extend(media)
+        buf.message_ids.append(message_id)
+        if not buf.metadata:
+            buf.metadata = dict(metadata)
+
+        buf.generation += 1
+        generation = buf.generation
+
+        task = self._group_tasks.get(key)
+        if task and not task.done():
+            task.cancel()
+        self._group_tasks[key] = asyncio.create_task(self._flush_group_turn(key, generation))
+
+    async def _flush_group_turn(self, key: str, generation: int) -> None:
+        """Flush a buffered group turn after the debounce window expires."""
+        try:
+            await asyncio.sleep(self.config.group_debounce_seconds)
+            buf = self._group_buffers.get(key)
+            if not buf or buf.generation != generation:
+                return
+
+            self._group_buffers.pop(key, None)
+            content = "\n".join(buf.contents) or "[empty message]"
+            metadata = dict(buf.metadata)
+            metadata.update(
+                {
+                    "group_buffered": True,
+                    "group_buffered_count": len(buf.message_ids),
+                    "group_buffered_message_ids": list(buf.message_ids),
+                    "group_buffered_thread_scope": buf.thread_scope,
+                }
+            )
+            if buf.session_key is not None:
+                metadata["group_buffered_session_key"] = buf.session_key
+
+            await self._handle_message(
+                sender_id=buf.sender_id,
+                chat_id=buf.chat_id,
+                content=content,
+                media=list(dict.fromkeys(buf.media)),
+                metadata=metadata,
+                session_key=buf.session_key,
+            )
+        finally:
+            task = self._group_tasks.get(key)
+            if task is asyncio.current_task():
+                self._group_tasks.pop(key, None)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -1726,14 +1837,6 @@ class FeishuChannel(BaseChannel):
                     )
                 return
 
-            # Add reaction (non-blocking — tracked background task)
-            task = asyncio.create_task(
-                self._add_reaction(message_id, self.config.react_emoji)
-            )
-            self._background_tasks.add(task)
-            task.add_done_callback(self._on_background_task_done)
-            task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
-
             # Parse content
             content_parts = []
             media_paths = []
@@ -1823,6 +1926,29 @@ class FeishuChannel(BaseChannel):
                     session_key = f"feishu:{chat_id}"
             else:
                 session_key = None
+
+            if chat_type == "group" and self.config.group_debounce_seconds > 0:
+                await self._queue_group_turn(
+                    sender_id=sender_id,
+                    chat_id=chat_id,
+                    content=content,
+                    media=media_paths,
+                    metadata={
+                        "message_id": message_id,
+                        "chat_type": chat_type,
+                        "msg_type": msg_type,
+                        "parent_id": parent_id,
+                        "root_id": root_id,
+                        "thread_id": thread_id,
+                    },
+                    session_key=session_key,
+                    message_id=message_id,
+                    thread_scope=str(root_id or "rootless"),
+                )
+                return
+
+            # Add reaction (non-blocking — tracked background task)
+            self._schedule_reaction(message_id)
 
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id

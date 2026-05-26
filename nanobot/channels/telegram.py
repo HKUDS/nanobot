@@ -7,7 +7,7 @@ import re
 import time
 import unicodedata
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -225,6 +225,21 @@ class _StreamBuf:
     stream_id: str | None = None
 
 
+@dataclass
+class _BufferedGroupTurn:
+    """Buffered inbound turn for short-lived group debouncing."""
+
+    sender_id: str
+    chat_id: str
+    session_key: str | None
+    thread_scope: str
+    contents: list[str] = field(default_factory=list)
+    media: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    message_ids: list[int] = field(default_factory=list)
+    generation: int = 0
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -235,6 +250,7 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    group_debounce_seconds: float = Field(default=0.0, ge=0.0)
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -290,6 +306,8 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._group_buffers: dict[str, _BufferedGroupTurn] = {}
+        self._group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
@@ -435,6 +453,11 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+
+        for task in self._group_tasks.values():
+            task.cancel()
+        self._group_tasks.clear()
+        self._group_buffers.clear()
 
         if self._app:
             self.logger.info("Stopping bot...")
@@ -829,6 +852,11 @@ class TelegramChannel(BaseChannel):
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
     @staticmethod
+    def _group_buffer_key(chat_id: str, sender_id: str, thread_scope: str) -> str:
+        """Return a stable key for short-lived group debouncing."""
+        return f"{chat_id}:{sender_id}:{thread_scope}"
+
+    @staticmethod
     def _build_message_metadata(message, user) -> dict:
         """Build common Telegram inbound metadata payload."""
         reply_to = getattr(message, "reply_to_message", None)
@@ -920,6 +948,83 @@ class TelegramChannel(BaseChannel):
             if add_failure_content:
                 return [], [f"[{media_type}: download failed]"]
             return [], []
+
+    async def _queue_group_turn(
+        self,
+        *,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str],
+        metadata: dict[str, Any],
+        session_key: str | None,
+        message_id: int,
+        thread_scope: str,
+    ) -> None:
+        """Buffer a group turn and reschedule the flush timer."""
+        key = self._group_buffer_key(chat_id, sender_id, thread_scope)
+        buf = self._group_buffers.get(key)
+        if buf is None:
+            buf = _BufferedGroupTurn(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                session_key=session_key,
+                thread_scope=thread_scope,
+                metadata=dict(metadata),
+            )
+            self._group_buffers[key] = buf
+            self._start_typing(chat_id)
+            await self._add_reaction(chat_id, message_id, self.config.react_emoji)
+
+        if content and content != "[empty message]":
+            buf.contents.append(content)
+        buf.media.extend(media)
+        buf.message_ids.append(message_id)
+        if not buf.metadata:
+            buf.metadata = dict(metadata)
+
+        buf.generation += 1
+        generation = buf.generation
+
+        task = self._group_tasks.get(key)
+        if task and not task.done():
+            task.cancel()
+        self._group_tasks[key] = asyncio.create_task(self._flush_group_turn(key, generation))
+
+    async def _flush_group_turn(self, key: str, generation: int) -> None:
+        """Flush a buffered group turn after the debounce window expires."""
+        try:
+            await asyncio.sleep(self.config.group_debounce_seconds)
+            buf = self._group_buffers.get(key)
+            if not buf or buf.generation != generation:
+                return
+
+            self._group_buffers.pop(key, None)
+            content = "\n".join(buf.contents) or "[empty message]"
+            metadata = dict(buf.metadata)
+            metadata.update(
+                {
+                    "group_buffered": True,
+                    "group_buffered_count": len(buf.message_ids),
+                    "group_buffered_message_ids": list(buf.message_ids),
+                    "group_buffered_thread_scope": buf.thread_scope,
+                }
+            )
+            if buf.session_key is not None:
+                metadata["group_buffered_session_key"] = buf.session_key
+
+            await self._handle_message(
+                sender_id=buf.sender_id,
+                chat_id=buf.chat_id,
+                content=content,
+                media=list(dict.fromkeys(buf.media)),
+                metadata=metadata,
+                session_key=buf.session_key,
+            )
+        finally:
+            task = self._group_tasks.get(key)
+            if task is asyncio.current_task():
+                self._group_tasks.pop(key, None)
 
     async def _ensure_bot_identity(self) -> tuple[int | None, str | None]:
         """Load bot identity once and reuse it for mention/reply checks."""
@@ -1085,6 +1190,23 @@ class TelegramChannel(BaseChannel):
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
         session_key = self._derive_topic_session_key(message)
+
+        if (
+            message.chat.type in ("group", "supergroup")
+            and self.config.group_debounce_seconds > 0
+            and getattr(message, "media_group_id", None) is None
+        ):
+            await self._queue_group_turn(
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=metadata,
+                session_key=session_key,
+                message_id=message.message_id,
+                thread_scope=str(getattr(message, "message_thread_id", None) or "rootless"),
+            )
+            return
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):

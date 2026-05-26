@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -136,6 +137,7 @@ class _FakeBuilder:
 def _make_telegram_update(
     *,
     chat_type: str = "group",
+    message_id: int = 1,
     text: str | None = None,
     caption: str | None = None,
     entities=None,
@@ -159,7 +161,7 @@ def _make_telegram_update(
         location=location,
         media_group_id=None,
         message_thread_id=None,
-        message_id=1,
+        message_id=message_id,
     )
     return SimpleNamespace(message=message, effective_user=user)
 
@@ -364,6 +366,34 @@ async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> No
     await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
 
     assert recorded == [("error", "error: boom")]
+
+
+@pytest.mark.asyncio
+async def test_group_messages_are_debounced_into_one_turn(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",
+            group_debounce_seconds=0.02,
+        ),
+        MessageBus(),
+    )
+    channel._download_message_media = AsyncMock(return_value=([], []))
+    channel._handle_message = AsyncMock()
+    monkeypatch.setattr(channel, "_start_typing", lambda _chat_id: None)
+
+    await channel._on_message(_make_telegram_update(text="first", message_id=1), None)
+    await channel._on_message(_make_telegram_update(text="second", message_id=2), None)
+    await asyncio.sleep(0.05)
+
+    channel._handle_message.assert_awaited_once()
+    call_kwargs = channel._handle_message.await_args.kwargs
+    assert call_kwargs["content"] == "first\nsecond"
+    assert call_kwargs["metadata"]["group_buffered"] is True
+    assert call_kwargs["metadata"]["group_buffered_count"] == 2
+    assert call_kwargs["metadata"]["group_buffered_message_ids"] == [1, 2]
 
 
 @pytest.mark.asyncio
