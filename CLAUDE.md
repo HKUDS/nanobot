@@ -47,7 +47,7 @@ Messages flow through an async `MessageBus` (`nanobot/bus/queue.py`) that decoup
 - **WebUI** (`webui/`): Vite-based React SPA that talks to the gateway over a WebSocket multiplex protocol. The dev server proxies `/api`, `/webui`, `/auth`, and WebSocket traffic to the gateway.
 - **API Server** (`nanobot/api/server.py`): OpenAI-compatible HTTP API (`/v1/chat/completions`, `/v1/models`) for programmatic access.
 - **Command Router** (`nanobot/command/`): Slash command routing and built-in command handlers.
-- **Heartbeat** (`nanobot/heartbeat/`): Periodic agent wake-up service for scheduled task checking.
+- **Heartbeat** (`nanobot/templates/HEARTBEAT.md`): Periodic task list checked via `cron` jobs (legacy dedicated service removed).
 - **Pairing** (`nanobot/pairing/`): DM sender approval store with persistent pairing codes per channel.
 - **Skills** (`nanobot/skills/`): Built-in skill definitions (long-goal, cron, github, image-generation, etc.) loaded into agent context.
 - **Security** (`nanobot/security/`): PTH file guard and other security measures activated at CLI entry.

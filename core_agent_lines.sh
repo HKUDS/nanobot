@@ -46,17 +46,15 @@ core_agent=$(count_top_level_py_lines "nanobot/agent")
 core_bus=$(count_top_level_py_lines "nanobot/bus")
 core_config=$(count_top_level_py_lines "nanobot/config")
 core_cron=$(count_top_level_py_lines "nanobot/cron")
-core_heartbeat=$(count_top_level_py_lines "nanobot/heartbeat")
 core_session=$(count_top_level_py_lines "nanobot/session")
 
 print_row "agent/" "$core_agent"
 print_row "bus/" "$core_bus"
 print_row "config/" "$core_config"
 print_row "cron/" "$core_cron"
-print_row "heartbeat/" "$core_heartbeat"
 print_row "session/" "$core_session"
 
-core_total=$((core_agent + core_bus + core_config + core_cron + core_heartbeat + core_session))
+core_total=$((core_agent + core_bus + core_config + core_cron + core_session))
 
 echo ""
 echo "Separate buckets"

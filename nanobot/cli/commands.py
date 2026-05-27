@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import functools
 import os
 import select
 import signal
@@ -76,6 +77,7 @@ class SafeFileHistory(FileHistory):
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.utils.evaluator import evaluate_response
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.restart import (
     consume_restart_notice_from_env,
@@ -94,6 +96,20 @@ console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
+
+_HEARTBEAT_PREAMBLE = (
+    "[Your response will be delivered directly to the user's messaging app. "
+    "Output ONLY the final user-facing message. Never reference internal "
+    "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
+    "decision process. If nothing needs reporting, respond with just "
+    "'All clear.' and nothing else.]\n\n"
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _heartbeat_template() -> str | None:
+    from nanobot.utils.helpers import load_bundled_template
+    return load_bundled_template("HEARTBEAT.md")
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -722,7 +738,6 @@ def _run_gateway(
     from nanobot.channels.websocket import publish_runtime_model_update
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-    from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
@@ -814,6 +829,9 @@ def _run_gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        async def _silent(*_args, **_kwargs):
+            pass
+
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
             try:
@@ -823,7 +841,56 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             return None
 
-        from nanobot.utils.evaluator import evaluate_response
+        # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
+        if job.name == "heartbeat":
+            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
+            try:
+                content = heartbeat_file.read_text(encoding="utf-8")
+            except OSError:
+                logger.debug("Heartbeat: HEARTBEAT.md missing")
+                return None
+            if not content or content == _heartbeat_template():
+                logger.debug("Heartbeat: HEARTBEAT.md empty or identical to template")
+                return None
+
+            channel, chat_id = _pick_heartbeat_target()
+            if channel == "cli":
+                return None
+
+            prompt = (
+                _HEARTBEAT_PREAMBLE
+                + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
+            )
+
+            resp = await agent.process_direct(
+                prompt,
+                session_key="heartbeat",
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
+            )
+            response = resp.content if resp else ""
+
+            # Keep a small tail of heartbeat history so the loop stays bounded.
+            session = agent.sessions.get_or_create("heartbeat")
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
+
+            if not response:
+                return None
+
+            should_notify = await evaluate_response(
+                response, prompt, agent.provider, agent.model,
+            )
+            if should_notify:
+                logger.info("Heartbeat: completed, delivering response")
+                await _deliver_to_channel(
+                    OutboundMessage(channel=channel, chat_id=chat_id, content=response),
+                    record=True,
+                )
+            else:
+                logger.info("Heartbeat: silenced by post-run evaluation")
+            return response
 
         reminder_note = (
             "The scheduled time has arrived. Deliver this reminder to the user now, "
@@ -837,9 +904,6 @@ def _run_gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
-
-        async def _silent(*_args, **_kwargs):
-            pass
 
         message_record_token = None
         if isinstance(message_tool, MessageTool):
@@ -902,7 +966,6 @@ def _run_gateway(
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
@@ -912,69 +975,7 @@ def _run_gateway(
                 continue
             if channel in enabled and chat_id:
                 return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
-
-    # Create heartbeat service
-    heartbeat_preamble = (
-        "[Your response will be delivered directly to the user's messaging app. "
-        "Output ONLY the final user-facing message. Never reference internal "
-        "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
-        "decision process. If nothing needs reporting, respond with just "
-        "'All clear.' and nothing else.]\n\n"
-    )
-
-    async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
-
-        async def _silent(*_args, **_kwargs):
-            pass
-
-        resp = await agent.process_direct(
-            heartbeat_preamble + tasks,
-            session_key="heartbeat",
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
-        )
-
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
-
-        return resp.content if resp else ""
-
-    async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel.
-
-        In addition to publishing the outbound message, this injects the
-        delivered text as an assistant turn into the *target channel's*
-        session.  Without this, a user reply on the channel (e.g. "Sure")
-        lands in a session that has no context about the heartbeat message
-        and the agent cannot follow through.
-        """
-        channel, chat_id = _pick_heartbeat_target()
-        if channel == "cli":
-            return  # No external channel available to deliver to
-
-        await _deliver_to_channel(
-            OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-            record=True,
-        )
-
-    hb_cfg = config.gateway.heartbeat
-    heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
-        llm_runtime=agent.llm_runtime,
-        on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify,
-        interval_s=hb_cfg.interval_s,
-        enabled=hb_cfg.enabled,
-        timezone=config.agents.defaults.timezone,
-    )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -985,7 +986,11 @@ def _run_gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    hb_cfg = config.gateway.heartbeat
+    if hb_cfg.enabled:
+        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    else:
+        console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
@@ -1036,7 +1041,7 @@ def _run_gateway(
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
-    from nanobot.cron.types import CronJob, CronPayload
+    from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     cron.register_system_job(CronJob(
         id="dream",
         name="dream",
@@ -1044,6 +1049,19 @@ def _run_gateway(
         payload=CronPayload(kind="system_event"),
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+
+    # Register Heartbeat system job (idempotent on restart)
+    if hb_cfg.enabled:
+        cron.register_system_job(CronJob(
+            id="heartbeat",
+            name="heartbeat",
+            schedule=CronSchedule(
+                kind="every",
+                every_ms=hb_cfg.interval_s * 1000,
+                tz=config.agents.defaults.timezone,
+            ),
+            payload=CronPayload(kind="system_event"),
+        ))
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
@@ -1071,7 +1089,6 @@ def _run_gateway(
     async def run():
         try:
             await cron.start()
-            await heartbeat.start()
             tasks = [
                 agent.run(),
                 channels.start_all(),
@@ -1089,7 +1106,6 @@ def _run_gateway(
             console.print(traceback.format_exc())
         finally:
             await agent.close_mcp()
-            heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()

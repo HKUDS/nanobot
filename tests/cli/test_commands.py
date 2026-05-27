@@ -1589,16 +1589,6 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         def register_system_job(self, _job) -> None:
             return None
 
-    class _FakeHeartbeatService:
-        def __init__(self, **_kwargs) -> None:
-            return None
-
-        async def start(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
     class _FakeServer:
         async def __aenter__(self):
             return self
@@ -1645,7 +1635,6 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
-    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
