@@ -165,6 +165,8 @@
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 pip install -e .
+# optional: GEPA skill evolution
+pip install -e ".[evolution]"
 ```
 
 **Install with `uv`**
@@ -178,6 +180,16 @@ uv tool install nanobot-ai
 ```bash
 pip install nanobot-ai
 ```
+
+**Optional extras**
+
+| Extra | Install | Purpose |
+|-------|---------|---------|
+| `evolution` | `pip install nanobot-ai[evolution]` | GEPA offline skill optimization (DSPy); gateway runs without it |
+| `pdf` | `pip install nanobot-ai[pdf]` | PDF reading in tools |
+| `langsmith` | `pip install nanobot-ai[langsmith]` | LangSmith tracing |
+
+Skill self-evolution (PostTask + GEPA): see [Configuration → Skill Evolution](./docs/configuration.md#skill-evolution).
 
 ## 🚀 Quick Start
 

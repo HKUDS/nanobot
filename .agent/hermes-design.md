@@ -1,10 +1,10 @@
 # Hermes 自进化能力设计（nanobot-enhance）
 
-> 分支：`feature/hermes-self-evolution`  
-> 状态：设计定稿，待实现  
-> 最后更新：2026-05-24
+> 分支：已合并至 `main`（原 `feature/hermes-self-evolution`）  
+> 状态：**已实现**（E0–E4 + Phase F/G；E5 WebUI / E6 可选未做）  
+> 最后更新：2026-05-26
 
-本文档记录将 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 式自进化能力集成到 nanobot 的设计决策与实施计划，防止实现过程中遗忘边界与分工。
+本文档记录将 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 式自进化能力集成到 nanobot 的设计决策与实施计划。GEPA 离线优化细节见 [`.agent/gepa.md`](./gepa.md)。
 
 ---
 
@@ -206,6 +206,10 @@ retrieve → execute → trace → evolve (create/update) → re-index → retri
 | `/evolve-reject <id>` | 标记 rejected / 移入 `.rejected/` |
 | `/evolve-log` | skill 变更 commit 历史 |
 | `/evolve-restore <sha>` | 回滚某次 skill 变更 |
+| `/evolve-run [skill]` | 手动触发 GEPA 离线优化（后台运行） |
+| `/evolve-status` | 查看最近一次 GEPA run 状态 |
+
+**CLI**（无需 gateway）：`nanobot evolve run [--skill NAME]`、`nanobot evolve status`
 
 **EvolutionGitStore（独立实例，方案 A）**：
 
@@ -242,11 +246,17 @@ SOUL.md, USER.md, memory/MEMORY.md, memory/.dream_cursor
 
 ---
 
-### 4.5 E4 — GEPA 层（仅 update，offline）
+### 4.5 E4 — GEPA 层（仅 update，offline）✅
 
-**依赖**：`nanobot[evolution]` → `dspy` + GEPA 相关包（optional dependency group in `pyproject.toml`）。
+> **实现清单与进度**：见 [`.agent/gepa.md`](./gepa.md)（Phase A–H）。
 
-**触发**：`evolution.gepa_interval_hours` / cron / `nanobot evolve run`
+**依赖**：`pip install nanobot-ai[evolution]` → 安装 `dspy`（optional extra，未安装时 gateway 仍可启动，GEPA 运行时会提示）。
+
+**触发**：
+
+- Gateway cron：`evolution.gepa.enable` + `intervalHours` → 注册 `evolve-gepa` system job
+- CLI：`nanobot evolve run [--skill NAME]`
+- Slash：`/evolve-run [skill]`
 
 **输入**：
 
@@ -262,8 +272,9 @@ SOUL.md, USER.md, memory/MEMORY.md, memory/.dream_cursor
 **约束（对齐 Hermes self-evolution）**：
 
 - 不 mid-conversation 改 skill
-- description 语义不漂移
-- 预算上限：`evolution.gepa_max_budget_usd`（默认 10）
+- description 语义不漂移（apply 前硬校验）
+- 预算上限：`evolution.gepa.maxBudgetUsd`（默认 10）
+- GEPA **从不 auto_apply**；一律走 proposal + `/evolve-apply`
 
 **PostTask vs GEPA**：
 
@@ -291,33 +302,20 @@ Agent 侧 API，权限分级：
 
 ## 5. 配置（`EvolutionConfig`）
 
+Schema 位于 `nanobot/config/schema.py`。嵌套结构（camelCase JSON 别名见各字段）：
+
 ```python
 class EvolutionConfig(Base):
-    enable: bool = False
+    enable: bool = True          # 总开关：trace + PostTask；GEPA 另需 gepa.enable
 
-    # PostTask
-    min_tool_calls: int = 5
-    cooldown_minutes: int = 5
-    min_confidence: float = 0.7
-    auto_apply: bool = False          # 「信任开关」：true = 跳过人工审核
-
-    # Trace
-    trace_retention_days: int = 30
-
-    # GEPA
-    gepa_enable: bool = False
-    gepa_interval_hours: float | None = None
-    gepa_model: str | None = None
-    gepa_max_budget_usd: float = 10.0
+    trace: EvolutionTraceConfig       # retention_days
+    post_task: EvolutionPostTaskConfig  # min_tool_calls, cooldown, auto_apply, ...
+    gepa: EvolutionGepaConfig           # enable, interval_hours, max_budget_usd, ...
 ```
 
-挂到 `AgentDefaults`：
+挂到 `AgentDefaults.evolution`。完整示例见 [Configuration → Skill Evolution](../docs/configuration.md#skill-evolution)。
 
-```python
-evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
-```
-
-**示例 — 审核模式（默认推荐）**：
+**示例 — 审核模式 + 每周 GEPA（推荐）**：
 
 ```json
 {
@@ -325,65 +323,81 @@ evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
     "defaults": {
       "evolution": {
         "enable": true,
-        "auto_apply": false,
-        "min_tool_calls": 5,
-        "gepa_enable": true,
-        "gepa_interval_hours": 168
+        "postTask": {
+          "autoApply": false,
+          "minToolCalls": 3,
+          "cooldownMinutes": 10
+        },
+        "gepa": {
+          "enable": true,
+          "intervalHours": 168,
+          "maxBudgetUsd": 10,
+          "minTraces": 3,
+          "maxSkillsPerRun": 1
+        }
       }
     }
   }
 }
 ```
 
-**示例 — trusted workspace**：
+**示例 — trusted workspace（PostTask 自动写入）**：
 
 ```json
-"evolution": { "enable": true, "auto_apply": true }
+"evolution": { "enable": true, "postTask": { "autoApply": true } }
 ```
+
+> GEPA 结果**始终**需 `/evolve-apply` 审核，不受 `postTask.autoApply` 影响。
 
 ---
 
-## 6. 目录结构（计划）
+## 6. 目录结构（已实现）
 
 ```
-nanobot/agent/
-├── evolution/
-│   ├── __init__.py
-│   ├── trace_recorder.py      # E0
-│   ├── trace_store.py         # SQLite 读写
-│   ├── post_task.py           # E1 PostTask Evolver
-│   ├── proposals.py           # proposal 目录 CRUD
-│   ├── git_store.py           # EvolutionGitStore 封装（或复用 utils/gitstore）
-│   └── gepa_runner.py         # E4（optional import）
-├── tools/
-│   └── skill_manage.py        # E5（可选）
-├── loop.py                    # +trace 结束 +post_task 一行
-└── memory.py                  # Dream 去 skill 写入
+nanobot/agent/evolution/
+├── trace_recorder.py          # E0
+├── trace_store.py
+├── post_task.py               # E1 PostTask Evolver
+├── proposals.py               # E2 proposal CRUD + apply 分流
+├── git_store.py               # EvolutionGitStore
+├── gepa_dataset.py            # E4-D1
+├── gepa_skill_module.py       # E4-D2
+├── gepa_evaluator.py          # E4-D3
+├── gepa_optimizer.py          # E4-D4
+├── gepa_runner.py             # E4-D6/D7
+├── gepa_status.py             # run 状态 + 单飞锁
+└── deps.py                    # optional extra 检测
 
-nanobot/command/builtin.py       # /evolve-* 命令
+nanobot/command/evolve.py        # /evolve-* 命令
+nanobot/cli/commands.py          # nanobot evolve run|status + cron
 nanobot/templates/agent/
-├── dream_phase2.md            # 移除 [SKILL]
-└── evolution_post_task.md     # PostTask LLM prompt（新建）
+├── dream_phase2.md              # 已移除 [SKILL] 创建
+├── evolution_post_task.md
+└── evolution_gepa_evaluator.md
 
 .agent/hermes-design.md          # 本文档
+.agent/gepa.md                   # GEPA 分步设计与进度
+.agent/plan-mode/                # Plan 模式 + 任务图（design + plan）
+.agent/context-cost/             # Runtime Harness + 上下文/成本（design + plan）
 ```
 
 ---
 
 ## 7. 实施顺序
 
-| 阶段 | 内容 | 依赖 | MVP? |
-|------|------|------|------|
-| **E0** | `EvolutionConfig` + TraceRecorder + TraceStore | — | ✅ |
-| **E1** | PostTask Evolver（create only） | E0 | ✅ |
-| **E2** | proposal 目录 + `/evolve-*` + EvolutionGitStore | E1 | ✅ |
-| **E3** | Dream 去掉 `[SKILL]` | — | ✅ |
-| **E4** | `nanobot[evolution]` + GEPA runner | E0, E2 | 完整 v1 |
-| **E5** | `skill_manage` tool | E2 | 可选 |
-| **E6** | WebUI 审核面板 | E2 | v2 |
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| **E0** | `EvolutionConfig` + TraceRecorder + TraceStore | ✅ |
+| **E1** | PostTask Evolver（create only） | ✅ |
+| **E2** | proposal 目录 + `/evolve-*` + EvolutionGitStore | ✅ |
+| **E3** | Dream 去掉 `[SKILL]` | ✅ |
+| **E4** | `[evolution]` extra + GEPA runner + 触发入口 | ✅ 见 [gepa.md](./gepa.md) |
+| **E5** | `skill_manage` tool | 未做（可选） |
+| **E6** | WebUI 审核面板 | 未做（v2）；可与 [plan-mode](./plan-mode/design.md) WebUI 共用模式 |
+| **Runtime Harness** | 在线策略 + verify + checkpoint（非离线 eval） | 见 [context-cost/design.md](./context-cost/design.md) |
 
-**MVP 交付线**：E0 → E1 → E2 → E3（不含 GEPA 即可跑通 learning loop）  
-**完整 v1**：+ E4
+**MVP 交付线**：E0 → E1 → E2 → E3 — 已合并 `main`  
+**完整 v1（含 GEPA）**：+ E4 — 已合并 `main`
 
 ---
 
@@ -436,3 +450,4 @@ nanobot/templates/agent/
 | 日期 | 说明 |
 |------|------|
 | 2026-05-24 | 初稿：四决策定稿 + E0–E6 分期 + 架构与配置 |
+| 2026-05-26 | E0–E4 实现合并 `main`；GEPA 细节链至 `gepa.md`；更新配置与命令表 |

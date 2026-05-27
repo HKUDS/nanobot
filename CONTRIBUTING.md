@@ -97,6 +97,9 @@ cd nanobot
 # Install with dev dependencies
 pip install -e ".[dev]"
 
+# Working on skill evolution / GEPA (adds dspy)
+pip install -e ".[dev,evolution]"
+
 # Run tests
 pytest
 

@@ -1502,3 +1502,81 @@ Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |
+
+## Skill Evolution
+
+Hermes-style **skill self-evolution**: turn traces → PostTask **create** proposals → optional GEPA **update** proposals → review via slash commands. Design: [`.agent/hermes-design.md`](../.agent/hermes-design.md) (repo); GEPA details: [`.agent/gepa.md`](../.agent/gepa.md).
+
+**Install GEPA (optional)** — gateway works without it; GEPA requires DSPy:
+
+```bash
+pip install nanobot-ai[evolution]
+# or from source:
+pip install -e ".[evolution]"
+```
+
+### Enable evolution
+
+Add under `agents.defaults` in `~/.nanobot/config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "evolution": {
+        "enable": true,
+        "postTask": {
+          "autoApply": false,
+          "minToolCalls": 3,
+          "cooldownMinutes": 10,
+          "minConfidence": 0.8
+        },
+        "gepa": {
+          "enable": true,
+          "intervalHours": 168,
+          "maxBudgetUsd": 10,
+          "minTraces": 3,
+          "maxSkillsPerRun": 1
+        }
+      }
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `evolution.enable` | `true` | Master switch: trace recording + PostTask after each turn |
+| `evolution.postTask.autoApply` | `false` | `true` = write new skills directly; `false` = proposal + `/evolve-apply` |
+| `evolution.postTask.minToolCalls` | `3` | Minimum tool calls in a turn to consider PostTask |
+| `evolution.gepa.enable` | `false` | Enable offline GEPA skill optimization |
+| `evolution.gepa.intervalHours` | `null` | Cron interval (hours); `null` = manual/CLI only |
+| `evolution.gepa.maxBudgetUsd` | `10` | Max LLM spend per GEPA run |
+| `evolution.gepa.minTraces` | `3` | Min success traces per skill to build GEPA dataset |
+| `evolution.gepa.maxSkillsPerRun` | `1` | Max skills optimized per GEPA run |
+| `evolution.gepa.notifyOnComplete` | `false` | Notify on cron completion (requires `notifyChannel` + `notifyChatId`) |
+
+Set `gepa.intervalHours` to register the `evolve-gepa` cron job on gateway startup (e.g. `168` = weekly).
+
+### Slash commands
+
+| Command | Description |
+|---------|-------------|
+| `/evolve-list` | List pending proposals |
+| `/evolve-show <id>` | Show proposal, diff, GEPA metadata |
+| `/evolve-apply <id>` | Promote proposal to active skill |
+| `/evolve-reject <id>` | Reject proposal |
+| `/evolve-log` | Git history of skill changes |
+| `/evolve-restore <sha>` | Restore skills to a prior commit |
+| `/evolve-run [skill]` | Start GEPA in background |
+| `/evolve-status` | Latest GEPA run status |
+
+### CLI
+
+```bash
+nanobot evolve run              # run GEPA (all eligible skills)
+nanobot evolve run --skill NAME # optimize one skill
+nanobot evolve status           # print gepa_run.json summary
+```
+
+GEPA proposals are **never** auto-applied; use `/evolve-apply` after review.
