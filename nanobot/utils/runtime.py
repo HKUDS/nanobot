@@ -34,6 +34,15 @@ SUSTAINED_GOAL_CONTINUE_PROMPT = (
     "objective using your tools, or call complete_goal if the work is truly finished."
 )
 
+OBSERVATION_REFLECTION_PROMPT = (
+    "[Inner monologue, based on the tool results above:"
+    "1.Think: Analyze the results and evaluate current progress."
+    "2.Verify: If there are intermediate outputs, verify their correctness."
+    "3.Update User: Briefly inform the user of your findings and next action."
+    "4.Act: If further steps are needed, call the appropriate tools to continue;"
+    "if the task is complete, provide the final answer.]"
+)
+
 
 def empty_tool_result_message(tool_name: str) -> str:
     """Short prompt-safe marker for tools that completed without visible output."""
@@ -73,6 +82,27 @@ def build_length_recovery_message() -> dict[str, str]:
 def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
     """Prompt the model to continue when a sustained goal is still active."""
     return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
+
+
+def build_observation_reflection_message() -> dict[str, str]:
+    """Prompt the model to observe tool results, narrate findings, and continue."""
+    return {"role": "user", "content": OBSERVATION_REFLECTION_PROMPT}
+
+
+def strip_observation_reflections(messages: list[dict[str, Any]]) -> None:
+    """Remove all historical observation-reflection prompts in-place.
+
+    Only the latest prompt (which will be appended after this call) should
+    be present in the context so accumulated boilerplate doesn't bloat history.
+    """
+    for idx in range(len(messages) - 1, -1, -1):
+        msg = messages[idx]
+        if (
+            msg.get("role") == "user"
+            and not msg.get("tool_call_id")
+            and msg.get("content") == OBSERVATION_REFLECTION_PROMPT
+        ):
+            del messages[idx]
 
 
 def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:

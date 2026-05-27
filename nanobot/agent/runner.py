@@ -46,10 +46,12 @@ from nanobot.utils.runtime import (
     build_finalization_retry_message,
     build_goal_continue_message,
     build_length_recovery_message,
+    build_observation_reflection_message,
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
+    strip_observation_reflections,
 )
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
@@ -406,6 +408,8 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_count = 0
+                strip_observation_reflections(messages)
+                messages.append(build_observation_reflection_message())
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
