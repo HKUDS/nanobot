@@ -23,9 +23,15 @@ import {
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
-import type { ChatSummary } from "@/lib/types";
+import type {
+  ChatSummary,
+  SettingsPayload,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { fetchWorkspaces } from "@/lib/api";
 
 type BootState =
   | { status: "loading" }
@@ -149,6 +155,21 @@ function writeCompletedRunChatIds(chatIds: Set<string>): void {
   }
 }
 
+function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePayload {
+  const accessMode = scope.access_mode === "restricted" ? "restricted" : "full";
+  return {
+    ...scope,
+    project_name: scope.project_name ?? projectNameFromPath(scope.project_path),
+    access_mode: accessMode,
+    restrict_to_workspace: accessMode === "restricted",
+  };
+}
+
+function projectNameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
 export default function App() {
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
@@ -163,13 +184,17 @@ export default function App() {
           const boot = await fetchBootstrap("", secret);
           if (cancelled) return;
           if (secret) saveSecret(secret);
-          const url = deriveWsUrl(boot.ws_path, boot.token);
+          const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
           const client = new NanobotClient({
             url,
             onReauth: async () => {
               try {
                 const refreshed = await fetchBootstrap("", bootstrapSecretRef.current);
-                const refreshedUrl = deriveWsUrl(refreshed.ws_path, refreshed.token);
+                const refreshedUrl = deriveWsUrl(
+                  refreshed.ws_path,
+                  refreshed.token,
+                  refreshed.ws_url,
+                );
                 const tokenExpiresAt = bootstrapTokenExpiresAt(refreshed.expires_in);
                 setState((current) =>
                   current.status === "ready" && current.client === client
@@ -219,7 +244,7 @@ export default function App() {
     const timer = window.setTimeout(async () => {
       try {
         const boot = await fetchBootstrap("", bootstrapSecretRef.current);
-        const url = deriveWsUrl(boot.ws_path, boot.token);
+        const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
         const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
         client.updateUrl(url);
         setState((current) =>
@@ -317,7 +342,7 @@ function Shell({
   onLogout: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const { client } = useClient();
+  const { client, token } = useClient();
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const { state: sidebarState, update: updateSidebarState } =
@@ -337,11 +362,22 @@ function Shell({
     key: string;
     label: string;
   } | null>(null);
+  const [pendingProjectRename, setPendingProjectRename] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(readCompletedRunChatIds);
+  const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [draftWorkspaceScope, setDraftWorkspaceScope] =
+    useState<WorkspaceScopePayload | null>(null);
+  const [workspaceOverrides, setWorkspaceOverrides] =
+    useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -365,6 +401,36 @@ function Shell({
   }, [sessions, activeKey]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
+  const activeChatId = activeSession?.chatId ?? null;
+  const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
+    if (activeChatId && workspaceOverrides[activeChatId]) {
+      return workspaceOverrides[activeChatId];
+    }
+    if (activeSession?.workspaceScope) {
+      return activeSession.workspaceScope;
+    }
+    return draftWorkspaceScope ?? workspaces?.default_scope ?? null;
+  }, [
+    activeChatId,
+    activeSession?.workspaceScope,
+    draftWorkspaceScope,
+    workspaceOverrides,
+    workspaces?.default_scope,
+  ]);
+  const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
+
+  const refreshWorkspaces = useCallback(async () => {
+    try {
+      const payload = await fetchWorkspaces(token);
+      setWorkspaces(payload);
+    } catch {
+      setWorkspaces(null);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void refreshWorkspaces();
+  }, [refreshWorkspaces]);
 
   useEffect(() => {
     if (loading) return;
@@ -375,7 +441,33 @@ function Shell({
       );
       return next.size === current.size ? current : next;
     });
+    setWorkspaceOverrides((current) => {
+      const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
+      return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
+    });
   }, [loading, sessions]);
+
+  useEffect(() => {
+    return client.onSessionUpdate((_chatId, _scope, workspaceScope) => {
+      if (!workspaceScope) return;
+      const next = normalizeWorkspaceScope(workspaceScope);
+      setWorkspaceOverrides((current) => ({
+        ...current,
+        [_chatId]: next,
+      }));
+      setDraftWorkspaceScope(next);
+      setWorkspaceError(null);
+      void refreshWorkspaces();
+    });
+  }, [client, refreshWorkspaces]);
+
+  useEffect(() => {
+    return client.onError((error) => {
+      if (error.kind !== "workspace_scope_rejected") return;
+      setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+      void refreshWorkspaces();
+    });
+  }, [client, refreshWorkspaces, t]);
 
   useEffect(() => {
     if (loading) return;
@@ -431,28 +523,78 @@ function Shell({
     }
   }, []);
 
-  const onCreateChat = useCallback(async () => {
+  const applyWorkspaceScope = useCallback(
+    (scope: WorkspaceScopePayload) => {
+      const next = normalizeWorkspaceScope(scope);
+      setWorkspaceError(null);
+      if (activeChatId) {
+        if (!activeChatRunning) {
+          client.setWorkspaceScope(activeChatId, next);
+        }
+        return;
+      }
+      setDraftWorkspaceScope(next);
+    },
+    [activeChatId, activeChatRunning, client],
+  );
+
+  const onCreateChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null) => {
     try {
-      const chatId = await createChat();
+      const scope = workspaceScope ?? activeWorkspaceScope;
+      const chatId = await createChat(scope);
       setActiveKey(`websocket:${chatId}`);
       setView("chat");
       setMobileSidebarOpen(false);
+      if (scope) {
+        setWorkspaceOverrides((current) => ({
+          ...current,
+          [chatId]: normalizeWorkspaceScope(scope),
+        }));
+      }
       return chatId;
     } catch (e) {
       console.error("Failed to create chat", e);
+      if (e instanceof Error && e.message.startsWith("workspace_scope_rejected:")) {
+        setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+      }
       return null;
     }
-  }, [createChat]);
+  }, [activeWorkspaceScope, createChat, t]);
 
   const onNewChat = useCallback(() => {
     setActiveKey(null);
+    setDraftWorkspaceScope(null);
+    setWorkspaceError(null);
     setView("chat");
     setMobileSidebarOpen(false);
   }, []);
 
+  const onNewChatInProject = useCallback(
+    (projectPath: string, projectName: string) => {
+      const base = workspaces?.default_scope ?? activeWorkspaceScope;
+      const trimmed = projectPath.trim();
+      if (!base || !trimmed) {
+        onNewChat();
+        return;
+      }
+      setActiveKey(null);
+      setDraftWorkspaceScope(normalizeWorkspaceScope({
+        project_path: trimmed,
+        project_name: projectName || projectNameFromPath(trimmed),
+        access_mode: base.access_mode,
+        restrict_to_workspace: base.access_mode === "restricted",
+      }));
+      setWorkspaceError(null);
+      setView("chat");
+      setMobileSidebarOpen(false);
+    },
+    [activeWorkspaceScope, onNewChat, workspaces?.default_scope],
+  );
+
   const onSelectChat = useCallback(
     (key: string) => {
-      const selectedChatId = sessions.find((session) => session.key === key)?.chatId;
+      const selected = sessions.find((session) => session.key === key);
+      const selectedChatId = selected?.chatId;
       if (selectedChatId) {
         setCompletedChatIds((current) => {
           if (!current.has(selectedChatId)) return current;
@@ -461,6 +603,12 @@ function Shell({
           return next;
         });
       }
+      if (selected?.workspaceScope) {
+        setDraftWorkspaceScope(normalizeWorkspaceScope(selected.workspaceScope));
+      } else {
+        setDraftWorkspaceScope(null);
+      }
+      setWorkspaceError(null);
       setActiveKey(key);
       setView("chat");
       setMobileSidebarOpen(false);
@@ -512,6 +660,61 @@ function Shell({
     [pendingRename, updateSidebarState],
   );
 
+  const onToggleGroup = useCallback(
+    (groupId: string) => {
+      void updateSidebarState((current) => {
+        const collapsedGroups = { ...current.collapsed_groups };
+        if (groupId === "workspace:chats" || groupId === "date:all") {
+          if (collapsedGroups[groupId] === false) {
+            delete collapsedGroups[groupId];
+          } else {
+            collapsedGroups[groupId] = false;
+          }
+          return {
+            ...current,
+            collapsed_groups: collapsedGroups,
+          };
+        }
+        if (collapsedGroups[groupId]) {
+          delete collapsedGroups[groupId];
+        } else {
+          collapsedGroups[groupId] = true;
+        }
+        return {
+          ...current,
+          collapsed_groups: collapsedGroups,
+        };
+      });
+    },
+    [updateSidebarState],
+  );
+
+  const onRequestRenameProject = useCallback((key: string, label: string) => {
+    setPendingProjectRename({ key, label });
+  }, []);
+
+  const onConfirmProjectRename = useCallback(
+    (title: string) => {
+      if (!pendingProjectRename) return;
+      const key = pendingProjectRename.key;
+      setPendingProjectRename(null);
+      void updateSidebarState((current) => {
+        const projectNameOverrides = { ...current.project_name_overrides };
+        const cleaned = title.trim();
+        if (cleaned) {
+          projectNameOverrides[key] = cleaned;
+        } else {
+          delete projectNameOverrides[key];
+        }
+        return {
+          ...current,
+          project_name_overrides: projectNameOverrides,
+        };
+      });
+    },
+    [pendingProjectRename, updateSidebarState],
+  );
+
   const onToggleArchive = useCallback(
     (key: string) => {
       void updateSidebarState((current) => {
@@ -546,19 +749,6 @@ function Shell({
       },
     }));
   }, [updateSidebarState]);
-
-  const onUpdateSidebarView = useCallback(
-    (viewUpdate: Partial<typeof sidebarState.view>) => {
-      void updateSidebarState((current) => ({
-        ...current,
-        view: {
-          ...current.view,
-          ...viewUpdate,
-        },
-      }));
-    },
-    [updateSidebarState],
-  );
 
   const onOpenSessionSearch = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -742,20 +932,25 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onToggleGroup,
+    onRequestRenameProject,
+    onNewChatInProject,
     onOpenSettings,
     onOpenApps,
     onOpenSearch: onOpenSessionSearch,
     activeUtility: view === "apps" ? "apps" as const : null,
     onToggleArchived,
-    onUpdateView: onUpdateSidebarView,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
     titleOverrides: sidebarState.title_overrides,
+    projectNameOverrides: sidebarState.project_name_overrides,
+    collapsedGroups: sidebarState.collapsed_groups,
     runningChatIds: runningChatIdList,
     completedChatIds: completedChatIdList,
     viewState: sidebarState.view,
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarState.archived_keys.length,
+    defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
   const showMainSidebar = view !== "settings";
 
@@ -817,7 +1012,6 @@ function Shell({
           titleOverrides={sidebarState.title_overrides}
           onSelect={onSelectSearchResult}
         />
-
         <main className="relative flex h-full min-w-0 flex-1 flex-col">
           <div
             className={cn(
@@ -835,6 +1029,13 @@ function Shell({
               theme={theme}
               onToggleTheme={toggle}
               hideSidebarToggleOnDesktop
+              workspaceScope={activeWorkspaceScope}
+              workspaceDefaultScope={workspaces?.default_scope ?? null}
+              workspaceControls={workspaces?.controls ?? null}
+              workspaceScopeDisabled={activeChatRunning}
+              workspaceError={workspaceError}
+              onWorkspaceScopeChange={applyWorkspaceScope}
+              settingsSnapshot={settingsSnapshot}
             />
           </div>
           {view !== "chat" && (
@@ -846,6 +1047,7 @@ function Shell({
                 onToggleTheme={toggle}
                 onBackToChat={onBackToChat}
                 onModelNameChange={onModelNameChange}
+                onSettingsChange={setSettingsSnapshot}
                 onLogout={onLogout}
                 onRestart={onRestart}
                 isRestarting={isRestarting}
@@ -865,6 +1067,15 @@ function Shell({
           title={pendingRename?.label ?? ""}
           onCancel={() => setPendingRename(null)}
           onConfirm={onConfirmRename}
+        />
+        <RenameChatDialog
+          open={!!pendingProjectRename}
+          title={pendingProjectRename?.label ?? ""}
+          dialogTitle={t("chat.renameProjectTitle")}
+          description={t("chat.renameProjectDescription")}
+          placeholder={t("chat.renameProjectPlaceholder")}
+          onCancel={() => setPendingProjectRename(null)}
+          onConfirm={onConfirmProjectRename}
         />
         {restartToast ? (
           <div

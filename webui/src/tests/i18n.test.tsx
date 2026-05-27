@@ -8,6 +8,7 @@ import { resources } from "@/i18n";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
+const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
   "stop",
@@ -97,10 +98,12 @@ describe("webui i18n", () => {
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
   });
 
-  it("keeps welcome quick actions localized for every registered locale", () => {
+  it("keeps empty landing resources localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const empty = resource.common.thread.empty;
-      expect(empty.greeting).toBeTruthy();
+      for (const key of HERO_GREETING_KEYS) {
+        expect(empty.greetings[key as keyof typeof empty.greetings]).toBeTruthy();
+      }
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
         expect(action.title).toBeTruthy();

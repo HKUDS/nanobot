@@ -12,6 +12,8 @@ const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 let mockSessions: ChatSummary[] = [];
+const HERO_GREETING_PATTERN =
+  /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -97,6 +99,8 @@ function baseSettingsPayload() {
     },
     advanced: {
       restrict_to_workspace: false,
+      allow_local_preview_access: true,
+      private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
       exec_enabled: true,
@@ -412,29 +416,7 @@ describe("App layout", () => {
     const encoded = new URLSearchParams(updateUrl?.split("?", 2)[1]).get("state");
     expect(JSON.parse(encoded ?? "{}").view.show_archived).toBe(true);
 
-    fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "View" }), {
-      button: 0,
-      ctrlKey: false,
-    });
-    fireEvent.click(await screen.findByText("Compact list"));
-    await waitFor(() => {
-      const lastUpdateUrl = vi.mocked(fetch).mock.calls
-        .map(([url]) => String(url))
-        .filter((url) => url.startsWith("/api/webui/sidebar-state/update?"))
-        .at(-1);
-      const lastEncoded = new URLSearchParams(lastUpdateUrl?.split("?", 2)[1]).get("state");
-      expect(JSON.parse(lastEncoded ?? "{}").view.density).toBe("compact");
-    });
-
-    fireEvent.click(screen.getByText("Title A-Z"));
-    await waitFor(() => {
-      const lastUpdateUrl = vi.mocked(fetch).mock.calls
-        .map(([url]) => String(url))
-        .filter((url) => url.startsWith("/api/webui/sidebar-state/update?"))
-        .at(-1);
-      const lastEncoded = new URLSearchParams(lastUpdateUrl?.split("?", 2)[1]).get("state");
-      expect(JSON.parse(lastEncoded ?? "{}").view.sort).toBe("title_asc");
-    });
+    expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
   });
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
@@ -785,6 +767,8 @@ describe("App layout", () => {
               },
               advanced: {
                 restrict_to_workspace: false,
+                allow_local_preview_access: true,
+                private_service_protection_enabled: true,
                 ssrf_whitelist_count: 0,
                 mcp_server_count: 0,
                 exec_enabled: true,
@@ -1071,6 +1055,8 @@ describe("App layout", () => {
               },
               advanced: {
                 restrict_to_workspace: false,
+                allow_local_preview_access: true,
+                private_service_protection_enabled: true,
                 ssrf_whitelist_count: 0,
                 mcp_server_count: 0,
                 exec_enabled: true,
@@ -1097,7 +1083,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
-    expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
+    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
   });
 
   it("filters sessions in the centered search dialog", async () => {
@@ -1273,7 +1259,7 @@ describe("App layout", () => {
     const rail = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(rail).getByRole("button", { name: "New chat" })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "Search" })).toBeInTheDocument();
-    expect(within(rail).getByRole("button", { name: "View" })).toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
     expect(within(rail).queryByText("Existing chat")).not.toBeInTheDocument();
 
     fireEvent.click(within(rail).getByRole("button", { name: "Toggle sidebar" }));
@@ -1282,7 +1268,7 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
     expect(createChatSpy).not.toHaveBeenCalled();
-    expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
+    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start a new chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Toggle theme from header" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();

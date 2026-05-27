@@ -14,6 +14,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.security.workspace_access import current_workspace_scope
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.providers.image_generation import (
@@ -21,6 +22,7 @@ from nanobot.providers.image_generation import (
     ImageGenerationProvider,
     get_image_gen_provider,
 )
+from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from nanobot.utils.artifacts import (
     ArtifactError,
     generated_image_tool_result,
@@ -131,18 +133,23 @@ class ImageGenerationTool(Tool):
         return cls(**kwargs)
 
     def _resolve_reference_image(self, value: str) -> str:
-        raw_path = Path(value).expanduser()
-        path = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+        scope = current_workspace_scope()
+        workspace = scope.project_path if scope is not None else self.workspace
+        allowed_root = workspace if scope is None or scope.restrict_to_workspace else None
         try:
-            resolved = path.resolve(strict=True)
-        except OSError as exc:
-            raise ImageGenerationError(f"reference image not found: {value}") from exc
-
-        allowed_roots = [self.workspace.resolve(), get_media_dir().resolve()]
-        if not any(_is_relative_to(resolved, root) for root in allowed_roots):
+            resolved = resolve_allowed_path(
+                value,
+                workspace=workspace,
+                allowed_root=allowed_root,
+                extra_allowed_roots=[get_media_dir()] if allowed_root is not None else None,
+                strict=True,
+            )
+        except WorkspaceBoundaryError as exc:
             raise ImageGenerationError(
                 "reference_images must be inside the workspace or nanobot media directory"
-            )
+            ) from exc
+        except OSError as exc:
+            raise ImageGenerationError(f"reference image not found: {value}") from exc
         if not resolved.is_file():
             raise ImageGenerationError(f"reference image is not a file: {value}")
         raw = resolved.read_bytes()
@@ -201,11 +208,3 @@ class ImageGenerationTool(Tool):
             return generated_image_tool_result(artifacts)
         except (ArtifactError, ImageGenerationError, OSError) as exc:
             return f"Error: {exc}"
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True

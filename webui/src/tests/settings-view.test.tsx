@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsPayload } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -12,7 +13,7 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
-function settingsPayload() {
+function settingsPayload(): SettingsPayload {
   return {
     agent: {
       model: "openai/gpt-4o",
@@ -88,6 +89,8 @@ function settingsPayload() {
     },
     advanced: {
       restrict_to_workspace: false,
+      allow_local_preview_access: true,
+      private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
       exec_enabled: true,
@@ -115,15 +118,21 @@ const installedAnyGen = {
   skill_installed: true,
 };
 
-function renderSettingsView() {
+function renderSettingsView(
+  options: {
+    initialSection?: "apps" | "advanced";
+    onSettingsChange?: (payload: SettingsPayload) => void;
+  } = {},
+) {
   render(
     <ClientProvider client={{} as never} token="tok">
       <SettingsView
         theme="light"
-        initialSection="apps"
+        initialSection={options.initialSection ?? "apps"}
         onToggleTheme={() => {}}
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
+        onSettingsChange={options.onSettingsChange}
       />
     </ClientProvider>,
   );
@@ -187,5 +196,69 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
+  });
+
+  it("publishes the latest settings payload to the shell", async () => {
+    const payload = settingsPayload();
+    const onSettingsChange = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ onSettingsChange });
+
+    await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
+  });
+
+  it("saves network safety without exposing technical SSRF copy", async () => {
+    const payload = settingsPayload();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/network-safety/update?allow_local_preview_access=false") {
+        return jsonResponse({
+          ...payload,
+          advanced: { ...payload.advanced, allow_local_preview_access: false },
+          requires_restart: true,
+          restart_required_sections: ["runtime"],
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "advanced" });
+
+    expect(await screen.findByText("Network Safety")).toBeInTheDocument();
+    expect(screen.queryByText(/SSRF/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Local Preview Access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/network-safety/update?allow_local_preview_access=false",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
   });
 });

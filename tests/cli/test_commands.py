@@ -1521,6 +1521,28 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert "port 18792" in result.stdout
 
 
+def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
+    from nanobot.cli.commands import _configure_desktop_gateway
+
+    config = Config()
+    config.channels.__pydantic_extra__ = {
+        "telegram": {"enabled": True, "token": "x"},
+        "websocket": {"enabled": False, "port": 8765},
+    }
+
+    _configure_desktop_gateway(config, webui_port=29888, token_issue_secret="secret")
+
+    extras = config.channels.__pydantic_extra__ or {}
+    assert config.gateway.host == "127.0.0.1"
+    assert config.gateway.port == 29888
+    assert extras["telegram"]["enabled"] is False
+    assert extras["websocket"]["enabled"] is True
+    assert extras["websocket"]["host"] == "127.0.0.1"
+    assert extras["websocket"]["port"] == 29888
+    assert extras["websocket"]["token_issue_secret"] == "secret"
+    assert extras["websocket"]["websocket_requires_token"] is True
+
+
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch, tmp_path: Path
 ) -> None:

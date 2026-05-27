@@ -143,6 +143,8 @@ def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -
     assert apps["gimp"]["install_supported"] is True
     assert apps["gimp"]["source"] == "harness+public"
     assert apps["gimp"]["description"] == "Public duplicate entry"
+    assert apps["feishu"]["description"] == "Lark CLI"
+    assert apps["feishu"]["manifest"]["description"] == "Lark CLI"
     assert apps["clibrowser"]["install_supported"] is False
     assert apps["jimeng"]["install_supported"] is False
     assert apps["suno"]["install_supported"] is True

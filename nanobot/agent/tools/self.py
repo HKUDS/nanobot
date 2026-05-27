@@ -68,6 +68,7 @@ class MyTool(Tool, ContextAware):
         "_current_iteration",  # updated by runner only
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
+        "workspace_sandbox",  # read-only view of workspace enforcement level
     })
 
     _DENIED_ATTRS = frozenset({
@@ -349,7 +350,7 @@ class MyTool(Tool, ContextAware):
             parts.append(self._format_value(getattr(state, k, None), k))
         parts.append(self._format_value(state.model_preset, "model_preset"))
         # Other useful top-level keys shown in description
-        for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "subagents"):
+        for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "workspace_sandbox", "subagents"):
             if _has_real_attr(state, k):
                 parts.append(self._format_value(getattr(state, k, None), k))
         # Token usage

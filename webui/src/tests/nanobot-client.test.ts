@@ -132,6 +132,30 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
+  it("clears run strip when a turn_end arrives without idle", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "running",
+      started_at: 12_345,
+    });
+    lastSocket().fakeMessage({
+      event: "turn_end",
+      chat_id: "chat-strip",
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+  });
+
   it("notifies run status subscribers and replays running chats", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -268,9 +292,19 @@ describe("NanobotClient", () => {
       event: "session_updated",
       chat_id: "chat-title",
       scope: "metadata",
+      workspace_scope: {
+        project_path: "/tmp/project",
+        project_name: "project",
+        access_mode: "restricted",
+        restrict_to_workspace: true,
+      },
     });
 
-    expect(globalHandler).toHaveBeenCalledWith("chat-title", "metadata");
+    expect(globalHandler).toHaveBeenCalledWith(
+      "chat-title",
+      "metadata",
+      expect.objectContaining({ project_path: "/tmp/project" }),
+    );
     expect(chatHandler).not.toHaveBeenCalled();
   });
 
@@ -286,6 +320,40 @@ describe("NanobotClient", () => {
     expect(lastSocket().sent).toContain(JSON.stringify({ type: "new_chat" }));
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
+  });
+
+  it("serializes workspace scope for new chats and messages", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const workspaceScope = {
+      project_path: "/tmp/project",
+      project_name: "project",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const promise = client.newChat(1_000, workspaceScope);
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
+    );
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    await expect(promise).resolves.toBe("fresh-id");
+
+    client.sendMessage("fresh-id", "hello", undefined, { workspaceScope });
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "fresh-id",
+        content: "hello",
+        workspace_scope: workspaceScope,
+        webui: true,
+      }),
+    );
   });
 
   it("queues sends while connecting and flushes on open", () => {
@@ -534,6 +602,52 @@ describe("NanobotClient", () => {
     // Server rejected an outbound frame as too large.
     lastSocket().fakeCloseWithCode(1009);
     expect(errors).toEqual([{ kind: "message_too_big" }]);
+  });
+
+  it("emits workspace scope rejection errors from server frames", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const errors: Array<{ kind: string; reason?: string; chatId?: string }> = [];
+    client.onError((e) => errors.push(e));
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "error",
+      chat_id: "chat-a",
+      detail: "workspace_scope_rejected",
+      reason: "chat_running",
+    });
+    expect(errors).toEqual([
+      {
+        kind: "workspace_scope_rejected",
+        reason: "chat_running",
+        chatId: "chat-a",
+      },
+    ]);
+  });
+
+  it("rejects pending new chats when workspace scope is rejected", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const pending = client.newChat(5_000, {
+      project_path: "/missing",
+      project_name: "missing",
+      access_mode: "restricted",
+    });
+    lastSocket().fakeMessage({
+      event: "error",
+      detail: "workspace_scope_rejected",
+      reason: "project_path must be an existing directory",
+    });
+    await expect(pending).rejects.toThrow("workspace_scope_rejected");
   });
 
   it("isolates throwing error handlers so reconnect bookkeeping still runs", async () => {

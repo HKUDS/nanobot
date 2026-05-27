@@ -12,6 +12,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   pinned_keys: [],
   archived_keys: [],
   title_overrides: {},
+  project_name_overrides: {},
   tags_by_key: {},
   collapsed_groups: {},
   view: {
@@ -90,6 +91,7 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     pinned_keys: uniqueStrings(value.pinned_keys),
     archived_keys: uniqueStrings(value.archived_keys),
     title_overrides: stringMap(value.title_overrides),
+    project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
     collapsed_groups: boolMap(value.collapsed_groups),
     view: {

@@ -30,6 +30,8 @@ from nanobot.channels.websocket import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.session import webui_turns as wth
+from nanobot.session.manager import SessionManager
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
@@ -57,11 +59,28 @@ def bus() -> MagicMock:
     return b
 
 
+@pytest.fixture(autouse=True)
+def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.workspaces.get_webui_dir",
+        lambda: tmp_path / "webui",
+    )
+
+
 async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Response:
     """Run GET in a thread to avoid blocking the asyncio loop shared with websockets."""
     return await asyncio.to_thread(
         functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
     )
+
+
+async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
+    """Receive until a specific websocket event appears."""
+    for _ in range(10):
+        payload = json.loads(await client.recv())
+        if payload.get("event") == event:
+            return payload
+    raise AssertionError(f"websocket event {event!r} was not received")
 
 
 def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
@@ -202,6 +221,291 @@ async def test_plain_websocket_message_does_not_mark_webui(bus: MagicMock) -> No
 
     msg = bus.publish_inbound.await_args.args[0]
     assert "webui" not in msg.metadata
+
+
+@pytest.mark.asyncio
+async def test_webui_message_scope_inherits_persisted_session_scope(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    default_workspace.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=sessions,
+        workspace_path=default_workspace,
+        restrict_to_workspace=True,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-scope",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+        },
+    )
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-scope", "content": "hello", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.metadata["workspace_scope"] == {
+        "project_path": str(project.resolve()),
+        "access_mode": "full",
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_scope_expands_home_project_path(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default_workspace = tmp_path / "default"
+    home = tmp_path / "home"
+    project = home / "Desktop" / "Photos"
+    default_workspace.mkdir()
+    project.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=SessionManager(tmp_path / "sessions"),
+        workspace_path=default_workspace,
+        restrict_to_workspace=True,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-scope",
+            "workspace_scope": {
+                "project_path": "~/Desktop/Photos",
+                "access_mode": "restricted",
+            },
+        },
+    )
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-scope", "content": "hello", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.metadata["workspace_scope"] == {
+        "project_path": str(project.resolve()),
+        "access_mode": "restricted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_scope_rejects_missing_project_path(bus: MagicMock, tmp_path) -> None:
+    default_workspace = tmp_path / "default"
+    default_workspace.mkdir()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=SessionManager(tmp_path / "sessions"),
+        workspace_path=default_workspace,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-scope",
+            "workspace_scope": {
+                "project_path": str(tmp_path / "missing"),
+                "access_mode": "restricted",
+            },
+        },
+    )
+
+    conn.send.assert_awaited()
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "workspace_scope_rejected"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    other = tmp_path / "other"
+    default_workspace.mkdir()
+    project.mkdir()
+    other.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=sessions,
+        workspace_path=default_workspace,
+        restrict_to_workspace=True,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-running",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "restricted",
+            },
+        },
+    )
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    try:
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "message",
+                "chat_id": "chat-running",
+                "content": "hello",
+                "webui": True,
+                "workspace_scope": {
+                    "project_path": str(other),
+                    "access_mode": "full",
+                },
+            },
+        )
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "workspace_scope_rejected"
+    assert payload["reason"] == "chat_running"
+    assert payload["chat_id"] == "chat-running"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tmp_path) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    other = tmp_path / "other"
+    default_workspace.mkdir()
+    project.mkdir()
+    other.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=sessions,
+        workspace_path=default_workspace,
+        restrict_to_workspace=True,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-running",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "restricted",
+            },
+        },
+    )
+    conn.send.reset_mock()
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    try:
+        await channel._dispatch_envelope(
+            conn,
+            "webui-client",
+            {
+                "type": "set_workspace_scope",
+                "chat_id": "chat-running",
+                "workspace_scope": {
+                    "project_path": str(other),
+                    "access_mode": "full",
+                },
+            },
+        )
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "workspace_scope_rejected"
+    assert payload["reason"] == "chat_running"
+    assert payload["chat_id"] == "chat-running"
+
+    saved = sessions.read_session_file("websocket:chat-running")
+    assert saved["metadata"]["workspace_scope"] == {
+        "project_path": str(project.resolve()),
+        "access_mode": "restricted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp_path) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    default_workspace.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        session_manager=sessions,
+        workspace_path=default_workspace,
+        restrict_to_workspace=True,
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("203.0.113.8", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "set_workspace_scope",
+            "chat_id": "chat-remote",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "workspace_scope_rejected"
+    assert payload["reason"] == "workspace controls are localhost-only"
+    assert payload["chat_id"] == "chat-remote"
+    assert sessions.read_session_file("websocket:chat-remote") is None
 
 
 @pytest.mark.asyncio
@@ -1067,6 +1371,15 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     config.tools.web.search.api_key = "brave-secret"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_api._oauth_provider_status",
+        lambda _spec: {
+            "configured": False,
+            "account": None,
+            "expires_at": None,
+            "login_supported": True,
+        },
+    )
 
     channel = _ch(bus, port=port)
     channel._api_tokens["tok"] = time.monotonic() + 300
@@ -1103,6 +1416,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["atomic_chat"]["configured"] is False
         assert providers["atomic_chat"]["api_key_required"] is False
         assert providers["atomic_chat"]["default_api_base"] == "http://localhost:1337/v1"
+        assert providers["openai_codex"]["auth_type"] == "oauth"
+        assert providers["openai_codex"]["configured"] is False
         assert body["agent"]["has_api_key"] is True
         assert body["web_search"]["provider"] == "brave"
         assert body["web_search"]["api_key_hint"] == "brav••••cret"
@@ -1121,17 +1436,27 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         }
         assert image_providers["openrouter"]["label"] == "OpenRouter"
         assert image_providers["openrouter"]["configured"] is False
-        assert image_providers["openai_codex"]["configured"] is True
+        assert image_providers["openai_codex"]["auth_type"] == "oauth"
+        assert image_providers["openai_codex"]["configured"] is False
         assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
         workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
         assert workspace_path.endswith("/.nanobot/workspace")
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
+        assert body["advanced"]["allow_local_preview_access"] is True
+        assert body["advanced"]["private_service_protection_enabled"] is True
         assert body["advanced"]["mcp_server_count"] == 0
         assert body["restart_required_sections"] == []
         assert "secret-key" not in settings.text
         assert "brave-secret" not in settings.text
+
+        unknown_api = await _http_get(
+            f"http://127.0.0.1:{port}/api/settings/model-configurations/missing",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert unknown_api.status_code == 404
+        assert "<!doctype html>" not in unknown_api.text.lower()
 
         provider_updated = await _http_get(
             "http://127.0.0.1:"
@@ -1204,6 +1529,21 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert created_presets["fast-writing"]["label"] == "Fast writing"
         assert created_presets["fast-writing"]["provider"] == "openai"
 
+        updated_preset = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/model-configurations/update"
+            "?name=fast-writing&label=Codex&provider=openai&model=openai%2Fgpt-5.5",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert updated_preset.status_code == 200
+        updated_preset_body = updated_preset.json()
+        assert updated_preset_body["agent"]["model_preset"] == "fast-writing"
+        assert updated_preset_body["agent"]["model"] == "openai/gpt-5.5"
+        updated_presets = {
+            preset["name"]: preset for preset in updated_preset_body["model_presets"]
+        }
+        assert updated_presets["fast-writing"]["label"] == "Codex"
+
         duplicate_preset = await _http_get(
             "http://127.0.0.1:"
             f"{port}/api/settings/model-configurations/create"
@@ -1228,6 +1568,18 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_body["web_search"]["base_url"] == "https://search.example.com"
         assert search_body["web_search"]["max_results"] == 8
         assert search_body["web"]["fetch"]["use_jina_reader"] is False
+
+        network_safety_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/network-safety/update?allow_local_preview_access=false",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert network_safety_updated.status_code == 200
+        network_safety_body = network_safety_updated.json()
+        assert network_safety_body["requires_restart"] is True
+        assert network_safety_body["restart_required_sections"] == ["runtime", "web"]
+        assert network_safety_body["advanced"]["allow_local_preview_access"] is False
+        assert network_safety_body["advanced"]["private_service_protection_enabled"] is True
 
         image_updated = await _http_get(
             "http://127.0.0.1:"
@@ -1280,8 +1632,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.agents.defaults.model == "atomic_chat/test"
         assert saved.agents.defaults.provider == "atomic_chat"
         assert saved.agents.defaults.model_preset == "fast-writing"
-        assert saved.model_presets["fast-writing"].label == "Fast writing"
-        assert saved.model_presets["fast-writing"].model == "openai/gpt-4.1-mini"
+        assert saved.model_presets["fast-writing"].label == "Codex"
+        assert saved.model_presets["fast-writing"].model == "openai/gpt-5.5"
         assert saved.model_presets["fast-writing"].provider == "openai"
         assert saved.agents.defaults.timezone == "Asia/Shanghai"
         assert saved.agents.defaults.bot_name == "Nano"
@@ -1296,6 +1648,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.tools.web.search.max_results == 8
         assert saved.tools.web.search.timeout == 45
         assert saved.tools.web.fetch.use_jina_reader is False
+        assert saved.tools.allow_local_preview_access is False
         assert saved.tools.image_generation.enabled is True
         assert saved.tools.image_generation.provider == "openrouter"
         assert saved.tools.image_generation.model == "openai/gpt-image-1"
@@ -1335,6 +1688,43 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
         await server_task
 
 
+@pytest.mark.asyncio
+async def test_bootstrap_exposes_desktop_surface(bus: MagicMock) -> None:
+    port = 29893
+    channel = WebSocketChannel(
+        {
+            "enabled": True,
+            "allowFrom": ["*"],
+            "host": "127.0.0.1",
+            "port": port,
+            "path": "/ws",
+            "tokenIssueSecret": "desktop-secret",
+            "websocketRequiresToken": True,
+        },
+        bus,
+        runtime_surface="desktop",
+        runtime_capabilities_overrides={"can_pick_folder": True},
+    )
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/webui/bootstrap",
+            headers={"X-Nanobot-Auth": "desktop-secret"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["runtime_surface"] == "desktop"
+        assert body["runtime_capabilities"]["can_pick_folder"] is True
+        assert body["runtime_capabilities"]["can_restart_engine"] is True
+        assert body["token"].startswith("nbwt_")
+    finally:
+        await channel.stop()
+        await server_task
+
+
 def test_settings_payload_normalizes_camel_case_provider(
     bus: MagicMock,
     monkeypatch,
@@ -1363,6 +1753,44 @@ def test_settings_payload_exposes_api_type_only_for_openai(monkeypatch, tmp_path
 
     assert providers["openai"]["api_type"] == "responses"
     assert "api_type" not in providers["custom"]
+
+
+def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.restrict_to_workspace = True
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")
+
+    body = settings_payload()
+    sandbox = body["advanced"]["workspace_sandbox"]
+
+    assert sandbox["restrict_to_workspace"] is True
+    assert sandbox["level"] == "system"
+    assert sandbox["enforced"] is True
+    assert sandbox["provider"] == "macos_app_sandbox"
+    assert sandbox["provider_label"] == "macOS App Sandbox"
+
+
+def test_settings_payload_includes_desktop_runtime_surface(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    body = settings_payload(
+        surface="desktop",
+        runtime_capability_overrides={"can_open_logs": True},
+        restart_required_sections=["runtime"],
+    )
+
+    assert body["surface"] == "desktop"
+    assert body["runtime_surface"] == "desktop"
+    assert body["runtime_capabilities"]["can_open_logs"] is True
+    assert body["runtime_capabilities"]["can_restart_engine"] is True
+    assert body["restart_behavior_by_section"]["runtime"] == "engineRestart"
+    assert body["requires_restart"] is True
+    assert body["apply_state"] == {"status": "pending", "sections": ["runtime"]}
 
 
 def test_update_provider_settings_ignores_api_type_for_non_openai(monkeypatch, tmp_path) -> None:
@@ -1671,6 +2099,8 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
                 OutboundMessage(channel="websocket", chat_id=new_chat, content="ok")
             )
             reply = json.loads(await client.recv())
+            if reply["event"] == "session_updated":
+                reply = json.loads(await client.recv())
             assert reply["event"] == "message"
             assert reply["chat_id"] == new_chat
             assert reply["text"] == "ok"
@@ -1691,16 +2121,16 @@ async def test_multiplex_two_chats_isolated(bus: MagicMock) -> None:
             await client.recv()  # ready
 
             await client.send(json.dumps({"type": "new_chat"}))
-            chat_a = json.loads(await client.recv())["chat_id"]
+            chat_a = (await _recv_ws_event(client, "attached"))["chat_id"]
             await client.send(json.dumps({"type": "new_chat"}))
-            chat_b = json.loads(await client.recv())["chat_id"]
+            chat_b = (await _recv_ws_event(client, "attached"))["chat_id"]
             assert chat_a != chat_b
 
             # Push A → client sees A only (FIFO over the single WS).
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=chat_a, content="for-A")
             )
-            msg_a = json.loads(await client.recv())
+            msg_a = await _recv_ws_event(client, "message")
             assert msg_a["chat_id"] == chat_a
             assert msg_a["text"] == "for-A"
 
@@ -1708,7 +2138,7 @@ async def test_multiplex_two_chats_isolated(bus: MagicMock) -> None:
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=chat_b, content="for-B")
             )
-            msg_b = json.loads(await client.recv())
+            msg_b = await _recv_ws_event(client, "message")
             assert msg_b["chat_id"] == chat_b
             assert msg_b["text"] == "for-B"
     finally:
@@ -1830,6 +2260,9 @@ def test_sessions_list_includes_active_run_started_at() -> None:
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
+    workspace_scope = body["sessions"][0].pop("workspace_scope")
+    assert workspace_scope["project_path"] == str(channel._workspace_path)
+    assert workspace_scope["access_mode"] in {"restricted", "full"}
     assert body["sessions"] == [
         {
             "key": "websocket:chat-1",

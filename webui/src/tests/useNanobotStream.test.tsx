@@ -14,6 +14,10 @@ function fakeClient() {
   const goalStateByChatId = new Map<string, GoalStateWsPayload>();
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
+    if (ev.event === "turn_end") {
+      runStartedAtByChatId.delete(chatId);
+      return;
+    }
     if (ev.event !== "goal_status") return;
     if (ev.status === "running" && typeof ev.started_at === "number") {
       runStartedAtByChatId.set(chatId, ev.started_at);
@@ -476,6 +480,69 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("replaces matching write_file tool events with live file edit activity", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-edit-events", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-edit-events", {
+        event: "message",
+        chat_id: "chat-file-edit-events",
+        text: 'write_file({"path":"foo.txt"})',
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-write",
+          name: "write_file",
+          arguments: { path: "foo.txt", content: "hello\n" },
+        }],
+      });
+      fake.emit("chat-file-edit-events", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-events",
+        edits: [{
+          call_id: "call-write",
+          tool: "write_file",
+          path: "foo.txt",
+          phase: "start",
+          added: 1,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+      fake.emit("chat-file-edit-events", {
+        event: "message",
+        chat_id: "chat-file-edit-events",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "end",
+          call_id: "call-write",
+          name: "write_file",
+          arguments: { path: "foo.txt", content: "hello\n" },
+          result: "ok",
+        }],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "tool",
+      kind: "trace",
+      traces: [],
+      fileEdits: [{
+        call_id: "call-write",
+        tool: "write_file",
+        path: "foo.txt",
+        status: "editing",
+      }],
+    });
+    expect(result.current.messages[0].toolEvents).toBeUndefined();
+  });
+
   it("upgrades pending file_edit placeholders when the path arrives", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-edit-pending", EMPTY_MESSAGES), {
@@ -591,7 +658,7 @@ describe("useNanobotStream", () => {
     }]);
   });
 
-  it("starts a new assistant bubble for deltas after stream_end and activity", async () => {
+  it("keeps interrupted pre-tool text inside activity before the final answer", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-stream-segments", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -625,7 +692,9 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(3);
     expect(result.current.messages[0]).toMatchObject({
       role: "assistant",
-      content: "I created the files.",
+      content: "",
+      reasoning: "I created the files.",
+      isStreaming: false,
     });
     expect(result.current.messages[1]).toMatchObject({
       role: "tool",
@@ -635,6 +704,54 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[2]).toMatchObject({
       role: "assistant",
       content: "Now I will summarize the edits.",
+    });
+  });
+
+  it("does not replace interrupted pre-tool text with final stream_end text", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-stream-end-final", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-stream-end-final", {
+        event: "delta",
+        chat_id: "chat-stream-end-final",
+        text: "I will inspect the project first.",
+      });
+      fake.emit("chat-stream-end-final", {
+        event: "stream_end",
+        chat_id: "chat-stream-end-final",
+      });
+      fake.emit("chat-stream-end-final", {
+        event: "message",
+        chat_id: "chat-stream-end-final",
+        text: 'exec({"cmd":"ls"})',
+        kind: "tool_hint",
+      });
+      fake.emit("chat-stream-end-final", {
+        event: "stream_end",
+        chat_id: "chat-stream-end-final",
+        text: "Done. Open index.html to play.",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(3);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "",
+      reasoning: "I will inspect the project first.",
+      isStreaming: false,
+    });
+    expect(result.current.messages[1]).toMatchObject({
+      role: "tool",
+      kind: "trace",
+      traces: ['exec({"cmd":"ls"})'],
+    });
+    expect(result.current.messages[2]).toMatchObject({
+      role: "assistant",
+      content: "Done. Open index.html to play.",
+      isStreaming: true,
     });
   });
 
@@ -1369,6 +1486,31 @@ describe("useNanobotStream", () => {
         event: "goal_status",
         chat_id: "chat-g",
         status: "idle",
+      });
+    });
+    expect(result.current.runStartedAt).toBeNull();
+  });
+
+  it("clears runStartedAt on turn_end even without idle", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-g", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-g", {
+        event: "goal_status",
+        chat_id: "chat-g",
+        status: "running",
+        started_at: 1700,
+      });
+    });
+    expect(result.current.runStartedAt).toBe(1700);
+
+    act(() => {
+      fake.emit("chat-g", {
+        event: "turn_end",
+        chat_id: "chat-g",
       });
     });
     expect(result.current.runStartedAt).toBeNull();

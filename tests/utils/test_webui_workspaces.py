@@ -1,0 +1,101 @@
+import json
+
+from nanobot.security.workspace_access import default_workspace_scope
+from nanobot.webui.workspaces import (
+    read_webui_workspace_state,
+    remember_workspace_scope,
+    webui_workspace_state_path,
+    workspaces_payload,
+)
+
+
+def test_workspace_state_defaults_when_file_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+
+    state = read_webui_workspace_state()
+
+    assert state["recent_projects"] == []
+    assert state["last_scope"] is None
+    assert webui_workspace_state_path() == tmp_path / "webui" / "workspace-state.json"
+
+
+def test_workspace_state_discards_missing_projects(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    project = tmp_path / "project"
+    project.mkdir()
+    path = webui_workspace_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "recent_projects": [
+                    {"project_path": str(project)},
+                    {"project_path": str(tmp_path / "missing")},
+                ],
+                "last_scope": {
+                    "project_path": str(project),
+                    "access_mode": "full",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = read_webui_workspace_state()
+
+    assert state["recent_projects"] == [
+        {
+            "project_path": str(project.resolve()),
+            "project_name": "project",
+        }
+    ]
+    assert state["last_scope"] == {
+        "project_path": str(project.resolve()),
+        "project_name": "project",
+        "access_mode": "full",
+    }
+
+
+def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    remember_workspace_scope(default_workspace_scope(project, restrict_to_workspace=True))
+
+    payload = workspaces_payload(
+        default_workspace=default,
+        default_restrict_to_workspace=False,
+        controls_available=True,
+    )
+
+    assert payload["default_scope"]["project_path"] == str(default.resolve())
+    assert payload["default_scope"]["access_mode"] == "full"
+    assert payload["last_scope"]["project_path"] == str(project.resolve())
+    assert payload["last_scope"]["access_mode"] == "restricted"
+    assert payload["controls"]["can_change_project"] is True
+
+
+def test_workspace_payload_hides_mutable_state_when_controls_unavailable(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    project = tmp_path / "project"
+    default.mkdir()
+    project.mkdir()
+    remember_workspace_scope(default_workspace_scope(project, restrict_to_workspace=True))
+
+    payload = workspaces_payload(
+        default_workspace=default,
+        default_restrict_to_workspace=False,
+        controls_available=False,
+    )
+
+    assert payload["default_scope"]["project_path"] == str(default.resolve())
+    assert payload["last_scope"] is None
+    assert payload["recent_projects"] == []
+    assert payload["controls"]["can_change_project"] is False
+    assert payload["controls"]["can_use_full_access"] is False

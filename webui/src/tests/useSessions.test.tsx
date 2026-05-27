@@ -186,6 +186,7 @@ describe("useSessions", () => {
       await result.current.createChat();
     });
 
+    expect(client.newChat).toHaveBeenCalledWith(5000, undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
 
     await act(async () => {
@@ -202,6 +203,30 @@ describe("useSessions", () => {
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
     expect(result.current.sessions[0]?.preview).toBe("First message");
     expect(result.current.sessions[0]?.title).toBe("Generated title");
+  });
+
+  it("stores optimistic workspace scope when creating a chat", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-workspace");
+    const workspaceScope = {
+      project_path: "/tmp/project",
+      project_name: "project",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat(workspaceScope);
+    });
+
+    expect(client.newChat).toHaveBeenCalledWith(5000, workspaceScope);
+    expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {

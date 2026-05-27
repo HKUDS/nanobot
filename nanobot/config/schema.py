@@ -295,7 +295,8 @@ class ToolsConfig(Base):
     image_generation: ImageGenerationToolConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
-    restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
+    restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
+    allow_local_preview_access: bool = True  # allow Full Access shell checks against localhost dev servers
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
