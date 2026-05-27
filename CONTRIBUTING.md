@@ -12,6 +12,8 @@ software together: with care, clarity, and respect for the next person reading t
 
 ## Maintainers
 
+Maintainers are community stewards who help review, organize, and maintain the project. The list below describes each maintainer's current open-source project responsibilities.
+
 | Maintainer | Focus |
 |------------|-------|
 | [@re-bin](https://github.com/re-bin) | Project lead, `main` branch |
