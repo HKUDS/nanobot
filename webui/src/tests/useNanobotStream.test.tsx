@@ -308,6 +308,108 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("dedupes finish-phase tool events after their start trace", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-tool-finish", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-tool-finish", {
+        event: "message",
+        chat_id: "chat-tool-finish",
+        text: 'exec({"cmd":"ls"})',
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-exec",
+          name: "exec",
+          arguments: { cmd: "ls" },
+        }],
+      });
+      fake.emit("chat-tool-finish", {
+        event: "message",
+        chat_id: "chat-tool-finish",
+        text: "",
+        kind: "progress",
+        tool_events: [
+          {
+            phase: "end",
+            call_id: "call-exec",
+            name: "exec",
+            arguments: { cmd: "ls" },
+            result: "ok",
+          },
+          {
+            phase: "error",
+            call_id: "call-read",
+            name: "read_file",
+            arguments: { path: "notes.md" },
+            error: "missing",
+          },
+        ],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].traces).toEqual([
+      'exec({"cmd":"ls"})',
+      'read_file({"path":"notes.md"})',
+    ]);
+    expect(result.current.messages[0].toolEvents).toMatchObject([
+      { phase: "end", call_id: "call-exec", name: "exec" },
+      { phase: "error", call_id: "call-read", name: "read_file", error: "missing" },
+    ]);
+  });
+
+  it("keeps phase updates when a tool event trace line is deduped", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-tool-phase", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    const args = { name: "github", args: ["repo", "view"], json: "true" };
+    act(() => {
+      fake.emit("chat-tool-phase", {
+        event: "message",
+        chat_id: "chat-tool-phase",
+        text: "",
+        kind: "tool_hint",
+        tool_events: [{
+          phase: "start",
+          call_id: "call-cli",
+          name: "run_cli_app",
+          arguments: args,
+        }],
+      });
+      fake.emit("chat-tool-phase", {
+        event: "message",
+        chat_id: "chat-tool-phase",
+        text: "",
+        kind: "progress",
+        tool_events: [{
+          phase: "error",
+          call_id: "call-cli",
+          name: "run_cli_app",
+          arguments: args,
+          error: "Error: CLI app 'github' not found",
+        }],
+      });
+    });
+
+    expect(result.current.messages[0].traces).toEqual([
+      'run_cli_app({"name":"github","args":["repo","view"],"json":"true"})',
+    ]);
+    expect(result.current.messages[0].toolEvents).toMatchObject([
+      {
+        phase: "error",
+        call_id: "call-cli",
+        name: "run_cli_app",
+        error: "Error: CLI app 'github' not found",
+      },
+    ]);
+  });
+
   it("renders live file_edit events as their own activity trace", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-file-edit", EMPTY_MESSAGES), {
@@ -372,6 +474,121 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].activitySegmentId).not.toBe(
       result.current.messages[0].activitySegmentId,
     );
+  });
+
+  it("upgrades pending file_edit placeholders when the path arrives", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-edit-pending", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-edit-pending", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-pending",
+        edits: [{
+          call_id: "call-write",
+          tool: "write_file",
+          path: "",
+          phase: "start",
+          added: 1,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+          pending: true,
+        }],
+      });
+      fake.emit("chat-file-edit-pending", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-pending",
+        edits: [{
+          call_id: "call-write",
+          tool: "write_file",
+          path: "foo.txt",
+          phase: "start",
+          added: 12,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+    });
+
+    const fileEditMessages = result.current.messages.filter((message) => message.fileEdits?.length);
+    expect(fileEditMessages).toHaveLength(1);
+    expect(fileEditMessages[0].fileEdits).toEqual([{
+      call_id: "call-write",
+      tool: "write_file",
+      path: "foo.txt",
+      phase: "start",
+      added: 12,
+      deleted: 0,
+      approximate: true,
+      status: "editing",
+    }]);
+  });
+
+  it("merges file_edit updates after interleaved progress events", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-edit-progress", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-edit-progress", {
+        event: "message",
+        chat_id: "chat-file-edit-progress",
+        text: 'write_file({"path":"foo.txt"})',
+        kind: "tool_hint",
+      });
+      fake.emit("chat-file-edit-progress", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-progress",
+        edits: [{
+          call_id: "call-write",
+          tool: "write_file",
+          path: "foo.txt",
+          phase: "start",
+          added: 12,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+      fake.emit("chat-file-edit-progress", {
+        event: "message",
+        chat_id: "chat-file-edit-progress",
+        text: "still working",
+        kind: "progress",
+      });
+      fake.emit("chat-file-edit-progress", {
+        event: "file_edit",
+        chat_id: "chat-file-edit-progress",
+        edits: [{
+          call_id: "call-write",
+          tool: "write_file",
+          path: "foo.txt",
+          phase: "end",
+          added: 30,
+          deleted: 0,
+          approximate: false,
+          status: "done",
+        }],
+      });
+    });
+
+    const fileEditMessages = result.current.messages.filter((message) => message.fileEdits?.length);
+    expect(fileEditMessages).toHaveLength(1);
+    expect(fileEditMessages[0].fileEdits).toEqual([{
+      call_id: "call-write",
+      tool: "write_file",
+      path: "foo.txt",
+      phase: "end",
+      added: 30,
+      deleted: 0,
+      approximate: false,
+      status: "done",
+    }]);
   });
 
   it("starts a new assistant bubble for deltas after stream_end and activity", async () => {
@@ -472,7 +689,67 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].activitySegmentId).toBe(firstSegment);
     expect(result.current.messages[2].activitySegmentId).toBeTruthy();
     expect(result.current.messages[2].activitySegmentId).not.toBe(firstSegment);
-    expect(result.current.messages[3].activitySegmentId).toBe(firstSegment);
+    expect(result.current.messages[3].activitySegmentId).toBeTruthy();
+    expect(result.current.messages[3].activitySegmentId).not.toBe(result.current.messages[2].activitySegmentId);
+  });
+
+  it("keeps file edit blocks ordered across a new reasoning phase", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-file-order", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-file-order", {
+        event: "file_edit",
+        chat_id: "chat-file-order",
+        edits: [{
+          call_id: "call-one",
+          tool: "write_file",
+          path: "one.txt",
+          phase: "start",
+          added: 10,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+      fake.emit("chat-file-order", {
+        event: "reasoning_delta",
+        chat_id: "chat-file-order",
+        text: "Check the next file.",
+      });
+    });
+
+    await flushStreamFrame();
+
+    act(() => {
+      fake.emit("chat-file-order", {
+        event: "file_edit",
+        chat_id: "chat-file-order",
+        edits: [{
+          call_id: "call-two",
+          tool: "write_file",
+          path: "two.txt",
+          phase: "start",
+          added: 20,
+          deleted: 0,
+          approximate: true,
+          status: "editing",
+        }],
+      });
+    });
+
+    expect(result.current.messages.map((message) => message.fileEdits?.[0]?.path ?? message.reasoning)).toEqual([
+      "one.txt",
+      "Check the next file.",
+      "two.txt",
+    ]);
+    const fileEditSegments = result.current.messages
+      .filter((message) => message.fileEdits?.length)
+      .map((message) => message.activitySegmentId);
+    expect(fileEditSegments).toHaveLength(2);
+    expect(fileEditSegments[0]).not.toBe(fileEditSegments[1]);
   });
 
   it("accumulates reasoning_delta chunks on a placeholder until reasoning_end", async () => {
@@ -987,6 +1264,60 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces streamed content with final stream_end text when provided", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-stream-final", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-stream-final", {
+        event: "delta",
+        chat_id: "chat-stream-final",
+        text: "![Diagram](diagram.png)",
+      });
+    });
+
+    await flushStreamFrame();
+
+    act(() => {
+      fake.emit("chat-stream-final", {
+        event: "stream_end",
+        chat_id: "chat-stream-final",
+        text: "![Diagram](/api/media/sig/payload)",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "![Diagram](/api/media/sig/payload)",
+      isStreaming: true,
+    });
+  });
+
+  it("creates an assistant bubble from final stream_end text without prior delta", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-stream-end-only", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-stream-end-only", {
+        event: "stream_end",
+        chat_id: "chat-stream-end-only",
+        text: "![Diagram](/api/media/sig/payload)",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "![Diagram](/api/media/sig/payload)",
+      isStreaming: true,
+    });
   });
 
   it("stamps latency on the last assistant bubble from turn_end", () => {

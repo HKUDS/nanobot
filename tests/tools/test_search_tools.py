@@ -12,7 +12,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
-from nanobot.agent.tools.search import GrepTool
+from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
@@ -31,6 +31,68 @@ async def test_web_search_tool_refreshes_dynamic_config_loader(monkeypatch) -> N
     monkeypatch.setattr(WebSearchTool, "_search_duckduckgo", fake_duckduckgo)
 
     assert await tool.execute("nanobot") == "duckduckgo:nanobot:3"
+
+
+@pytest.mark.asyncio
+async def test_find_files_filters_by_query_glob_and_type(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "settings_view.tsx").write_text("export {}\n", encoding="utf-8")
+    (tmp_path / "src" / "settings_api.py").write_text("pass\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("settings\n", encoding="utf-8")
+
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        path=".",
+        query="settings",
+        glob="src/**",
+        type="ts",
+    )
+
+    assert result.splitlines() == ["src/settings_view.tsx"]
+
+
+@pytest.mark.asyncio
+async def test_find_files_can_include_directories(tmp_path: Path) -> None:
+    (tmp_path / "src" / "settings").mkdir(parents=True)
+    (tmp_path / "src" / "settings" / "index.ts").write_text("export {}\n", encoding="utf-8")
+
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(path="src", query="settings", include_dirs=True)
+
+    assert "src/settings/" in result.splitlines()
+    assert "src/settings/index.ts" in result.splitlines()
+
+
+@pytest.mark.asyncio
+async def test_find_files_supports_modified_sort_and_pagination(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    for idx, name in enumerate(("a.py", "b.py", "c.py"), start=1):
+        file_path = tmp_path / "src" / name
+        file_path.write_text("pass\n", encoding="utf-8")
+        os.utime(file_path, (idx, idx))
+
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(
+        path="src",
+        type="py",
+        sort="modified",
+        head_limit=1,
+        offset=1,
+    )
+
+    assert result.splitlines()[0] == "src/b.py"
+    assert "pagination: limit=1, offset=1" in result
+
+
+@pytest.mark.asyncio
+async def test_find_files_rejects_paths_outside_workspace(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside-find-files.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(path=str(outside))
+
+    assert result.startswith("Error:")
 
 
 @pytest.mark.asyncio
@@ -249,6 +311,7 @@ def test_agent_loop_registers_grep(tmp_path: Path) -> None:
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
+    assert "find_files" in loop.tools.tool_names
     assert "grep" in loop.tools.tool_names
 
 
@@ -280,6 +343,7 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
     await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status)
 
+    assert "find_files" in captured["tool_names"]
     assert "grep" in captured["tool_names"]
 
 

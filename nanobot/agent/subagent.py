@@ -79,6 +79,7 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         defaults = AgentDefaults()
@@ -95,7 +96,11 @@ class SubagentManager:
             if max_iterations is not None
             else defaults.max_tool_iterations
         )
-        self.max_concurrent_subagents = defaults.max_concurrent_subagents
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
+        )
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -140,6 +145,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -155,7 +161,9 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id)
+            self._run_subagent(
+                task_id, task, display_label, origin, status, origin_message_id, temperature
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -182,6 +190,7 @@ class SubagentManager:
         origin: dict[str, str],
         status: SubagentStatus,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -208,6 +217,7 @@ class SubagentManager:
                 initial_messages=messages,
                 tools=tools,
                 model=self.model,
+                temperature=temperature,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=_SubagentHook(task_id, status),

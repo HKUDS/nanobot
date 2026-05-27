@@ -139,6 +139,13 @@ class TestLoadBootstrapFiles:
         for name in ContextBuilder.BOOTSTRAP_FILES:
             assert f"## {name}" in result
 
+    def test_legacy_tools_md_is_not_bootstrapped(self, tmp_path):
+        (tmp_path / "TOOLS.md").write_text("workspace tool notes", encoding="utf-8")
+        builder = _builder(tmp_path)
+        result = builder._load_bootstrap_files()
+        assert "TOOLS.md" not in result
+        assert "workspace tool notes" not in result
+
     def test_utf8_content(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("用中文回复", encoding="utf-8")
         builder = _builder(tmp_path)
@@ -169,6 +176,37 @@ class TestIsTemplateContent:
         if not tpl.is_file():
             pytest.skip("MEMORY.md template not bundled")
         assert ContextBuilder._is_template_content("totally different", "memory/MEMORY.md") is False
+
+
+# ---------------------------------------------------------------------------
+# Bundled bootstrap templates
+# ---------------------------------------------------------------------------
+
+
+class TestBundledToolContract:
+    def test_tool_contract_balances_general_and_coding_workflows(self):
+        from importlib.resources import files as pkg_files
+
+        tpl = pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
+        content = tpl.read_text(encoding="utf-8")
+
+        assert "## General Tool Contract" in content
+        assert "Use the narrowest structured tool" in content
+        assert "Do not use `exec` as a universal workaround" in content
+        assert "## File and Coding Workflows" in content
+        assert "apply_patch" in content
+        assert "## Web and External Information" in content
+        assert "## Messaging and Media" in content
+        assert "## Scheduling and Background Work" in content
+        assert "pure coding" not in content.lower()
+
+    def test_tool_contract_is_injected_without_workspace_file(self, tmp_path):
+        builder = _builder(tmp_path)
+        prompt = builder.build_system_prompt()
+
+        assert "# Tool Usage Notes" in prompt
+        assert "## General Tool Contract" in prompt
+        assert "Do not use `exec` as a universal workaround" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +361,21 @@ class TestBuildMessages:
         assert "Other chat goal." in str(with_goal[-1]["content"])
         assert "Other chat goal." not in str(without_goal[-1]["content"])
         assert "Goal (active):" not in str(without_goal[-1]["content"])
+
+    def test_current_runtime_lines_are_injected(self, tmp_path):
+        builder = _builder(tmp_path)
+        messages = builder.build_messages(
+            [],
+            "please use @zoom tonight",
+            current_runtime_lines=[
+                "CLI App Attachment: @zoom (installed; tool=run_cli_app; entry_point=cli-anything-zoom).",
+            ],
+        )
+        user_msg = str(messages[-1]["content"])
+
+        assert "CLI App Attachment: @zoom" in user_msg
+        assert "tool=run_cli_app" in user_msg
+        assert "entry_point=cli-anything-zoom" in user_msg
 
     def test_consecutive_same_role_merged(self, tmp_path):
         builder = _builder(tmp_path)

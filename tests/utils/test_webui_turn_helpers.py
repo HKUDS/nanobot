@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.utils import webui_turn_helpers as wth
+from nanobot.session import webui_turns as wth
 
 
 @pytest.fixture(autouse=True)

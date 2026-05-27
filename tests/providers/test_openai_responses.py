@@ -155,6 +155,49 @@ class TestConvertMessages:
         assert items[0]["id"] == "fc_1"
         assert items[0]["name"] == "get_weather"
 
+    def test_duplicate_response_item_ids_are_made_unique(self):
+        """Codex rejects replayed Responses input items with duplicate ids."""
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_a|rs_same",
+                    "function": {"name": "first", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_a|rs_same", "content": "ok"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_b|rs_same",
+                    "function": {"name": "second", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_b|rs_same", "content": "ok"},
+        ])
+        function_call_ids = [
+            item["id"] for item in items if item.get("type") == "function_call"
+        ]
+        assert function_call_ids == ["rs_same", "rs_same_2"]
+        assert len(function_call_ids) == len(set(function_call_ids))
+
+    def test_fallback_response_item_ids_are_unique_with_multiple_tool_calls(self):
+        _, items = convert_messages([{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_a", "function": {"name": "first", "arguments": "{}"}},
+                {"id": "call_b", "function": {"name": "second", "arguments": "{}"}},
+            ],
+        }])
+        function_call_ids = [
+            item["id"] for item in items if item.get("type") == "function_call"
+        ]
+        assert function_call_ids == ["fc_0", "fc_0_2"]
+        assert len(function_call_ids) == len(set(function_call_ids))
+
     def test_assistant_with_tool_calls_no_id(self):
         """Fallback IDs when tool_call.id is missing."""
         _, items = convert_messages([{
@@ -452,6 +495,56 @@ class TestConsumeSdkStream:
         assert len(tool_calls) == 1
         assert tool_calls[0].name == "get_weather"
         assert tool_calls[0].arguments == {"city": "SF"}
+
+    @pytest.mark.asyncio
+    async def test_tool_call_argument_delta_callback(self):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "write_file"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        ev2 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='{"path":"a.txt","content":"',
+        )
+        ev3 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='hello\\n',
+        )
+        ev4 = MagicMock(
+            type="response.function_call_arguments.done",
+            call_id="c1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done = MagicMock(
+            type="function_call",
+            call_id="c1",
+            id="fc1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done.name = "write_file"
+        ev5 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev6 = MagicMock(type="response.completed", response=resp_obj)
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for e in [ev1, ev2, ev3, ev4, ev5, ev6]:
+                yield e
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=cb)
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments_delta": '{"path":"a.txt","content":"',
+            },
+            {"call_id": "c1", "name": "write_file", "arguments_delta": "hello\\n"},
+        ]
 
     @pytest.mark.asyncio
     async def test_usage_extracted(self):

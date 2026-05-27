@@ -9,6 +9,7 @@ from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
     _deep_merge,
 )
+from nanobot.providers.registry import find_by_name
 
 # ---------------------------------------------------------------------------
 # _deep_merge unit tests
@@ -183,6 +184,86 @@ class TestBuildKwargsExtraBody:
             temperature=0.1, reasoning_effort=None, tool_choice=None,
         )
         assert kwargs["extra_body"]["repetition_penalty"] == 1.15
+
+
+class TestBuildResponsesBodyExtraBody:
+    """Verify extra_body flows into Responses API request bodies."""
+
+    def test_responses_extra_body_merges_top_level_fields(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="gpt-5",
+            spec=find_by_name("openai"),
+            extra_body={
+                "metadata": {"source": "test"},
+                "parallel_tool_calls": False,
+            },
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=None, model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort=None, tool_choice=None,
+        )
+
+        assert body["metadata"] == {"source": "test"}
+        assert body["parallel_tool_calls"] is False
+
+    def test_responses_extra_body_appends_tools(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="gpt-5",
+            spec=find_by_name("openai"),
+            extra_body={"tools": [{"type": "web_search"}]},
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            model=None, max_tokens=100, temperature=0.1,
+            reasoning_effort=None, tool_choice=None,
+        )
+
+        assert body["tools"] == [
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {"type": "object"},
+            },
+            {"type": "web_search"},
+        ]
+
+    def test_responses_extra_body_merges_include_without_duplicates(self) -> None:
+        provider = OpenAICompatProvider(
+            api_key="test-key",
+            default_model="gpt-5",
+            spec=find_by_name("openai"),
+            extra_body={
+                "include": [
+                    "reasoning.encrypted_content",
+                    "web_search_call.action.sources",
+                ],
+            },
+        )
+
+        body = provider._build_responses_body(
+            messages=_simple_messages(),
+            tools=None, model=None, max_tokens=100,
+            temperature=0.1, reasoning_effort="high", tool_choice=None,
+        )
+
+        assert body["include"] == [
+            "reasoning.encrypted_content",
+            "web_search_call.action.sources",
+        ]
 
 
 # ---------------------------------------------------------------------------

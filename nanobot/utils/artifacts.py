@@ -21,8 +21,6 @@ _MIME_EXTENSIONS = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
-_GENERATE_IMAGE_TOOL_NAME = "generate_image"
-
 
 class ArtifactError(ValueError):
     """Raised when an artifact cannot be safely decoded or stored."""
@@ -115,48 +113,10 @@ def generated_image_tool_result(artifacts: list[dict[str, Any]]) -> str:
             "artifacts": artifacts,
             "next_step": (
                 "Use these artifact paths as reference_images for follow-up edits. "
-                "For the current chat, reply naturally; the runtime attaches generated images automatically. "
-                "Do not call message just to announce or resend them. Keep raw paths internal unless the user asks for debug details."
+                "Call the message tool with the artifact paths in the media parameter "
+                "to deliver the images to the user. Keep raw paths internal unless the "
+                "user asks for debug details."
             ),
         },
         ensure_ascii=False,
     )
-
-
-def _extract_text_payload(content: Any) -> str | None:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and isinstance(block.get("text"), str):
-                parts.append(block["text"])
-        return "\n".join(parts) if parts else None
-    return None
-
-
-def generated_image_paths_from_messages(messages: list[dict[str, Any]]) -> list[str]:
-    """Collect generated image artifact paths from generate_image tool results."""
-    paths: list[str] = []
-    seen: set[str] = set()
-    for message in messages:
-        if message.get("role") != "tool" or message.get("name") != _GENERATE_IMAGE_TOOL_NAME:
-            continue
-        payload = _extract_text_payload(message.get("content"))
-        if not payload:
-            continue
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
-        artifacts = data.get("artifacts") if isinstance(data, dict) else None
-        if not isinstance(artifacts, list):
-            continue
-        for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                continue
-            path = artifact.get("path")
-            if isinstance(path, str) and path and path not in seen:
-                paths.append(path)
-                seen.add(path)
-    return paths

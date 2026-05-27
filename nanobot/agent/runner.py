@@ -8,7 +8,7 @@ import os
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -16,10 +16,14 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
+    StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_error_event,
     build_file_edit_start_event,
-    prepare_file_edit_tracker,
+    prepare_file_edit_trackers,
+)
+from nanobot.utils.file_edit_events import (
+    prepare_file_edit_tracker as _prepare_file_edit_tracker,
 )
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
@@ -40,6 +44,7 @@ from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
+    build_goal_continue_message,
     build_length_recovery_message,
     ensure_nonempty_tool_result,
     is_blank_text,
@@ -57,11 +62,14 @@ _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
 _COMPACTABLE_TOOLS = frozenset({
-    "read_file", "exec", "grep",
-    "web_search", "web_fetch", "list_dir",
+    "read_file", "exec", "grep", "find_files",
+    "web_search", "web_fetch", "list_dir", "list_exec_sessions",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
+# Backward-compatible module attribute for tests/extensions that monkeypatch
+# the former single-file tracker hook. Runtime uses prepare_file_edit_trackers.
+prepare_file_edit_tracker = _prepare_file_edit_tracker
 
 
 @dataclass(slots=True)
@@ -92,6 +100,8 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    goal_active_predicate: Callable[[], bool] | None = None
+    goal_continue_message: str | None = None
 
 
 @dataclass(slots=True)
@@ -162,6 +172,7 @@ class AgentRunner:
         *,
         phase: str = "after error",
         iteration: int | None = None,
+        allow_goal_continue: bool = False,
     ) -> tuple[bool, int]:
         """Drain pending injections. Returns (should_continue, updated_cycles).
 
@@ -170,12 +181,19 @@ class AgentRunner:
         and *iteration* are both provided) and return (True, cycles+1) so the
         caller continues the iteration loop.  Otherwise return (False, cycles).
         """
-        if injection_cycles >= _MAX_INJECTION_CYCLES:
-            return False, injection_cycles
-        injections = await self._drain_injections(spec)
+        injections: list[dict[str, Any]] = []
+        real_injection = False
+        if injection_cycles < _MAX_INJECTION_CYCLES:
+            injections = await self._drain_injections(spec)
+            real_injection = bool(injections)
+        if not injections and allow_goal_continue and assistant_message is not None:
+            predicate = spec.goal_active_predicate
+            if predicate is not None and predicate():
+                injections = [build_goal_continue_message(spec.goal_continue_message)]
         if not injections:
             return False, injection_cycles
-        injection_cycles += 1
+        if real_injection:
+            injection_cycles += 1
         if assistant_message is not None:
             messages.append(assistant_message)
             if iteration is not None:
@@ -191,10 +209,13 @@ class AgentRunner:
                     },
                 )
         self._append_injected_messages(messages, injections)
-        logger.info(
-            "Injected {} follow-up message(s) {} ({}/{})",
-            len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
-        )
+        if real_injection:
+            logger.info(
+                "Injected {} follow-up message(s) {} ({}/{})",
+                len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
+            )
+        else:
+            logger.info("Injected sustained-goal continuation {}", phase)
         return True, injection_cycles
 
     async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
@@ -470,6 +491,7 @@ class AgentRunner:
                 spec, messages, assistant_message, injection_cycles,
                 phase="after final response",
                 iteration=iteration,
+                allow_goal_continue=True,
             )
             if should_continue:
                 had_injections = True
@@ -629,6 +651,24 @@ class AgentRunner:
         )
 
         progress_state: dict[str, bool] | None = None
+        live_file_edits: StreamingFileEditTracker | None = None
+
+        if (
+            spec.progress_callback is not None
+            and on_progress_accepts_file_edit_events(spec.progress_callback)
+        ):
+            async def _emit_live_file_edits(events: list[dict[str, Any]]) -> None:
+                await invoke_file_edit_progress(spec.progress_callback, events)
+
+            live_file_edits = StreamingFileEditTracker(
+                workspace=spec.workspace,
+                tools=spec.tools,
+                emit=_emit_live_file_edits,
+            )
+
+        async def _tool_call_delta(delta: dict[str, Any]) -> None:
+            if live_file_edits is not None:
+                await live_file_edits.update(delta)
 
         if wants_streaming:
             async def _stream(delta: str) -> None:
@@ -646,6 +686,7 @@ class AgentRunner:
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
+                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         elif wants_progress_streaming:
             stream_buf = ""
@@ -675,6 +716,7 @@ class AgentRunner:
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
+                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)
@@ -689,6 +731,14 @@ class AgentRunner:
                 await coro if outer_timeout_s is None
                 else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
+            if live_file_edits is not None:
+                await live_file_edits.flush()
+                if response.should_execute_tools:
+                    live_file_edits.apply_final_call_ids(response.tool_calls)
+                await live_file_edits.error_unmatched(
+                    response.tool_calls if response.should_execute_tools else [],
+                    "Tool call did not complete.",
+                )
         except asyncio.TimeoutError:
             if outer_timeout_s is None:
                 return LLMResponse(
@@ -828,8 +878,8 @@ class AgentRunner:
             and on_progress_accepts_file_edit_events(spec.progress_callback)
         )
         progress_callback = spec.progress_callback if emit_file_edit_events else None
-        file_edit_tracker = (
-            prepare_file_edit_tracker(
+        file_edit_trackers = (
+            prepare_file_edit_trackers(
                 call_id=tool_call.id,
                 tool_name=tool_call.name,
                 tool=tool,
@@ -839,13 +889,13 @@ class AgentRunner:
             if progress_callback is not None
             else None
         )
-        if file_edit_tracker is not None and progress_callback is not None:
+        if file_edit_trackers and progress_callback is not None:
             await invoke_file_edit_progress(
                 progress_callback,
                 [build_file_edit_start_event(
                     file_edit_tracker,
                     params if isinstance(params, dict) else None,
-                )],
+                ) for file_edit_tracker in file_edit_trackers],
             )
         try:
             if tool is not None:
@@ -855,10 +905,13 @@ class AgentRunner:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
-            if file_edit_tracker is not None and progress_callback is not None:
+            if file_edit_trackers and progress_callback is not None:
                 await invoke_file_edit_progress(
                     progress_callback,
-                    [build_file_edit_error_event(file_edit_tracker, str(exc))],
+                    [
+                        build_file_edit_error_event(file_edit_tracker, str(exc))
+                        for file_edit_tracker in file_edit_trackers
+                    ],
                 )
             event = {
                 "name": tool_call.name,
@@ -881,10 +934,13 @@ class AgentRunner:
             return payload, event, None
 
         if isinstance(result, str) and result.startswith("Error"):
-            if file_edit_tracker is not None and progress_callback is not None:
+            if file_edit_trackers and progress_callback is not None:
                 await invoke_file_edit_progress(
                     progress_callback,
-                    [build_file_edit_error_event(file_edit_tracker, result)],
+                    [
+                        build_file_edit_error_event(file_edit_tracker, result)
+                        for file_edit_tracker in file_edit_trackers
+                    ],
                 )
             event = {
                 "name": tool_call.name,
@@ -904,10 +960,13 @@ class AgentRunner:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
 
-        if file_edit_tracker is not None and progress_callback is not None:
+        if file_edit_trackers and progress_callback is not None:
             await invoke_file_edit_progress(
                 progress_callback,
-                [build_file_edit_end_event(file_edit_tracker)],
+                [build_file_edit_end_event(
+                    file_edit_tracker,
+                    params if isinstance(params, dict) else None,
+                ) for file_edit_tracker in file_edit_trackers],
             )
 
         detail = "" if result is None else str(result)

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from nanobot.utils.webui_thread_disk import delete_webui_thread, webui_thread_file_path
-from nanobot.utils.webui_transcript import append_transcript_object, webui_transcript_path
+from nanobot.webui.thread_disk import delete_webui_thread, webui_thread_file_path
+from nanobot.webui.transcript import append_transcript_object, webui_transcript_path
 
 
 def test_delete_webui_thread_removes_legacy_json_and_transcript(tmp_path, monkeypatch) -> None:

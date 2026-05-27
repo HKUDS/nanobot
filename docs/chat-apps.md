@@ -17,6 +17,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
+| **Signal** | signal-cli daemon + phone number |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -49,6 +50,43 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 ```bash
 nanobot gateway
 ```
+
+**Webhook mode (optional)**
+
+Telegram uses long polling by default. To receive updates through a webhook, expose
+a public HTTPS URL that forwards to nanobot's local listener and set `mode` to
+`webhook`:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "mode": "webhook",
+      "webhookUrl": "https://example.com/telegram",
+      "webhookListenHost": "127.0.0.1",
+      "webhookListenPort": 8081,
+      "webhookPath": "/telegram",
+      "webhookSecretToken": "CHANGE_ME_RANDOM_SECRET",
+      "webhookMaxConnections": 4,
+      "allowFrom": ["YOUR_USER_ID"]
+    }
+  }
+}
+```
+
+> `webhookSecretToken` is required in webhook mode. Do not expose the local
+> webhook listener directly to the public internet without a reverse proxy or
+> tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only
+> listens on `webhookListenHost:webhookListenPort` and validates Telegram's
+> webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot
+> still serializes Telegram updates per conversation before forwarding them to
+> the agent.
+>
+> `webhookUrl` is the public HTTPS URL registered with Telegram.
+> `webhookPath` is the local path nanobot listens on. They often use the same
+> path, but may differ when a reverse proxy or tunnel rewrites the request path.
 
 </details>
 
@@ -667,5 +705,71 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Signal</b></summary>
+
+Uses **signal-cli** daemon in HTTP mode — receive messages via SSE, send via JSON-RPC.
+
+**1. Install signal-cli**
+
+Install [signal-cli](https://github.com/AsamK/signal-cli) and register a phone number:
+
+```bash
+signal-cli -u +1234567890 register
+signal-cli -u +1234567890 verify <CODE>
+```
+
+Start the daemon:
+
+```bash
+signal-cli -a +1234567890 daemon --http localhost:8080
+```
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "phoneNumber": "+1234567890",
+      "daemonHost": "localhost",
+      "daemonPort": 8080,
+      "dm": {
+        "enabled": true,
+        "policy": "open"
+      },
+      "group": {
+        "enabled": true,
+        "policy": "open",
+        "requireMention": true
+      }
+    }
+  }
+}
+```
+
+> - `phoneNumber`: Your registered Signal phone number.
+> - `daemonHost` / `daemonPort`: Where signal-cli daemon is listening (default `localhost:8080`).
+> - `dm.policy`: `"open"` (anyone can DM) or `"allowlist"` (only listed numbers/UUIDs). When `"allowlist"`, unlisted DM senders receive a pairing code.
+> - `dm.allowFrom`: List of allowed phone numbers or UUIDs (used when policy is `"allowlist"`).
+> - `group.policy`: `"open"` (all groups) or `"allowlist"` (only listed group IDs).
+> - `group.requireMention`: When `true` (default), the bot only responds in groups when @mentioned.
+> - `group.allowFrom`: List of allowed group IDs (used when group policy is `"allowlist"`).
+> - `attachmentsDir`: Override the directory where signal-cli stores inbound attachments. Defaults to `~/.local/share/signal-cli/attachments` (the Linux default). Set this if signal-cli runs with a custom `XDG_DATA_HOME` or on macOS/Windows.
+> - `groupMessageBufferSize`: Number of recent group messages kept for context (default `20`, must be > 0).
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops.
+> Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
 
 </details>

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
@@ -33,21 +34,24 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
+    goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
+    sustained_goal_active,
 )
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.artifacts import generated_image_paths_from_messages
+from nanobot.session.webui_turns import (
+    WebuiTurnCoordinator,
+    build_bus_progress_callback,
+    mark_webui_session,
+)
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
-from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
-from nanobot.utils.webui_turn_helpers import (
-    WebuiTurnCoordinator,
-    build_bus_progress_callback,
-    mark_webui_session,
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    SUSTAINED_GOAL_CONTINUE_PROMPT,
 )
 
 if TYPE_CHECKING:
@@ -60,7 +64,6 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
-
 
 class TurnState(Enum):
     RESTORE = auto()
@@ -103,7 +106,6 @@ class TurnContext:
     save_skip: int = 0
 
     outbound: OutboundMessage | None = None
-    generated_media: list[str] = field(default_factory=list)
 
     on_progress: Callable[..., Awaitable[None]] | None = None
     on_stream: Callable[[str], Awaitable[None]] | None = None
@@ -167,6 +169,7 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
@@ -265,6 +268,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
+            max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
@@ -350,6 +354,7 @@ class AgentLoop:
             workspace=config.workspace_path,
             model=model,
             max_iterations=defaults.max_tool_iterations,
+            max_concurrent_subagents=defaults.max_concurrent_subagents,
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
@@ -479,26 +484,8 @@ class AgentLoop:
         logger.info("Registered {} tools: {}", len(registered), registered)
 
     async def _connect_mcp(self) -> None:
-        """Connect to configured MCP servers (one-time, lazy)."""
-        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            return
-        self._mcp_connecting = True
-        from nanobot.agent.tools.mcp import connect_mcp_servers
-
-        try:
-            self._mcp_stacks = await connect_mcp_servers(self._mcp_servers, self.tools)
-            if self._mcp_stacks:
-                self._mcp_connected = True
-            else:
-                logger.warning("No MCP servers connected successfully (will retry next message)")
-        except asyncio.CancelledError:
-            logger.warning("MCP connection cancelled (will retry next message)")
-            self._mcp_stacks.clear()
-        except BaseException as e:
-            logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
-            self._mcp_stacks.clear()
-        finally:
-            self._mcp_connecting = False
+        """Connect configured MCP servers."""
+        await agent_context.connect_mcp(self, self.tools)
 
     def _set_tool_context(
         self, channel: str, chat_id: str,
@@ -571,7 +558,7 @@ class AgentLoop:
         media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
         has_text = isinstance(msg.content, str) and msg.content.strip()
         if has_text or media_paths:
-            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
+            extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
             session.add_message("user", text, **extra)
@@ -596,7 +583,7 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
-            session_metadata=session.metadata,
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace),
         )
 
     async def _dispatch_command_inline(
@@ -747,6 +734,15 @@ class AgentLoop:
 
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        # Build continuation message that embeds the active goal objective so
+        # the LLM can see it even if earlier Runtime Context was truncated.
+        _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
+        _goal_continue = (
+            "You have an active sustained goal:\n\n"
+            + "\n".join(_goal_lines)
+            + "\n\nPlease continue working toward the objective using your tools, "
+            "or call complete_goal if the work is truly finished."
+        ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -774,6 +770,8 @@ class AgentLoop:
                     session.key if session is not None else session_key,
                     metadata=(session.metadata if session is not None else None),
                 ),
+                goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
+                goal_continue_message=_goal_continue,
             ))
         finally:
             reset_file_states(file_state_token)
@@ -814,6 +812,8 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
+            if await agent_context.handle_runtime_control(self, msg, self.tools):
+                continue
             raw = msg.content.strip()
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
@@ -1061,7 +1061,7 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
-            session_metadata=session.metadata,
+            session_metadata=session.metadata, current_runtime_lines=agent_context.runtime_lines(self, msg, self.context.workspace, skip=is_subagent),
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
@@ -1194,7 +1194,6 @@ class AgentLoop:
         all_msgs: list[dict[str, Any]],
         stop_reason: str,
         had_injections: bool,
-        generated_media: list[str],
         on_stream: Callable[[str], Awaitable[None]] | None,
         *,
         turn_latency_ms: int | None = None,
@@ -1218,7 +1217,6 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
-            media=generated_media,
             metadata=meta,
         )
 
@@ -1348,11 +1346,6 @@ class AgentLoop:
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
-        skip_msgs = ctx.all_messages[ctx.save_skip:]
-        ctx.generated_media = generated_image_paths_from_messages(skip_msgs)
-        mt = self.tools.get("message")
-        extra = getattr(mt, "turn_delivered_media_paths", lambda: [])() if mt else []
-        merge_turn_media_into_last_assistant(ctx.all_messages, ctx.generated_media, extra)
 
         ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
         self._save_turn(
@@ -1380,7 +1373,6 @@ class AgentLoop:
             ctx.all_messages,
             ctx.stop_reason,
             ctx.had_injections,
-            ctx.generated_media,
             ctx.on_stream,
             turn_latency_ms=ctx.turn_latency_ms,
         )

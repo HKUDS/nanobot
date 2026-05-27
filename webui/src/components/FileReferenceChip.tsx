@@ -19,6 +19,7 @@ type FileReferenceKind =
 
 interface FileReferenceChipProps {
   path: string;
+  tooltipPath?: string;
   display?: "name" | "path";
   active?: boolean;
   className?: string;
@@ -28,27 +29,29 @@ interface FileReferenceChipProps {
 
 export function FileReferenceChip({
   path,
+  tooltipPath,
   display = "name",
   active = false,
   className,
   textClassName,
   testId = "inline-file-path",
 }: FileReferenceChipProps) {
-  const { name } = splitFilePath(path);
+  const { directory, name } = splitFilePath(path);
   const kind = fileKindForPath(path);
   const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
+  const fullPath = tooltipPath || path;
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            className={cn("not-prose inline-flex max-w-full align-[0.14em]", className)}
+            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", className)}
           >
             <span
               data-testid={testId}
-              aria-label={path}
+              aria-label={fullPath}
               className={cn(
-                "inline-flex max-w-full items-center gap-1 font-medium leading-[1.1]",
+                "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
                 "text-sky-600 transition-colors hover:text-sky-700",
                 "dark:text-sky-300 dark:hover:text-sky-200",
               )}
@@ -57,12 +60,19 @@ export function FileReferenceChip({
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 truncate",
-                  active && "streaming-text-sheen",
+                  "min-w-0 max-w-full truncate",
+                  active && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
               >
-                {displayText}
+                {display === "path" && directory ? (
+                  <>
+                    <span className="text-muted-foreground/65">{directory}</span>
+                    <span className="font-semibold text-sky-700 dark:text-sky-200">{name}</span>
+                  </>
+                ) : (
+                  displayText
+                )}
               </span>
             </span>
           </span>
@@ -79,7 +89,7 @@ export function FileReferenceChip({
             "shadow-lg backdrop-blur",
           )}
         >
-          {path}
+          {fullPath}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -151,7 +161,7 @@ function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
     return (
       <svg
         aria-hidden
-        className="h-[0.98em] w-[0.98em] shrink-0 text-sky-500 dark:text-sky-300"
+        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -170,7 +180,7 @@ function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
     return (
       <svg
         aria-hidden
-        className="h-[0.98em] w-[0.98em] shrink-0 text-sky-500 dark:text-sky-300"
+        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -185,16 +195,36 @@ function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
   }
   const label = fileKindLabel(kind);
   return (
-    <span
+    <svg
       aria-hidden
-      className={cn(
-        "inline-flex h-[1.05em] min-w-[1.05em] shrink-0 items-center justify-center",
-        "rounded-[4px] bg-sky-500/12 px-[0.22em] text-[0.58em] font-bold uppercase leading-none",
-        "text-sky-600 dark:bg-sky-400/15 dark:text-sky-300",
-      )}
+      className="h-[0.96em] w-[0.96em] shrink-0 translate-y-[0.12em] text-sky-500 dark:text-sky-300"
+      viewBox="0 0 24 24"
+      fill="none"
     >
-      {label}
-    </span>
+      <path
+        d="M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
+        fill="currentColor"
+        opacity="0.12"
+      />
+      <path
+        d="M13.5 3.75V8h4.25M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <text
+        x="12"
+        y="15.7"
+        textAnchor="middle"
+        fill="currentColor"
+        fontSize={label.length > 1 ? "5.8" : "7.2"}
+        fontWeight="800"
+        letterSpacing="-0.2"
+      >
+        {label}
+      </text>
+    </svg>
   );
 }
 

@@ -2,6 +2,18 @@
 
 <div align="center">
   <p>
+    <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview">English</a> |
+    <a href="https://nanobot.wiki/cn/docs/latest/getting-started/nanobot-overview">简体中文</a> |
+    <a href="https://nanobot.wiki/zh-Hant/docs/latest/getting-started/nanobot-overview">繁體中文</a> |
+    <a href="https://nanobot.wiki/es/docs/latest/getting-started/nanobot-overview">Español</a> |
+    <a href="https://nanobot.wiki/fr/docs/latest/getting-started/nanobot-overview">Français</a> |
+    <a href="https://nanobot.wiki/id/docs/latest/getting-started/nanobot-overview">Bahasa Indonesia</a> |
+    <a href="https://nanobot.wiki/ja/docs/latest/getting-started/nanobot-overview">日本語</a> |
+    <a href="https://nanobot.wiki/ko/docs/latest/getting-started/nanobot-overview">한국어</a> |
+    <a href="https://nanobot.wiki/ru/docs/latest/getting-started/nanobot-overview">Русский</a> |
+    <a href="https://nanobot.wiki/vi/docs/latest/getting-started/nanobot-overview">Tiếng Việt</a>
+  </p>
+  <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
@@ -61,7 +73,7 @@
 - **2026-04-13** 🛡️ Agent turn hardened — user messages persisted early, auto-compact skips active tasks.
 - **2026-04-12** 🔒 Lark global domain support, Dream learns discovered skills, shell sandbox tightened.
 - **2026-04-11** ⚡ Context compact shrinks sessions on the fly; Kagi web search; QQ & WeCom full media.
-- **2026-04-10** 📓 Notebook editing tool, multiple MCP servers, Feishu streaming & done-emoji.
+- **2026-04-10** 📓 Multiple MCP servers, Feishu streaming & done-emoji.
 - **2026-04-09** 🔌 WebSocket channel, unified cross-channel session, `disabled_skills` config.
 - **2026-04-08** 📤 API file uploads, OpenAI reasoning auto-routing with Responses fallback.
 - **2026-04-07** 🧠 Anthropic adaptive thinking, MCP resources & prompts exposed as tools.
@@ -212,6 +224,7 @@ nanobot agent
 
 
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run locally? Use [Atomic Chat](./docs/configuration.md#atomic-chat-local), [vLLM](./docs/configuration.md#vllm-local-openai-compatible), [Ollama](./docs/configuration.md#ollama-local), and [others](./docs/configuration.md#local-providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 

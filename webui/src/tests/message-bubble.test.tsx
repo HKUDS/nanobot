@@ -2,7 +2,64 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+
+const CLI_APPS: CliAppInfo[] = [
+  {
+    name: "zoom",
+    display_name: "Zoom",
+    category: "productivity",
+    description: "Meetings",
+    requires: "",
+    source: "harness",
+    entry_point: "cli-anything-zoom",
+    install_supported: true,
+    installed: true,
+    available: true,
+    status: "installed",
+    logo_url: "https://example.invalid/zoom.svg",
+    brand_color: "#0B5CFF",
+    skill_installed: true,
+  },
+  {
+    name: "krita",
+    display_name: "Krita",
+    category: "image",
+    description: "Painting",
+    requires: "",
+    source: "harness",
+    entry_point: "cli-anything-krita",
+    install_supported: true,
+    installed: false,
+    available: false,
+    status: "not_installed",
+    logo_url: null,
+    brand_color: "#3BABFF",
+    skill_installed: false,
+  },
+];
+
+const MCP_PRESETS: McpPresetInfo[] = [
+  {
+    name: "browserbase",
+    display_name: "Browserbase",
+    category: "browser",
+    description: "Cloud browser automation",
+    docs_url: "https://docs.browserbase.com",
+    transport: "streamableHttp",
+    requires: "Browserbase API key",
+    note: "",
+    install_supported: true,
+    installed: true,
+    configured: true,
+    available: true,
+    status: "configured",
+    logo_url: "https://example.invalid/browserbase.svg",
+    brand_color: "#111827",
+    required_fields: [],
+    connection_summary: "https://mcp.browserbase.com/mcp",
+  },
+];
 
 describe("MessageBubble", () => {
   it("renders user messages as right-aligned pills", () => {
@@ -20,6 +77,71 @@ describe("MessageBubble", () => {
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
     expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
+  it("renders installed CLI app mentions inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-cli",
+      role: "user",
+      content: "Hi nano, please use @zoom to book a meeting, not @krita",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+
+    const token = screen.getByTestId("message-cli-mention-zoom");
+    expect(token).toHaveTextContent("@zoom");
+    expect(token).toHaveAttribute("title", "CLI app: Zoom");
+    expect(token.className).not.toContain("rounded");
+    expect(token.className).not.toContain("px-");
+    expect(token.getAttribute("style")).toContain("color: #0B5CFF");
+    expect(token.getAttribute("style")).toContain("text-shadow");
+    expect(screen.getByTestId("message-cli-mention-logo-zoom")).toBeInTheDocument();
+    expect(screen.queryByTestId("message-cli-mention-krita")).not.toBeInTheDocument();
+    expect(screen.getByText(/not @krita/)).toBeInTheDocument();
+  });
+
+  it("renders structured CLI app attachments even without the installed catalog", () => {
+    const message: UIMessage = {
+      id: "u-cli-attached",
+      role: "user",
+      content: "Please use @drawio for the diagram",
+      createdAt: Date.now(),
+      cliApps: [{
+        name: "drawio",
+        display_name: "Draw.io",
+        category: "diagram",
+        entry_point: "cli-anything-drawio",
+        logo_url: "https://example.invalid/drawio.svg",
+        brand_color: "#F08705",
+      }],
+    };
+
+    render(<MessageBubble message={message} cliApps={[]} />);
+
+    const token = screen.getByTestId("message-cli-mention-drawio");
+    expect(token).toHaveTextContent("@drawio");
+    expect(token.className).not.toContain("rounded");
+    expect(token.className).not.toContain("px-");
+    expect(token.getAttribute("style")).toContain("color: #F08705");
+    expect(screen.getByTestId("message-cli-mention-logo-drawio")).toBeInTheDocument();
+  });
+
+  it("renders MCP preset mentions inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-mcp",
+      role: "user",
+      content: "Use @browserbase to inspect the checkout flow",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} mcpPresets={MCP_PRESETS} />);
+
+    const token = screen.getByTestId("message-mcp-mention-browserbase");
+    expect(token).toHaveTextContent("@browserbase");
+    expect(token).toHaveAttribute("title", "MCP server: Browserbase");
+    expect(token.getAttribute("style")).toContain("color: #111827");
+    expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
   });
 
   it("copies completed assistant replies from the action row", async () => {
@@ -195,7 +317,9 @@ describe("MessageBubble", () => {
       const references = await screen.findAllByTestId("inline-file-path");
       expect(references).toHaveLength(2);
       expect(references[0].parentElement).not.toHaveClass("translate-y-[0.08em]");
-      expect(references[0].parentElement).toHaveClass("align-[0.14em]");
+      expect(references[0].parentElement).toHaveClass("align-baseline");
+      expect(references[0].parentElement).toHaveClass("leading-[inherit]");
+      expect(references[0]).toHaveClass("items-baseline");
       expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
       expect(references[0]).not.toHaveTextContent("webui/src/components");
       expect(screen.getByText("index.html")).toBeInTheDocument();

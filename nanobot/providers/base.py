@@ -70,11 +70,11 @@ class LLMResponse:
 
     @property
     def should_execute_tools(self) -> bool:
-        """Tools execute only when has_tool_calls AND finish_reason is ``tool_calls`` / ``stop``.
+        """Tools execute only when has_tool_calls AND finish_reason is a tool-capable stop.
         Blocks gateway-injected calls under ``refusal`` / ``content_filter`` / ``error`` (#3220)."""
         if not self.has_tool_calls:
             return False
-        return self.finish_reason in ("tool_calls", "stop")
+        return self.finish_reason in ("tool_calls", "function_call", "stop")
 
 
 @dataclass(frozen=True)
@@ -501,6 +501,7 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Stream a chat completion, calling *on_content_delta* for each text chunk.
 
@@ -514,7 +515,7 @@ class LLMProvider(ABC):
         full content as a single delta.  Providers that support native
         streaming should override this method.
         """
-        _ = on_thinking_delta
+        _ = on_thinking_delta, on_tool_call_delta
         response = await self.chat(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
@@ -544,6 +545,7 @@ class LLMProvider(ABC):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -561,6 +563,7 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
             on_content_delta=on_content_delta,
             on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
         )
         return await self._run_with_retry(
             self._safe_chat_stream,

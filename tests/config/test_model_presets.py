@@ -1,3 +1,5 @@
+import pytest
+
 from nanobot.config.schema import Config
 
 
@@ -10,6 +12,40 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.context_window_tokens == config.agents.defaults.context_window_tokens
     assert resolved.temperature == config.agents.defaults.temperature
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
+
+
+def test_provider_api_type_accepts_exact_values_only() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "openai": {
+                "apiKey": "sk-test",
+                "apiType": "responses",
+            }
+        }
+    })
+    assert config.providers.openai.api_type == "responses"
+
+    with pytest.raises(ValueError):
+        Config.model_validate({
+            "providers": {
+                "openai": {
+                    "apiKey": "sk-test",
+                    "apiType": "response",
+                }
+            }
+        })
+
+
+def test_provider_api_type_is_openai_only() -> None:
+    with pytest.raises(ValueError, match="only supported"):
+        Config.model_validate({
+            "providers": {
+                "custom": {
+                    "apiBase": "https://example.test/v1",
+                    "apiType": "responses",
+                }
+            }
+        })
 
 
 def test_legacy_defaults_config_without_presets_still_resolves() -> None:
@@ -192,3 +228,20 @@ def test_match_provider_uses_preset_provider_when_forced() -> None:
     })
     name = config.get_provider_name()
     assert name == "anthropic"
+
+
+def test_match_provider_routes_forced_novita_model_api_models() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "novita": {"apiKey": "sk-test"},
+        },
+        "agents": {
+            "defaults": {
+                "model": "deepseek-v4-pro",
+                "provider": "novita",
+            }
+        },
+    })
+
+    assert config.get_provider_name() == "novita"
+    assert config.get_api_base() == "https://api.novita.ai/openai"

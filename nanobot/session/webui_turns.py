@@ -1,4 +1,4 @@
-"""Outbound helpers for the WebSocket/WebUI wire contract.
+"""Session turn helpers for WebUI-capable WebSocket sessions.
 
 AgentLoop uses these without importing a concrete channel plugin; only
 ``channel == "websocket"`` messages are affected.

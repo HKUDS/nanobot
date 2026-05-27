@@ -132,6 +132,37 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
+  it("notifies run status subscribers and replays running chats", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRunStatus(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-status",
+      status: "running",
+      started_at: 12_345,
+    });
+    expect(handler).toHaveBeenCalledWith("chat-status", 12_345);
+
+    const lateHandler = vi.fn();
+    client.onRunStatus(lateHandler);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", 12_345);
+
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-status",
+      status: "idle",
+    });
+    expect(handler).toHaveBeenCalledWith("chat-status", null);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", null);
+  });
+
   it("records goal_state per chat_id without an onChat subscriber", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -296,6 +327,96 @@ describe("NanobotClient", () => {
         chat_id: "chat-img",
         content: "draw a banner",
         image_generation: { enabled: true, aspect_ratio: "16:9" },
+        webui: true,
+      }),
+    );
+  });
+
+  it("includes CLI app attachments in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-cli",
+      "@drawio please make this diagram",
+      undefined,
+      {
+        cliApps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-cli",
+        content: "@drawio please make this diagram",
+        cli_apps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+        webui: true,
+      }),
+    );
+  });
+
+  it("includes MCP preset attachments in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-mcp",
+      "@browserbase check this page",
+      undefined,
+      {
+        mcpPresets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-mcp",
+        content: "@browserbase check this page",
+        mcp_presets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
         webui: true,
       }),
     );

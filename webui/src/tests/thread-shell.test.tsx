@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { UIMessage } from "@/lib/types";
+import type { CliAppsPayload, UIMessage } from "@/lib/types";
 function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
@@ -337,6 +338,84 @@ describe("ThreadShell", () => {
       expect(screen.getByText("first message should stay")).toBeInTheDocument(),
     );
     expect(screen.queryByText("What can I do for you?")).not.toBeInTheDocument();
+  });
+
+  it("keeps a live first command reply when the initial history snapshot is stale", async () => {
+    const client = makeClient();
+    const onCreateChat = vi.fn().mockResolvedValue("chat-new");
+    let resolveThread:
+      | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
+      | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-new/webui-thread")) {
+          return new Promise((resolve) => {
+            resolveThread = resolve;
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        });
+      }),
+    );
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onCreateChat={onCreateChat}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/model" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-new")}
+            title="Chat chat-new"
+            onToggleSidebar={() => {}}
+            onCreateChat={onCreateChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith("chat-new", "/model", undefined),
+    );
+
+    await act(async () => {
+      client._emitChat("chat-new", {
+        event: "message",
+        chat_id: "chat-new",
+        text: "## Model\n- Current model: `Ring-2.6-1T`",
+      });
+    });
+    expect(screen.getByText(/Current model/)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveThread?.(
+        httpJson(transcriptFromSimpleMessages([{ role: "user", content: "/model" }])),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText(/Current model/)).toBeInTheDocument());
   });
 
   it("sends quick action prompts from the empty thread landing", async () => {
@@ -993,5 +1072,51 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("from chat b")).toBeInTheDocument());
     expect(screen.queryByText("from chat a")).not.toBeInTheDocument();
+  });
+
+  it("updates @ CLI app suggestions when settings broadcasts an install", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-cli-apps")}
+        title="Chat chat-cli-apps"
+        onToggleSidebar={() => {}}
+        onGoHome={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    expect(screen.queryByRole("listbox", { name: "Apps" })).not.toBeInTheDocument();
+
+    const payload: CliAppsPayload = {
+      apps: [{
+        name: "gimp",
+        display_name: "GIMP",
+        category: "image",
+        description: "Image editing",
+        requires: "",
+        source: "harness",
+        entry_point: "cli-anything-gimp",
+        install_supported: true,
+        installed: true,
+        available: true,
+        status: "installed",
+        logo_url: null,
+        brand_color: "#5C5543",
+        skill_installed: true,
+      }],
+      installed_count: 1,
+      catalog_updated_at: "2026-04-18",
+    };
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(CLI_APPS_CHANGED_EVENT, { detail: payload }));
+    });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
   });
 });

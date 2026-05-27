@@ -32,12 +32,17 @@ export function ThreadHeader({
           onClick={onToggleSidebar}
           className={cn(
             "h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
-            hideSidebarToggleOnDesktop && "lg:pointer-events-none lg:opacity-0",
+            hideSidebarToggleOnDesktop && "lg:hidden",
           )}
         >
           <Menu className="h-3.5 w-3.5" />
         </Button>
-        <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />
+        <ThemeButton
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          label={t("thread.header.toggleTheme")}
+          className="ml-auto"
+        />
       </div>
     );
   }
@@ -52,7 +57,7 @@ export function ThreadHeader({
           onClick={onToggleSidebar}
           className={cn(
             "h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground",
-            hideSidebarToggleOnDesktop && "lg:pointer-events-none lg:opacity-0",
+            hideSidebarToggleOnDesktop && "lg:hidden",
           )}
         >
           <Menu className="h-3.5 w-3.5" />
@@ -62,7 +67,12 @@ export function ThreadHeader({
         </div>
       </div>
 
-      <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />
+      <ThemeButton
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        label={t("thread.header.toggleTheme")}
+        className="ml-auto shrink-0"
+      />
 
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
     </div>
@@ -73,10 +83,12 @@ function ThemeButton({
   theme,
   onToggleTheme,
   label,
+  className,
 }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   label: string;
+  className?: string;
 }) {
   return (
     <Button
@@ -84,7 +96,10 @@ function ThemeButton({
       size="icon"
       aria-label={label}
       onClick={onToggleTheme}
-      className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+      className={cn(
+        "h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
+        className,
+      )}
     >
       {theme === "dark" ? (
         <Sun className="h-4 w-4" />

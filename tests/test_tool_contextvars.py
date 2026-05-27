@@ -64,6 +64,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
+            temperature: float | None = None,
         ) -> str:
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"{origin_channel}:{origin_chat_id}:{task}"
@@ -176,6 +177,7 @@ async def test_spawn_tool_basic_set_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            temperature=None,
         ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"ok: {task}"
@@ -208,6 +210,7 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            temperature=None,
         ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return "ok"

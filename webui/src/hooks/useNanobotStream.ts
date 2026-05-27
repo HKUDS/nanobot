@@ -2,11 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
-import { toolTraceLinesFromEvents } from "@/lib/tool-traces";
+import {
+  mergeToolProgressEvents,
+  mergeUniqueToolTraceLines,
+  normalizeToolProgressEvents,
+  toolTraceLinesFromEvents,
+} from "@/lib/tool-traces";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
+  OutboundCliAppMention,
   OutboundImageGeneration,
+  OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
   UIImage,
@@ -187,6 +194,15 @@ function stampLastAssistantLatency(prev: UIMessage[], latencyMs: number): UIMess
   return prev;
 }
 
+function findLatestAssistantAnswerIndex(prev: UIMessage[]): number | null {
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const m = prev[i];
+    if (m.role === "assistant" && m.kind !== "trace") return i;
+    if (m.role === "user") break;
+  }
+  return null;
+}
+
 function absorbCompleteAssistantMessage(
   prev: UIMessage[],
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
@@ -215,18 +231,19 @@ function absorbCompleteAssistantMessage(
 }
 
 function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
-  return `${edit.call_id}|${edit.tool}|${edit.path}`;
+  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+  return `${edit.tool}|${edit.path}`;
 }
 
 function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
-  if (!edit || !edit.path || !edit.tool) return null;
+  if (!edit || !edit.tool || (!edit.path && !edit.pending)) return null;
   const inferredStatus =
     edit.phase === "error"
       ? "error"
       : edit.phase === "end"
         ? "done"
         : "editing";
-  return {
+  const normalized: UIFileEdit = {
     ...edit,
     call_id: edit.call_id || `${edit.tool}:${edit.path}`,
     added: Number.isFinite(edit.added) ? Math.max(0, Math.round(edit.added)) : 0,
@@ -235,6 +252,8 @@ function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
       ? edit.status
       : inferredStatus,
   };
+  if (edit.pending && !edit.path) normalized.pending = true;
+  return normalized;
 }
 
 function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit[]): UIFileEdit[] {
@@ -250,9 +269,29 @@ function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit
       next.push(edit);
       continue;
     }
-    next[existingIndex] = { ...next[existingIndex], ...edit };
+    const merged = { ...next[existingIndex], ...edit };
+    if (edit.path && !edit.pending) delete merged.pending;
+    next[existingIndex] = merged;
   }
   return next;
+}
+
+function findFileEditTraceIndex(
+  prev: UIMessage[],
+  segmentId: string | null,
+  incoming: UIFileEdit[],
+): number | null {
+  const incomingKeys = new Set(incoming.map(fileEditKey));
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const candidate = prev[i];
+    if (candidate.role === "user") break;
+    if (candidate.kind !== "trace" || !candidate.fileEdits?.length) continue;
+    if (segmentId && candidate.activitySegmentId === segmentId) return i;
+    for (const existing of candidate.fileEdits) {
+      if (incomingKeys.has(fileEditKey(existing))) return i;
+    }
+  }
+  return null;
 }
 
 /**
@@ -274,6 +313,8 @@ export interface SendImage {
 
 export interface SendOptions {
   imageGeneration?: OutboundImageGeneration;
+  cliApps?: OutboundCliAppMention[];
+  mcpPresets?: OutboundMcpPresetMention[];
 }
 
 export function useNanobotStream(
@@ -459,23 +500,54 @@ export function useNanobotStream(
     [appendAnswerChunk, ensureActivitySegmentId],
   );
 
-  const flushPendingStreamEvents = useCallback((options?: { closeAnswerSegment?: boolean }) => {
+  const flushPendingStreamEvents = useCallback((options?: {
+    closeAnswerSegment?: boolean;
+    finalAnswerText?: string;
+  }) => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
       streamFrameRef.current = null;
     }
     const events = pendingStreamEventsRef.current;
-    if (events.length === 0) {
+    const finalAnswerText = options?.finalAnswerText;
+    if (events.length === 0 && finalAnswerText === undefined) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
     }
     pendingStreamEventsRef.current = [];
     setMessages((prev) => {
-      const next = applyPendingStreamEvents(prev, events);
+      let next = events.length > 0 ? applyPendingStreamEvents(prev, events) : prev;
+      if (finalAnswerText !== undefined) {
+        const targetIndex =
+          resolveActiveAssistantIndex(next)
+          ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current)
+          ?? findLatestAssistantAnswerIndex(next);
+          if (targetIndex !== null) {
+            const target = next[targetIndex];
+            next = replaceMessageAt(next, targetIndex, {
+              ...target,
+              content: finalAnswerText,
+              isStreaming: true,
+            });
+          } else {
+            const id = crypto.randomUUID();
+            closedAssistantStreamIdsRef.current.add(id);
+            next = [
+              ...next,
+              {
+                id,
+                role: "assistant",
+                content: finalAnswerText,
+                isStreaming: true,
+                createdAt: Date.now(),
+              },
+            ];
+          }
+        }
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return next;
     });
-  }, [applyPendingStreamEvents, closeActiveAssistantStream]);
+  }, [applyPendingStreamEvents, closeActiveAssistantStream, resolveActiveAssistantIndex]);
 
   const schedulePendingStreamFlush = useCallback(() => {
     if (streamFrameRef.current !== null) return;
@@ -534,6 +606,7 @@ export function useNanobotStream(
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
         if (!chunk) return;
+        clearActivitySegment();
         setIsStreaming(true);
         pendingStreamEventsRef.current.push({ kind: "delta", text: chunk });
         schedulePendingStreamFlush();
@@ -544,6 +617,7 @@ export function useNanobotStream(
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = ev.text;
         if (!chunk) return;
+        if (fileEditSegmentRef.current) clearActivitySegment();
         setIsStreaming(true);
         pendingStreamEventsRef.current.push({ kind: "reasoning", text: chunk });
         schedulePendingStreamFlush();
@@ -551,7 +625,10 @@ export function useNanobotStream(
       }
 
       if (ev.event === "stream_end") {
-        flushPendingStreamEvents({ closeAnswerSegment: true });
+        flushPendingStreamEvents({
+          closeAnswerSegment: true,
+          ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
+        });
         if (suppressStreamUntilTurnEndRef.current) return;
         // stream_end only means the text segment finished — the model may
         // still be executing tools.  Do NOT reset isStreaming here; the
@@ -622,6 +699,7 @@ export function useNanobotStream(
         if (ev.kind === "reasoning") {
           const line = ev.text;
           if (!line) return;
+          if (fileEditSegmentRef.current) clearActivitySegment();
           setMessages((prev) => closeReasoningStream(attachReasoningChunk(prev, line, {
             ensure: ensureActivitySegmentId,
           })));
@@ -631,6 +709,7 @@ export function useNanobotStream(
         // Attach them to the last trace row if it was the last emitted item
         // so a sequence of calls collapses into one compact trace group.
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
+          const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
           const structuredLines = toolTraceLinesFromEvents(ev.tool_events);
           const lines = structuredLines.length > 0
             ? structuredLines
@@ -652,10 +731,18 @@ export function useNanobotStream(
                 : last.content
                   ? [last.content]
                   : [];
+              const mergedLines = structuredLines.length > 0
+                ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
+                : null;
               const merged: UIMessage = {
                 ...last,
-                traces: [...previousTraces, ...lines],
-                content: lines[lines.length - 1],
+                traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
+                content: mergedLines
+                  ? mergedLines.traces[mergedLines.traces.length - 1]
+                  : lines[lines.length - 1],
+                toolEvents: structuredEvents.length
+                  ? mergeToolProgressEvents(last.toolEvents, structuredEvents)
+                  : last.toolEvents,
                 activitySegmentId: last.activitySegmentId ?? segmentId,
               };
               return [...prev.slice(0, -1), merged];
@@ -668,6 +755,7 @@ export function useNanobotStream(
                 kind: "trace",
                 content: lines[lines.length - 1],
                 traces: lines,
+                ...(structuredEvents.length ? { toolEvents: structuredEvents } : {}),
                 activitySegmentId: segmentId,
                 createdAt: Date.now(),
               },
@@ -685,6 +773,7 @@ export function useNanobotStream(
         // flight, drop the placeholder so we don't render the text twice.
         // Do NOT reset isStreaming here — only ``turn_end`` signals that
         // the full turn (all tool calls + final text) is complete.
+        clearActivitySegment();
         setMessages((prev) => {
           const activeId = buffer.current?.messageId;
           buffer.current = null;
@@ -709,27 +798,32 @@ export function useNanobotStream(
       if (ev.event === "file_edit") {
         const edits = Array.isArray(ev.edits) ? ev.edits : [];
         if (edits.length === 0) return;
+        const normalized = mergeFileEdits(undefined, edits);
+        if (normalized.length === 0) return;
+        const opensFileEditPhase = normalized.some(
+          (edit) => edit.status === "editing" || edit.phase === "start",
+        );
+        let eventSegmentId = fileEditSegmentRef.current;
+        if (!eventSegmentId && opensFileEditPhase) {
+          eventSegmentId = detachedActivitySegmentId();
+          fileEditSegmentRef.current = eventSegmentId;
+        }
         setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          let segmentId = fileEditSegmentRef.current;
-          if (!segmentId || !(last?.kind === "trace" && last.fileEdits?.length)) {
-            segmentId = detachedActivitySegmentId();
-            fileEditSegmentRef.current = segmentId;
-          }
-          if (
-            last
-            && last.kind === "trace"
-            && !last.isStreaming
-            && !!last.fileEdits?.length
-            && last.activitySegmentId === segmentId
-          ) {
+          let segmentId = eventSegmentId;
+          const targetIndex = findFileEditTraceIndex(prev, segmentId, normalized);
+          if (targetIndex !== null) {
+            const target = prev[targetIndex];
+            segmentId = target.activitySegmentId ?? segmentId ?? detachedActivitySegmentId();
+            if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
             const merged: UIMessage = {
-              ...last,
-              fileEdits: mergeFileEdits(last.fileEdits, edits),
-              activitySegmentId: last.activitySegmentId ?? segmentId,
+              ...target,
+              fileEdits: mergeFileEdits(target.fileEdits, normalized),
+              activitySegmentId: segmentId,
             };
-            return [...prev.slice(0, -1), merged];
+            return replaceMessageAt(prev, targetIndex, merged);
           }
+          segmentId = segmentId ?? detachedActivitySegmentId();
+          if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
           return [
             ...prev,
             {
@@ -738,7 +832,7 @@ export function useNanobotStream(
               kind: "trace",
               content: "",
               traces: [],
-              fileEdits: mergeFileEdits(undefined, edits),
+              fileEdits: normalized,
               activitySegmentId: segmentId,
               createdAt: Date.now(),
             },
@@ -798,6 +892,8 @@ export function useNanobotStream(
             content,
             createdAt: Date.now(),
             ...(previews ? { images: previews } : {}),
+            ...(options?.cliApps?.length ? { cliApps: options.cliApps } : {}),
+            ...(options?.mcpPresets?.length ? { mcpPresets: options.mcpPresets } : {}),
           },
         ];
       });

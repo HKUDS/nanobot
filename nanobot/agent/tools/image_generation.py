@@ -17,9 +17,9 @@ from nanobot.agent.tools.schema import (
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.providers.image_generation import (
-    AIHubMixImageGenerationClient,
     ImageGenerationError,
-    OpenRouterImageGenerationClient,
+    ImageGenerationProvider,
+    get_image_gen_provider,
 )
 from nanobot.utils.artifacts import (
     ArtifactError,
@@ -117,27 +117,18 @@ class ImageGenerationTool(Tool):
     def _provider_config(self) -> ProviderConfig | None:
         return self.provider_configs.get(self.config.provider)
 
-    def _provider_client(self) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | None:
+    def _provider_client(self) -> ImageGenerationProvider | None:
         provider = self._provider_config()
+        cls = get_image_gen_provider(self.config.provider)
+        if cls is None:
+            return None
         kwargs = {
             "api_key": provider.api_key if provider else None,
             "api_base": provider.api_base if provider else None,
             "extra_headers": provider.extra_headers if provider else None,
             "extra_body": provider.extra_body if provider else None,
         }
-        if self.config.provider == "openrouter":
-            return OpenRouterImageGenerationClient(**kwargs)
-        if self.config.provider == "aihubmix":
-            return AIHubMixImageGenerationClient(**kwargs)
-        return None
-
-    def _missing_api_key_error(self) -> str:
-        provider = self.config.provider
-        if provider == "openrouter":
-            return "Error: OpenRouter API key is not configured. Set providers.openrouter.apiKey."
-        if provider == "aihubmix":
-            return "Error: AIHubMix API key is not configured. Set providers.aihubmix.apiKey."
-        return f"Error: {provider} API key is not configured."
+        return cls(**kwargs)
 
     def _resolve_reference_image(self, value: str) -> str:
         raw_path = Path(value).expanduser()
@@ -176,9 +167,6 @@ class ImageGenerationTool(Tool):
         client = self._provider_client()
         if client is None:
             return f"Error: unsupported image generation provider '{self.config.provider}'"
-        provider = self._provider_config()
-        if not provider or not provider.api_key:
-            return self._missing_api_key_error()
 
         requested = count or 1
         if requested > self.config.max_images_per_turn:

@@ -9,6 +9,18 @@
       "title": "nanobot에 연결할 수 없습니다",
       "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
     },
+    "auth": {
+      "title": "인증이 필요합니다",
+      "hint": "gateway 설정의 tokenIssueSecret에 구성된 비밀 값을 입력하세요.",
+      "placeholder": "비밀번호",
+      "submit": "연결",
+      "invalid": "비밀번호가 올바르지 않습니다. 다시 시도하세요."
+    },
+    "account": {
+      "section": "계정",
+      "logoutHint": "이 브라우저를 gateway에서 연결 해제합니다.",
+      "logout": "로그아웃"
+    },
     "system": {
       "section": "시스템",
       "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
@@ -27,16 +39,32 @@
     }
   },
   "sidebar": {
+    "navigation": "사이드바 탐색",
+    "globalActions": "전역 작업",
     "collapse": "사이드바 접기",
     "toggleTheme": "테마 전환",
+    "home": "홈",
     "newChat": "새 채팅",
+    "searchAria": "검색",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
+    "searchPlaceholder": "검색",
+    "searchResults": "결과",
+    "noSearchResults": "일치하는 채팅이 없습니다.",
     "recent": "최근 대화",
     "refreshSessions": "세션 새로고침",
     "settings": "설정",
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
-    }
+    },
+    "apps": "앱"
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -46,12 +74,37 @@
     },
     "nav": {
       "general": "일반",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced",
+      "cliApps": "CLI 앱",
+      "mcp": "MCP",
+      "apps": "앱"
     },
     "sections": {
       "interface": "인터페이스",
       "ai": "AI",
-      "system": "시스템"
+      "system": "시스템",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "imageGeneration": "이미지 생성",
+      "imageDefaults": "기본값",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "capabilities": "기능",
+      "integrations": "Integrations",
+      "cliApps": "CLI 앱",
+      "mcp": "MCP 서비스",
+      "apps": "앱"
     },
     "rows": {
       "theme": "테마",
@@ -59,31 +112,114 @@
       "provider": "제공자",
       "model": "모델",
       "restart": "nanobot 재시작",
-      "configPath": "설정 경로"
+      "configPath": "설정 경로",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "pendingChanges": "대기 중인 변경 사항",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "imageGeneration": "이미지 생성",
+      "imageProvider": "이미지 제공자",
+      "imageProviderStatus": "제공자 상태",
+      "imageProviderBase": "제공자 기준 주소",
+      "imageModel": "이미지 모델",
+      "defaultAspectRatio": "기본 비율",
+      "defaultImageSize": "기본 크기",
+      "maxImagesPerTurn": "턴당 최대 이미지 수",
+      "imageSaveDir": "저장 디렉터리",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs",
+      "currentModel": "현재 모델",
+      "brandLogos": "브랜드 로고",
+      "cliAppsCatalog": "CLI 앱 카탈로그",
+      "cliAppsFilter": "CLI 앱 필터"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
       "language": "WebUI에서 사용할 언어를 선택합니다.",
       "provider": "새 모델 요청에 사용할 제공자를 선택합니다.",
       "model": "nanobot이 기본으로 사용할 모델 이름을 설정합니다.",
-      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다."
+      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "구성된 이미지 제공자를 사용할 수 있을 때 채팅에서 generate_image를 노출합니다.",
+      "imageProvider": "generate_image가 사용할 레지스트리 제공자를 선택합니다.",
+      "imageProviderStatus": "이미지 생성은 Providers의 제공자 자격 증명을 재사용합니다.",
+      "imageModel": "선택한 이미지 제공자에 보낼 모델 이름입니다.",
+      "defaultAspectRatio": "프롬프트에서 가로세로 비율을 선택하지 않았을 때 사용됩니다.",
+      "defaultImageSize": "지원하는 제공자에게 보내는 크기 힌트입니다.",
+      "maxImagesPerTurn": "한 번의 generate_image 요청에 대한 상한입니다.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "currentModel": "nanobot이 새 답변에 사용할 모델을 선택합니다.",
+      "selectedModelProvider": "선택한 모델에서 설정됩니다.",
+      "selectedModelValue": "선택한 모델에서 설정됩니다.",
+      "brandLogos": "로고는 브랜드 도메인에서 불러오며, 실패하면 로컬 아이콘을 사용합니다.",
+      "cliAppsCatalog": "nanobot이 로컬에서 실행할 수 있는 앱 CLI를 살펴봅니다.",
+      "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다."
     },
     "values": {
       "light": "라이트",
       "dark": "다크",
-      "notAvailable": "사용할 수 없음"
+      "notAvailable": "사용할 수 없음",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartPending": "재시작 대기 중",
+      "ready": "준비됨",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "설정을 불러오는 중...",
       "loadError": "설정을 불러올 수 없습니다",
       "unsaved": "저장되지 않은 변경 사항이 있습니다.",
-      "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요."
+      "upToDate": "최신 상태입니다.",
+      "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요.",
+      "restartAfterSaving": "변경 사항을 저장한 뒤 준비되면 재시작하세요.",
+      "savedRestartApply": "저장되었습니다. 준비되면 재시작하세요.",
+      "imageProviderRestart": "이미지 제공자 변경 사항이 저장되었습니다. 준비되면 재시작하세요."
     },
     "actions": {
       "save": "저장",
       "saving": "저장 중",
       "edit": "편집",
-      "cancel": "취소"
+      "cancel": "취소",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
@@ -126,15 +262,174 @@
         "missingCredential": "저장하기 전에 필요한 자격 증명을 입력하세요.",
         "saveHint": "변경 사항은 새 web search 요청에 적용됩니다."
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "imageGeneration": "이미지 생성",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search.",
+      "saveProvider": "제공자 저장"
+    },
+    "image": {
+      "selectProvider": "제공자 선택",
+      "selectAspect": "비율 선택",
+      "selectSize": "크기 선택",
+      "configureProvider": "제공자 구성",
+      "missingCredential": "이미지 생성을 활성화하기 전에 이 제공자를 구성하세요."
+    },
+    "models": {
+      "selectModel": "모델 선택",
+      "addConfiguration": "구성 추가",
+      "newConfiguration": "새 모델 구성",
+      "newConfigurationHelp": "제공자와 모델을 한 번에 선택할 수 있는 옵션으로 저장합니다.",
+      "configurationName": "이름",
+      "configurationNamePlaceholder": "빠른 글쓰기"
+    },
+    "timezone": {
+      "select": "시간대 선택",
+      "search": "시간대 검색",
+      "empty": "일치하는 시간대가 없습니다."
+    },
+    "cliApps": {
+      "allCategories": "모든 카테고리",
+      "availableCount": "앱 {{count}}개",
+      "installedCount": "{{count}}개 설치됨",
+      "summary": "CLI {{total}}개 중 {{installed}}개 설치됨",
+      "filterAll": "전체",
+      "filterInstalled": "설치된 CLI",
+      "filterNotInstalled": "미설치",
+      "searchPlaceholder": "CLI 검색",
+      "statusInstalled": "설치됨",
+      "statusAvailable": "사용 가능",
+      "statusMissing": "의존성 필요",
+      "statusUnsupported": "지원 안 함",
+      "statusNotInstalled": "미설치",
+      "unsupported": "지원 안 함",
+      "loading": "CLI 앱 로드 중...",
+      "empty": "이 필터와 일치하는 CLI 앱이 없습니다.",
+      "readyTitle": "@{{name}} 준비됨",
+      "readyStatus": "준비됨",
+      "readyPrompt": "@{{name}}을 사용해 이 CLI가 무엇을 할 수 있는지 확인하세요.",
+      "readyTry": "@{{name}} 사용해 보기",
+      "readyCopied": "복사됨",
+      "openChat": "채팅 열기",
+      "requires": "필요 항목",
+      "test": "CLI 테스트",
+      "update": "CLI 업데이트",
+      "uninstall": "CLI 제거",
+      "install": "CLI 설치",
+      "unavailable": "사용 불가",
+      "noDescription": "설명이 없습니다."
+    },
+    "mcp": {
+      "allCategories": "모든 카테고리",
+      "summary": "프리셋 {{total}}개 중 {{installed}}개 활성화됨",
+      "filterAll": "전체",
+      "filterInstalled": "활성화됨",
+      "filterNotInstalled": "비활성",
+      "searchPlaceholder": "MCP 프리셋 검색",
+      "moreOptions": "추가 MCP 옵션",
+      "moreOptionsSubtitle": "사용자 지정 서버를 추가하거나 mcp.json을 가져옵니다.",
+      "customTitle": "사용자 지정 MCP",
+      "customSubtitle": "stdio, HTTP 또는 SSE MCP 서버를 추가합니다.",
+      "customAction": "사용자 지정",
+      "importAction": "가져오기",
+      "serverName": "서버 이름",
+      "serverUrl": "URL",
+      "transport": "전송 방식",
+      "command": "명령",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "도구 제한 시간",
+      "advancedOptions": "고급 옵션",
+      "hideAdvanced": "고급 숨기기",
+      "saveCustom": "MCP 저장",
+      "configImport": "mcp.json 가져오기",
+      "importConfig": "가져오기",
+      "restartRequired": "업데이트된 MCP 도구를 연결하려면 nanobot을 다시 시작하세요.",
+      "toolsFound": "도구 {{count}}개",
+      "loading": "MCP 프리셋 로드 중...",
+      "empty": "이 필터와 일치하는 MCP 프리셋이 없습니다.",
+      "openDocs": "문서 열기",
+      "test": "테스트",
+      "remove": "제거",
+      "enable": "활성화",
+      "enabled": "활성화됨",
+      "setup": "연결",
+      "configure": "연결",
+      "connectTitle": "{{name}} 연결",
+      "connectHint": "계정 설정에서 키를 추가하세요.",
+      "saveAndEnable": "저장 후 활성화",
+      "updateSetup": "설정 업데이트",
+      "configured": "구성됨",
+      "keepExisting": "기존 값을 유지하려면 비워 두세요",
+      "statusConfigured": "구성됨",
+      "statusMissingCredentials": "키 필요",
+      "statusMissingDependency": "의존성 필요",
+      "statusComingSoon": "곧 제공",
+      "statusNotInstalled": "비활성",
+      "toolScope": "도구",
+      "allTools": "전체",
+      "noTools": "없음",
+      "testForTools": "테스트를 실행해 개별 도구를 확인하고 선택하세요."
+    },
+    "legal": {
+      "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
+    },
+    "apps": {
+      "description": "채팅에서 nanobot이 사용할 수 있는 앱 CLI와 MCP 서비스를 추가합니다.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "전체",
+      "filterCli": "CLI 앱",
+      "filterMcp": "MCP 서비스",
+      "enabledSummary": "{{count}}개 활성화됨",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "앱 검색",
+      "featured": "추천",
+      "loading": "앱 불러오는 중...",
+      "empty": "이 필터와 일치하는 앱이 없습니다."
     }
   },
   "chat": {
     "fallbackTitle": "채팅 {{id}}",
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
+    "showMore": "{{count}}개 더 보기",
     "actions": "{{title}} 채팅 작업",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "삭제",
-    "newChat": "새 채팅"
+    "newChat": "새 채팅",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",
@@ -153,7 +448,6 @@
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다.",
       "greeting": "무엇을 도와드릴까요?",
       "quickActions": {
         "plan": {
@@ -209,7 +503,10 @@
       }
     },
     "header": {
-      "toggleSidebar": "사이드바 전환"
+      "toggleSidebar": "사이드바 전환",
+      "newChat": "새 채팅 시작",
+      "toggleTheme": "헤더에서 테마 전환",
+      "settings": "설정 열기"
     },
     "composer": {
       "placeholderThread": "메시지를 입력하세요…",
@@ -223,6 +520,7 @@
       "goalStateFallback": "목표",
       "goalStateExpandAria": "전체 목표 보기",
       "goalStateSheetTitle": "목표",
+      "goalStateCloseAria": "목표 닫기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "attachImage": "이미지 첨부",
@@ -241,16 +539,11 @@
           "16_9": "와이드 16:9"
         }
       },
-      "encoding": "처리 중…",
-      "remove": "첨부 제거",
-      "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
-      "imageRejected": {
-        "unsupported_type": "지원하지 않는 파일 형식입니다",
-        "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
-        "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
-        "decode_failed": "이 이미지를 디코딩할 수 없습니다",
-        "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
-        "io": "이 파일을 읽을 수 없습니다"
+      "tools": {
+        "search": "검색",
+        "reason": "추론",
+        "deepResearch": "심층 조사",
+        "voice": "음성 입력"
       },
       "slash": {
         "ariaLabel": "슬래시 명령",
@@ -275,6 +568,10 @@
             "title": "상태 보기",
             "description": "런타임, provider, channel 상태를 표시합니다."
           },
+          "model": {
+            "title": "모델",
+            "description": "활성 모델 프리셋을 보거나 전환합니다."
+          },
           "history": {
             "title": "대화 기록 보기",
             "description": "저장된 최근 N개의 대화 메시지를 출력합니다."
@@ -298,10 +595,44 @@
           "help": {
             "title": "도움말 보기",
             "description": "사용 가능한 슬래시 명령을 나열합니다."
+          },
+          "pairing": {
+            "title": "페어링",
+            "description": "페어링 요청을 관리합니다."
           }
+        },
+        "badges": {
+          "current": "현재",
+          "recent": "최근"
+        },
+        "details": {
+          "goalActive": "목표 실행 중",
+          "goalReady": "지속 목표 시작",
+          "history": "최근 메시지 보기",
+          "stopRunning": "실행 중"
         }
       },
-      "goalStateCloseAria": "목표 닫기"
+      "encoding": "처리 중…",
+      "remove": "첨부 제거",
+      "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
+      "imageRejected": {
+        "unsupported_type": "지원하지 않는 파일 형식입니다",
+        "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
+        "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
+        "decode_failed": "이 이미지를 디코딩할 수 없습니다",
+        "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
+        "io": "이 파일을 읽을 수 없습니다"
+      },
+      "mentions": {
+        "ariaLabel": "앱",
+        "label": "앱",
+        "cliGroup": "CLI 앱",
+        "mcpGroup": "MCP 서비스",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "@{{name}}을 로컬 CLI 앱으로 사용",
+        "mcpDescription": "@{{name}}을 MCP 서버로 사용"
+      }
     },
     "scrollToBottom": "맨 아래로 스크롤",
     "loadEarlier": "이전 메시지 불러오기"
@@ -323,7 +654,21 @@
     "agentActivityLiveSummary": "진행 중… · {{reasoning}}단계 · 도구 호출 {{tools}}회",
     "agentActivityLiveToolsOnly": "진행 중… · 도구 호출 {{tools}}회",
     "imageAttachment": "이미지 첨부",
-    "turnLatencyTitle": "응답 시간(엔드투엔드)"
+    "copyReply": "답변 복사",
+    "copiedReply": "답변이 복사됨",
+    "turnLatencyTitle": "응답 시간(엔드투엔드)",
+    "activityThinkingFor": "{{duration}} 동안 생각 중",
+    "activityThought": "생각함",
+    "activityThoughtFor": "{{duration}} 동안 생각함",
+    "cliActivityRunningOne": "@{{name}} 사용 중",
+    "cliActivityRanOne": "@{{name}} 사용함",
+    "cliActivityFailedOne": "@{{name}} 실패",
+    "cliActivityRunningMany": "CLI 앱 {{count}}개 사용 중",
+    "cliActivityRanMany": "CLI 앱 {{count}}개 사용함",
+    "cliActivityFailedMany": "CLI 앱 {{count}}개 실패",
+    "cliRunRunning": "사용 중",
+    "cliRunRan": "사용함",
+    "cliRunFailed": "실패"
   },
   "lightbox": {
     "title": "이미지 미리보기",

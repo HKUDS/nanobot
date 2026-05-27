@@ -157,6 +157,53 @@ describe("useSessions", () => {
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a newly created chat visible until the server session list catches up", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          key: "websocket:chat-new",
+          channel: "websocket",
+          chatId: "chat-new",
+          createdAt: "2026-05-20T10:00:00Z",
+          updatedAt: "2026-05-20T10:01:00Z",
+          title: "Generated title",
+          preview: "First message",
+        },
+      ]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-new");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions).toEqual([]);
+
+    await act(async () => {
+      await result.current.createChat();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+    expect(result.current.sessions[0]?.preview).toBe("");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+    expect(result.current.sessions[0]?.preview).toBe("First message");
+    expect(result.current.sessions[0]?.title).toBe("Generated title");
+  });
+
   it("passes through WebUI transcript user media as images and media", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

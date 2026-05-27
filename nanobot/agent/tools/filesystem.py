@@ -132,6 +132,10 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
             minimum=1,
         ),
         pages=StringSchema("Page range for PDF files, e.g. '1-5' (default: all, max 20 pages)"),
+        force=BooleanSchema(
+            description="Bypass same-file read deduplication and return content again.",
+            default=False,
+        ),
         required=["path"],
     )
 )
@@ -154,7 +158,11 @@ class ReadFileTool(_FsTool):
             "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
             "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Use find_files/list_dir first when the path is uncertain. "
+            "Read the relevant range before editing so replacements or patches "
+            "are based on current content. "
             "Use offset and limit for large text files. "
+            "Use force=true to re-read content even if unchanged. "
             "Reads exceeding ~128K chars are truncated."
         )
 
@@ -162,7 +170,15 @@ class ReadFileTool(_FsTool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, pages: str | None = None, **kwargs: Any) -> Any:
+    async def execute(
+        self,
+        path: str | None = None,
+        offset: int = 1,
+        limit: int | None = None,
+        pages: str | None = None,
+        force: bool = False,
+        **kwargs: Any,
+    ) -> Any:
         try:
             if not path:
                 return "Error reading file: Unknown path"
@@ -202,7 +218,13 @@ class ReadFileTool(_FsTool):
                 current_mtime = os.path.getmtime(fp)
             except OSError:
                 current_mtime = 0.0
-            if entry and entry.can_dedup and entry.offset == offset and entry.limit == limit:
+            if (
+                not force
+                and entry
+                and entry.can_dedup
+                and entry.offset == offset
+                and entry.limit == limit
+            ):
                 if current_mtime != entry.mtime:
                     # File was modified externally - force full read and mark as not dedupable
                     entry.can_dedup = False
@@ -365,9 +387,10 @@ class WriteFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Write content to a file. Overwrites if the file already exists; "
-            "creates parent directories as needed. "
-            "For partial edits, prefer edit_file instead."
+            "Create a new file or intentionally replace an entire file with "
+            "the provided content. Overwrites existing files and creates parent "
+            "directories as needed. For code changes or partial edits, prefer "
+            "apply_patch; use edit_file only for small exact replacements."
         )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
@@ -657,6 +680,24 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         old_text=StringSchema("The text to find and replace"),
         new_text=StringSchema("The text to replace with"),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
+        occurrence=IntegerSchema(
+            1,
+            description="Optional 1-based occurrence to replace when old_text appears multiple times.",
+            minimum=1,
+            nullable=True,
+        ),
+        line_hint=IntegerSchema(
+            1,
+            description="Optional 1-based line hint used to choose the nearest match.",
+            minimum=1,
+            nullable=True,
+        ),
+        expected_replacements=IntegerSchema(
+            1,
+            description="Optional guard for the number of replacements that must be made.",
+            minimum=1,
+            nullable=True,
+        ),
         required=["path", "old_text", "new_text"],
     )
 )
@@ -674,10 +715,13 @@ class EditFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Edit a file by replacing old_text with new_text. "
-            "Tolerates minor whitespace/indentation differences and curly/straight quote mismatches. "
-            "If old_text matches multiple times, you must provide more context "
-            "or set replace_all=true. Shows a diff of the closest match on failure."
+            "Perform a small, exact replacement in one file by replacing "
+            "old_text with new_text. Use this for narrow text substitutions "
+            "with old_text copied from read_file. For multi-file, structural, "
+            "or generated code edits, prefer apply_patch. If old_text matches "
+            "multiple times, provide more context or set occurrence, line_hint, "
+            "replace_all, and expected_replacements. Shows closest-match "
+            "diagnostics on failure."
         )
 
     @staticmethod
@@ -688,7 +732,8 @@ class EditFileTool(_FsTool):
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
         new_text: str | None = None,
-        replace_all: bool = False, **kwargs: Any,
+        replace_all: bool = False, occurrence: int | None = None,
+        line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
     ) -> str:
         try:
             if not path:
@@ -697,10 +742,12 @@ class EditFileTool(_FsTool):
                 raise ValueError("Unknown old_text")
             if new_text is None:
                 raise ValueError("Unknown new_text")
-
-            # .ipynb detection
-            if path.endswith(".ipynb"):
-                return "Error: This is a Jupyter notebook. Use the notebook_edit tool instead of edit_file."
+            if occurrence is not None and occurrence < 1:
+                return "Error: occurrence must be >= 1."
+            if line_hint is not None and line_hint < 1:
+                return "Error: line_hint must be >= 1."
+            if expected_replacements is not None and expected_replacements < 1:
+                return "Error: expected_replacements must be >= 1."
 
             fp = self._resolve(path)
 
@@ -743,15 +790,42 @@ class EditFileTool(_FsTool):
             if not matches:
                 return self._not_found_msg(old_text, content, path)
             count = len(matches)
+            if replace_all and occurrence is not None:
+                return "Error: occurrence cannot be used with replace_all=true."
+            if replace_all and line_hint is not None:
+                return "Error: line_hint cannot be used with replace_all=true."
+            if occurrence is not None and line_hint is not None:
+                return "Error: line_hint cannot be used with occurrence."
             if count > 1 and not replace_all:
-                line_numbers = [match.line for match in matches]
-                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                if len(line_numbers) > 3:
-                    preview += ", ..."
-                location_hint = f" at {preview}" if preview else ""
+                if occurrence is not None:
+                    if occurrence > count:
+                        return (
+                            f"Error: occurrence {occurrence} is out of range; "
+                            f"old_text appears {count} times."
+                        )
+                elif line_hint is not None:
+                    nearest = min(matches, key=lambda match: abs(match.line - line_hint))
+                    distance = abs(nearest.line - line_hint)
+                    if sum(1 for match in matches if abs(match.line - line_hint) == distance) > 1:
+                        return (
+                            f"Error: line_hint {line_hint} is ambiguous; "
+                            f"old_text appears {count} times."
+                        )
+                else:
+                    line_numbers = [match.line for match in matches]
+                    preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                    if len(line_numbers) > 3:
+                        preview += ", ..."
+                    location_hint = f" at {preview}" if preview else ""
+                    return (
+                        f"Warning: old_text appears {count} times{location_hint}. "
+                        "Provide more context, set occurrence to choose one match, "
+                        "or set replace_all=true."
+                    )
+            elif occurrence is not None and occurrence > count:
                 return (
-                    f"Warning: old_text appears {count} times{location_hint}. "
-                    "Provide more context to make it unique, or set replace_all=true."
+                    f"Error: occurrence {occurrence} is out of range; "
+                    f"old_text appears {count} time."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
@@ -760,7 +834,17 @@ class EditFileTool(_FsTool):
             if fp.suffix.lower() not in self._MARKDOWN_EXTS:
                 norm_new = self._strip_trailing_ws(norm_new)
 
-            selected = matches if replace_all else matches[:1]
+            if replace_all:
+                selected = matches
+            elif line_hint is not None:
+                selected = [min(matches, key=lambda match: abs(match.line - line_hint))]
+            else:
+                selected = [matches[occurrence - 1 if occurrence else 0]]
+            if expected_replacements is not None and len(selected) != expected_replacements:
+                return (
+                    f"Error: expected {expected_replacements} replacements but "
+                    f"would make {len(selected)}."
+                )
             new_content = content
             for match in reversed(selected):
                 replacement = _preserve_quote_style(norm_old, match.text, norm_new)

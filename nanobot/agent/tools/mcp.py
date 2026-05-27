@@ -6,13 +6,20 @@ import re
 import shutil
 import urllib.parse
 from contextlib import AsyncExitStack, suppress
-from typing import Any
+from typing import Any, Mapping
+from weakref import WeakKeyDictionary
 
 import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import (
+    INBOUND_META_RUNTIME_CONTROL,
+    RUNTIME_CONTROL_ACK,
+    RUNTIME_CONTROL_MCP_RELOAD,
+    InboundMessage,
+)
 
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
@@ -33,6 +40,7 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
+_RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 
 
 def _sanitize_name(name: str) -> str:
@@ -503,6 +511,7 @@ async def connect_mcp_servers(
                     command=command,
                     args=args,
                     env=env,
+                    cwd=cfg.cwd or None,
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
@@ -662,3 +671,272 @@ async def connect_mcp_servers(
             server_stacks[result[0]] = result[1]
 
     return server_stacks
+
+
+def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return persisted session kwargs for MCP preset attachments."""
+    mcp_presets = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
+    return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
+
+
+def runtime_lines(
+    message: Any,
+    *,
+    available_server_names: set[str] | None = None,
+    configured_server_names: set[str] | None = None,
+    connected_server_names: set[str] | None = None,
+    skip: bool = False,
+) -> list[str]:
+    """Return model-visible MCP preset annotations for the current turn."""
+    if skip:
+        return []
+    if configured_server_names is None:
+        configured_server_names = available_server_names
+    if connected_server_names is None:
+        connected_server_names = available_server_names
+    metadata = message.metadata if isinstance(getattr(message, "metadata", None), Mapping) else None
+    structured = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
+    if not isinstance(structured, list):
+        return []
+
+    lines: list[str] = []
+    for item in structured[:8]:
+        if not isinstance(item, Mapping):
+            continue
+        raw_name = str(item.get("name") or "").strip().lower()
+        if not raw_name:
+            continue
+        display = str(item.get("display_name") or raw_name).strip() or raw_name
+        transport = str(item.get("transport") or "mcp").strip() or "mcp"
+        prefix = f"mcp_{raw_name}_"
+        if configured_server_names is not None and raw_name not in configured_server_names:
+            lines.append(
+                "MCP Preset Attachment: "
+                f"@{raw_name} ({display}; transport={transport}) is configured in WebUI Settings, "
+                "but this gateway has not loaded the latest MCP settings yet. "
+                f"Tools with prefix `{prefix}` may not be available yet; if they are missing, "
+                "tell the user to restart nanobot."
+            )
+            continue
+        if connected_server_names is not None and raw_name not in connected_server_names:
+            lines.append(
+                "MCP Preset Attachment: "
+                f"@{raw_name} ({display}; transport={transport}) is configured, "
+                "but its MCP connection is not currently live. "
+                f"Tools with prefix `{prefix}` may be unavailable; tell the user to open Settings, "
+                "run the preset test, and restart nanobot only if hot reload is unavailable."
+            )
+            continue
+        lines.append(
+            "MCP Preset Attachment: "
+            f"@{raw_name} ({display}; transport={transport}; tool_prefix={prefix}). "
+            f"Prefer available tools whose names start with `{prefix}` for this request; "
+            "do not substitute shell commands for this MCP integration unless the user asks."
+        )
+    return lines
+
+
+async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
+    """Connect configured MCP servers that are not currently live."""
+    missing_servers = {
+        name: cfg for name, cfg in state._mcp_servers.items() if name not in state._mcp_stacks
+    }
+    if state._mcp_connecting or not missing_servers:
+        return
+    state._mcp_connecting = True
+    try:
+        connected = await connect_mcp_servers(missing_servers, registry)
+        state._mcp_stacks.update(connected)
+        state._mcp_connected = bool(state._mcp_stacks)
+        if connected:
+            logger.info("MCP connected servers: {}", sorted(connected))
+        else:
+            logger.warning("No MCP servers connected successfully (will retry next message)")
+    except asyncio.CancelledError:
+        logger.warning("MCP connection cancelled (will retry next message)")
+        state._mcp_connected = bool(state._mcp_stacks)
+    except BaseException as e:
+        logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
+        state._mcp_connected = bool(state._mcp_stacks)
+    finally:
+        state._mcp_connecting = False
+
+
+async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
+    """Reconcile live MCP connections with the current config file."""
+    async with _reload_lock(state):
+        try:
+            from nanobot.config.loader import (load_config,
+                                               resolve_config_env_vars)
+
+            config = resolve_config_env_vars(load_config())
+            next_servers = dict(config.tools.mcp_servers)
+        except Exception as exc:
+            logger.warning("MCP hot reload could not read config: {}", exc)
+            return {
+                "ok": False,
+                "message": "Could not reload MCP config. Restart nanobot to pick up changes.",
+                "requires_restart": True,
+                "error": str(exc),
+            }
+
+        current_servers = dict(state._mcp_servers)
+        current_names = set(current_servers)
+        next_names = set(next_servers)
+        removed = sorted(current_names - next_names)
+        added = sorted(next_names - current_names)
+        changed = sorted(
+            name
+            for name in current_names & next_names
+            if _server_signature(current_servers[name]) != _server_signature(next_servers[name])
+        )
+
+        tools_removed = 0
+        for name in [*removed, *changed]:
+            tools_removed += _unregister_server_tools(state, registry, name)
+            await _close_server(state, name)
+
+        state._mcp_servers = next_servers
+        retry_missing = sorted(
+            name
+            for name in next_names
+            if name not in state._mcp_stacks and name not in set(added) | set(changed)
+        )
+        to_connect_names = sorted(set(added) | set(changed) | set(retry_missing))
+        to_connect = {name: next_servers[name] for name in to_connect_names}
+        connected: dict[str, AsyncExitStack] = {}
+        if to_connect:
+            connected = await connect_mcp_servers(to_connect, registry)
+            state._mcp_stacks.update(connected)
+
+        state._mcp_connected = bool(state._mcp_stacks)
+        failed = sorted(set(to_connect) - set(connected))
+        unchanged = not removed and not added and not changed and not retry_missing
+        ok = not failed
+        if failed:
+            message = "MCP config reloaded, but some servers did not connect: " + ", ".join(failed)
+        elif unchanged:
+            message = "MCP config is already live."
+        elif retry_missing and not added and not changed and not removed:
+            message = "MCP connections refreshed without restarting nanobot."
+        else:
+            message = "MCP config reloaded without restarting nanobot."
+
+        logger.info(
+            "MCP hot reload: added={} changed={} removed={} retried={} connected={} failed={} tools_removed={}",
+            added,
+            changed,
+            removed,
+            retry_missing,
+            sorted(connected),
+            failed,
+            tools_removed,
+        )
+        return {
+            "ok": ok,
+            "message": message,
+            "added": added,
+            "changed": changed,
+            "removed": removed,
+            "retried": retry_missing,
+            "connected": sorted(state._mcp_stacks),
+            "configured": sorted(state._mcp_servers),
+            "failed": failed,
+            "tools_removed": tools_removed,
+            "requires_restart": False,
+        }
+
+
+async def request_mcp_reload(bus: Any, *, timeout: float = 15.0) -> dict[str, Any]:
+    """Ask the running agent loop to reconcile live MCP connections."""
+    loop = asyncio.get_running_loop()
+    ack: asyncio.Future[dict[str, Any]] = loop.create_future()
+    await bus.publish_inbound(
+        InboundMessage(
+            channel="system",
+            sender_id="webui-settings",
+            chat_id="runtime",
+            content=RUNTIME_CONTROL_MCP_RELOAD,
+            metadata={
+                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MCP_RELOAD,
+                RUNTIME_CONTROL_ACK: ack,
+            },
+        )
+    )
+    try:
+        result = await asyncio.wait_for(ack, timeout=timeout)
+    except asyncio.TimeoutError:
+        return {
+            "ok": False,
+            "message": "MCP hot reload timed out. Restart nanobot to pick up changes.",
+            "requires_restart": True,
+        }
+    return result if isinstance(result, dict) else {
+        "ok": False,
+        "message": "MCP hot reload returned an unexpected response.",
+        "requires_restart": True,
+    }
+
+
+async def handle_runtime_control(state: Any, msg: InboundMessage, registry: ToolRegistry) -> bool:
+    metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+    control = metadata.get(INBOUND_META_RUNTIME_CONTROL)
+    if control != RUNTIME_CONTROL_MCP_RELOAD:
+        return False
+
+    ack = metadata.get(RUNTIME_CONTROL_ACK)
+    try:
+        result = await reload_servers(state, registry)
+    except Exception as exc:
+        logger.exception("MCP hot reload failed")
+        result = {
+            "ok": False,
+            "message": "MCP hot reload failed. Restart nanobot to pick up changes.",
+            "requires_restart": True,
+            "error": str(exc),
+        }
+    if isinstance(ack, asyncio.Future) and not ack.done():
+        ack.set_result(result)
+    return True
+
+
+def _reload_lock(state: Any) -> asyncio.Lock:
+    try:
+        return _RELOAD_LOCKS[state]
+    except KeyError:
+        lock = asyncio.Lock()
+        _RELOAD_LOCKS[state] = lock
+        return lock
+
+
+def _server_signature(cfg: Any) -> Any:
+    if hasattr(cfg, "model_dump"):
+        return cfg.model_dump(mode="json")
+    return cfg
+
+
+def _tool_prefix(server_name: str) -> str:
+    safe_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in server_name)
+    while "__" in safe_name:
+        safe_name = safe_name.replace("__", "_")
+    return f"mcp_{safe_name}_"
+
+
+def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
+    prefix = _tool_prefix(server_name)
+    removed = 0
+    for tool_name in list(registry.tool_names):
+        if tool_name.startswith(prefix):
+            registry.unregister(tool_name)
+            removed += 1
+    return removed
+
+
+async def _close_server(state: Any, server_name: str) -> None:
+    stack = state._mcp_stacks.pop(server_name, None)
+    if stack is None:
+        return
+    try:
+        await stack.aclose()
+    except (RuntimeError, BaseExceptionGroup):
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)

@@ -32,7 +32,7 @@ def _mimo_spec():
 
 
 def _openrouter_spec():
-    """Return the registered OpenRouter ProviderSpec (no thinking_style)."""
+    """Return the registered OpenRouter ProviderSpec."""
     specs = {s.name: s for s in PROVIDERS}
     return specs["openrouter"]
 
@@ -75,6 +75,13 @@ def test_xiaomi_mimo_uses_thinking_type_style():
     assert spec.thinking_style == "thinking_type"
     assert spec.backend == "openai_compat"
     assert spec.default_api_base == "https://api.xiaomimimo.com/v1"
+
+
+def test_openrouter_declares_gateway_reasoning_style():
+    """OpenRouter uses its own reasoning.effort field for routed thinking models."""
+    spec = _openrouter_spec()
+    assert spec.thinking_style == ""
+    assert spec.gateway_reasoning_style == "reasoning_effort"
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +149,11 @@ def test_mimo_reasoning_effort_unset_preserves_provider_default():
 
 
 def test_mimo_via_openrouter_reasoning_effort_none_disables_thinking():
-    """OpenRouter routes MiMo as "xiaomi/mimo-v2.5-pro"; the openrouter spec
-    has no thinking_style, so the disable signal must come from the
-    model-name path (#3845)."""
+    """OpenRouter routes MiMo as "xiaomi/mimo-v2.5-pro" and does NOT forward
+    extra_body.thinking to upstream, so a disable signal must also reach OR
+    in its own `reasoning.effort` shape. Verifies both the upstream-MiMo
+    payload (#3845) and the OR-native payload (#3851 follow-up) are sent.
+    """
     provider = _openrouter_provider("xiaomi/mimo-v2.5-pro")
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
@@ -152,11 +161,15 @@ def test_mimo_via_openrouter_reasoning_effort_none_disables_thinking():
         temperature=0.7, reasoning_effort="none", tool_choice=None,
     )
     assert "reasoning_effort" not in kwargs
-    assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert kwargs["extra_body"] == {
+        "thinking": {"type": "disabled"},
+        "reasoning": {"effort": "none"},
+    }
 
 
 def test_mimo_via_openrouter_reasoning_effort_medium_enables_thinking():
-    """Same as the direct path: any non-none/minimal effort enables thinking."""
+    """Non-none/minimal effort enables thinking and the OR `reasoning.effort`
+    field mirrors the requested effort level."""
     provider = _openrouter_provider("xiaomi/mimo-v2.5-pro")
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
@@ -164,7 +177,10 @@ def test_mimo_via_openrouter_reasoning_effort_medium_enables_thinking():
         temperature=0.7, reasoning_effort="medium", tool_choice=None,
     )
     assert kwargs.get("reasoning_effort") == "medium"
-    assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert kwargs["extra_body"] == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "medium"},
+    }
 
 
 def test_mimo_via_openrouter_bare_slug_also_matches():
@@ -176,12 +192,16 @@ def test_mimo_via_openrouter_bare_slug_also_matches():
         tools=None, model=None, max_tokens=100,
         temperature=0.7, reasoning_effort="none", tool_choice=None,
     )
-    assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert kwargs["extra_body"] == {
+        "thinking": {"type": "disabled"},
+        "reasoning": {"effort": "none"},
+    }
 
 
 def test_mimo_flash_via_openrouter_does_not_inject_thinking():
     """mimo-v2-flash has no thinking mode per Xiaomi docs; the allowlist
-    excludes it, so no thinking field should be injected on the gateway path."""
+    excludes it, so neither the upstream `thinking` field nor OR's
+    `reasoning.effort` should be injected on the gateway path."""
     provider = _openrouter_provider("xiaomi/mimo-v2-flash")
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
@@ -200,3 +220,18 @@ def test_non_mimo_model_via_openrouter_unaffected():
         temperature=0.7, reasoning_effort="none", tool_choice=None,
     )
     assert "extra_body" not in kwargs
+
+
+def test_kimi_via_openrouter_also_injects_reasoning_effort():
+    """Kimi has the same gateway problem as MiMo: OR drops the upstream
+    `thinking` field. The same OR-reasoning injection should fire."""
+    provider = _openrouter_provider("moonshotai/kimi-k2.5")
+    kwargs = provider._build_kwargs(
+        messages=_simple_messages(),
+        tools=None, model=None, max_tokens=100,
+        temperature=0.7, reasoning_effort="none", tool_choice=None,
+    )
+    assert kwargs["extra_body"] == {
+        "thinking": {"type": "disabled"},
+        "reasoning": {"effort": "none"},
+    }
