@@ -296,6 +296,7 @@ def gateway(
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         model_router=config.agents.defaults.model_router,
         sync_config=config.agents.defaults.sync,
     )
@@ -473,6 +474,7 @@ def agent(
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         model_router=config.agents.defaults.model_router,
         sync_config=config.agents.defaults.sync,
     )
@@ -979,6 +981,7 @@ def cron_run(
         channels_config=config.channels,
         web_fetch_config=config.tools.web.fetch,
         max_tokens_per_turn=config.agents.defaults.max_tokens_per_turn,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         model_router=config.agents.defaults.model_router,
         sync_config=config.agents.defaults.sync,
     )

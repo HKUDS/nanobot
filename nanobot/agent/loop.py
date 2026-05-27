@@ -66,6 +66,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         web_fetch_config: Any | None = None,
         max_tokens_per_turn: int = 0,
+        max_tool_result_chars: int = 0,
         model_router: Any | None = None,
         sync_config: Any | None = None,
     ):
@@ -87,6 +88,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self.web_fetch_config = web_fetch_config
         self.max_tokens_per_turn = max_tokens_per_turn
+        self.max_tool_result_chars = max_tool_result_chars
         self.model_router = model_router
         self.sync_config = sync_config or SyncConfig()
         self.sync = WorkspaceSync(workspace, self.sync_config)
@@ -210,6 +212,23 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    def _cap_tool_result(self, name: str, result: str) -> str:
+        """Truncate oversized tool results so they can't blow up the turn's context."""
+        cap = self.max_tool_result_chars
+        if not cap or not isinstance(result, str) or len(result) <= cap:
+            return result
+        original = len(result)
+        kept = result[:cap]
+        logger.warning(
+            "Tool result truncated: {} returned {} chars, capped at {}",
+            name, original, cap,
+        )
+        return (
+            f"{kept}\n\n[Truncated — tool '{name}' returned {original:,} chars, "
+            f"capped at {cap:,}. Narrow the query (filter by date, query string, "
+            f"or `fields`) to see more.]"
+        )
 
     _DEFAULT_CLASSIFIER_SYSTEM_PROMPT = (
         "Classify the user's message. Call the classify tool. "
@@ -387,6 +406,7 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = self._cap_tool_result(tool_call.name, result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
