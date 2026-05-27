@@ -409,7 +409,6 @@ class AgentRunner:
                 empty_content_retries = 0
                 length_recovery_count = 0
                 strip_observation_reflections(messages)
-                messages.append(build_observation_reflection_message())
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
@@ -417,6 +416,9 @@ class AgentRunner:
                 )
                 if _drained:
                     had_injections = True
+                self._append_injected_messages(
+                    messages, [build_observation_reflection_message()],
+                )
                 await hook.after_iteration(context)
                 continue
 

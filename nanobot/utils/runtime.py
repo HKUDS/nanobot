@@ -92,17 +92,23 @@ def build_observation_reflection_message() -> dict[str, str]:
 def strip_observation_reflections(messages: list[dict[str, Any]]) -> None:
     """Remove all historical observation-reflection prompts in-place.
 
-    Only the latest prompt (which will be appended after this call) should
-    be present in the context so accumulated boilerplate doesn't bloat history.
+    Standalone prompts are deleted entirely.  When a prompt has been merged
+    into a real user message (by ``_append_injected_messages``), only the
+    prompt text is stripped out so the user's content is preserved.
     """
     for idx in range(len(messages) - 1, -1, -1):
         msg = messages[idx]
-        if (
-            msg.get("role") == "user"
-            and not msg.get("tool_call_id")
-            and msg.get("content") == OBSERVATION_REFLECTION_PROMPT
-        ):
+        if msg.get("role") != "user" or msg.get("tool_call_id"):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        if content == OBSERVATION_REFLECTION_PROMPT:
             del messages[idx]
+            continue
+        if OBSERVATION_REFLECTION_PROMPT in content:
+            cleaned = content.replace(OBSERVATION_REFLECTION_PROMPT, "").strip()
+            messages[idx] = {**msg, "content": cleaned}
 
 
 def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:
