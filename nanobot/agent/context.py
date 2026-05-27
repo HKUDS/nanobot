@@ -22,6 +22,8 @@ from nanobot.utils.helpers import (
 )
 from nanobot.utils.prompt_templates import render_template
 
+from nanobot.config.loader import load_config
+
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return persisted kwargs for turn-attached capabilities."""
@@ -71,39 +73,53 @@ class ContextBuilder:
         session_summary: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity(channel=channel)]
+        config = load_config().context
+        parts = []
 
-        bootstrap = self._load_bootstrap_files()
+        if config.custom_prompt:
+            parts.append(config.custom_prompt)
+            
+        master_on = config.master_toggle
+            
+        if master_on and config.include_identity:
+            parts.append(self._get_identity(channel=channel))
+
+        bootstrap = self._load_bootstrap_files(config, master_on)
         if bootstrap:
             parts.append(bootstrap)
+            
+        if master_on and config.include_tool_usage:
+            parts.append(render_template("agent/tool_contract.md"))
 
-        parts.append(render_template("agent/tool_contract.md"))
+        if master_on and config.include_memory:
+            memory = self.memory.get_memory_context()
+            if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
+                parts.append(f"# Memory\n\n{memory}")
 
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
-            parts.append(f"# Memory\n\n{memory}")
+        if master_on and config.include_skills:
+            always_skills = self.skills.get_always_skills()
+            if always_skills:
+                always_content = self.skills.load_skills_for_context(always_skills)
+                if always_content:
+                    parts.append(f"# Active Skills\n\n{always_content}")
 
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+            skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+            if skills_summary:
+                parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
-        if skills_summary:
-            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+        if master_on and config.include_recent_history:
+            entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+            if entries:
+                capped = entries[-self._MAX_RECENT_HISTORY:]
+                history_text = "\n".join(
+                    f"- [{e['timestamp']}] {e['content']}" for e in capped
+                )
+                history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
+                parts.append("# Recent History\n\n" + history_text)
 
-        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
-        if entries:
-            capped = entries[-self._MAX_RECENT_HISTORY:]
-            history_text = "\n".join(
-                f"- [{e['timestamp']}] {e['content']}" for e in capped
-            )
-            history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
-            parts.append("# Recent History\n\n" + history_text)
-
-        if session_summary:
-            parts.append(f"[Archived Context Summary]\n\n{session_summary}")
+        if master_on and config.include_session_summary:
+            if session_summary:
+                parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
 
@@ -153,11 +169,20 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(self) -> str:
+    def _load_bootstrap_files(self, config: Any, master_on: bool) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
+        if not master_on:
+            return ""
 
         for filename in self.BOOTSTRAP_FILES:
+            if filename == "AGENTS.md" and not config.include_agents:
+                continue
+            if filename == "SOUL.md" and not config.include_soul:
+                continue
+            if filename == "USER.md" and not config.include_user:
+                continue
+                
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")

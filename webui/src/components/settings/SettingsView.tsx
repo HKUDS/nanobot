@@ -83,6 +83,7 @@ import {
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
+  updateContextSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
@@ -101,12 +102,14 @@ import type {
   McpPresetsPayload,
   SettingsPayload,
   WebSearchSettingsUpdate,
+  ContextSettingsUpdate,
 } from "@/lib/types";
 
 type SettingsSectionKey =
   | "overview"
   | "appearance"
   | "models"
+  | "context"		 
   | "image"
   | "web"
   | "cliApps"
@@ -291,6 +294,7 @@ export function SettingsView({
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
+  const [contextSaving, setContextSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("overview");
@@ -324,6 +328,19 @@ export function SettingsView({
     maxResults: 5,
     timeout: 30,
     useJinaReader: true,
+  });
+  const [contextForm, setContextForm] = useState<ContextSettingsUpdate>({
+    masterToggle: true,
+    customPrompt: "",
+    includeIdentity: true,
+    includeAgents: true,
+    includeSoul: true,
+    includeUser: true,
+	includeToolUsage: true,
+    includeMemory: true,
+    includeSkills: true,
+    includeRecentHistory: true,
+	includeSessionSummary: true,
   });
   const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>({
     enabled: false,
@@ -371,6 +388,19 @@ export function SettingsView({
       timeout: payload.web_search.timeout,
       useJinaReader: payload.web.fetch.use_jina_reader,
     }));
+	setContextForm({
+      masterToggle: payload.context.master_toggle,
+      customPrompt: payload.context.custom_prompt,
+      includeIdentity: payload.context.include_identity,
+      includeAgents: payload.context.include_agents,
+      includeSoul: payload.context.include_soul,
+      includeUser: payload.context.include_user,
+	  includeToolUsage: payload.context.include_tool_usage,
+      includeMemory: payload.context.include_memory,
+      includeSkills: payload.context.include_skills,
+      includeRecentHistory: payload.context.include_recent_history,
+	  includeSessionSummary: payload.context.include_session_summary,
+    });
     setImageGenerationForm({
       enabled: payload.image_generation.enabled,
       provider: payload.image_generation.provider,
@@ -721,6 +751,20 @@ export function SettingsView({
     }
   };
 
+  const saveContextSettings = async () => {
+    if (!settings || contextSaving) return;
+    setContextSaving(true);
+    try {
+      const payload = await updateContextSettings(token, contextForm);
+      applyPayload(payload);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setContextSaving(false);
+    }
+  };
+  
   const resetProviderDraft = useCallback((providerName: string) => {
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
@@ -982,6 +1026,16 @@ export function SettingsView({
             />
           </div>
         );
+	  case "context":
+	    return (
+		  <ContextSettings
+            settings={settings}
+            form={contextForm}
+            onChangeForm={setContextForm}
+            onSave={saveContextSettings}
+            saving={contextSaving}
+          />
+		);
       case "image":
         return (
           <ImageGenerationSettings
@@ -1163,6 +1217,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "overview", icon: Activity, fallback: "Overview" },
   { key: "appearance", icon: Palette, fallback: "Appearance" },
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
+  { key: "context", icon: Layers, fallback: "Context" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
   { key: "cliApps", icon: Package, fallback: "CLI Apps" },
@@ -3706,6 +3761,100 @@ function AdvancedSettings({ settings }: { settings: SettingsPayload }) {
         </SettingsGroup>
       </section>
     </div>
+  );
+}
+
+function ContextSettings({
+  settings,
+  form,
+  onChangeForm,
+  onSave,
+  saving,
+}: {
+  settings: SettingsPayload;
+  form: ContextSettingsUpdate;
+  onChangeForm: Dispatch<SetStateAction<ContextSettingsUpdate>>;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const masterEnabled = form.masterToggle ?? true;
+
+  const dirty =
+    form.masterToggle !== settings.context.master_toggle ||
+    form.customPrompt !== settings.context.custom_prompt ||
+    form.includeIdentity !== settings.context.include_identity ||
+    form.includeAgents !== settings.context.include_agents ||
+    form.includeSoul !== settings.context.include_soul ||
+    form.includeUser !== settings.context.include_user ||
+	form.includeToolUsage !== settings.context.include_tool_usage ||
+    form.includeMemory !== settings.context.include_memory ||
+    form.includeSkills !== settings.context.include_skills ||
+    form.includeRecentHistory !== settings.context.include_recent_history ||
+	form.includeSessionSummary !== settings.context.include_session_summary;
+
+  const ToggleRow = ({ label, stateKey }: { label: string, stateKey: keyof ContextSettingsUpdate }) => (
+    <SettingsRow title={label}>
+      <ToggleButton
+        checked={Boolean(form[stateKey])}
+        onChange={(checked) => onChangeForm((prev) => ({ ...prev, [stateKey]: checked }))}
+        label={Boolean(form[stateKey]) ? "On" : "Off"}
+      />
+    </SettingsRow>
+  );
+
+  return (
+    <section>
+      <SettingsSectionTitle>{tx("settings.sections.context", "Context")}</SettingsSectionTitle>
+      <SettingsGroup>
+        <SettingsRow
+          title={tx("settings.context.customPrompt", "Custom System Prompt")}
+          description={tx("settings.context.customPromptDesc", "Added at the very beginning of the system prompt.")}
+        >
+          <Textarea
+            value={form.customPrompt ?? ""}
+            onChange={(e) => onChangeForm((prev) => ({ ...prev, customPrompt: e.target.value }))}
+            placeholder="Enter custom instructions here..."
+            className="mt-2 min-h-[80px] w-full resize-y rounded-[12px] text-[13px] sm:w-[320px] sm:mt-0"
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={tx("settings.context.masterToggle", "Master Context Toggle")}
+          description={tx("settings.context.masterToggleDesc", "Enable or disable all context file inclusions.")}
+        >
+          <ToggleButton
+            checked={masterEnabled}
+            onChange={(checked) => onChangeForm((prev) => ({ ...prev, masterToggle: checked }))}
+            label={masterEnabled ? "On" : "Off"}
+          />
+        </SettingsRow>
+
+        <div className={cn("transition-opacity", !masterEnabled && "pointer-events-none opacity-50")}>
+          <div className="border-t border-border/45 bg-muted/15 px-5 py-2.5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">
+            {tx("settings.context.toggleSystemPrompt", "Toggle system prompt")}
+          </div>
+          <div className="divide-y divide-border/45">
+            <ToggleRow label="Identity (identity.md)" stateKey="includeIdentity" />
+            <ToggleRow label="Agents (AGENTS.md)" stateKey="includeAgents" />
+            <ToggleRow label="Soul (SOUL.md)" stateKey="includeSoul" />
+            <ToggleRow label="User (USER.md)" stateKey="includeUser" />
+			<ToggleRow label="Tool usage (tool_contract.md)" stateKey="includeToolUsage" />
+            <ToggleRow label="Memory" stateKey="includeMemory" />
+            <ToggleRow label="Skills" stateKey="includeSkills" />
+            <ToggleRow label="Recent History" stateKey="includeRecentHistory" />
+			<ToggleRow label="Session Summary" stateKey="includeSessionSummary" />
+          </div>
+        </div>
+
+        <SettingsFooter
+          dirty={dirty}
+          saving={saving}
+          saved={false}
+          onSave={onSave}
+        />
+      </SettingsGroup>
+    </section>
   );
 }
 

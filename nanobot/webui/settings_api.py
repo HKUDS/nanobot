@@ -258,6 +258,19 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
             "tool_hint_max_length": defaults.tool_hint_max_length,
         },
         "model_presets": model_presets,
+        "context": {
+            "master_toggle": config.context.master_toggle,
+            "custom_prompt": config.context.custom_prompt,
+            "include_identity": config.context.include_identity,
+            "include_agents": config.context.include_agents,
+            "include_soul": config.context.include_soul,
+            "include_user": config.context.include_user,
+            "include_tool_usage": config.context.include_tool_usage,
+            "include_memory": config.context.include_memory,
+            "include_skills": config.context.include_skills,
+            "include_recent_history": config.context.include_recent_history,
+            "include_session_summary": config.context.include_session_summary,
+        },
         "providers": providers,
         "web_search": {
             "provider": search_provider,
@@ -442,7 +455,41 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
     config.agents.defaults.model_preset = name
     save_config(config)
     return settings_payload()
+    
+def update_context_settings(query: QueryParams) -> dict[str, Any]:
+    config = load_config()
+    ctx = config.context
+    changed = False
 
+    def _update_bool(key: str, alias: str):
+        nonlocal changed
+        val = _query_first_alias(query, key, alias)
+        if val is not None:
+            parsed = _parse_bool(val, key)
+            if getattr(ctx, key) != parsed:
+                setattr(ctx, key, parsed)
+                changed = True
+
+    _update_bool("master_toggle", "masterToggle")
+    _update_bool("include_identity", "includeIdentity")
+    _update_bool("include_agents", "includeAgents")
+    _update_bool("include_soul", "includeSoul")
+    _update_bool("include_user", "includeUser")
+    _update_bool("include_tool_usage", "includeToolUsage")
+    _update_bool("include_memory", "includeMemory")
+    _update_bool("include_skills", "includeSkills")
+    _update_bool("include_recent_history", "includeRecentHistory")
+    _update_bool("include_session_summary", "includeSessionSummary")
+
+    custom_prompt = _query_first_alias(query, "custom_prompt", "customPrompt")
+    if custom_prompt is not None:
+        if ctx.custom_prompt != custom_prompt:
+            ctx.custom_prompt = custom_prompt
+            changed = True
+
+    if changed:
+        save_config(config)
+    return settings_payload()
 
 def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()

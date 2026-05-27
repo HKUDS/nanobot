@@ -11,6 +11,7 @@ import type {
   SlashCommand,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
+  ContextSettingsUpdate,
 } from "./types";
 
 export class ApiError extends Error {
@@ -281,6 +282,30 @@ export async function createModelConfiguration(
   );
 }
 
+export async function updateContextSettings(
+  token: string,
+  update: ContextSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  if (update.masterToggle !== undefined) query.set("master_toggle", String(update.masterToggle));
+  if (update.customPrompt !== undefined) query.set("custom_prompt", update.customPrompt);
+  if (update.includeIdentity !== undefined) query.set("include_identity", String(update.includeIdentity));
+  if (update.includeAgents !== undefined) query.set("include_agents", String(update.includeAgents));
+  if (update.includeSoul !== undefined) query.set("include_soul", String(update.includeSoul));
+  if (update.includeUser !== undefined) query.set("include_user", String(update.includeUser));
+  if (update.includeToolUsage !== undefined) query.set("include_tool_usage", String(update.includeToolUsage));
+  if (update.includeMemory !== undefined) query.set("include_memory", String(update.includeMemory));
+  if (update.includeSkills !== undefined) query.set("include_skills", String(update.includeSkills));
+  if (update.includeRecentHistory !== undefined) query.set("include_recent_history", String(update.includeRecentHistory));
+  if (update.includeSessionSummary !== undefined) query.set("include_session_summary", String(update.includeSessionSummary));
+
+  return request<SettingsPayload>(
+    `${base}/api/settings/context/update?${query}`,
+    token,
+  );
+}
+
 export async function updateProviderSettings(
   token: string,
   update: ProviderSettingsUpdate,
@@ -333,4 +358,4 @@ export async function updateImageGenerationSettings(
     `${base}/api/settings/image-generation/update?${query}`,
     token,
   );
-}
+}									
