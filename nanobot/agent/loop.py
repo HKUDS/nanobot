@@ -19,7 +19,7 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, CompositeHook
-from nanobot.agent.memory import Consolidator, Dream
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
@@ -316,11 +316,6 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
-        self.dream = Dream(
-            store=self.context.memory,
-            provider=provider,
-            model=self.model,
-        )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None
         if model_preset:
@@ -409,7 +404,6 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
-        self.dream.set_provider(provider, model)
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(

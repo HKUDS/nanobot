@@ -984,11 +984,25 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
+            store = agent.context.memory
             try:
-                await agent.dream.run()
-                logger.info("Dream cron job completed")
+                result = store.build_dream_prompt()
+                if result is None:
+                    logger.info("Dream: nothing to process")
+                    return None
+                prompt, last_cursor = result
+                resp = await agent.process_direct(prompt, session_key="dream")
+                if resp is not None:
+                    store.set_last_dream_cursor(last_cursor)
+                    logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
             except Exception:
                 logger.exception("Dream cron job failed")
+            finally:
+                if store.git.is_initialized():
+                    sha = store.git.auto_commit("dream: periodic memory consolidation")
+                    if sha:
+                        logger.info("Dream commit: {}", sha)
+                store.compact_history()
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -1199,13 +1213,8 @@ def _run_gateway(
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)
-    dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model_override:
-        agent.dream.model = dream_cfg.model_override
-    agent.dream.max_batch_size = dream_cfg.max_batch_size
-    agent.dream.max_iterations = dream_cfg.max_iterations
-    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+    dream_cfg = config.agents.defaults.dream
     if dream_cfg.enabled:
         cron.register_system_job(CronJob(
             id="dream",

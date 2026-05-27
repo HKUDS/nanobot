@@ -305,17 +305,32 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
+        store = loop.context.memory
+        content = ""
         t0 = time.monotonic()
         try:
-            did_work = await loop.dream.run()
+            result = store.build_dream_prompt()
+            if result is None:
+                await loop.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Dream: nothing to process.",
+                ))
+                return
+            prompt, last_cursor = result
+            resp = await loop.process_direct(prompt, session_key="dream")
             elapsed = time.monotonic() - t0
-            if did_work:
-                content = f"Dream completed in {elapsed:.1f}s."
-            else:
-                content = "Dream: nothing to process."
+            if resp is not None:
+                store.set_last_dream_cursor(last_cursor)
+            content = f"Dream completed in {elapsed:.1f}s."
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
+        finally:
+            if store.git.is_initialized():
+                sha = store.git.auto_commit("dream: manual run")
+                if sha:
+                    content += f" (commit {sha})"
+            store.compact_history()
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
