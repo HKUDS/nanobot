@@ -299,6 +299,19 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
+class ContextConfig(Base):
+    """System prompt context toggle configuration."""
+    master_toggle: bool = True
+    custom_prompt: str = ""
+    include_identity: bool = True
+    include_agents: bool = True
+    include_soul: bool = True
+    include_user: bool = True
+    include_tool_usage: bool = True
+    include_memory: bool = True
+    include_skills: bool = True
+    include_recent_history: bool = True
+    include_session_summary: bool = True
 
 class Config(BaseSettings):
     """Root configuration for nanobot."""
@@ -309,6 +322,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    context: ContextConfig = Field(default_factory=ContextConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
