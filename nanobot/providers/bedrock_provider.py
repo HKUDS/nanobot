@@ -12,7 +12,13 @@ from typing import Any
 
 import json_repair
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    is_local_endpoint,
+    resolve_stream_idle_timeout_s,
+)
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
@@ -51,12 +57,15 @@ class BedrockProvider(LLMProvider):
         profile: str | None = None,
         extra_body: dict[str, Any] | None = None,
         client: Any | None = None,
+        stream_idle_timeout_s: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         self.profile = profile
         self._extra_body = extra_body or {}
+        self._stream_idle_timeout_s_override = stream_idle_timeout_s
+        self._is_local = is_local_endpoint(api_base)
         self._client = client if client is not None else self._make_client()
 
     def _make_client(self) -> Any:
@@ -707,7 +716,10 @@ class BedrockProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         _ = on_thinking_delta, on_tool_call_delta
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            config_override=self._stream_idle_timeout_s_override,
+            is_local=self._is_local,
+        )
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         thinking_blocks: list[dict[str, Any]] = []

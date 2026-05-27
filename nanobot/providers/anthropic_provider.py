@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import secrets
 import string
@@ -12,7 +11,13 @@ from typing import Any
 
 import json_repair
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    is_local_endpoint,
+    resolve_stream_idle_timeout_s,
+)
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -34,10 +39,13 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        stream_idle_timeout_s: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._stream_idle_timeout_s_override = stream_idle_timeout_s
+        self._is_local = is_local_endpoint(api_base)
 
         from anthropic import AsyncAnthropic
 
@@ -596,7 +604,10 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            config_override=self._stream_idle_timeout_s_override,
+            is_local=self._is_local,
+        )
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta or on_thinking_delta or on_tool_call_delta:

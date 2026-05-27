@@ -76,6 +76,7 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
+            stream_idle_timeout_s=p.stream_idle_timeout_s if p else None,
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -87,6 +88,7 @@ def _make_provider_core(
             region=getattr(p, "region", None) if p else None,
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
+            stream_idle_timeout_s=p.stream_idle_timeout_s if p else None,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -99,6 +101,7 @@ def _make_provider_core(
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p and provider_name == "openai" else "auto",
+            stream_idle_timeout_s=p.stream_idle_timeout_s if p else None,
         )
 
     provider.generation = resolved.to_generation_settings()

@@ -8,6 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.providers.anthropic_provider import AnthropicProvider
+from nanobot.providers.base import (
+    DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S,
+    DEFAULT_STREAM_IDLE_TIMEOUT_S,
+    resolve_stream_idle_timeout_s,
+)
 
 
 def _final_message_stub(text: str = "Hi") -> SimpleNamespace:
@@ -215,3 +220,99 @@ async def test_chat_stream_without_callback_still_finalizes() -> None:
     )
     assert res.content == "ok"
     fake.get_final_message.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Stream-idle timeout resolution — config > env > local default > cloud default.
+# Regression tests for nanobot#4013.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_default_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", raising=False)
+    assert resolve_stream_idle_timeout_s() == DEFAULT_STREAM_IDLE_TIMEOUT_S
+    assert DEFAULT_STREAM_IDLE_TIMEOUT_S == 90
+
+
+def test_resolve_default_local_bumps_to_300s(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", raising=False)
+    assert resolve_stream_idle_timeout_s(is_local=True) == DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S
+    assert DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S == 300
+
+
+def test_resolve_env_var_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "240")
+    assert resolve_stream_idle_timeout_s() == 240
+    # Env beats local default too — legacy behavior preserved.
+    assert resolve_stream_idle_timeout_s(is_local=True) == 240
+
+
+def test_resolve_config_override_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "240")
+    assert resolve_stream_idle_timeout_s(config_override=600) == 600
+
+
+def test_resolve_invalid_env_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "not-a-number")
+    assert resolve_stream_idle_timeout_s() == DEFAULT_STREAM_IDLE_TIMEOUT_S
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_uses_config_override_when_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anthropic provider must thread stream_idle_timeout_s into asyncio.wait_for."""
+    monkeypatch.delenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", raising=False)
+    provider = AnthropicProvider(api_key="sk-test", stream_idle_timeout_s=600)
+    provider._client = MagicMock()
+
+    fake = _FakeAsyncStream(
+        [
+            SimpleNamespace(
+                type="content_block_delta",
+                delta=SimpleNamespace(type="text_delta", text="Hi"),
+            ),
+        ]
+    )
+    stream_cm = MagicMock()
+    stream_cm.__aenter__ = AsyncMock(return_value=fake)
+    stream_cm.__aexit__ = AsyncMock(return_value=None)
+    provider._client.messages.stream = MagicMock(return_value=stream_cm)
+
+    captured: list[float | int] = []
+    import asyncio as _asyncio
+
+    real_wait_for = _asyncio.wait_for
+
+    async def spy_wait_for(awaitable, timeout):
+        captured.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr("nanobot.providers.anthropic_provider.asyncio.wait_for", spy_wait_for)
+
+    async def noop(_: str) -> None:
+        return None
+
+    await provider.chat_stream(
+        messages=[{"role": "user", "content": "hello"}],
+        on_content_delta=noop,
+    )
+
+    assert captured, "stream loop did not call asyncio.wait_for"
+    assert all(t == 600 for t in captured), captured
+
+
+def test_anthropic_provider_local_api_base_bumps_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A localhost api_base must lift the default idle timeout to 300s."""
+    monkeypatch.delenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", raising=False)
+    provider = AnthropicProvider(
+        api_key="sk-test",
+        api_base="http://localhost:1234/v1",
+    )
+    assert provider._is_local is True
+    assert resolve_stream_idle_timeout_s(
+        config_override=provider._stream_idle_timeout_s_override,
+        is_local=provider._is_local,
+    ) == DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S

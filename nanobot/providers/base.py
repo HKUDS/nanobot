@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -9,11 +10,76 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from ipaddress import ip_address
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
 from nanobot.utils.helpers import image_placeholder_text
+
+# Default SSE stream-idle watchdog for cloud LLM APIs.  Local LLM servers
+# (LM Studio, Ollama, vLLM) need a longer fuse — see ``resolve_stream_idle_timeout_s``.
+DEFAULT_STREAM_IDLE_TIMEOUT_S = 90
+DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S = 300
+
+
+def is_local_endpoint(api_base: str | None) -> bool:
+    """Return True when the api_base URL points at a local or LAN model server.
+
+    Matches localhost, 127.x, 192.168.x, 10.x, 172.16-31.x, IPv6 loopback,
+    and Docker ``host.docker.internal``.  Used by providers without a
+    ``ProviderSpec`` (Anthropic, Bedrock) to decide stream-idle defaults.
+    """
+    if not api_base:
+        return False
+    raw = api_base.strip().lower()
+    parsed = urlparse(raw if "://" in raw else f"//{raw}")
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return False
+    if host in {"localhost", "host.docker.internal"}:
+        return True
+    if not host:
+        return False
+    try:
+        addr = ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
+
+
+def resolve_stream_idle_timeout_s(
+    *,
+    config_override: int | None = None,
+    is_local: bool = False,
+) -> int:
+    """Return the SSE stream-idle timeout for an LLM streaming call.
+
+    Resolution order (first match wins):
+      1. ``config_override`` — per-provider ``streamIdleTimeoutS`` from config.
+      2. ``NANOBOT_STREAM_IDLE_TIMEOUT_S`` env var (legacy, kept for compat).
+      3. ``DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S`` (300s) when *is_local*.
+      4. ``DEFAULT_STREAM_IDLE_TIMEOUT_S`` (90s).
+
+    The 90s cloud default detects genuinely stalled connections; the 300s
+    local default avoids false-positive aborts on heavier prompts where
+    inference between tokens can legitimately take minutes.
+    """
+    if config_override is not None and config_override > 0:
+        return int(config_override)
+    raw = os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+    if is_local:
+        return DEFAULT_LOCAL_STREAM_IDLE_TIMEOUT_S
+    return DEFAULT_STREAM_IDLE_TIMEOUT_S
 
 
 @dataclass

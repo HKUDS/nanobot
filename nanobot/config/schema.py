@@ -174,6 +174,7 @@ class ProviderConfig(Base):
     api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
+    stream_idle_timeout_s: int | None = None  # SSE stream-idle watchdog override (seconds); default: 90s cloud / 300s local. Falls back to NANOBOT_STREAM_IDLE_TIMEOUT_S env var.
 
 
 class BedrockProviderConfig(ProviderConfig):

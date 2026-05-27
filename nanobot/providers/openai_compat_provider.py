@@ -13,14 +13,18 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
-from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import json_repair
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    is_local_endpoint,
+    resolve_stream_idle_timeout_s,
+)
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -218,23 +222,7 @@ def _is_local_endpoint(
     """
     if spec and spec.is_local:
         return True
-    if not api_base:
-        return False
-    raw = api_base.strip().lower()
-    parsed = urlparse(raw if "://" in raw else f"//{raw}")
-    try:
-        host = parsed.hostname
-    except ValueError:
-        return False
-    if host in {"localhost", "host.docker.internal"}:
-        return True
-    if not host:
-        return False
-    try:
-        addr = ip_address(host)
-    except ValueError:
-        return False
-    return addr.is_loopback or addr.is_private
+    return is_local_endpoint(api_base)
 
 
 def _is_direct_openai_base(api_base: str | None) -> bool:
@@ -331,6 +319,7 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
+        stream_idle_timeout_s: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -338,6 +327,7 @@ class OpenAICompatProvider(LLMProvider):
         self._spec = spec
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
+        self._stream_idle_timeout_s_override = stream_idle_timeout_s
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -1357,7 +1347,10 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            config_override=self._stream_idle_timeout_s_override,
+            is_local=self._is_local,
+        )
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
