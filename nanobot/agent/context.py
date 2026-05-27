@@ -169,8 +169,10 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(self, config: Any, master_on: bool) -> str:
+    def _load_bootstrap_files(self, config: Any = None, master_on: bool = True) -> str:
         """Load all bootstrap files from workspace."""
+        if config is None:
+            config = load_config().context
         parts = []
         if not master_on:
             return ""
