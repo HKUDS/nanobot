@@ -236,7 +236,7 @@ class ProvidersConfig(Base):
 
 
 class HeartbeatConfig(Base):
-    """Heartbeat service configuration."""
+    """Heartbeat service configuration (now backed by cron)."""
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
