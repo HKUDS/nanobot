@@ -1,0 +1,49 @@
+spec_version: "0.1.0"
+name: nanobot
+version: "0.2.0"
+description: >
+  nanobot is an open-source, ultra-lightweight AI agent framework built in Python.
+  It runs a small, readable agent loop that receives messages from chat channels
+  (Telegram, Discord, Slack, WhatsApp, Feishu, Matrix, WeChat, DingTalk, MS Teams,
+  and more), invokes any OpenAI-compatible or Anthropic LLM provider, executes
+  tools (filesystem, shell, web search/fetch, MCP servers, image generation,
+  sub-agent spawning, long-running goals), and persists session memory via Dream
+  two-phase consolidation. Designed to go from local setup to a long-running
+  personal agent with minimal overhead and maximal extensibility through channels,
+  tools, skills, and MCP server plugins.
+license: MIT
+model:
+  preferred: anthropic:claude-opus-4-5
+  fallback:
+    - openai:gpt-4o
+    - anthropic:claude-sonnet-4-6
+runtime:
+  max_turns: 50
+  entrypoint: "nanobot gateway"
+  language: python
+  min_python: "3.11"
+skills:
+  - name: github
+    description: Interact with GitHub using the gh CLI
+  - name: weather
+    description: Get weather info using wttr.in and Open-Meteo
+  - name: summarize
+    description: Summarize URLs, files, and YouTube videos
+  - name: tmux
+    description: Remote-control tmux sessions
+  - name: clawhub
+    description: Search and install skills from the ClawHub registry
+  - name: cron
+    description: Schedule recurring tasks and reminders
+  - name: long-goal
+    description: Hold sustained objectives across conversation turns
+  - name: image-generation
+    description: Generate images end-to-end via configured providers
+  - name: memory
+    description: Persistent Dream two-phase memory consolidation
+  - name: skill-creator
+    description: Dynamically author and install new skills at runtime
+compliance:
+  risk_tier: standard
+  supervision:
+    human_in_the_loop: destructive
