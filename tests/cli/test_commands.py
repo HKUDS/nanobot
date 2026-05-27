@@ -1210,7 +1210,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "nanobot.utils.evaluator.evaluate_response",
+        "nanobot.cli.commands.evaluate_response",
         _capture_evaluate_response,
     )
 
@@ -1342,7 +1342,7 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "nanobot.utils.evaluator.evaluate_response",
+        "nanobot.cli.commands.evaluate_response",
         _always_reject,
     )
 
