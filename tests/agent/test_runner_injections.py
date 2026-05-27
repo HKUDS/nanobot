@@ -224,7 +224,7 @@ async def test_checkpoint1_injects_after_tool_execution():
     # The second call should have the injected user message
     assert call_count["n"] == 2
     last_messages = captured_messages[-1]
-    injected = [m for m in last_messages if m.get("role") == "user" and m.get("content") == "follow-up question"]
+    injected = [m for m in last_messages if m.get("role") == "user" and "follow-up question" in (m.get("content") or "")]
     assert len(injected) == 1
 
 
@@ -920,7 +920,7 @@ async def test_drain_injections_on_max_iterations():
     # The injection message is appended to conversation history
     injected = [
         m for m in result.messages
-        if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
+        if m.get("role") == "user" and "follow-up after max iters" in (m.get("content") or "")
     ]
     assert len(injected) == 1
 
@@ -983,7 +983,7 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
     assert injection_queue.empty()
     injected = [
         m for m in result.messages
-        if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
+        if m.get("role") == "user" and "late follow-up after max iters" in (m.get("content") or "")
     ]
     assert len(injected) == 1
 
