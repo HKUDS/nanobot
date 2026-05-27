@@ -319,14 +319,39 @@ class MemoryStore:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]
 
-    def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+    def compact_history(self, *, protect_after_cursor: int | None = None) -> None:
+        """Drop oldest entries if the file exceeds *max_history_entries*.
+
+        When *protect_after_cursor* is set, entries with cursor > that value
+        are never removed — they are "unprocessed" by Dream and must survive
+        compaction even if that means exceeding *max_history_entries*.
+        """
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
-        kept = entries[-self.max_history_entries:]
+
+        if protect_after_cursor is not None and protect_after_cursor > 0:
+            # Find the first unprocessed entry (cursor > protect_after_cursor).
+            protected_start = len(entries)  # default: all processed
+            for i, e in enumerate(entries):
+                c = self._valid_cursor(e.get("cursor"))
+                if c is not None and c > protect_after_cursor:
+                    protected_start = i
+                    break
+
+            prefix = entries[:protected_start]   # processed (safe to trim)
+            suffix = entries[protected_start:]    # unprocessed (protected)
+
+            # Only trim the processed prefix; keep last max_history_entries
+            if len(prefix) > self.max_history_entries:
+                prefix = prefix[-self.max_history_entries:]
+
+            kept = prefix + suffix
+        else:
+            kept = entries[-self.max_history_entries:]
+
         self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
@@ -1148,7 +1173,7 @@ class Dream:
                 reason,
             )
 
-        self.store.compact_history()
+        self.store.compact_history(protect_after_cursor=self.store.get_last_dream_cursor())
 
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():

@@ -99,6 +99,47 @@ class TestDreamRun:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert all(e["cursor"] > 0 for e in entries)
 
+    async def test_compact_does_not_drop_unprocessed_on_failure(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """When Dream fails, compact must not discard entries beyond dream_cursor."""
+        # Use a small store so compaction actually trims
+        from nanobot.agent.memory import MemoryStore
+        small_store = MemoryStore(store.workspace, max_history_entries=3)
+        dream.store = small_store
+
+        small_store.write_soul("# Soul\n- Helpful")
+        small_store.write_user("# User\n- Developer")
+        small_store.write_memory("# Memory\n- Project X active")
+
+        # Mark cursor 1-2 as already processed
+        small_store.append_history("processed 1")
+        small_store.append_history("processed 2")
+        small_store.set_last_dream_cursor(2)
+
+        # Add unprocessed entries
+        small_store.append_history("unprocessed 3")
+        small_store.append_history("unprocessed 4")
+        small_store.append_history("unprocessed 5")
+        small_store.append_history("unprocessed 6")
+
+        # Simulate Dream failure
+        mock_provider.chat_with_retry.return_value = MagicMock(content="Analysis")
+        mock_runner.run = AsyncMock(return_value=_make_run_result(stop_reason="error"))
+
+        await dream.run()
+
+        # cursor should NOT have advanced
+        assert small_store.get_last_dream_cursor() == 2
+
+        # All unprocessed entries (3-6) must survive compaction
+        unprocessed = small_store.read_unprocessed_history(since_cursor=2)
+        cursors = [e["cursor"] for e in unprocessed]
+        assert 3 in cursors
+        assert 4 in cursors
+        assert 5 in cursors
+        assert 6 in cursors
+
     async def test_skill_phase_uses_builtin_skill_creator_path(self, dream, mock_provider, mock_runner, store):
         """Dream should point skill creation guidance at the builtin skill-creator template."""
         store.append_history("Repeated workflow one")

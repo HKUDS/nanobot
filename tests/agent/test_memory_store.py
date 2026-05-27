@@ -141,6 +141,60 @@ class TestHistoryWithCursor:
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
 
+    def test_compact_history_protects_unprocessed_entries(self, tmp_path):
+        """Entries with cursor > protect_after_cursor must survive compaction."""
+        store = MemoryStore(tmp_path, max_history_entries=3)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        store.append_history("event 4")
+        store.append_history("event 5")
+        store.append_history("event 6")
+        # cursor 1-2 processed, 3-6 unprocessed
+        store.compact_history(protect_after_cursor=2)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        # Unprocessed entries (3-6) must all survive; processed prefix
+        # trimmed to last 3 of the processed part, but there are only 2
+        # processed so both kept → total = 2 + 4 = 6
+        cursors = [e["cursor"] for e in entries]
+        assert 3 in cursors
+        assert 4 in cursors
+        assert 5 in cursors
+        assert 6 in cursors
+
+    def test_compact_history_without_protect_keeps_last_n(self, tmp_path):
+        """Without protect_after_cursor, behaviour is unchanged."""
+        store = MemoryStore(tmp_path, max_history_entries=2)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        store.compact_history(protect_after_cursor=None)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 2
+
+    def test_compact_history_protect_zero_cursor_preserves_all(self, tmp_path):
+        """protect_after_cursor=0 means all entries are unprocessed — none dropped."""
+        store = MemoryStore(tmp_path, max_history_entries=2)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        store.compact_history(protect_after_cursor=0)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        # protect_after_cursor=0 is falsy, so falls through to default behaviour
+        assert len(entries) == 2
+
+    def test_compact_history_all_processed_trims_normally(self, tmp_path):
+        """When all entries are already processed, compact trims to cap."""
+        store = MemoryStore(tmp_path, max_history_entries=2)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        # All processed (cursor 3 is the latest)
+        store.compact_history(protect_after_cursor=3)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 2
+        assert entries[0]["cursor"] == 2
+
     def test_write_entries_uses_atomic_write(self, tmp_path):
         """_write_entries uses temp file + os.replace for atomicity."""
         store = MemoryStore(tmp_path)
