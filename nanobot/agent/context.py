@@ -14,6 +14,7 @@ from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.cli_apps import utils as cli_app_utils
+from nanobot.config.loader import load_config
 from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
@@ -21,8 +22,6 @@ from nanobot.utils.helpers import (
     truncate_text,
 )
 from nanobot.utils.prompt_templates import render_template
-
-from nanobot.config.loader import load_config
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -78,16 +77,16 @@ class ContextBuilder:
 
         if config.custom_prompt:
             parts.append(config.custom_prompt)
-            
+
         master_on = config.master_toggle
-            
+
         if master_on and config.include_identity:
             parts.append(self._get_identity(channel=channel))
 
         bootstrap = self._load_bootstrap_files(config, master_on)
         if bootstrap:
             parts.append(bootstrap)
-            
+
         if master_on and config.include_tool_usage:
             parts.append(render_template("agent/tool_contract.md"))
 
@@ -184,7 +183,7 @@ class ContextBuilder:
                 continue
             if filename == "USER.md" and not config.include_user:
                 continue
-                
+
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")

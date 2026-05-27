@@ -50,10 +50,10 @@ from nanobot.webui.settings_api import (
     create_model_configuration,
     settings_payload,
     update_agent_settings,
+    update_context_settings,
     update_image_generation_settings,
     update_provider_settings,
     update_web_search_settings,
-    update_context_settings,
 )
 from nanobot.webui.cli_apps_api import (
     cli_apps_action,
@@ -713,7 +713,7 @@ class WebSocketChannel(BaseChannel):
 
         if got == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
-            
+
         if got == "/api/settings/context/update":
             return self._handle_settings_context_update(request)
 
@@ -962,7 +962,7 @@ class WebSocketChannel(BaseChannel):
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
         return _http_json_response(self._with_settings_restart_state(payload, section="web"))
-        
+
     def _handle_settings_context_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")

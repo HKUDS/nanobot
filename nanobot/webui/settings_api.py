@@ -455,7 +455,7 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
     config.agents.defaults.model_preset = name
     save_config(config)
     return settings_payload()
-    
+
 def update_context_settings(query: QueryParams) -> dict[str, Any]:
     config = load_config()
     ctx = config.context
