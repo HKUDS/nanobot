@@ -9,7 +9,7 @@ import {
   listSessions,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
-import type { ChatSummary, UIMessage } from "@/lib/types";
+import type { ChatSummary, UIMessage, WorkspaceScopePayload } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 
@@ -19,7 +19,7 @@ export function useSessions(): {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  createChat: () => Promise<string>;
+  createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
   deleteChat: (key: string) => Promise<void>;
 } {
   const { client, token } = useClient();
@@ -66,8 +66,8 @@ export function useSessions(): {
     });
   }, [client, refresh]);
 
-  const createChat = useCallback(async (): Promise<string> => {
-    const chatId = await client.newChat();
+  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
+    const chatId = await client.newChat(5_000, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -81,6 +81,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
+        workspaceScope: workspaceScope ?? null,
       },
       ...prev.filter((s) => s.key !== key),
     ]);

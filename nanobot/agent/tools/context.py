@@ -1,8 +1,14 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol, runtime_checkable
+
+_CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
+    "nanobot_tool_request_context",
+    default=None,
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,23 @@ class ContextAware(Protocol):
         ...
 
 
+def bind_request_context(ctx: RequestContext) -> Token[RequestContext | None]:
+    return _CURRENT_REQUEST_CONTEXT.set(ctx)
+
+
+def reset_request_context(token: Token[RequestContext | None]) -> None:
+    _CURRENT_REQUEST_CONTEXT.reset(token)
+
+
+def current_request_context() -> RequestContext | None:
+    return _CURRENT_REQUEST_CONTEXT.get()
+
+
+def current_request_session_key() -> str | None:
+    ctx = current_request_context()
+    return ctx.session_key if ctx else None
+
+
 @dataclass
 class ToolContext:
     config: Any
@@ -33,3 +56,4 @@ class ToolContext:
     provider_snapshot_loader: Callable[[], Any] | None = None
     image_generation_provider_configs: dict[str, Any] | None = None
     timezone: str = "UTC"
+    workspace_sandbox: Any | None = None

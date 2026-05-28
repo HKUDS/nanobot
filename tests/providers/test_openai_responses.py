@@ -1,10 +1,10 @@
 """Tests for the shared openai_responses converters and parsers."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -13,6 +13,8 @@ from nanobot.providers.openai_responses.converters import (
 )
 from nanobot.providers.openai_responses.parsing import (
     consume_sdk_stream,
+    consume_sse,
+    consume_sse_with_reasoning,
     map_finish_reason,
     parse_response_output,
 )
@@ -435,6 +437,166 @@ class TestParseResponseOutput:
 
 
 # ======================================================================
+# parsing - consume_sse
+# ======================================================================
+
+
+class _SseResponse:
+    def __init__(self, events: list[dict]):
+        self._events = events
+
+    async def aiter_lines(self):
+        for event in self._events:
+            yield f"data: {json.dumps(event)}"
+            yield ""
+
+
+class TestConsumeSse:
+    @pytest.mark.asyncio
+    async def test_legacy_consume_sse_returns_three_tuple(self):
+        response = _SseResponse([
+            {"type": "response.output_text.delta", "delta": "hi"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+
+        content, tool_calls, finish_reason = await consume_sse(response)
+
+        assert content == "hi"
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_delta_extracted(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
+            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {"type": "response.output_text.delta", "delta": "answer"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert content == "answer"
+        assert tool_calls == []
+        assert finish_reason == "stop"
+        assert reasoning == "thinking briefly"
+        assert deltas == ["thinking ", "briefly"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_from_completed_response(self):
+        response = _SseResponse([
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [
+                        {"type": "reasoning", "summary": [
+                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "summary"},
+                        ]},
+                    ],
+                },
+            },
+        ])
+
+        _, _, _, reasoning = await consume_sse_with_reasoning(response)
+
+        assert reasoning == "cached summary"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_from_done_item(self):
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "done summary"}],
+                },
+            },
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "done summary"
+        assert deltas == ["done summary"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_part_done_extracted(self):
+        response = _SseResponse([
+            {
+                "type": "response.reasoning_summary_part.done",
+                "part": {"type": "summary_text", "text": "part summary"},
+            },
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+
+        _, _, _, reasoning = await consume_sse_with_reasoning(response)
+
+        assert reasoning == "part summary"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_done_arguments_callback(self):
+        response = _SseResponse([
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "write_file",
+                    "arguments": "",
+                },
+            },
+            {
+                "type": "response.function_call_arguments.done",
+                "call_id": "c1",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "write_file",
+                    "arguments": '{"path":"a.txt","content":"hello\\n"}',
+                },
+            },
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        await consume_sse_with_reasoning(response, on_tool_call_delta=cb)
+
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+        ]
+
+
+# ======================================================================
 # parsing - consume_sdk_stream
 # ======================================================================
 
@@ -544,6 +706,46 @@ class TestConsumeSdkStream:
                 "arguments_delta": '{"path":"a.txt","content":"',
             },
             {"call_id": "c1", "name": "write_file", "arguments_delta": "hello\\n"},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tool_call_done_item_arguments_callback_without_delta(self):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "write_file"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        item_done = MagicMock(
+            type="function_call",
+            call_id="c1",
+            id="fc1",
+            arguments='{"path":"late.txt","content":"done\\n"}',
+        )
+        item_done.name = "write_file"
+        ev2 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev3 = MagicMock(type="response.completed", response=resp_obj)
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for e in [ev1, ev2, ev3]:
+                yield e
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=cb)
+
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"late.txt","content":"done\\n"}',
+            },
         ]
 
     @pytest.mark.asyncio

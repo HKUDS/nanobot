@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import NumberSchema, StringSchema, tool_parameters_schema
+from nanobot.security.workspace_access import current_workspace_scope
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -91,4 +92,5 @@ class SpawnTool(Tool, ContextAware):
             session_key=self._session_key.get(),
             origin_message_id=self._origin_message_id.get(),
             temperature=temperature,
+            workspace_scope=current_workspace_scope(),
         )

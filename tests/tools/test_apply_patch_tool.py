@@ -89,7 +89,7 @@ def test_apply_patch_edits_add_to_existing_file(tmp_path):
     )
 
 
-def test_apply_patch_edits_delete(tmp_path):
+def test_apply_patch_rejects_delete_action(tmp_path):
     target = tmp_path / "utils.py"
     target.write_text("def unused():\n    pass\ndef used():\n    return 1\n")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -106,51 +106,8 @@ def test_apply_patch_edits_delete(tmp_path):
         )
     )
 
-    assert "update utils.py" in result
-    assert target.read_text() == "def used():\n    return 1\n"
-
-
-def test_apply_patch_edits_delete_entire_file(tmp_path):
-    target = tmp_path / "obsolete.txt"
-    target.write_text("remove me\n")
-    tool = ApplyPatchTool(workspace=tmp_path)
-
-    result = asyncio.run(
-        tool.execute(
-            edits=[
-                {
-                    "path": "obsolete.txt",
-                    "action": "delete",
-                    "old_text": "remove me\n",
-                }
-            ]
-        )
-    )
-
-    assert "delete obsolete.txt" in result
-    assert not target.exists()
-
-
-def test_apply_patch_edits_delete_substring_with_surrounding_whitespace(tmp_path):
-    target = tmp_path / "keep_whitespace.txt"
-    target.write_text("  token  \n")
-    tool = ApplyPatchTool(workspace=tmp_path)
-
-    result = asyncio.run(
-        tool.execute(
-            edits=[
-                {
-                    "path": "keep_whitespace.txt",
-                    "action": "delete",
-                    "old_text": "token",
-                }
-            ]
-        )
-    )
-
-    assert "update keep_whitespace.txt" in result
-    assert target.exists()
-    assert target.read_text() == "    \n"
+    assert "unknown action: delete" in result
+    assert target.read_text() == "def unused():\n    pass\ndef used():\n    return 1\n"
 
 
 def test_apply_patch_edits_batch_multiple_files(tmp_path):
@@ -319,8 +276,9 @@ def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
                 },
                 {
                     "path": "missing.txt",
-                    "action": "delete",
+                    "action": "replace",
                     "old_text": "remove me",
+                    "new_text": "removed",
                 },
             ]
         )

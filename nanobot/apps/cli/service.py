@@ -20,6 +20,7 @@ import httpx
 
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
+from nanobot.security.workspace_policy import is_path_within
 
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
@@ -32,6 +33,7 @@ _MAX_ARTIFACT_REPORT = 12
 _SAFE_NAME_RE = re.compile(r"[^a-z0-9_-]+")
 _MENTION_RE = re.compile(r"(^|[\s([{])@([a-z0-9_-]+)\b", re.IGNORECASE)
 _SHELL_META_CHARS = ("|", "&&", "||", ";", "$(", "`", ">", "<")
+_ENDORSEMENT_WORD_RE = re.compile(r"\bofficial\s+", re.IGNORECASE)
 _ARTIFACT_EXTENSIONS = frozenset({
     ".csv",
     ".drawio",
@@ -362,6 +364,12 @@ def _truncate(text: str, limit: int = _MAX_TOOL_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n\n... truncated {omitted} characters ..."
 
 
+def _catalog_description(app: dict[str, Any]) -> str:
+    """Return catalog copy without implying vendor endorsement."""
+    description = str(app.get("description") or "")
+    return _ENDORSEMENT_WORD_RE.sub("", description).strip()
+
+
 class CliAppManager:
     """Manage CLI-Anything registry entries and local install state."""
 
@@ -554,7 +562,7 @@ class CliAppManager:
             "name": name,
             "display_name": app.get("display_name") or name,
             "category": app.get("category") or "uncategorized",
-            "description": app.get("description") or "",
+            "description": _catalog_description(app),
             "requires": app.get("requires") or "",
             "source": app.get("_source") or "harness",
             "entry_point": entry_point,
@@ -630,7 +638,7 @@ class CliAppManager:
             app_id=name,
             display_name=str(app.get("display_name") or name),
             version=str(app.get("version") or ""),
-            description=str(app.get("description") or ""),
+            description=_catalog_description(app),
             category=str(app.get("category") or "uncategorized"),
             source=f"cli-anything:{app.get('_source') or 'harness'}",
             logo_url=logo_url,
@@ -802,7 +810,7 @@ class CliAppManager:
         name = str(app.get("name") or "unknown")
         display = str(app.get("display_name") or name)
         entry = str(app.get("entry_point") or f"cli-anything-{name}")
-        description = str(app.get("description") or f"Use {display} from nanobot.")
+        description = _catalog_description(app) or f"Use {display} from nanobot."
         return f"""---
 name: {_safe_skill_name(name)}
 description: >-
@@ -1018,7 +1026,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         cwd = Path(working_dir).expanduser() if working_dir else self.workspace
         cwd = cwd.resolve(strict=False)
         workspace = self.workspace.resolve(strict=False)
-        if restrict_to_workspace and cwd != workspace and not cwd.is_relative_to(workspace):
+        if restrict_to_workspace and not is_path_within(cwd, workspace):
             raise CliAppError("working_dir is outside the configured workspace")
         return cwd
 

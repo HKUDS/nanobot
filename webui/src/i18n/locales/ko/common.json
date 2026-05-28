@@ -25,7 +25,9 @@
       "section": "시스템",
       "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
       "restart": "nanobot 다시 시작",
-      "restarting": "다시 시작 중..."
+      "restarting": "다시 시작 중...",
+      "restartEngine": "엔진 다시 시작",
+      "restartingEngine": "엔진 다시 시작 중..."
     },
     "restart": {
       "completed": "{{seconds}}초 만에 다시 시작되었습니다."
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "사이드바 탐색",
-    "globalActions": "전역 작업",
     "collapse": "사이드바 접기",
-    "toggleTheme": "테마 전환",
-    "home": "홈",
     "newChat": "새 채팅",
     "searchAria": "검색",
-    "viewOptions": "View",
-    "compactList": "Compact list",
-    "showPreviews": "Show previews",
-    "showTimestamps": "Show time",
-    "sortLabel": "Sort",
-    "sortUpdated": "Recently updated",
-    "sortCreated": "Recently created",
-    "sortTitle": "Title A-Z",
     "searchPlaceholder": "검색",
     "searchResults": "결과",
     "noSearchResults": "일치하는 채팅이 없습니다.",
     "recent": "최근 대화",
-    "refreshSessions": "세션 새로고침",
     "settings": "설정",
     "language": {
       "label": "언어",
@@ -80,9 +70,9 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "browser": "Web",
+      "runtime": "시스템",
+      "advanced": "Security",
       "cliApps": "CLI 앱",
       "mcp": "MCP",
       "apps": "앱"
@@ -99,12 +89,13 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "Web safety",
       "capabilities": "기능",
-      "integrations": "Integrations",
       "cliApps": "CLI 앱",
       "mcp": "MCP 서비스",
-      "apps": "앱"
+      "apps": "앱",
+      "nativeHost": "App",
+      "hostSafety": "App safety"
     },
     "rows": {
       "theme": "테마",
@@ -137,22 +128,16 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs",
+      "workspacePath": "기본 작업공간",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "currentModel": "현재 모델",
       "brandLogos": "브랜드 로고",
       "cliAppsCatalog": "CLI 앱 카탈로그",
-      "cliAppsFilter": "CLI 앱 필터"
+      "cliAppsFilter": "CLI 앱 필터",
+      "engine": "엔진",
+      "logs": "로그",
+      "diagnostics": "진단"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
@@ -175,17 +160,22 @@
       "defaultAspectRatio": "프롬프트에서 가로세로 비율을 선택하지 않았을 때 사용됩니다.",
       "defaultImageSize": "지원하는 제공자에게 보내는 크기 힌트입니다.",
       "maxImagesPerTurn": "한 번의 generate_image 요청에 대한 상한입니다.",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "botName": "nanobot이 표시 이름을 쓰는 곳에 표시됩니다.",
+      "botIcon": "Bot 이름 옆에 표시할 짧은 emoji 또는 텍스트입니다.",
+      "timezone": "예약과 시간 인식 답변에 사용됩니다.",
+      "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
+      "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
       "currentModel": "nanobot이 새 답변에 사용할 모델을 선택합니다.",
       "selectedModelProvider": "선택한 모델에서 설정됩니다.",
       "selectedModelValue": "선택한 모델에서 설정됩니다.",
       "brandLogos": "로고는 브랜드 도메인에서 불러오며, 실패하면 로컬 아이콘을 사용합니다.",
       "cliAppsCatalog": "nanobot이 로컬에서 실행할 수 있는 앱 CLI를 살펴봅니다.",
-      "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다."
+      "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다.",
+      "logs": "App 엔진 로그 폴더를 엽니다.",
+      "diagnostics": "지원용 작은 런타임 보고서를 내보냅니다.",
+      "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
     },
     "values": {
       "light": "라이트",
@@ -201,8 +191,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "대기 중",
+      "restartingEngine": "다시 시작 중"
     },
     "status": {
       "loading": "설정을 불러오는 중...",
@@ -212,14 +206,24 @@
       "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요.",
       "restartAfterSaving": "변경 사항을 저장한 뒤 준비되면 재시작하세요.",
       "savedRestartApply": "저장되었습니다. 준비되면 재시작하세요.",
-      "imageProviderRestart": "이미지 제공자 변경 사항이 저장되었습니다. 준비되면 재시작하세요."
+      "imageProviderRestart": "이미지 제공자 변경 사항이 저장되었습니다. 준비되면 재시작하세요.",
+      "hostRestartAfterSaving": "저장하면 nanobot이 엔진을 다시 시작합니다.",
+      "hostRestartPending": "저장되었습니다. 준비되면 엔진을 다시 시작합니다.",
+      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "logsOpened": "Opened logs folder.",
+      "logsOpenFailed": "Could not open logs folder.",
+      "diagnosticsExported": "Diagnostics exported to {{path}}.",
+      "diagnosticsExportFailed": "Could not export diagnostics."
     },
     "actions": {
       "save": "저장",
       "saving": "저장 중",
       "edit": "편집",
       "cancel": "취소",
-      "openDocs": "Open docs"
+      "open": "열기",
+      "export": "내보내기",
+      "opening": "Opening...",
+      "exporting": "Exporting..."
     },
     "byok": {
       "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
@@ -290,6 +294,7 @@
       "newConfiguration": "새 모델 구성",
       "newConfigurationHelp": "제공자와 모델을 한 번에 선택할 수 있는 옵션으로 저장합니다.",
       "configurationName": "이름",
+      "configurationNameHelp": "저장된 모델 구성의 이름을 변경합니다.",
       "configurationNamePlaceholder": "빠른 글쓰기"
     },
     "timezone": {
@@ -397,6 +402,19 @@
       "featured": "추천",
       "loading": "앱 불러오는 중...",
       "empty": "이 필터와 일치하는 앱이 없습니다."
+    },
+    "oauth": {
+      "authentication": "OAuth authentication",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{account}}",
+      "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "signInRequired": "Sign in required",
+      "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
+      "signedIn": "Signed in",
+      "notSignedIn": "Not signed in"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
     "showMore": "{{count}}개 더 보기",
+    "collapsed": "{{count}}개 채팅 접힘",
+    "showLess": "접기",
     "actions": "{{title}} 채팅 작업",
+    "newInProject": "{{project}}에서 새 채팅 시작",
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished"
@@ -415,6 +436,9 @@
     "renameTitle": "Rename chat",
     "renameDescription": "Choose a local sidebar name for this chat.",
     "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "Pinned",
       "all": "Chats",
+      "projects": "Projects",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "greeting": "무엇을 도와드릴까요?",
+      "greetings": {
+        "workOn": "우리 무엇을 함께 해볼까요?",
+        "start": "오늘은 어디서 시작할까요?",
+        "build": "오늘은 무엇을 만들어볼까요?",
+        "tackle": "함께 무엇을 해결할까요?"
+      },
       "quickActions": {
         "plan": {
           "title": "프로젝트 계획 만들기",
@@ -632,6 +662,13 @@
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}}을 로컬 CLI 앱으로 사용",
         "mcpDescription": "@{{name}}을 MCP 서버로 사용"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "프로젝트 선택",
+        "projectPlaceholder": "프로젝트 선택",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
     "scrollToBottom": "맨 아래로 스크롤",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "메시지가 너무 큽니다",
       "body": "마지막 메시지가 서버의 크기 제한을 초과하여 거부되었습니다. 이미지를 줄이거나 더 작은 파일로 바꿔서 다시 보내 주세요."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "경로 붙여넣기",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

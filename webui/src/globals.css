@@ -81,6 +81,14 @@
 }
 
 @layer utilities {
+  .host-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .host-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
   .shadow-inner-right {
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }

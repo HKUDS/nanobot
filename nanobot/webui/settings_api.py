@@ -7,7 +7,9 @@ settings payload shape and the allowlisted config mutations exposed to WebUI.
 from __future__ import annotations
 
 import re
-from typing import Any
+import time
+from contextlib import suppress
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from nanobot.config.loader import get_config_path, load_config, save_config
@@ -17,8 +19,48 @@ from nanobot.providers.image_generation import (
     image_gen_provider_names,
 )
 from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.webui.workspaces import (
+    read_webui_default_access_mode,
+    write_webui_default_access_mode,
+)
 
 QueryParams = dict[str, list[str]]
+RuntimeSurface = Literal["browser", "native"]
+
+_RUNTIME_CAPABILITIES = {
+    "can_restart_engine": False,
+    "can_pick_folder": False,
+    "can_open_logs": False,
+    "can_export_diagnostics": False,
+}
+
+_NATIVE_RUNTIME_CAPABILITIES = {
+    **_RUNTIME_CAPABILITIES,
+    "can_restart_engine": True,
+    "can_pick_folder": True,
+    "can_open_logs": True,
+    "can_export_diagnostics": True,
+}
+
+_BROWSER_RESTART_BEHAVIOR_BY_SECTION = {
+    "appearance": "none",
+    "models": "none",
+    "providers": "none",
+    "runtime": "engineRestart",
+    "browser": "engineRestart",
+    "image": "engineRestart",
+    "apps": "engineRestart",
+    "advanced": "appRestart",
+}
+
+_NATIVE_RESTART_BEHAVIOR_BY_SECTION = {
+    **_BROWSER_RESTART_BEHAVIOR_BY_SECTION,
+    "runtime": "engineRestart",
+    "browser": "engineRestart",
+    "image": "engineRestart",
+    "apps": "engineRestart",
+}
 
 _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
@@ -55,6 +97,70 @@ class WebUISettingsError(ValueError):
         self.status = status
 
 
+def _normalize_surface(surface: str | None) -> RuntimeSurface:
+    return "native" if surface in {"native", "desktop"} else "browser"
+
+
+def runtime_capabilities(
+    surface: str | None = "browser",
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, bool]:
+    """Return the capability flags exposed to the WebUI runtime."""
+    base = (
+        _NATIVE_RUNTIME_CAPABILITIES
+        if _normalize_surface(surface) == "native"
+        else _RUNTIME_CAPABILITIES
+    )
+    result = dict(base)
+    for key, value in (overrides or {}).items():
+        if key in result:
+            result[key] = bool(value)
+    return result
+
+
+def restart_behavior_by_section(surface: str | None = "browser") -> dict[str, str]:
+    return dict(
+        _NATIVE_RESTART_BEHAVIOR_BY_SECTION
+        if _normalize_surface(surface) == "native"
+        else _BROWSER_RESTART_BEHAVIOR_BY_SECTION
+    )
+
+
+def decorate_settings_payload(
+    payload: dict[str, Any],
+    *,
+    surface: str | None = "browser",
+    runtime_capability_overrides: dict[str, Any] | None = None,
+    restart_required_sections: list[str] | None = None,
+    apply_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach runtime-surface metadata without changing the core settings shape."""
+    surface_value = _normalize_surface(surface)
+    sections = restart_required_sections
+    if sections is None:
+        raw_sections = payload.get("restart_required_sections") or []
+        sections = [str(section) for section in raw_sections if isinstance(section, str)]
+    sections = sorted(dict.fromkeys(sections))
+    result = dict(payload)
+    result["surface"] = surface_value
+    result["runtime_surface"] = surface_value
+    result["runtime_capabilities"] = runtime_capabilities(
+        surface_value,
+        runtime_capability_overrides,
+    )
+    result["restart_behavior_by_section"] = restart_behavior_by_section(surface_value)
+    result["restart_required_sections"] = sections
+    if sections:
+        result["requires_restart"] = True
+    else:
+        result["requires_restart"] = bool(result.get("requires_restart", False))
+    result["apply_state"] = apply_state or {
+        "status": "pending" if result["requires_restart"] else "idle",
+        "sections": sections,
+    }
+    return result
+
+
 def _query_first(query: QueryParams, key: str) -> str | None:
     values = query.get(key)
     return values[0] if values else None
@@ -83,9 +189,57 @@ def _provider_requires_api_key(spec: Any) -> bool:
     return True
 
 
+def _oauth_provider_status(spec: Any) -> dict[str, Any]:
+    if not getattr(spec, "is_oauth", False):
+        return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit import get_token as get_codex_token
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_codex_token()
+        expires_at = getattr(token, "expires", None) if token else None
+        return {
+            "configured": bool(token and token.access),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": expires_at,
+            "login_supported": True,
+        }
+
+    if spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import get_github_copilot_login_status
+        except Exception:
+            return {
+                "configured": False,
+                "account": None,
+                "expires_at": None,
+                "login_supported": False,
+            }
+        token = None
+        with suppress(Exception):
+            token = get_github_copilot_login_status()
+        return {
+            "configured": bool(token and token.access and token.expires > int(time.time() * 1000)),
+            "account": getattr(token, "account_id", None) if token else None,
+            "expires_at": getattr(token, "expires", None) if token else None,
+            "login_supported": True,
+        }
+
+    return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
+
+
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
-        return True
+        return bool(_oauth_provider_status(spec)["configured"])
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
     return bool(
@@ -144,6 +298,7 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
                 "name": name,
                 "label": spec.label if spec is not None else name,
                 "configured": configured,
+                "auth_type": "oauth" if spec is not None and spec.is_oauth else "api_key",
                 "api_key_hint": _mask_secret_hint(
                     getattr(provider_config, "api_key", None)
                 ),
@@ -156,7 +311,14 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
+def settings_payload(
+    *,
+    requires_restart: bool = False,
+    surface: str | None = "browser",
+    runtime_capability_overrides: dict[str, Any] | None = None,
+    restart_required_sections: list[str] | None = None,
+    apply_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults
     active_preset_name = defaults.model_preset or "default"
@@ -179,17 +341,27 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
     providers = []
     for spec in PROVIDERS:
         provider_config = getattr(config.providers, spec.name, None)
-        if provider_config is None or spec.is_oauth:
+        if provider_config is None:
             continue
+        oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
         row = {
             "name": spec.name,
             "label": spec.label,
-            "configured": _provider_configured_for_settings(spec, provider_config),
+            "configured": (
+                bool(oauth_status["configured"])
+                if oauth_status is not None
+                else _provider_configured_for_settings(spec, provider_config)
+            ),
+            "auth_type": "oauth" if spec.is_oauth else "api_key",
             "api_key_required": _provider_requires_api_key(spec),
             "api_key_hint": _mask_secret_hint(provider_config.api_key),
             "api_base": provider_config.api_base,
             "default_api_base": spec.default_api_base or None,
         }
+        if oauth_status is not None:
+            row["oauth_account"] = oauth_status["account"]
+            row["oauth_expires_at"] = oauth_status["expires_at"]
+            row["oauth_login_supported"] = oauth_status["login_supported"]
         if spec.name == "openai":
             row["api_type"] = provider_config.api_type
         providers.append(row)
@@ -241,7 +413,11 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         )
 
     exec_config = config.tools.exec
-    return {
+    sandbox_status = workspace_sandbox_status(
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        workspace=config.workspace_path,
+    )
+    payload = {
         "agent": {
             "model": effective_preset.model,
             "provider": selected_provider,
@@ -312,6 +488,11 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         },
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
+            "workspace_sandbox": sandbox_status.as_dict(),
+            "webui_allow_local_service_access": config.tools.webui_allow_local_service_access,
+            "allow_local_preview_access": config.tools.webui_allow_local_service_access,
+            "webui_default_access_mode": read_webui_default_access_mode(),
+            "private_service_protection_enabled": True,
             "ssrf_whitelist_count": len(config.tools.ssrf_whitelist),
             "mcp_server_count": len(config.tools.mcp_servers),
             "exec_enabled": exec_config.enable,
@@ -320,6 +501,13 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         },
         "requires_restart": requires_restart,
     }
+    return decorate_settings_payload(
+        payload,
+        surface=surface,
+        runtime_capability_overrides=runtime_capability_overrides,
+        restart_required_sections=restart_required_sections,
+        apply_state=apply_state,
+    )
 
 
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:
@@ -444,6 +632,54 @@ def create_model_configuration(query: QueryParams) -> dict[str, Any]:
     return settings_payload()
 
 
+def update_model_configuration(query: QueryParams) -> dict[str, Any]:
+    name = (_query_first(query, "name") or "").strip()
+    if not name or name == "default":
+        raise WebUISettingsError("model configuration is required")
+
+    config = load_config()
+    preset = config.model_presets.get(name)
+    if preset is None:
+        raise WebUISettingsError("unknown model configuration")
+
+    changed = False
+    label = _query_first_alias(query, "label", "displayName")
+    if label is not None:
+        label = label.strip()
+        if not label:
+            raise WebUISettingsError("label is required")
+        if preset.label != label:
+            preset.label = label
+            changed = True
+
+    model = _query_first(query, "model")
+    if model is not None:
+        model = model.strip()
+        if not model:
+            raise WebUISettingsError("model is required")
+        if preset.model != model:
+            preset.model = model
+            changed = True
+
+    provider = _query_first(query, "provider")
+    if provider is not None:
+        provider = provider.strip()
+        if not provider:
+            raise WebUISettingsError("provider is required")
+        _validate_configured_provider(config, provider)
+        if preset.provider != provider:
+            preset.provider = provider
+            changed = True
+
+    if config.agents.defaults.model_preset != name:
+        config.agents.defaults.model_preset = name
+        changed = True
+
+    if changed:
+        save_config(config)
+    return settings_payload()
+
+
 def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
@@ -493,6 +729,114 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
         and get_image_gen_provider(spec.name) is not None
     )
     return settings_payload(requires_restart=restart_required)
+
+
+def login_oauth_provider(query: QueryParams) -> dict[str, Any]:
+    provider_name = (_query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+    spec = find_by_name(provider_name)
+    if spec is None or not spec.is_oauth:
+        raise WebUISettingsError("unknown OAuth provider")
+
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit import get_token, login_oauth_interactive
+        except ImportError:
+            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+
+        token = None
+        with suppress(Exception):
+            token = get_token()
+        if not (token and token.access):
+            messages: list[str] = []
+            token = login_oauth_interactive(
+                print_fn=lambda message: messages.append(str(message)),
+                prompt_fn=lambda _prompt: "",
+            )
+        if not (token and token.access):
+            raise WebUISettingsError("OAuth login failed", status=401)
+        return settings_payload()
+
+    if spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import (
+                get_github_copilot_login_status,
+                login_github_copilot,
+            )
+        except ImportError:
+            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+
+        token = get_github_copilot_login_status()
+        if not token:
+            token = login_github_copilot(print_fn=lambda _message: None)
+        if not (token and token.access):
+            raise WebUISettingsError("OAuth login failed", status=401)
+        return settings_payload()
+
+    raise WebUISettingsError("OAuth login is not supported for this provider")
+
+
+def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
+    provider_name = (_query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+    spec = find_by_name(provider_name)
+    if spec is None or not spec.is_oauth:
+        raise WebUISettingsError("unknown OAuth provider")
+
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.storage import FileTokenStorage
+        except ImportError:
+            raise WebUISettingsError("oauth_cli_kit is not installed", status=500) from None
+        token_path = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename).get_token_path()
+    elif spec.name == "github_copilot":
+        try:
+            from nanobot.providers.github_copilot_provider import get_storage
+        except ImportError:
+            raise WebUISettingsError("GitHub Copilot OAuth support is unavailable", status=500) from None
+        token_path = get_storage().get_token_path()
+    else:
+        raise WebUISettingsError("OAuth logout is not supported for this provider")
+
+    for path in (token_path, token_path.with_suffix(".lock")):
+        with suppress(FileNotFoundError):
+            path.unlink()
+    return settings_payload()
+
+
+def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
+    raw_allow = (
+        _query_first_alias(query, "webui_allow_local_service_access", "webuiAllowLocalServiceAccess")
+        or _query_first_alias(query, "allow_local_preview_access", "allowLocalPreviewAccess")
+    )
+    raw_default_access_mode = _query_first_alias(query, "webui_default_access_mode", "webuiDefaultAccessMode")
+    if raw_allow is None and raw_default_access_mode is None:
+        raise WebUISettingsError("webui_allow_local_service_access or webui_default_access_mode is required")
+
+    config = load_config()
+    changed = False
+    if raw_allow is not None:
+        webui_allow_local_service_access = _parse_bool(raw_allow, "webui_allow_local_service_access")
+        if config.tools.webui_allow_local_service_access != webui_allow_local_service_access:
+            config.tools.webui_allow_local_service_access = webui_allow_local_service_access
+            changed = True
+
+    if changed:
+        save_config(config)
+    if raw_default_access_mode is not None:
+        default_access_mode = raw_default_access_mode.strip().lower()
+        if default_access_mode == "restricted":
+            default_access_mode = "default"
+        if default_access_mode not in {"default", "full"}:
+            raise WebUISettingsError("webui_default_access_mode must be default or full")
+        try:
+            write_webui_default_access_mode(default_access_mode)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from exc
+    return settings_payload(requires_restart=changed)
 
 
 def update_web_search_settings(query: QueryParams) -> dict[str, Any]:

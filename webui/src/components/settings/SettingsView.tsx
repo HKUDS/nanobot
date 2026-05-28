@@ -27,7 +27,6 @@ import {
   HardDrive,
   Hexagon,
   ImageIcon,
-  Info,
   Layers,
   Loader2,
   LogOut,
@@ -43,7 +42,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  Blocks,
   Trash2,
   Triangle,
   Waves,
@@ -77,16 +75,21 @@ import {
   fetchCliApps,
   fetchMcpPresets,
   importMcpConfig,
+  loginProviderOAuth,
+  logoutProviderOAuth,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
   updateImageGenerationSettings,
   updateMcpServerTools,
+  updateModelConfiguration,
+  updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
+import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import {
   logoFallbackUrls,
@@ -101,8 +104,10 @@ import type {
   ImageGenerationSettingsUpdate,
   McpPresetInfo,
   McpPresetsPayload,
+  NetworkSafetySettingsUpdate,
   SettingsPayload,
   WebSearchSettingsUpdate,
+  WebuiDefaultAccessMode,
 } from "@/lib/types";
 
 export type SettingsSectionKey =
@@ -110,7 +115,7 @@ export type SettingsSectionKey =
   | "appearance"
   | "models"
   | "image"
-  | "web"
+  | "browser"
   | "apps"
   | "runtime"
   | "advanced";
@@ -133,6 +138,7 @@ interface AgentSettingsDraft {
   model: string;
   provider: string;
   modelPreset: string;
+  presetLabel: string;
   timezone: string;
   botName: string;
   botIcon: string;
@@ -145,8 +151,14 @@ interface ModelConfigurationDraft {
   model: string;
 }
 
-type PendingRestartSection = "runtime" | "web" | "image";
+type PendingRestartSection = "runtime" | "browser" | "image";
 type PendingRestartSections = Record<PendingRestartSection, boolean>;
+type RestartAwarePayload = {
+  requires_restart?: boolean;
+  surface?: SettingsPayload["surface"];
+  runtime_surface?: SettingsPayload["runtime_surface"];
+  runtime_capabilities?: SettingsPayload["runtime_capabilities"];
+};
 type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
@@ -213,7 +225,7 @@ const IMAGE_ASPECT_RATIO_OPTIONS = ["1:1", "3:4", "9:16", "4:3", "16:9", "3:2", 
 const IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K", "1024x1024", "1536x1024", "1024x1536"];
 const EMPTY_PENDING_RESTART_SECTIONS: PendingRestartSections = {
   runtime: false,
-  web: false,
+  browser: false,
   image: false,
 };
 
@@ -235,9 +247,12 @@ interface SettingsViewProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
+  onSettingsChange?: (payload: SettingsPayload) => void;
+  onWorkspaceSettingsChange?: () => void | Promise<void>;
   onLogout?: () => void;
   onRestart?: () => void;
   isRestarting?: boolean;
+  hostChromeInset?: boolean;
 }
 
 function readLocalPreferences(): LocalPreferences {
@@ -276,9 +291,12 @@ export function SettingsView({
   onToggleTheme,
   onBackToChat,
   onModelNameChange,
+  onSettingsChange,
+  onWorkspaceSettingsChange,
   onLogout,
   onRestart,
   isRestarting = false,
+  hostChromeInset = false,
 }: SettingsViewProps) {
   const { t } = useTranslation();
   const { token } = useClient();
@@ -301,6 +319,8 @@ export function SettingsView({
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
+  const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
+  const [hostEngineApplying, setHostEngineApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
@@ -338,6 +358,10 @@ export function SettingsView({
     defaultImageSize: "1K",
     maxImagesPerTurn: 4,
   });
+  const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>({
+    webuiAllowLocalServiceAccess: true,
+    webuiDefaultAccessMode: "default",
+  });
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -348,6 +372,7 @@ export function SettingsView({
     model: "",
     provider: "",
     modelPreset: "default",
+    presetLabel: "Default",
     timezone: "UTC",
     botName: "nanobot",
     botIcon: "",
@@ -362,11 +387,17 @@ export function SettingsView({
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
     const fallbackDefault = defaultPreset(payload);
+    const activePresetName = modelPresetValue(payload);
+    const activePreset =
+      payload.model_presets.find((preset) => preset.name === activePresetName) ?? fallbackDefault;
     setSettings(payload);
     setForm({
-      model: fallbackDefault?.model ?? payload.agent.model,
-      provider: editableDefaultProvider(payload),
-      modelPreset: modelPresetValue(payload),
+      model: activePreset?.model ?? payload.agent.model,
+      provider: activePreset?.is_default
+        ? editableDefaultProvider(payload)
+        : activePreset?.provider ?? editableDefaultProvider(payload),
+      modelPreset: activePresetName,
+      presetLabel: activePreset?.label ?? activePresetName,
       timezone: payload.agent.timezone,
       botName: payload.agent.bot_name,
       botIcon: payload.agent.bot_icon,
@@ -388,14 +419,19 @@ export function SettingsView({
       defaultImageSize: payload.image_generation.default_image_size,
       maxImagesPerTurn: payload.image_generation.max_images_per_turn,
     });
+    setNetworkSafetyForm({
+      webuiAllowLocalServiceAccess: payload.advanced.webui_allow_local_service_access ?? payload.advanced.allow_local_preview_access ?? true,
+      webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(payload.advanced.webui_default_access_mode),
+    });
     if (payload.restart_required_sections) {
       setPendingRestartSections({
         runtime: payload.restart_required_sections.includes("runtime"),
-        web: payload.restart_required_sections.includes("web"),
+        browser: payload.restart_required_sections.includes("browser"),
         image: payload.restart_required_sections.includes("image"),
       });
     }
-  }, []);
+    onSettingsChange?.(payload);
+  }, [onSettingsChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -419,6 +455,7 @@ export function SettingsView({
   }, [applyPayload, token]);
 
   useEffect(() => {
+    if (activeSection !== "apps") return;
     let cancelled = false;
     setCliAppsLoading(true);
     fetchCliApps(token)
@@ -437,9 +474,10 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [activeSection, token]);
 
   useEffect(() => {
+    if (activeSection !== "apps") return;
     let cancelled = false;
     setMcpPresetsLoading(true);
     fetchMcpPresets(token)
@@ -458,7 +496,7 @@ export function SettingsView({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [activeSection, token]);
 
   useEffect(() => {
     try {
@@ -485,13 +523,17 @@ export function SettingsView({
 
   const modelDirty = useMemo(() => {
     if (!settings) return false;
-    const preset = modelPresetValue(settings);
-    const base = defaultPreset(settings);
+    const activePresetName = modelPresetValue(settings);
+    const selectedPreset = settings.model_presets.find((preset) => preset.name === form.modelPreset);
+    if (!selectedPreset) return form.modelPreset !== activePresetName;
+    const selectedProvider = selectedPreset.is_default
+      ? editableDefaultProvider(settings)
+      : selectedPreset.provider;
     return (
-      form.modelPreset !== preset ||
-      (form.modelPreset === "default" &&
-        (form.model !== (base?.model ?? settings.agent.model) ||
-          form.provider !== editableDefaultProvider(settings)))
+      form.modelPreset !== activePresetName ||
+      form.model !== selectedPreset.model ||
+      form.provider !== selectedProvider ||
+      (!selectedPreset.is_default && form.presetLabel.trim() !== selectedPreset.label)
     );
   }, [form, settings]);
 
@@ -500,8 +542,7 @@ export function SettingsView({
     return (
       form.timezone !== settings.agent.timezone ||
       form.botName !== settings.agent.bot_name ||
-      form.botIcon !== settings.agent.bot_icon ||
-      form.toolHintMaxLength !== settings.agent.tool_hint_max_length
+      form.botIcon !== settings.agent.bot_icon
     );
   }, [form, settings]);
 
@@ -517,6 +558,17 @@ export function SettingsView({
     );
   }, [imageGenerationForm, settings]);
 
+  const networkSafetyDirty = useMemo(() => {
+    if (!settings) return false;
+    const currentLocalServiceAccess =
+      settings.advanced.webui_allow_local_service_access ?? settings.advanced.allow_local_preview_access ?? true;
+    const currentDefaultAccess = visibleWebuiDefaultAccessMode(settings.advanced.webui_default_access_mode);
+    return (
+      networkSafetyForm.webuiAllowLocalServiceAccess !== currentLocalServiceAccess ||
+      networkSafetyForm.webuiDefaultAccessMode !== currentDefaultAccess
+    );
+  }, [networkSafetyForm, settings]);
+
   const configuredModelProviderOptions = useMemo(
     () =>
       settings?.providers
@@ -529,22 +581,79 @@ export function SettingsView({
     () =>
       !!settings?.requires_restart ||
       pendingRestartSections.runtime ||
-      pendingRestartSections.web ||
+      pendingRestartSections.browser ||
       pendingRestartSections.image,
     [pendingRestartSections, settings?.requires_restart],
+  );
+
+  const restartViaSettingsSurface = useCallback(async () => {
+    const isNativeHost = (settings?.surface ?? settings?.runtime_surface) === "native";
+    const hostApi = getHostApi();
+    if (isNativeHost && settings?.runtime_capabilities?.can_restart_engine && hostApi) {
+      setHostEngineApplying(true);
+      try {
+        await hostApi.restartEngine();
+        const payload = await fetchSettings(token);
+        applyPayload(payload);
+        setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setHostEngineApplying(false);
+      }
+      return;
+    }
+    onRestart?.();
+  }, [applyPayload, onRestart, settings, token]);
+
+  const maybeRestartHostEngine = useCallback(
+    async (payload: RestartAwarePayload) => {
+      const surface = payload.surface ?? payload.runtime_surface ?? settings?.surface ?? settings?.runtime_surface;
+      const capabilities = payload.runtime_capabilities ?? settings?.runtime_capabilities;
+      const isNativeHost = surface === "native";
+      const hostApi = getHostApi();
+      if (!payload.requires_restart || !isNativeHost || !capabilities?.can_restart_engine || !hostApi) {
+        return;
+      }
+      setHostEngineApplying(true);
+      try {
+        await hostApi.restartEngine();
+        const refreshed = await fetchSettings(token);
+        applyPayload(refreshed);
+        setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
+        setError(null);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setHostEngineApplying(false);
+      }
+    },
+    [applyPayload, settings, token],
   );
 
   const saveModelSettings = async () => {
     if (!settings || !modelDirty || saving) return;
     setSaving(true);
     try {
-      const defaultModel = defaultPreset(settings)?.model ?? settings.agent.model;
-      const defaultProvider = editableDefaultProvider(settings);
-      const payload = await updateSettings(token, {
-        modelPreset: form.modelPreset,
-        ...(form.modelPreset === "default" && form.model !== defaultModel ? { model: form.model } : {}),
-        ...(form.modelPreset === "default" && form.provider !== defaultProvider ? { provider: form.provider } : {}),
-      });
+      const selectedPreset = settings.model_presets.find((preset) => preset.name === form.modelPreset);
+      let payload: SettingsPayload;
+      if (selectedPreset && !selectedPreset.is_default) {
+        payload = await updateModelConfiguration(token, {
+          name: selectedPreset.name,
+          label: form.presetLabel.trim(),
+          model: form.model,
+          provider: form.provider,
+        });
+      } else {
+        const defaultModel = defaultPreset(settings)?.model ?? settings.agent.model;
+        const defaultProvider = editableDefaultProvider(settings);
+        payload = await updateSettings(token, {
+          modelPreset: form.modelPreset,
+          ...(form.model !== defaultModel ? { model: form.model } : {}),
+          ...(form.provider !== defaultProvider ? { provider: form.provider } : {}),
+        });
+      }
       applyPayload(payload);
       onModelNameChange(payload.agent.model || null);
       setError(null);
@@ -602,12 +711,13 @@ export function SettingsView({
         timezone: form.timezone,
         botName: form.botName,
         botIcon: form.botIcon,
-        toolHintMaxLength: form.toolHintMaxLength,
       });
       applyPayload(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
+      await onWorkspaceSettingsChange?.();
+      await maybeRestartHostEngine(payload);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -625,6 +735,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
+      await maybeRestartHostEngine(payload);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -633,10 +744,29 @@ export function SettingsView({
     }
   };
 
+  const saveNetworkSafetySettings = async () => {
+    if (!settings || !networkSafetyDirty || networkSafetySaving) return;
+    setNetworkSafetySaving(true);
+    try {
+      const payload = await updateNetworkSafetySettings(token, networkSafetyForm);
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setNetworkSafetySaving(false);
+    }
+  };
+
   const saveProvider = async (providerName: string) => {
     if (providerSaving) return;
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
+    if (provider.auth_type === "oauth") return;
     const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "", apiType: "auto" };
     const apiKey = providerForm.apiKey.trim();
     const apiKeyRequired = provider.api_key_required ?? true;
@@ -656,6 +786,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
+      await maybeRestartHostEngine(payload);
       setProviderForms((prev) => ({
         ...prev,
         [providerName]: {
@@ -666,6 +797,24 @@ export function SettingsView({
       }));
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setProviderSaving(null);
+    }
+  };
+
+  const runProviderOAuth = async (providerName: string, action: "login" | "logout") => {
+    if (providerSaving) return;
+    setProviderSaving(providerName);
+    try {
+      const payload =
+        action === "login"
+          ? await loginProviderOAuth(token, providerName)
+          : await logoutProviderOAuth(token, providerName);
+      applyPayload(payload);
+      setExpandedProvider(providerName);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -710,8 +859,9 @@ export function SettingsView({
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
       if (payload.requires_restart || webFetchRestartRequired) {
-        setPendingRestartSections((prev) => ({ ...prev, web: true }));
+        setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
+      await maybeRestartHostEngine(payload);
       setWebSearchForm((prev) => ({
         provider: payload.web_search.provider,
         apiKey: "",
@@ -843,6 +993,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
+      await maybeRestartHostEngine(payload);
       if (action === "enable") {
         setMcpFieldValues((prev) => ({ ...prev, [name]: {} }));
       }
@@ -876,6 +1027,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
+      await maybeRestartHostEngine(payload);
       setCustomMcpForm((prev) => ({ ...DEFAULT_CUSTOM_MCP_FORM, transport: prev.transport }));
     } catch (err) {
       setMcpError((err as Error).message);
@@ -896,6 +1048,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
+      await maybeRestartHostEngine(payload);
       setMcpConfigImport("");
     } catch (err) {
       setMcpError((err as Error).message);
@@ -916,6 +1069,7 @@ export function SettingsView({
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
+      await maybeRestartHostEngine(payload);
     } catch (err) {
       setMcpError((err as Error).message);
     } finally {
@@ -931,11 +1085,9 @@ export function SettingsView({
           <OverviewSettings
             settings={settings}
             requiresRestart={hasPendingRestart}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
             showBrandLogos={localPrefs.brandLogos}
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
             onSelectSection={setActiveSection}
           />
         );
@@ -958,6 +1110,8 @@ export function SettingsView({
               dirty={modelDirty}
               saving={saving}
               showBrandLogos={localPrefs.brandLogos}
+              providerSaving={providerSaving}
+              onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onSave={saveModelSettings}
               onCreateConfiguration={openModelConfigurationDialog}
             />
@@ -986,10 +1140,12 @@ export function SettingsView({
                 }))
               }
               onSaveProvider={saveProvider}
+              onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
+              onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
               onResetProviderDraft={resetProviderDraft}
               imageProviderRestartPending={pendingRestartSections.image}
-              onRestart={onRestart}
-              isRestarting={isRestarting}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={isRestarting || hostEngineApplying}
             />
           </div>
         );
@@ -1004,12 +1160,12 @@ export function SettingsView({
             onSave={saveImageGenerationSettings}
             onOpenProviders={() => setActiveSection("models")}
             showBrandLogos={localPrefs.brandLogos}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.image}
           />
         );
-      case "web":
+      case "browser":
         return (
           <WebSettings
             settings={settings}
@@ -1028,9 +1184,9 @@ export function SettingsView({
             onReset={resetWebSearchDraft}
             onSave={saveWebSearch}
             showBrandLogos={localPrefs.brandLogos}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
-            requiresRestartPending={pendingRestartSections.web}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+            requiresRestartPending={pendingRestartSections.browser}
           />
         );
       case "apps":
@@ -1079,8 +1235,8 @@ export function SettingsView({
             onSaveCustomMcp={handleSaveCustomMcp}
             onImportMcpConfig={handleImportMcpConfig}
             onMcpToolsChange={handleMcpToolsChange}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
           />
         );
       case "runtime":
@@ -1092,13 +1248,25 @@ export function SettingsView({
             dirty={runtimeDirty}
             saving={saving}
             onSave={saveRuntimeSettings}
-            onRestart={onRestart}
-            isRestarting={isRestarting}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
             requiresRestartPending={pendingRestartSections.runtime}
           />
         );
       case "advanced":
-        return <AdvancedSettings settings={settings} />;
+        return (
+          <AdvancedSettings
+            form={networkSafetyForm}
+            dirty={networkSafetyDirty}
+            saving={networkSafetySaving}
+            isNativeHostSurface={(settings.surface ?? settings.runtime_surface) === "native"}
+            onChangeForm={setNetworkSafetyForm}
+            onSave={saveNetworkSafetySettings}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+            requiresRestartPending={pendingRestartSections.runtime}
+          />
+        );
       default:
         return null;
     }
@@ -1112,6 +1280,7 @@ export function SettingsView({
           onSelectSection={setActiveSection}
           onBackToChat={onBackToChat}
           onLogout={onLogout}
+          hostChromeInset={hostChromeInset}
         />
       ) : null}
 
@@ -1127,7 +1296,12 @@ export function SettingsView({
       />
 
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-        <div className="mx-auto w-full max-w-[920px] px-5 py-8 sm:px-8 lg:py-12">
+        <div
+          className={cn(
+            "mx-auto w-full max-w-[920px] px-5 py-8 sm:px-8 lg:py-12",
+            hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
+          )}
+        >
           <div className="mb-7">
             <p className="mb-2 text-[13px] font-medium text-muted-foreground">
               {t("settings.sidebar.title")}
@@ -1169,11 +1343,14 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "appearance", icon: Palette, fallback: "Appearance" },
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "image", icon: ImageIcon, fallback: "Image" },
-  { key: "web", icon: Globe2, fallback: "Web" },
-  { key: "apps", icon: Blocks, fallback: "Apps" },
-  { key: "runtime", icon: Server, fallback: "Runtime" },
-  { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
+  { key: "browser", icon: Globe2, fallback: "Web" },
+  { key: "runtime", icon: Server, fallback: "System" },
+  { key: "advanced", icon: ShieldCheck, fallback: "Security" },
 ];
+
+function visibleWebuiDefaultAccessMode(mode: string | null | undefined): WebuiDefaultAccessMode {
+  return mode === "full" ? "full" : "default";
+}
 
 function titleForSection(section: SettingsSectionKey): string {
   return SETTINGS_NAV_ITEMS.find((item) => item.key === section)?.fallback ?? "Settings";
@@ -1184,15 +1361,22 @@ function SettingsSidebar({
   onSelectSection,
   onBackToChat,
   onLogout,
+  hostChromeInset,
 }: {
   activeSection: SettingsSectionKey;
   onSelectSection: (section: SettingsSectionKey) => void;
   onBackToChat: () => void;
   onLogout?: () => void;
+  hostChromeInset?: boolean;
 }) {
   const { t } = useTranslation();
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-4 pb-3 pt-4 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:py-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]">
+    <aside
+      className={cn(
+        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-4 pb-3 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
+        hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
+      )}
+    >
       <button
         type="button"
         onClick={onBackToChat}
@@ -1234,7 +1418,7 @@ function SettingsSidebar({
       </nav>
 
       <div className="hidden md:mt-auto md:block md:pt-4">
-        {onLogout ? (
+        {onLogout && !hostChromeInset ? (
           <Button
             type="button"
             variant="ghost"
@@ -1257,8 +1441,6 @@ function OverviewSettings({
   isRestarting,
   onSelectSection,
   showBrandLogos,
-  cliApps,
-  mcpPresets,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
@@ -1266,8 +1448,6 @@ function OverviewSettings({
   isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
-  cliApps: CliAppsPayload | null;
-  mcpPresets: McpPresetsPayload | null;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1284,14 +1464,6 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
-  const cliAppsEnabledCount = cliApps?.installed_count ?? 0;
-  const mcpAppsEnabledCount = mcpPresets?.installed_count ?? settings.advanced.mcp_server_count;
-  const appsCount = cliAppsEnabledCount + mcpAppsEnabledCount;
-  const appsValue = tx("settings.apps.enabledSummary", "{{count}} enabled")
-    .replace("{{count}}", String(appsCount));
-  const appsCaption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
-    .replace("{{cli}}", String(cliAppsEnabledCount))
-    .replace("{{mcp}}", String(mcpAppsEnabledCount));
   return (
     <div className="space-y-7">
       <section>
@@ -1361,7 +1533,7 @@ function OverviewSettings({
             value={providerDisplayLabel(settings.web_search.providers, settings.web_search.provider)}
             caption={webStatus}
             showBrandLogos={showBrandLogos}
-            onClick={() => onSelectSection("web")}
+            onClick={() => onSelectSection("browser")}
           />
           <OverviewListRow
             icon={ImageIcon}
@@ -1371,13 +1543,6 @@ function OverviewSettings({
             caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
-          />
-          <OverviewListRow
-            icon={Blocks}
-            title={tx("settings.nav.apps", "Apps")}
-            value={appsValue}
-            caption={appsCaption}
-            onClick={() => onSelectSection("apps")}
           />
         </SettingsGroup>
       </section>
@@ -1648,6 +1813,8 @@ function ModelsSettings({
   dirty,
   saving,
   showBrandLogos,
+  providerSaving,
+  onProviderOAuthLogin,
   onSave,
   onCreateConfiguration,
 }: {
@@ -1657,19 +1824,33 @@ function ModelsSettings({
   dirty: boolean;
   saving: boolean;
   showBrandLogos: boolean;
+  providerSaving: string | null;
+  onProviderOAuthLogin: (provider: string) => void;
   onSave: () => void;
   onCreateConfiguration: () => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
+  const oauthProviders = settings.providers.filter((provider) => provider.auth_type === "oauth");
   const showAutoProvider = defaultPreset(settings)?.provider === "auto" || form.provider === "auto";
+  const selectableProviders = uniqueProviders([...configuredProviders, ...oauthProviders]);
   const providerOptions = showAutoProvider
-    ? [{ name: "auto", label: tx("settings.values.auto", "Auto") }, ...configuredProviders]
-    : configuredProviders;
+    ? [{ name: "auto", label: tx("settings.values.auto", "Auto") }, ...selectableProviders]
+    : selectableProviders;
   const providerValue = providerOptions.some((provider) => provider.name === form.provider)
     ? form.provider
     : "";
+  const selectedPreset =
+    settings.model_presets.find((preset) => preset.name === form.modelPreset) ?? null;
+  const selectedProvider = settings.providers.find((provider) => provider.name === form.provider);
+  const selectedProviderNeedsSignIn =
+    selectedProvider?.auth_type === "oauth" && !selectedProvider.configured;
+  const selectedProviderSigningIn = providerSaving === selectedProvider?.name;
+  const modelFieldsMissing =
+    !form.model.trim() ||
+    !form.provider.trim() ||
+    Boolean(selectedPreset && !selectedPreset.is_default && !form.presetLabel.trim());
   return (
     <div className="space-y-7">
       <section>
@@ -1685,12 +1866,35 @@ function ModelsSettings({
               draftModel={form.model}
               draftProvider={form.provider}
               showProviderLogos={showBrandLogos}
-              onChange={(modelPreset) => setForm((prev) => ({ ...prev, modelPreset }))}
+              onChange={(modelPreset) => {
+                const nextPreset = settings.model_presets.find((preset) => preset.name === modelPreset);
+                setForm((prev) => ({
+                  ...prev,
+                  modelPreset,
+                  model: nextPreset?.model ?? prev.model,
+                  provider: nextPreset?.is_default
+                    ? editableDefaultProvider(settings)
+                    : nextPreset?.provider ?? prev.provider,
+                  presetLabel: nextPreset?.label ?? modelPreset,
+                }));
+              }}
               onCreateConfiguration={onCreateConfiguration}
             />
           </SettingsRow>
-          {form.modelPreset === "default" ? (
-            <>
+          {selectedPreset && !selectedPreset.is_default ? (
+            <SettingsRow
+              title={tx("settings.models.configurationName", "Name")}
+              description={tx("settings.models.configurationNameHelp", "Rename this saved model configuration.")}
+            >
+              <Input
+                value={form.presetLabel}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
+                }
+                className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+              />
+            </SettingsRow>
+          ) : null}
               <SettingsRow
                 title={t("settings.rows.provider")}
                 description={t("settings.help.provider")}
@@ -1703,6 +1907,27 @@ function ModelsSettings({
                   onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
                 />
               </SettingsRow>
+              {selectedProviderNeedsSignIn ? (
+                <SettingsRow
+                  title={tx("settings.oauth.signInRequired", "Sign in required")}
+                  description={tx("settings.oauth.signInBeforeSaving", "Sign in before saving this OAuth provider as the active model provider.")}
+                >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
+                    disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
+                    className="rounded-full"
+                  >
+                    {selectedProviderSigningIn ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                    ) : null}
+                    {selectedProviderSigningIn
+                      ? tx("settings.oauth.signingIn", "Signing in...")
+                      : tx("settings.oauth.signIn", "Sign in")}
+                  </Button>
+                </SettingsRow>
+              ) : null}
               <SettingsRow
                 title={t("settings.rows.model")}
                 description={t("settings.help.model")}
@@ -1713,12 +1938,16 @@ function ModelsSettings({
                   className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
                 />
               </SettingsRow>
-            </>
-          ) : null}
           <SettingsFooter
             dirty={dirty}
             saving={saving}
             saved={false}
+            disabled={selectedProviderNeedsSignIn || modelFieldsMissing}
+            message={
+              selectedProviderNeedsSignIn
+                ? tx("settings.oauth.signInBeforeSaving", "Sign in before saving this OAuth provider as the active model provider.")
+                : undefined
+            }
             onSave={onSave}
           />
         </SettingsGroup>
@@ -1742,6 +1971,8 @@ function ProvidersSettings({
   onToggleProviderKeyEditing,
   onChangeProviderForm,
   onSaveProvider,
+  onProviderOAuthLogin,
+  onProviderOAuthLogout,
   onResetProviderDraft,
   imageProviderRestartPending,
   onRestart,
@@ -1761,6 +1992,8 @@ function ProvidersSettings({
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
   onSaveProvider: (provider: string) => void;
+  onProviderOAuthLogin: (provider: string) => void;
+  onProviderOAuthLogout: (provider: string) => void;
   onResetProviderDraft: (provider: string) => void;
   imageProviderRestartPending: boolean;
   onRestart?: () => void;
@@ -1783,14 +2016,15 @@ function ProvidersSettings({
       apiType: provider.api_type ?? "auto",
     };
     const saving = providerSaving === provider.name;
+    const isOauthProvider = provider.auth_type === "oauth";
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
-    const missingRequiredApiKey = apiKeyRequired && !provider.configured && !apiKey;
+    const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const missingOptionalCredential =
-      !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
+      !isOauthProvider && !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
     return (
       <div key={provider.name} className="divide-y divide-border/45">
         <button
@@ -1813,14 +2047,63 @@ function ProvidersSettings({
             </span>
           </span>
           <StatusPill tone={provider.configured ? "success" : "neutral"}>
-            {provider.configured
-              ? t("settings.byok.configured")
-              : t("settings.byok.notConfigured")}
+            {isOauthProvider
+              ? provider.configured
+                ? tx("settings.oauth.signedIn", "Signed in")
+                : tx("settings.oauth.notSignedIn", "Not signed in")
+              : provider.configured
+                ? t("settings.byok.configured")
+                : t("settings.byok.notConfigured")}
           </StatusPill>
         </button>
 
         {expanded ? (
           <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+            {isOauthProvider ? (
+              <div className="flex flex-col gap-3 rounded-[18px] border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-foreground">
+                    {tx("settings.oauth.authentication", "OAuth authentication")}
+                  </p>
+                  <p className="mt-1 truncate text-[12px] text-muted-foreground">
+                    {provider.configured
+                      ? t("settings.oauth.signedInAs", {
+                          account: provider.oauth_account || provider.label,
+                          defaultValue: "Signed in as {{account}}",
+                        })
+                      : tx("settings.oauth.signInHelp", "Sign in from this device; no API key is stored in config.")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 justify-end gap-2">
+                  {provider.configured ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onProviderOAuthLogout(provider.name)}
+                      disabled={saving}
+                      className="rounded-full"
+                    >
+                      {tx("settings.oauth.signOut", "Sign out")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onProviderOAuthLogin(provider.name)}
+                    disabled={saving || !provider.oauth_login_supported}
+                    className="rounded-full"
+                  >
+                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                    {saving
+                      ? tx("settings.oauth.signingIn", "Signing in...")
+                      : provider.configured
+                        ? tx("settings.oauth.signInAgain", "Sign in again")
+                        : tx("settings.oauth.signIn", "Sign in")}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
             <label className="block space-y-1.5">
               <span className="text-[12px] font-medium text-muted-foreground">
                 {t("settings.byok.apiKey")}
@@ -1943,6 +2226,8 @@ function ProvidersSettings({
                 {saving ? t("settings.actions.saving") : tx("settings.providers.saveProvider", "Save provider")}
               </Button>
             </div>
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -3513,26 +3798,73 @@ function RuntimeSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const isNativeHost = getHostApi() !== null || (settings.surface ?? settings.runtime_surface) === "native";
+  const restartActionLabel = isNativeHost
+    ? tx("app.system.restartEngine", "Restart engine")
+    : t("app.system.restart");
+  const restartingActionLabel = isNativeHost
+    ? tx("app.system.restartingEngine", "Restarting engine...")
+    : t("app.system.restarting");
+  const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
+  const [hostActionMessage, setHostActionMessage] = useState<{
+    target: "logs" | "diagnostics";
+    message: string;
+  } | null>(null);
+  const [hostActionBusy, setHostActionBusy] =
+    useState<"logs" | "diagnostics" | null>(null);
+  const hostApi = getHostApi();
+  const engineState = isRestarting
+    ? tx("settings.values.restartingEngine", "Restarting")
+    : settings.apply_state?.status === "pending"
+      ? tx("settings.values.pending", "Pending")
+      : tx("settings.values.ready", "Ready");
+  const runHostAction = async (
+    target: "logs" | "diagnostics",
+    action: () => Promise<string | void>,
+    successMessage: (result: string | void) => string,
+    failureMessage: string,
+  ) => {
+    if (!hostApi) {
+      setHostActionMessage({
+        target,
+        message: tx(
+          "settings.status.hostApiUnavailable",
+          "Host actions are only available inside the native app.",
+        ),
+      });
+      return;
+    }
+    setHostActionBusy(target);
+    setHostActionMessage(null);
+    try {
+      const result = await action();
+      setHostActionMessage({ target, message: successMessage(result) });
+    } catch {
+      setHostActionMessage({ target, message: failureMessage });
+    } finally {
+      setHostActionBusy(null);
+    }
+  };
   return (
     <div className="space-y-7">
       <section>
         <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown in runtime surfaces that use the configured bot identity.")}>
+          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
             <Input
               value={form.botName}
               onChange={(event) => setForm((prev) => ({ ...prev, botName: event.target.value }))}
               className="h-8 w-[220px] rounded-full text-[13px]"
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.botIcon", "Bot icon")} description={tx("settings.help.botIcon", "Short emoji or text shown beside the bot name.")}>
+          <SettingsRow title={tx("settings.rows.botIcon", "Bot icon")} description={tx("settings.help.botIcon", "Short emoji or text shown with the bot name.")}>
             <Input
               value={form.botIcon}
               onChange={(event) => setForm((prev) => ({ ...prev, botIcon: event.target.value }))}
               className="h-8 w-[120px] rounded-full text-center text-[13px]"
             />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.timezone", "Timezone")} description={tx("settings.help.timezone", "IANA timezone used by runtime context and schedules.")}>
+          <SettingsRow title={tx("settings.rows.timezone", "Timezone")} description={tx("settings.help.timezone", "Used for schedules and time-aware replies.")}>
             <TimezonePicker
               value={form.timezone}
               onChange={(timezone) => setForm((prev) => ({ ...prev, timezone }))}
@@ -3542,8 +3874,16 @@ function RuntimeSettings({
             dirty={dirty}
             saving={saving}
             pendingRestart={requiresRestartPending}
-            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
-            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+            dirtyMessage={
+              isNativeHost
+                ? tx("settings.status.hostRestartAfterSaving", "Save changes and nanobot will restart its engine.")
+                : tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
+            }
+            pendingMessage={
+              isNativeHost
+                ? tx("settings.status.hostRestartPending", "Saved. Restarting engine when ready.")
+                : tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+            }
             onSave={onSave}
             onRestart={onRestart}
             isRestarting={isRestarting}
@@ -3551,9 +3891,92 @@ function RuntimeSettings({
         </SettingsGroup>
       </section>
 
+      {isNativeHost ? (
+        <section>
+          <SettingsSectionTitle>{tx("settings.sections.nativeHost", "Native host")}</SettingsSectionTitle>
+          <SettingsGroup>
+            <ReadOnlyRow title={tx("settings.rows.engine", "Engine")} value={engineState} />
+            {settings.runtime_capabilities?.can_open_logs ? (
+              <SettingsRow
+                title={tx("settings.rows.logs", "Logs")}
+                description={
+                  hostActionMessage?.target === "logs"
+                    ? hostActionMessage.message
+                    : tx("settings.help.logs", "Open the native engine log folder.")
+                }
+              >
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void runHostAction(
+                      "logs",
+                      () => hostApi!.openLogs(),
+                      () => tx("settings.status.logsOpened", "Opened logs folder."),
+                      tx("settings.status.logsOpenFailed", "Could not open logs folder."),
+                    )
+                  }
+                  disabled={hostActionBusy !== null}
+                  className="rounded-full"
+                >
+                  {hostActionBusy === "logs"
+                    ? tx("settings.actions.opening", "Opening...")
+                    : tx("settings.actions.open", "Open")}
+                </Button>
+              </SettingsRow>
+            ) : null}
+            {settings.runtime_capabilities?.can_export_diagnostics ? (
+              <SettingsRow
+                title={tx("settings.rows.diagnostics", "Diagnostics")}
+                description={
+                  hostActionMessage?.target === "diagnostics"
+                    ? hostActionMessage.message
+                    : diagnosticsPath
+                    ? diagnosticsPath
+                    : tx("settings.help.diagnostics", "Export a small runtime report for support.")
+                }
+              >
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void runHostAction(
+                      "diagnostics",
+                      async () => {
+                        const path = await hostApi!.exportDiagnostics();
+                        setDiagnosticsPath(path);
+                        return path;
+                      },
+                      (path) =>
+                        t("settings.status.diagnosticsExported", {
+                          path: String(path ?? ""),
+                          defaultValue: "Diagnostics exported to {{path}}.",
+                        }),
+                      tx("settings.status.diagnosticsExportFailed", "Could not export diagnostics."),
+                    )
+                  }
+                  disabled={hostActionBusy !== null}
+                  className="rounded-full"
+                >
+                  {hostActionBusy === "diagnostics"
+                    ? tx("settings.actions.exporting", "Exporting...")
+                    : tx("settings.actions.export", "Export")}
+                </Button>
+              </SettingsRow>
+            ) : null}
+          </SettingsGroup>
+        </section>
+      ) : null}
+
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
         <SettingsGroup>
+          <ReadOnlyRow
+            title={tx("settings.rows.gateway", "Gateway")}
+            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
+          />
+          <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
+          <ReadOnlyRow title={tx("settings.rows.workspacePath", "Default workspace")} value={settings.runtime.workspace_path} />
           {onRestart && !requiresRestartPending ? (
             <SettingsRow
               title={t("settings.rows.restart")}
@@ -3571,57 +3994,106 @@ function RuntimeSettings({
                 ) : (
                   <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                 )}
-                {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+                {isRestarting ? restartingActionLabel : restartActionLabel}
               </Button>
             </SettingsRow>
           ) : null}
-          <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
-          <ReadOnlyRow title={tx("settings.rows.workspacePath", "Workspace path")} value={settings.runtime.workspace_path} />
-          <ReadOnlyRow title={tx("settings.rows.heartbeat", "Heartbeat")} value={settings.runtime.heartbeat.enabled ? `${settings.runtime.heartbeat.interval_s}s` : tx("settings.values.disabled", "Disabled")} />
-          <ReadOnlyRow title={tx("settings.rows.dream", "Dream")} value={settings.runtime.dream.schedule} />
-          <ReadOnlyRow title={tx("settings.rows.unifiedSession", "Unified session")} value={settings.runtime.unified_session ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")} />
         </SettingsGroup>
       </section>
     </div>
   );
 }
 
-function AdvancedSettings({ settings }: { settings: SettingsPayload }) {
+function AdvancedSettings({
+  form,
+  dirty,
+  saving,
+  requiresRestartPending,
+  isNativeHostSurface,
+  onChangeForm,
+  onSave,
+  onRestart,
+  isRestarting,
+}: {
+  form: NetworkSafetySettingsUpdate;
+  dirty: boolean;
+  saving: boolean;
+  requiresRestartPending: boolean;
+  isNativeHostSurface: boolean;
+  onChangeForm: Dispatch<SetStateAction<NetworkSafetySettingsUpdate>>;
+  onSave: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
     <div className="space-y-7">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.safety", "Safety")}</SettingsSectionTitle>
+        <SettingsSectionTitle>
+          {isNativeHostSurface
+            ? tx("settings.sections.hostSafety", "App safety")
+            : tx("settings.sections.webuiSafety", "Web safety")}
+        </SettingsSectionTitle>
         <SettingsGroup>
-          <ReadOnlyRow title={tx("settings.rows.restrictWorkspace", "Restrict to workspace")} value={settings.advanced.restrict_to_workspace ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")} />
-          <ReadOnlyRow title={tx("settings.rows.execTool", "Exec tool")} value={settings.advanced.exec_enabled ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")} />
-          <ReadOnlyRow title={tx("settings.rows.execSandbox", "Exec sandbox")} value={settings.advanced.exec_sandbox ?? tx("settings.values.notAvailable", "Not available")} />
-          <ReadOnlyRow title={tx("settings.rows.ssrfWhitelist", "SSRF whitelist")} value={String(settings.advanced.ssrf_whitelist_count)} />
+          <SettingsRow
+            title={tx("settings.rows.localServiceAccess", "Local Service Access")}
+            description={tx(
+              isNativeHostSurface ? "settings.help.localServiceAccessNative" : "settings.help.localServiceAccess",
+              isNativeHostSurface
+                ? "Allow Full Access shell commands to reach services on this Mac."
+                : "Allow Full Access shell commands to reach localhost services.",
+            )}
+          >
+            <ToggleButton
+              checked={form.webuiAllowLocalServiceAccess}
+              onChange={(webuiAllowLocalServiceAccess) =>
+                onChangeForm((prev) => ({ ...prev, webuiAllowLocalServiceAccess }))
+              }
+              ariaLabel={tx("settings.rows.localServiceAccess", "Local Service Access")}
+              label={form.webuiAllowLocalServiceAccess ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.webuiDefaultAccess", "Default access")}
+            description={tx(
+              isNativeHostSurface ? "settings.help.webuiDefaultAccessNative" : "settings.help.webuiDefaultAccess",
+              isNativeHostSurface
+                ? "Used by native chats without a project-specific permission."
+                : "Used by web chats without a project-specific permission.",
+            )}
+          >
+            <SegmentedControl
+              value={form.webuiDefaultAccessMode}
+              options={[
+                { value: "default", label: tx("settings.values.defaultPermission", "Default Permission") },
+                { value: "full", label: tx("settings.values.fullAccess", "Full Access") },
+              ]}
+              onChange={(webuiDefaultAccessMode) =>
+                onChangeForm((prev) => ({
+                  ...prev,
+                  webuiDefaultAccessMode: webuiDefaultAccessMode as WebuiDefaultAccessMode,
+                }))
+              }
+            />
+          </SettingsRow>
+          <RestartSettingsFooter
+            dirty={dirty}
+            saving={saving}
+            pendingRestart={requiresRestartPending}
+            onSave={onSave}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
         </SettingsGroup>
       </section>
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.integrations", "Integrations")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <ReadOnlyRow title={tx("settings.rows.mcpServers", "MCP servers")} value={String(settings.advanced.mcp_server_count)} />
-          <ReadOnlyRow title={tx("settings.rows.pathAppend", "PATH append")} value={settings.advanced.exec_path_append_set ? tx("settings.values.configured", "Configured") : tx("settings.values.notConfigured", "Not configured")} />
-          <SettingsRow
-            title={tx("settings.rows.configurationDocs", "Configuration docs")}
-            description={tx("settings.help.advancedReadOnly", "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.")}
-          >
-            <a
-              className="inline-flex h-8 items-center rounded-full border border-input bg-background px-3 text-[13px] font-medium text-foreground shadow-sm transition-colors hover:bg-muted"
-              href="https://github.com/HKUDS/nanobot/blob/main/docs/configuration.md"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Info className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              {tx("settings.actions.openDocs", "Open docs")}
-            </a>
-          </SettingsRow>
-        </SettingsGroup>
-      </section>
+      <p className="max-w-3xl px-1 text-sm leading-6 text-muted-foreground">
+        {tx(
+          "settings.help.securityManagedControls",
+          "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
+        )}
+      </p>
     </div>
   );
 }
@@ -3656,7 +4128,7 @@ function TimezonePicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-[340px] max-w-[calc(100vw-2rem)] rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]"
+        className="w-[340px] max-w-[calc(100vw-2rem)]"
       >
         <div className="sticky top-0 z-10 bg-popover px-1 pb-1">
           <div className="flex h-9 items-center gap-2 rounded-full border border-input bg-background px-3">
@@ -3749,7 +4221,7 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]"
+        className="max-h-[18rem] w-[240px] overflow-y-auto"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;
@@ -3904,6 +4376,17 @@ function orderUnconfiguredProviders(
       return rank || left.index - right.index;
     })
     .map(({ provider }) => provider);
+}
+
+function uniqueProviders(
+  providers: SettingsPayload["providers"],
+): SettingsPayload["providers"] {
+  const seen = new Set<string>();
+  return providers.filter((provider) => {
+    if (seen.has(provider.name)) return false;
+    seen.add(provider.name);
+    return true;
+  });
 }
 
 function providerVisibilityRank(provider: SettingsPayload["providers"][number]): number {
@@ -4258,9 +4741,17 @@ function SettingsRow({
   );
 }
 
-function ReadOnlyRow({ title, value }: { title: string; value: string }) {
+function ReadOnlyRow({
+  title,
+  value,
+  description,
+}: {
+  title: string;
+  value: string;
+  description?: string;
+}) {
   return (
-    <SettingsRow title={title}>
+    <SettingsRow title={title} description={description}>
       <span className="block max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
         {value}
       </span>
@@ -4322,7 +4813,7 @@ function ModelPresetPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]"
+        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto"
       >
         {presets.map((preset) => {
           const selected = preset.name === value;
@@ -4432,6 +4923,13 @@ function RestartSettingsFooter({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const isNativeHost = getHostApi() !== null;
+  const restartLabel = isNativeHost
+    ? tx("app.system.restartEngine", "Restart engine")
+    : t("app.system.restart");
+  const restartingLabel = isNativeHost
+    ? tx("app.system.restartingEngine", "Restarting engine...")
+    : t("app.system.restarting");
   const statusMessage =
     message ??
     (pendingRestart && !dirty
@@ -4460,7 +4958,7 @@ function RestartSettingsFooter({
             ) : (
               <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
             )}
-            {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+            {isRestarting ? restartingLabel : restartLabel}
           </Button>
         ) : null}
         {onReset ? (
@@ -4492,29 +4990,33 @@ function SettingsFooter({
   dirty,
   saving,
   saved,
+  disabled = false,
+  message,
   onSave,
 }: {
   dirty: boolean;
   saving: boolean;
   saved: boolean;
+  disabled?: boolean;
+  message?: string;
   onSave: () => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const statusMessage = dirty
+  const statusMessage = message ?? (dirty
     ? t("settings.status.unsaved")
     : saved
       ? t("settings.status.savedRestart")
-      : tx("settings.status.upToDate", "Up to date.");
+      : tx("settings.status.upToDate", "Up to date."));
   return (
     <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="text-[13px] text-muted-foreground">
-        <SettingsStatusMessage tone={dirty || saved ? "accent" : undefined}>
+        <SettingsStatusMessage tone={disabled ? "danger" : dirty || saved ? "accent" : undefined}>
           {statusMessage}
         </SettingsStatusMessage>
       </div>
       <div className="flex justify-end">
-        <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || saving} className="rounded-full">
+        <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || disabled || saving} className="rounded-full">
           {saving ? t("settings.actions.saving") : t("settings.actions.save")}
         </Button>
       </div>

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsPayload } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -12,7 +13,7 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
-function settingsPayload() {
+function settingsPayload(): SettingsPayload {
   return {
     agent: {
       model: "openai/gpt-4o",
@@ -88,6 +89,9 @@ function settingsPayload() {
     },
     advanced: {
       restrict_to_workspace: false,
+      webui_allow_local_service_access: true,
+      webui_default_access_mode: "default",
+      private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
       exec_enabled: true,
@@ -115,15 +119,21 @@ const installedAnyGen = {
   skill_installed: true,
 };
 
-function renderSettingsView() {
+function renderSettingsView(
+  options: {
+    initialSection?: "apps" | "advanced";
+    onSettingsChange?: (payload: SettingsPayload) => void;
+  } = {},
+) {
   render(
     <ClientProvider client={{} as never} token="tok">
       <SettingsView
         theme="light"
-        initialSection="apps"
+        initialSection={options.initialSection ?? "apps"}
         onToggleTheme={() => {}}
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
+        onSettingsChange={options.onSettingsChange}
       />
     </ClientProvider>,
   );
@@ -187,5 +197,98 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
+  });
+
+  it("publishes the latest settings payload to the shell", async () => {
+    const payload = settingsPayload();
+    const onSettingsChange = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ onSettingsChange });
+
+    await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
+  });
+
+  it("saves network safety without exposing technical SSRF copy", async () => {
+    const payload = settingsPayload();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default") {
+        return jsonResponse({
+          ...payload,
+          advanced: { ...payload.advanced, webui_allow_local_service_access: false },
+          requires_restart: true,
+          restart_required_sections: ["runtime"],
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "advanced" });
+
+    expect(await screen.findByText("Web safety")).toBeInTheDocument();
+    expect(screen.queryByText(/SSRF/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Private Service Protection")).not.toBeInTheDocument();
+    expect(screen.getByText("Default access")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restricted" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Default Permission" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Full Access" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
+  it("uses native host safety copy on the native surface", async () => {
+    const payload = {
+      ...settingsPayload(),
+      surface: "native" as const,
+      runtime_surface: "native" as const,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "advanced" });
+
+    expect(await screen.findByText("App safety")).toBeInTheDocument();
+    expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
+    expect(screen.getByText("Allow Full Access shell commands to reach services on this Mac.")).toBeInTheDocument();
   });
 });

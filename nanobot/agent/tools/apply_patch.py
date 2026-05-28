@@ -88,11 +88,11 @@ def _format_summary(summary: _PatchSummary) -> str:
             items=ObjectSchema(
                 path=StringSchema("Relative path to the file to edit."),
                 action=StringSchema(
-                    "Operation type: replace (find and replace text), add (append new content or create file), delete (remove text).",
-                    enum=["replace", "add", "delete"],
+                    "Operation type: replace or add.",
+                    enum=["replace", "add"],
                 ),
                 old_text=StringSchema(
-                    "Exact text to search for in the file. Required for replace and delete.",
+                    "Exact text to search for in the file. Required for replace.",
                     nullable=True,
                 ),
                 new_text=StringSchema(
@@ -124,7 +124,8 @@ class ApplyPatchTool(_FsTool):
     def description(self) -> str:
         return (
             "Default tool for code edits. Supports multi-file changes in a single call. "
-            "Provide a list of structured edits, each specifying a file path, action (replace/add/delete), and the text to change. "
+            "Provide a list of structured edits, each specifying a file path, action "
+            "(replace/add), and the exact text to change. "
             "Paths must be relative. Set dry_run=true to validate and preview without writing files. "
             "Use edit_file only for small exact replacements on a single file."
         )
@@ -140,7 +141,6 @@ class ApplyPatchTool(_FsTool):
                 raise _PatchError("must provide edits")
 
             writes: dict[Path, str] = {}
-            deletes: set[Path] = set()
             summaries: list[_PatchSummary] = []
 
             for edit in edits:
@@ -183,7 +183,6 @@ class ApplyPatchTool(_FsTool):
                         if uses_crlf:
                             new_norm = new_norm.replace("\n", "\r\n")
                         writes[source] = new_norm
-                        deletes.discard(source)
                         added, deleted = _line_diff_stats(content, new_norm)
                         action_name = "update"
                     else:
@@ -191,7 +190,6 @@ class ApplyPatchTool(_FsTool):
                         if new_norm and not new_norm.endswith("\n"):
                             new_norm += "\n"
                         writes[source] = new_norm
-                        deletes.discard(source)
                         added = _text_line_count(new_norm)
                         deleted = 0
                         action_name = "add"
@@ -246,69 +244,12 @@ class ApplyPatchTool(_FsTool):
                         new_norm = new_norm.replace("\n", "\r\n")
 
                     writes[source] = new_norm
-                    deletes.discard(source)
                     added, deleted = _line_diff_stats(content, new_norm)
                     summaries.append(
                         _PatchSummary(
                             action="update", path=path, added=added, deleted=deleted
                         )
                     )
-
-                elif action == "delete":
-                    old_text = edit.get("old_text") or ""
-                    if not old_text:
-                        raise _PatchError(f"old_text required for delete: {path}")
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                    else:
-                        raise _PatchError(f"file to update does not exist: {path}")
-
-                    if pending is None and not source.is_file():
-                        raise _PatchError(f"path to update is not a file: {path}")
-
-                    uses_crlf = "\r\n" in content
-                    norm_content = content.replace("\r\n", "\n")
-                    norm_old = old_text.replace("\r\n", "\n")
-
-                    pos = norm_content.find(norm_old)
-                    if pos < 0:
-                        raise _PatchError(f"old_text not found in {path}")
-                    if norm_content.find(norm_old, pos + 1) >= 0:
-                        raise _PatchError(f"old_text appears multiple times in {path}")
-
-                    if norm_old == norm_content:
-                        deletes.add(source)
-                        writes.pop(source, None)
-                        added, deleted = 0, _text_line_count(content)
-                        summaries.append(
-                            _PatchSummary(
-                                action="delete", path=path, added=added, deleted=deleted
-                            )
-                        )
-                    else:
-                        new_norm = (
-                            norm_content[:pos] + norm_content[pos + len(norm_old) :]
-                        )
-                        if new_norm and not new_norm.endswith("\n"):
-                            new_norm += "\n"
-                        if uses_crlf:
-                            new_norm = new_norm.replace("\n", "\r\n")
-                        writes[source] = new_norm
-                        deletes.discard(source)
-                        added, deleted = _line_diff_stats(content, new_norm)
-                        summaries.append(
-                            _PatchSummary(
-                                action="update", path=path, added=added, deleted=deleted
-                            )
-                        )
 
                 else:
                     raise _PatchError(f"unknown action: {action}")
@@ -319,13 +260,10 @@ class ApplyPatchTool(_FsTool):
                 )
 
             backups: dict[Path, bytes | None] = {}
-            for path in set(writes) | deletes:
+            for path in writes:
                 backups[path] = path.read_bytes() if path.exists() else None
 
             try:
-                for path in deletes:
-                    if path.exists():
-                        path.unlink()
                 for path, content in writes.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(content, encoding="utf-8", newline="")
@@ -339,7 +277,7 @@ class ApplyPatchTool(_FsTool):
                         path.write_bytes(data)
                 raise
 
-            for path in set(writes) | deletes:
+            for path in writes:
                 self._file_states.record_write(path)
             return "Patch applied:\n" + "\n".join(
                 _format_summary(summary) for summary in summaries

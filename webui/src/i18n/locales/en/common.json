@@ -25,7 +25,9 @@
       "section": "System",
       "restartHint": "Restart nanobot to apply runtime changes.",
       "restart": "Restart nanobot",
-      "restarting": "Restarting..."
+      "restarting": "Restarting...",
+      "restartEngine": "Restart engine",
+      "restartingEngine": "Restarting engine..."
     },
     "restart": {
       "completed": "Restart completed in {{seconds}}s."
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "Sidebar navigation",
-    "globalActions": "Global actions",
     "collapse": "Collapse sidebar",
-    "toggleTheme": "Toggle theme",
-    "home": "Home",
     "newChat": "New chat",
     "searchAria": "Search",
-    "viewOptions": "View",
-    "compactList": "Compact list",
-    "showPreviews": "Show previews",
-    "showTimestamps": "Show time",
-    "sortLabel": "Sort",
-    "sortUpdated": "Recently updated",
-    "sortCreated": "Recently created",
-    "sortTitle": "Title A-Z",
     "searchPlaceholder": "Search",
     "searchResults": "Results",
     "noSearchResults": "No matching chats.",
     "recent": "Recent",
-    "refreshSessions": "Refresh sessions",
     "settings": "Settings",
     "language": {
       "label": "Language",
@@ -80,11 +70,11 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
+      "browser": "Web",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "runtime": "System",
+      "advanced": "Security",
       "apps": "Apps"
     },
     "sections": {
@@ -101,10 +91,11 @@
       "cliApps": "CLI apps",
       "mcp": "MCP services",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "Web safety",
       "capabilities": "Capabilities",
-      "integrations": "Integrations",
-      "apps": "Apps"
+      "apps": "Apps",
+      "nativeHost": "Native host",
+      "hostSafety": "App safety"
     },
     "models": {
       "selectModel": "Select model",
@@ -112,6 +103,7 @@
       "newConfiguration": "New model configuration",
       "newConfigurationHelp": "Save a provider and model as a one-click option.",
       "configurationName": "Name",
+      "configurationNameHelp": "Rename this saved model configuration.",
       "configurationNamePlaceholder": "Fast writing"
     },
     "rows": {
@@ -147,20 +139,14 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
+      "workspacePath": "Default workspace",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "cliAppsCatalog": "Catalog",
       "cliAppsFilter": "Filter",
-      "configurationDocs": "Configuration docs"
+      "engine": "Engine",
+      "logs": "Logs",
+      "diagnostics": "Diagnostics"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
@@ -187,13 +173,18 @@
       "defaultAspectRatio": "Used when the prompt does not choose an aspect ratio.",
       "defaultImageSize": "Size hint sent to providers that support it.",
       "maxImagesPerTurn": "Upper bound for one generate_image request.",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; desktop apps stay untouched.",
+      "botName": "Shown wherever nanobot uses a display name.",
+      "botIcon": "Short emoji or text shown with the bot name.",
+      "timezone": "Used for schedules and time-aware replies.",
+      "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; native apps stay untouched.",
       "cliAppsFilter": "Search by app, category, or capability.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
+      "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
+      "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
+      "logs": "Open the native engine log folder.",
+      "diagnostics": "Export a small runtime report for support.",
+      "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
     },
     "timezone": {
       "select": "Select timezone",
@@ -298,8 +289,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "Pending",
+      "restartingEngine": "Restarting"
     },
     "status": {
       "loading": "Loading settings...",
@@ -309,14 +304,24 @@
       "savedRestart": "Saved. Restart nanobot to apply.",
       "restartAfterSaving": "Save changes, then restart when ready.",
       "savedRestartApply": "Saved. Restart when ready.",
-      "imageProviderRestart": "Image provider changes saved. Restart when ready."
+      "imageProviderRestart": "Image provider changes saved. Restart when ready.",
+      "hostRestartAfterSaving": "Save changes and nanobot will restart its engine.",
+      "hostRestartPending": "Saved. Restarting engine when ready.",
+      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "logsOpened": "Opened logs folder.",
+      "logsOpenFailed": "Could not open logs folder.",
+      "diagnosticsExported": "Diagnostics exported to {{path}}.",
+      "diagnosticsExportFailed": "Could not export diagnostics."
     },
     "actions": {
       "save": "Save",
       "saving": "Saving",
       "edit": "Edit",
       "cancel": "Cancel",
-      "openDocs": "Open docs"
+      "open": "Open",
+      "export": "Export",
+      "opening": "Opening...",
+      "exporting": "Exporting..."
     },
     "byok": {
       "description": "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be selected in General.",
@@ -397,6 +402,19 @@
       "featured": "Featured",
       "loading": "Loading Apps...",
       "empty": "No apps match this filter."
+    },
+    "oauth": {
+      "authentication": "OAuth authentication",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{account}}",
+      "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "signInRequired": "Sign in required",
+      "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
+      "signedIn": "Signed in",
+      "notSignedIn": "Not signed in"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "showMore": "Show {{count}} more",
+    "collapsed": "{{count}} hidden chats",
+    "showLess": "Show less",
     "actions": "Chat actions for {{title}}",
+    "newInProject": "Start a new chat in {{project}}",
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished"
@@ -415,6 +436,9 @@
     "renameTitle": "Rename chat",
     "renameDescription": "Choose a local sidebar name for this chat.",
     "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "Pinned",
       "all": "Chats",
+      "projects": "Projects",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "Loading conversation…",
     "empty": {
-      "greeting": "What can I do for you?",
+      "greetings": {
+        "workOn": "What should we work on?",
+        "start": "Where should we start?",
+        "build": "What are we building today?",
+        "tackle": "What should we tackle together?"
+      },
       "quickActions": {
         "plan": {
           "title": "Create a project plan",
@@ -632,6 +662,13 @@
         "decode_failed": "Couldn't decode this image",
         "too_large": "Image is too large — try a smaller one",
         "io": "Couldn't read this file"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "Choose project",
+        "projectPlaceholder": "Select project",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
     "scrollToBottom": "Scroll to bottom",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "Message too large",
       "body": "The server rejected your last message because it exceeded the size limit. Remove some images or try smaller files, then send again."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "Paste path",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

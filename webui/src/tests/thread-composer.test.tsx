@@ -98,7 +98,7 @@ const MCP_PRESETS: McpPresetInfo[] = [
     description: "Design context",
     docs_url: "https://figma.com",
     transport: "streamableHttp",
-    requires: "Figma desktop",
+    requires: "Figma local app",
     note: "",
     install_supported: true,
     installed: true,
@@ -115,6 +115,7 @@ const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  Reflect.deleteProperty(window, "nanobotHost");
   window.localStorage.clear();
   Object.defineProperty(window, "innerHeight", {
     value: ORIGINAL_INNER_HEIGHT,
@@ -182,6 +183,167 @@ describe("ThreadComposer", () => {
     expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
+    expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
+  });
+
+  it("renders and changes workspace access mode", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        workspaceScope={{
+          project_path: "/tmp/project",
+          project_name: "project",
+          access_mode: "restricted",
+          restrict_to_workspace: true,
+        }}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace access mode" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Full Access/ }));
+
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_path: "/tmp/project",
+        access_mode: "full",
+        restrict_to_workspace: false,
+      }),
+    );
+  });
+
+  it("keeps project selection as a compact composer dropdown", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={{
+          ...defaultScope,
+          access_mode: "full",
+          restrict_to_workspace: false,
+        }}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByRole("menuitem", { name: /Default workspace/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const input = screen.getByLabelText("Paste path");
+    fireEvent.change(input, { target: { value: "relative/project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Enter an absolute folder path on this machine.",
+    );
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "/Users/test/project-alpha" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/project-alpha",
+      project_name: "project-alpha",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Choose project" }));
+    const reopenedInput = await screen.findByLabelText("Paste path");
+    fireEvent.change(reopenedInput, { target: { value: "~/Pictures/Photos" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      project_path: "~/Pictures/Photos",
+      project_name: "Photos",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
+  it("uses the native folder picker for project selection on native host", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    Object.defineProperty(window, "nanobotHost", {
+      configurable: true,
+      value: {
+        getRuntimeInfo: vi.fn(),
+        restartEngine: vi.fn(),
+        pickFolder,
+        openLogs: vi.fn(),
+        exportDiagnostics: vi.fn(),
+      },
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
+    expect(screen.queryByRole("menuitem", { name: /Default workspace/ })).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/native-project",
+      project_name: "native-project",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
+  it("uses the web path menu when no native host picker is available", async () => {
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByRole("menuitem", { name: /Default workspace/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Paste path")).toBeInTheDocument();
   });
 
   it("shows turn run timer when runStartedAt is set", () => {
@@ -242,12 +404,7 @@ describe("ThreadComposer", () => {
     const palette = screen.getByRole("listbox", { name: "Slash commands" });
     expect(palette).toBeInTheDocument();
     expect(palette).toHaveStyle({ maxHeight: "288px" });
-    expect(screen.getByRole("option", { name: /\/stop/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.queryByRole("option", { name: /\/stop/i })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -310,6 +467,7 @@ describe("ThreadComposer", () => {
 
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("");
+    expect(window.localStorage.getItem("nanobot.webui.slashCommandRecents")).toBeNull();
   });
 
   it("orders recent slash commands first for the blank slash menu", () => {
@@ -331,6 +489,42 @@ describe("ThreadComposer", () => {
       "true",
     );
     expect(screen.getByText("Recent")).toBeInTheDocument();
+  });
+
+  it("keeps keyboard-selected slash options visible while navigating", () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          slashCommands={Array.from({ length: 8 }, (_, index) => ({
+            command: `/cmd-${index}`,
+            title: `Command ${index}`,
+            description: `Description ${index}`,
+            icon: "activity",
+          }))}
+        />,
+      );
+
+      const input = screen.getByLabelText("Message input");
+      fireEvent.change(input, { target: { value: "/" } });
+      scrollIntoView.mockClear();
+
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+
+      expect(screen.getByRole("option", { name: /\/cmd-2/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 
   it("opens the CLI app mention palette and inserts the selected app", () => {
@@ -379,6 +573,52 @@ describe("ThreadComposer", () => {
         brand_color: "#E87D0D",
       }],
     });
+  });
+
+  it("keeps keyboard-selected mention options visible while navigating", () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      render(
+        <ThreadComposer
+          onSend={vi.fn()}
+          placeholder="Type your message..."
+          cliApps={Array.from({ length: 8 }, (_, index) => ({
+            name: `app-${index}`,
+            display_name: `App ${index}`,
+            category: "test",
+            description: "Test app",
+            requires: "",
+            source: "harness",
+            entry_point: `app-${index}`,
+            install_supported: true,
+            installed: true,
+            available: true,
+            status: "installed",
+            logo_url: null,
+            brand_color: "#111827",
+            skill_installed: true,
+          }))}
+        />,
+      );
+
+      const input = screen.getByLabelText("Message input");
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+      scrollIntoView.mockClear();
+
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+
+      expect(screen.getByRole("option", { name: /@app-2/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 
   it("completes a CLI app mention with Tab and adds exactly one trailing space", () => {

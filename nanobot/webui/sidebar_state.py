@@ -38,6 +38,7 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "pinned_keys": [],
         "archived_keys": [],
         "title_overrides": {},
+        "project_name_overrides": {},
         "tags_by_key": {},
         "collapsed_groups": {},
         "view": {
@@ -136,6 +137,9 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     state["pinned_keys"] = _clean_string_list(raw.get("pinned_keys"))
     state["archived_keys"] = _clean_string_list(raw.get("archived_keys"))
     state["title_overrides"] = _clean_title_overrides(raw.get("title_overrides"))
+    state["project_name_overrides"] = _clean_title_overrides(
+        raw.get("project_name_overrides")
+    )
     state["tags_by_key"] = _clean_tags_by_key(raw.get("tags_by_key"))
     state["collapsed_groups"] = _clean_bool_map(raw.get("collapsed_groups"))
     state["view"] = _clean_view(raw.get("view"))
@@ -190,4 +194,3 @@ def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     finally:
         os.close(dir_fd)
     return state
-
