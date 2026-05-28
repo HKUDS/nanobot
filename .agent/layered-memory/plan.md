@@ -49,9 +49,11 @@
 
 ### LM0-C 包骨架
 
-- [ ] `nanobot/agent/layered_memory/__init__.py`
-- [ ] `facade.py`：`LayeredMemoryFacade` 空实现 + `enabled` 短路
-- [ ] `.agent/layered-memory/design.md`、`plan.md`（本文档）
+- [x] `nanobot/agent/layered_memory/__init__.py`
+- [x] `facade.py`：`LayeredMemoryFacade` 空实现 + `enabled` 短路
+- [x] `AgentLoop._layered_memory_facade`（`LayeredMemoryFacade(workspace, config)`）
+- [x] `tests/agent/layered_memory/test_facade.py`
+- [x] `.agent/layered-memory/plan.md`（本文档）
 
 **验收**：`enable: false` 时 hook 新增不改变行为；pytest 通过。
 

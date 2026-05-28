@@ -34,6 +34,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.agent.evolution.models import TurnTrace
 from nanobot.agent.evolution.post_task import PostTaskEvolver, resolve_post_task_provider
 from nanobot.agent.evolution.trace_recorder import TraceRecorder
+from nanobot.agent.layered_memory import LayeredMemoryFacade
 from nanobot.config.schema import (
     AgentDefaults,
     EvolutionConfig,
@@ -260,6 +261,7 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._evolution = evolution or EvolutionConfig()
         self._layered_memory = layered_memory or LayeredMemoryConfig()
+        self._layered_memory_facade = LayeredMemoryFacade(workspace, self._layered_memory)
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
