@@ -50,6 +50,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
     assert "[tool output persisted]" in tool_message["content"]
+    assert "node_id: call_big" in tool_message["content"]
     assert "tool-results" in tool_message["content"]
     assert (tmp_path / ".nanobot" / "tool-results" / "test_runner" / "call_big.txt").exists()
 
@@ -77,7 +78,8 @@ def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
         max_chars=64,
     )
 
-    assert "[tool output persisted]" in persisted
+    assert "[tool output persisted]" in persisted.content
+    assert "node_id: call_big" in persisted.content
     assert not old_bucket.exists()
     assert recent_bucket.exists()
     assert (root / "current_session" / "call_big.txt").exists()
@@ -121,7 +123,7 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
         max_chars=64,
     )
 
-    assert "[tool output persisted]" in persisted
+    assert "[tool output persisted]" in persisted.content
     assert warnings and "Failed to clean stale tool result buckets" in warnings[0]
 async def test_runner_keeps_going_when_tool_result_persistence_fails():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner

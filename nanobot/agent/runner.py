@@ -13,6 +13,11 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.layered_memory.facade import LayeredMemoryFacade
+from nanobot.agent.layered_memory.offload.node_registry import (
+    summarize_tool_result,
+    tool_result_char_len,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -97,6 +102,8 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    layered_memory_facade: LayeredMemoryFacade | None = None
+    is_subagent: bool = False
 
 
 @dataclass(slots=True)
@@ -1084,6 +1091,10 @@ class AgentRunner:
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
 
+    @staticmethod
+    def _is_persisted_tool_reference(content: Any) -> bool:
+        return isinstance(content, str) and "[tool output persisted]" in content
+
     def _normalize_tool_result(
         self,
         spec: AgentRunSpec,
@@ -1091,15 +1102,23 @@ class AgentRunner:
         tool_name: str,
         result: Any,
     ) -> Any:
+        if self._is_persisted_tool_reference(result):
+            if isinstance(result, str) and len(result) > spec.max_tool_result_chars:
+                return truncate_text(result, spec.max_tool_result_chars)
+            return result
+
         result = ensure_nonempty_tool_result(tool_name, result)
+        original_chars = tool_result_char_len(result)
+        summary_source = result if isinstance(result, str) else str(result)
         try:
-            content = maybe_persist_tool_result(
+            outcome = maybe_persist_tool_result(
                 spec.workspace,
                 spec.session_key,
                 tool_call_id,
                 result,
                 max_chars=spec.max_tool_result_chars,
             )
+            content = outcome.content
         except Exception:
             logger.exception(
                 "Tool result persist failed for {} in {}; using raw result",
@@ -1107,8 +1126,26 @@ class AgentRunner:
                 spec.session_key or "default",
             )
             content = result
+            outcome = None
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
-            return truncate_text(content, spec.max_tool_result_chars)
+            content = truncate_text(content, spec.max_tool_result_chars)
+
+        facade = spec.layered_memory_facade
+        if facade is not None and spec.session_key and spec.workspace:
+            persist_path: str | None = None
+            if outcome is not None and outcome.meta is not None:
+                persist_path = outcome.meta.path.as_posix()
+            max_summary = facade.config.offload.max_node_summary_chars
+            summary = summarize_tool_result(summary_source, max_chars=max_summary) or tool_name
+            facade.register_tool_result(
+                session_key=spec.session_key,
+                node_id=tool_call_id,
+                tool_name=tool_name,
+                persist_path=persist_path,
+                summary=summary,
+                chars=original_chars,
+                is_subagent=spec.is_subagent,
+            )
         return content
 
     @staticmethod

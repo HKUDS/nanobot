@@ -1463,6 +1463,46 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
 
+## Layered Memory
+
+Layered Memory adds **Task Canvas** short-term indexing for tool-heavy sessions: each tool call can be registered as a **node** (`node_id` = `tool_call_id`), summarized on a Mermaid canvas, and recalled with `read_memory_node` when output was spilled to disk.
+
+See [Layered Memory](./layered-memory.md) for the full LM1 guide (storage layout, persist relationship, tuning).
+
+**LM1 minimum** (off by default):
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "layeredMemory": {
+        "enable": true,
+        "offload": {
+          "enable": true
+        }
+      }
+    }
+  }
+}
+```
+
+Both `layeredMemory.enable` and `layeredMemory.offload.enable` must be `true` for canvas injection and `read_memory_node`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `layeredMemory.enable` | `false` | Master switch |
+| `layeredMemory.offload.enable` | `false` | Task canvas, `nodes.json`, runtime injection, `read_memory_node` |
+| `layeredMemory.offload.maxCanvasChars` | `1500` | Max characters for the injected `[Task canvas]` block |
+| `layeredMemory.offload.maxNodeSummaryChars` | `120` | Max one-line summary per node in `nodes.json` |
+| `layeredMemory.offload.updateCanvasEveryNTools` | `0` | Refresh `canvas.mmd` every N tools; `0` = turn end only |
+| `layeredMemory.subagent.enableOffload` | `false` | Subagents do not register nodes on the main canvas |
+| `layeredMemory.subagent.enableRecall` | `false` | LM2 — no-op until recall is implemented |
+| `layeredMemory.subagent.enableCapture` | `false` | LM2 — no-op until L0 capture is implemented |
+
+Related: `agents.defaults.maxToolResultChars` (default `16000`) controls when tool output is spilled to `.nanobot/tool-results/` and referenced with `node_id`. Layered Memory indexes those spills; it does not change the threshold.
+
+LM2 keys (`capture`, `pipeline`, `recall`, `embedding`) are defined in schema for forward compatibility. Leave them disabled unless you are testing LM2 development builds.
+
 ## Disabled Skills
 
 nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:

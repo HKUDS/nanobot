@@ -403,7 +403,13 @@ def onboard(
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.loader import (
+        ensure_config_models_built,
+        get_config_path,
+        load_config,
+        save_config,
+        set_config_path,
+    )
     from nanobot.config.schema import Config
 
     if config:
@@ -431,6 +437,7 @@ def onboard(
                 "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
             )
             if typer.confirm("Overwrite?"):
+                ensure_config_models_built()
                 config = _apply_workspace_override(Config())
                 save_config(config, config_path)
                 console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
@@ -441,6 +448,7 @@ def onboard(
                     f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
                 )
     else:
+        ensure_config_models_built()
         config = _apply_workspace_override(Config())
         # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
         if not wizard:

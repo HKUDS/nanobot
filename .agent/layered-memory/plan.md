@@ -63,35 +63,40 @@
 
 ### LM1-A Node 登记
 
-- [ ] `offload/node_registry.py`：`upsert(node_id, tool, path, summary, chars)`
-- [ ] `helpers.py`：`maybe_persist_tool_result` 返回或日志中带 `node_id`；引用串增加 `node_id: …` 行
-- [ ] `runner._normalize_tool_result`：persist 后若 `layered_memory.offload.enable` 调用 registry（**在 CB2 filter 之后**，与 design 一致）
-- [ ] 单测：大 tool 结果 → `nodes.json` 有条目且 path 存在
+- [x] `offload/node_registry.py`：`upsert(node_id, tool, path, summary, chars)`
+- [x] `helpers.py`：`MaybePersistOutcome` + 引用串 `node_id:` 行
+- [x] `runner._normalize_tool_result`：persist 后经 `LayeredMemoryFacade.register_tool_result` 写 registry（CB2 接入后保持同顺序）
+- [x] `AgentRunSpec.layered_memory_facade` + `loop` 传入
+- [x] 单测：`test_node_registry.py`、runner 大结果登记
 
 ### LM1-B Canvas
 
-- [ ] `offload/canvas.py`：读写 `workspace/.nanobot/canvas/{session}/canvas.mmd`
-- [ ] v1 **规则更新**：每 turn 末根据 `nodes.json` 生成简单 `graph TD`（不调 LLM）
-- [ ] `facade.canvas_lines(session_key)` → 截断至 `max_canvas_chars`
-- [ ] 单测：多 node 生成 mmd 行数受限
+- [x] `offload/canvas.py`：读写 `workspace/.nanobot/canvas/{session}/canvas.mmd`
+- [x] v1 **规则更新**：`build_mermaid_from_nodes` → `graph TD` 链（按 `ts`）；`refresh_canvas` / `canvas_lines` 触发
+- [x] `update_canvas_every_n_tools` > 0 时在 `register_tool_result` 周期性 refresh
+- [x] `facade.canvas_lines(session_key)` → 截断至 `max_canvas_chars`
+- [x] `tests/agent/layered_memory/test_canvas.py`
 
 ### LM1-C Hook + runtime 注入
 
-- [ ] `offload/hook.py`：`LayeredMemoryHook`（`after_tools` 批量 summary）
-- [ ] `loop.py`：`build_messages` 前合并 `canvas_lines` + recall 占位到 `current_runtime_lines`
-- [ ] `loop.py`：`CompositeHook` 在 `layered_memory.offload.enable` 时注册
-- [ ] 单测：runtime 含 `[Task canvas]` 标记
+- [x] `offload/hook.py`：`LayeredMemoryHook`（`after_tools` → `sync_tool_nodes` + refresh）
+- [x] `loop.py`：`_layered_memory_runtime_lines` → `canvas_lines` + `recall.prepend_lines`
+- [x] `loop.py`：`_state_build` / system message / `_build_initial_messages` 注入 runtime
+- [x] `loop.py`：`CompositeHook` 在 `offload.enable` 时挂 `LayeredMemoryHook`
+- [x] turn 末 `_state_save` / system path：`refresh_canvas`
+- [x] `tests/agent/layered_memory/test_hook_runtime.py`
 
 ### LM1-D Tool
 
-- [ ] `nanobot/agent/tools/memory_node.py`：`read_memory_node(node_id)`
-- [ ] 注册到默认 tools；Harness 下 read 路径仍受 policy 约束
-- [ ] 单测：读回 persist 全文；非法 id 友好错误
+- [x] `nanobot/agent/tools/memory_node.py`：`read_memory_node(node_id)`
+- [x] `ToolContext.layered_memory` + `ToolLoader` 自动注册（仅 `core` scope，`offload.enable` 时）
+- [x] 路径经 `resolve_workspace_path`（与 `read_file` / Harness 边界一致）
+- [x] `tests/agent/layered_memory/test_memory_node_tool.py`
 
 ### LM1-E 文档
 
-- [ ] `docs/layered-memory.md`：LM1 配置示例、与 CB2/persist 关系
-- [ ] `docs/configuration.md`：链接与配置表（简短）
+- [x] `docs/layered-memory.md`：LM1 配置示例、与 CB2/persist 关系
+- [x] `docs/configuration.md`：链接与配置表（简短）
 
 **验收**：
 

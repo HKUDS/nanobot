@@ -10,7 +10,7 @@ import pydantic
 from loguru import logger
 from pydantic import BaseModel
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, _resolve_tool_config_refs
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
@@ -29,6 +29,11 @@ def get_config_path() -> Path:
     return Path.home() / ".nanobot" / "config.json"
 
 
+def ensure_config_models_built() -> None:
+    """Resolve ToolsConfig forward refs (required after CLI/agent import cycles)."""
+    _resolve_tool_config_refs()
+
+
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
@@ -41,6 +46,7 @@ def load_config(config_path: Path | None = None) -> Config:
     """
     path = config_path or get_config_path()
 
+    ensure_config_models_built()
     config = Config()
     if path.exists():
         try:
