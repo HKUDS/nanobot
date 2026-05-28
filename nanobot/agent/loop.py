@@ -670,6 +670,7 @@ class AgentLoop:
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        ephemeral: bool = False,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -695,9 +696,9 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
-        hook: AgentHook = (
-            CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
-        )
+        hook: AgentHook = loop_hook
+        if not ephemeral and self._extra_hooks:
+            hook = CompositeHook([loop_hook] + self._extra_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -1437,6 +1438,7 @@ class AgentLoop:
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
+            ephemeral=ctx.ephemeral,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

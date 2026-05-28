@@ -178,3 +178,66 @@ class TestEphemeralDirect:
                 "test", session_key="dream:consolidate-test", ephemeral=True,
             )
             mock_consolidate.assert_not_called()
+
+
+class TestEphemeralHooks:
+    """When ephemeral=True, extra hooks must not fire."""
+
+    @pytest.fixture
+    def _make_loop_with_spy(self, tmp_path):
+        """Build an AgentLoop with a spy hook to verify hook firing behavior."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from nanobot.agent.hook import AgentHook
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+        provider.chat_with_retry = AsyncMock(
+            return_value=MagicMock(
+                content="done", finish_reason="stop", tool_calls=[], usage={},
+            )
+        )
+
+        spy = MagicMock(spec=AgentHook)
+        spy.wants_streaming.return_value = False
+        spy.before_iteration = AsyncMock()
+        spy.after_iteration = AsyncMock()
+
+        with (
+            patch("nanobot.agent.loop.SessionManager"),
+            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
+            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+        ):
+            mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
+            loop = AgentLoop(
+                bus=bus,
+                provider=provider,
+                workspace=tmp_path,
+                context_window_tokens=8000,
+                hooks=[spy],
+            )
+
+        return loop, spy
+
+    async def test_extra_hooks_skipped_when_ephemeral(self, tmp_path, _make_loop_with_spy):
+        """When ephemeral=True, extra hooks must not fire."""
+        loop, spy = _make_loop_with_spy
+
+        await loop.process_direct(
+            "test", session_key="dream:hook-test", ephemeral=True,
+        )
+        spy.before_iteration.assert_not_called()
+        spy.after_iteration.assert_not_called()
+
+    async def test_extra_hooks_fire_for_normal_sessions(self, tmp_path, _make_loop_with_spy):
+        """Without ephemeral, extra hooks should fire normally."""
+        loop, spy = _make_loop_with_spy
+
+        await loop.process_direct("test", session_key="cli:normal")
+        spy.before_iteration.assert_called()
