@@ -122,6 +122,103 @@ def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> 
     assert msgs[2]["activitySegmentId"] != msgs[1]["activitySegmentId"]
 
 
+def test_replay_file_edit_absorbs_matching_write_tool_event() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": 'write_file({"path":"foo.txt"})',
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-write",
+                    "name": "write_file",
+                    "arguments": {"path": "foo.txt", "content": "hello\n"},
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "foo.txt",
+                    "phase": "start",
+                    "added": 1,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                },
+            ],
+        },
+        {
+            "event": "message",
+            "chat_id": "t-file",
+            "text": "",
+            "kind": "progress",
+            "tool_events": [
+                {
+                    "phase": "end",
+                    "call_id": "call-write",
+                    "name": "write_file",
+                    "arguments": {"path": "foo.txt", "content": "hello\n"},
+                    "result": "ok",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["kind"] == "trace"
+    assert msgs[0]["traces"] == []
+    assert "toolEvents" not in msgs[0]
+    assert msgs[0]["fileEdits"] == [
+        {
+            "version": 1,
+            "call_id": "call-write",
+            "tool": "write_file",
+            "path": "foo.txt",
+            "phase": "start",
+            "added": 1,
+            "deleted": 0,
+            "approximate": True,
+            "status": "editing",
+        },
+    ]
+
+
+def test_replay_keeps_interrupted_pre_tool_text_in_activity() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {"event": "delta", "chat_id": "t-stream", "text": "I will inspect first."},
+        {"event": "stream_end", "chat_id": "t-stream"},
+        {
+            "event": "message",
+            "chat_id": "t-stream",
+            "text": 'exec({"cmd":"ls"})',
+            "kind": "tool_hint",
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "t-stream",
+            "text": "Done. Open index.html to play.",
+        },
+    ])
+
+    assert len(msgs) == 3
+    assert msgs[0]["role"] == "assistant"
+    assert msgs[0]["content"] == ""
+    assert msgs[0]["reasoning"] == "I will inspect first."
+    assert "isStreaming" not in msgs[0]
+    assert msgs[1]["kind"] == "trace"
+    assert msgs[1]["traces"] == ['exec({"cmd":"ls"})']
+    assert msgs[2]["role"] == "assistant"
+    assert msgs[2]["content"] == "Done. Open index.html to play."
+
+
 def test_replay_tool_events_dedupes_finish_after_start() -> None:
     msgs = replay_transcript_to_ui_messages([
         {

@@ -9,6 +9,7 @@ from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import ArraySchema, BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import Base
 
@@ -113,7 +114,12 @@ class CliAppsTool(Tool):
         working_dir: str | None = None,
         timeout: int | None = None,
     ) -> str:
-        manager = CliAppManager(workspace=self.workspace, runtime=self.runtime)
+        access = current_tool_workspace(
+            self.workspace,
+            restrict_to_workspace=self.restrict_to_workspace,
+        )
+        workspace = access.project_path or self.workspace
+        manager = CliAppManager(workspace=workspace, runtime=self.runtime)
         try:
             return manager.run(
                 name,
@@ -121,7 +127,7 @@ class CliAppsTool(Tool):
                 json_output=bool(json),
                 working_dir=working_dir,
                 timeout=timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
+                restrict_to_workspace=access.restrict_to_workspace,
             )
         except CliAppError as exc:
             return f"Error: {exc.message}"

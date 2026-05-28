@@ -68,11 +68,13 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
+        workspace: Path | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity(channel=channel)]
+        root = workspace or self.workspace
+        parts = [self._get_identity(channel=channel, workspace=root)]
 
-        bootstrap = self._load_bootstrap_files()
+        bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -106,9 +108,10 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None) -> str:
+    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""
-        workspace_path = str(self.workspace.expanduser().resolve())
+        root = workspace or self.workspace
+        workspace_path = str(root.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
@@ -152,12 +155,13 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(self) -> str:
+    def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
+        root = workspace or self.workspace
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = self.workspace / filename
+            file_path = root / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
@@ -185,11 +189,18 @@ class ContextBuilder:
         session_summary: str | None = None,
         session_metadata: Mapping[str, Any] | None = None,
         current_runtime_lines: Sequence[str] | None = None,
+        workspace: Path | None = None,
+        runtime_state: Any | None = None,
+        inbound_message: Any | None = None,
+        skip_runtime_lines: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        root = workspace or self.workspace
         extra = [
             *goal_state_runtime_lines(session_metadata),
         ]
+        if runtime_state is not None and inbound_message is not None:
+            extra.extend(runtime_lines(runtime_state, inbound_message, root, skip=skip_runtime_lines))
         if current_runtime_lines:
             extra.extend(line for line in current_runtime_lines if line)
         runtime_ctx = self._build_runtime_context(
@@ -210,7 +221,15 @@ class ContextBuilder:
         else:
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    skill_names,
+                    channel=channel,
+                    session_summary=session_summary,
+                    workspace=root,
+                ),
+            },
             *history,
         ]
         if messages[-1].get("role") == current_role:

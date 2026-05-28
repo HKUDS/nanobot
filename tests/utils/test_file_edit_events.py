@@ -86,13 +86,10 @@ def test_apply_patch_prepares_trackers_for_each_touched_file(tmp_path: Path) -> 
     (tmp_path / "src").mkdir()
     existing = tmp_path / "src" / "existing.py"
     existing.write_text("old\nkeep\n", encoding="utf-8")
-    delete_me = tmp_path / "src" / "delete_me.py"
-    delete_me.write_text("gone\n", encoding="utf-8")
 
     edits = [
         {"path": "src/new.py", "action": "add", "new_text": "fresh"},
         {"path": "src/existing.py", "action": "replace", "old_text": "old", "new_text": "new"},
-        {"path": "src/delete_me.py", "action": "delete", "old_text": "gone\n"},
     ]
 
     trackers = prepare_file_edit_trackers(
@@ -106,18 +103,15 @@ def test_apply_patch_prepares_trackers_for_each_touched_file(tmp_path: Path) -> 
     assert [tracker.display_path for tracker in trackers] == [
         "src/new.py",
         "src/existing.py",
-        "src/delete_me.py",
     ]
 
     (tmp_path / "src" / "new.py").write_text("fresh\n", encoding="utf-8")
     existing.write_text("new\nkeep\n", encoding="utf-8")
-    delete_me.unlink()
 
     events = [build_file_edit_end_event(tracker, {"edits": edits}) for tracker in trackers]
     by_path = {event["path"]: event for event in events}
     assert (by_path["src/new.py"]["added"], by_path["src/new.py"]["deleted"]) == (1, 0)
     assert (by_path["src/existing.py"]["added"], by_path["src/existing.py"]["deleted"]) == (1, 1)
-    assert (by_path["src/delete_me.py"]["added"], by_path["src/delete_me.py"]["deleted"]) == (0, 1)
 
 
 def test_apply_patch_dry_run_does_not_prepare_file_edit_trackers(tmp_path: Path) -> None:

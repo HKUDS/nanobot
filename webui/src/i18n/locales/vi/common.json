@@ -25,7 +25,9 @@
       "section": "Hệ thống",
       "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
       "restart": "Khởi động lại nanobot",
-      "restarting": "Đang khởi động lại..."
+      "restarting": "Đang khởi động lại...",
+      "restartEngine": "Khởi động lại engine",
+      "restartingEngine": "Đang khởi động lại engine..."
     },
     "restart": {
       "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
-    "globalActions": "Hành động toàn cục",
     "collapse": "Thu gọn thanh bên",
-    "toggleTheme": "Chuyển giao diện",
-    "home": "Trang chủ",
     "newChat": "Cuộc trò chuyện mới",
     "searchAria": "Tìm kiếm",
-    "viewOptions": "View",
-    "compactList": "Compact list",
-    "showPreviews": "Show previews",
-    "showTimestamps": "Show time",
-    "sortLabel": "Sort",
-    "sortUpdated": "Recently updated",
-    "sortCreated": "Recently created",
-    "sortTitle": "Title A-Z",
     "searchPlaceholder": "Tìm kiếm",
     "searchResults": "Kết quả",
     "noSearchResults": "Không có cuộc trò chuyện phù hợp.",
     "recent": "Gần đây",
-    "refreshSessions": "Làm mới phiên",
     "settings": "Cài đặt",
     "language": {
       "label": "Ngôn ngữ",
@@ -80,9 +70,9 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "browser": "Web",
+      "runtime": "Hệ thống",
+      "advanced": "Security",
       "cliApps": "Ứng dụng CLI",
       "mcp": "MCP",
       "apps": "Ứng dụng"
@@ -99,12 +89,13 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "Web safety",
       "capabilities": "Khả năng",
-      "integrations": "Integrations",
       "cliApps": "Ứng dụng CLI",
       "mcp": "Dịch vụ MCP",
-      "apps": "Ứng dụng"
+      "apps": "Ứng dụng",
+      "nativeHost": "Native host",
+      "hostSafety": "App safety"
     },
     "rows": {
       "theme": "Giao diện",
@@ -137,22 +128,16 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs",
+      "workspacePath": "Workspace mặc định",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "currentModel": "Mô hình hiện tại",
       "brandLogos": "Logo thương hiệu",
       "cliAppsCatalog": "Danh mục ứng dụng CLI",
-      "cliAppsFilter": "Bộ lọc ứng dụng CLI"
+      "cliAppsFilter": "Bộ lọc ứng dụng CLI",
+      "engine": "Engine",
+      "logs": "Nhật ký",
+      "diagnostics": "Chẩn đoán"
     },
     "help": {
       "theme": "Chuyển giữa giao diện sáng và tối.",
@@ -175,17 +160,22 @@
       "defaultAspectRatio": "Được dùng khi prompt không chọn tỷ lệ khung hình.",
       "defaultImageSize": "Gợi ý kích thước gửi tới các nhà cung cấp hỗ trợ.",
       "maxImagesPerTurn": "Giới hạn trên cho một yêu cầu generate_image.",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "botName": "Hiển thị ở nơi nanobot dùng tên hiển thị.",
+      "botIcon": "Emoji hoặc văn bản ngắn hiển thị cùng tên bot.",
+      "timezone": "Dùng cho lịch hẹn và câu trả lời có yếu tố thời gian.",
+      "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
+      "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
       "currentModel": "Chọn mô hình nanobot dùng cho các câu trả lời mới.",
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
       "brandLogos": "Logo được tải từ tên miền thương hiệu, có biểu tượng cục bộ làm dự phòng.",
       "cliAppsCatalog": "Duyệt các CLI ứng dụng mà nanobot có thể chạy cục bộ.",
-      "cliAppsFilter": "Tìm theo ứng dụng, danh mục hoặc khả năng."
+      "cliAppsFilter": "Tìm theo ứng dụng, danh mục hoặc khả năng.",
+      "logs": "Mở thư mục nhật ký native engine.",
+      "diagnostics": "Xuất báo cáo runtime nhỏ để hỗ trợ.",
+      "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
     },
     "values": {
       "light": "Sáng",
@@ -201,8 +191,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "Đang chờ",
+      "restartingEngine": "Đang khởi động lại"
     },
     "status": {
       "loading": "Đang tải cài đặt...",
@@ -212,14 +206,24 @@
       "savedRestart": "Đã lưu. Khởi động lại nanobot để áp dụng.",
       "restartAfterSaving": "Lưu thay đổi, rồi khởi động lại khi sẵn sàng.",
       "savedRestartApply": "Đã lưu. Khởi động lại khi sẵn sàng.",
-      "imageProviderRestart": "Đã lưu thay đổi nhà cung cấp ảnh. Khởi động lại khi sẵn sàng."
+      "imageProviderRestart": "Đã lưu thay đổi nhà cung cấp ảnh. Khởi động lại khi sẵn sàng.",
+      "hostRestartAfterSaving": "Lưu thay đổi và nanobot sẽ khởi động lại engine.",
+      "hostRestartPending": "Đã lưu. Sẽ khởi động lại engine khi sẵn sàng.",
+      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "logsOpened": "Opened logs folder.",
+      "logsOpenFailed": "Could not open logs folder.",
+      "diagnosticsExported": "Diagnostics exported to {{path}}.",
+      "diagnosticsExportFailed": "Could not export diagnostics."
     },
     "actions": {
       "save": "Lưu",
       "saving": "Đang lưu",
       "edit": "Sửa",
       "cancel": "Hủy",
-      "openDocs": "Open docs"
+      "open": "Mở",
+      "export": "Xuất",
+      "opening": "Opening...",
+      "exporting": "Exporting..."
     },
     "byok": {
       "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
@@ -290,6 +294,7 @@
       "newConfiguration": "Cấu hình mô hình mới",
       "newConfigurationHelp": "Lưu nhà cung cấp và mô hình thành một lựa chọn một lần nhấp.",
       "configurationName": "Tên",
+      "configurationNameHelp": "Đổi tên cấu hình mô hình đã lưu này.",
       "configurationNamePlaceholder": "Viết nhanh"
     },
     "timezone": {
@@ -397,6 +402,19 @@
       "featured": "Nổi bật",
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có ứng dụng nào khớp với bộ lọc này."
+    },
+    "oauth": {
+      "authentication": "OAuth authentication",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{account}}",
+      "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "signInRequired": "Sign in required",
+      "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
+      "signedIn": "Signed in",
+      "notSignedIn": "Not signed in"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "showMore": "Hiển thị thêm {{count}}",
+    "collapsed": "Đã thu gọn {{count}} cuộc trò chuyện",
+    "showLess": "Thu gọn",
     "actions": "Tác vụ cho cuộc trò chuyện {{title}}",
+    "newInProject": "Bắt đầu cuộc trò chuyện mới trong {{project}}",
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished"
@@ -415,6 +436,9 @@
     "renameTitle": "Rename chat",
     "renameDescription": "Choose a local sidebar name for this chat.",
     "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "Pinned",
       "all": "Chats",
+      "projects": "Projects",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "greeting": "Tôi có thể giúp gì cho bạn?",
+      "greetings": {
+        "workOn": "Mình cùng làm gì tiếp?",
+        "start": "Hôm nay bắt đầu từ đâu?",
+        "build": "Hôm nay mình xây dựng gì?",
+        "tackle": "Mình cùng xử lý việc gì?"
+      },
       "quickActions": {
         "plan": {
           "title": "Tạo kế hoạch dự án",
@@ -632,6 +662,13 @@
         "mcpBadge": "MCP",
         "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",
         "mcpDescription": "Dùng @{{name}} như máy chủ MCP"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "Chọn dự án",
+        "projectPlaceholder": "Chọn dự án",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "Tin nhắn quá lớn",
       "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "Dán đường dẫn",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

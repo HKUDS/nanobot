@@ -25,7 +25,9 @@
       "section": "システム",
       "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
       "restart": "nanobot を再起動",
-      "restarting": "再起動中..."
+      "restarting": "再起動中...",
+      "restartEngine": "エンジンを再起動",
+      "restartingEngine": "エンジンを再起動中..."
     },
     "restart": {
       "completed": "{{seconds}} 秒で再起動が完了しました。"
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
-    "globalActions": "グローバル操作",
     "collapse": "サイドバーを閉じる",
-    "toggleTheme": "テーマを切り替える",
-    "home": "ホーム",
     "newChat": "新しいチャット",
     "searchAria": "検索",
-    "viewOptions": "View",
-    "compactList": "Compact list",
-    "showPreviews": "Show previews",
-    "showTimestamps": "Show time",
-    "sortLabel": "Sort",
-    "sortUpdated": "Recently updated",
-    "sortCreated": "Recently created",
-    "sortTitle": "Title A-Z",
     "searchPlaceholder": "検索",
     "searchResults": "検索結果",
     "noSearchResults": "一致するチャットはありません。",
     "recent": "最近のチャット",
-    "refreshSessions": "セッションを更新",
     "settings": "設定",
     "language": {
       "label": "言語",
@@ -80,9 +70,9 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "browser": "Web",
+      "runtime": "システム",
+      "advanced": "Security",
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
       "apps": "アプリ"
@@ -99,12 +89,13 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "Web safety",
       "capabilities": "機能",
-      "integrations": "Integrations",
       "cliApps": "CLI アプリ",
       "mcp": "MCP サービス",
-      "apps": "アプリ"
+      "apps": "アプリ",
+      "nativeHost": "App",
+      "hostSafety": "App safety"
     },
     "rows": {
       "theme": "テーマ",
@@ -137,22 +128,16 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs",
+      "workspacePath": "デフォルトワークスペース",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "currentModel": "現在のモデル",
       "brandLogos": "ブランドロゴ",
       "cliAppsCatalog": "CLI アプリカタログ",
-      "cliAppsFilter": "CLI アプリフィルター"
+      "cliAppsFilter": "CLI アプリフィルター",
+      "engine": "エンジン",
+      "logs": "ログ",
+      "diagnostics": "診断"
     },
     "help": {
       "theme": "ライト表示とダーク表示を切り替えます。",
@@ -175,17 +160,22 @@
       "defaultAspectRatio": "プロンプトでアスペクト比が指定されていない場合に使用します。",
       "defaultImageSize": "対応しているプロバイダーへ送信するサイズ指定です。",
       "maxImagesPerTurn": "1 回の generate_image リクエストで生成できる画像数の上限です。",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "botName": "nanobot が表示名を使う場所に表示されます。",
+      "botIcon": "Bot 名の横に表示する短い emoji またはテキストです。",
+      "timezone": "スケジュールと時刻を考慮する返信に使用します。",
+      "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
+      "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
       "currentModel": "今後の返信で nanobot が使用するモデルを選択します。",
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "ロゴはブランドのドメインから読み込まれ、ローカルアイコンにフォールバックします。",
       "cliAppsCatalog": "nanobot がローカルで実行できるアプリ CLI を探します。",
-      "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。"
+      "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
+      "logs": "Appエンジンのログフォルダを開きます。",
+      "diagnostics": "サポート用の小さなランタイムレポートを書き出します。",
+      "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
     },
     "values": {
       "light": "ライト",
@@ -201,8 +191,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "保留中",
+      "restartingEngine": "再起動中"
     },
     "status": {
       "loading": "設定を読み込んでいます...",
@@ -212,14 +206,24 @@
       "savedRestart": "保存しました。反映するには nanobot を再起動してください。",
       "restartAfterSaving": "変更を保存してから、準備ができたら再起動してください。",
       "savedRestartApply": "保存しました。準備ができたら再起動してください。",
-      "imageProviderRestart": "画像プロバイダーの変更を保存しました。準備ができたら再起動してください。"
+      "imageProviderRestart": "画像プロバイダーの変更を保存しました。準備ができたら再起動してください。",
+      "hostRestartAfterSaving": "保存すると nanobot がエンジンを再起動します。",
+      "hostRestartPending": "保存しました。準備ができたらエンジンを再起動します。",
+      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "logsOpened": "Opened logs folder.",
+      "logsOpenFailed": "Could not open logs folder.",
+      "diagnosticsExported": "Diagnostics exported to {{path}}.",
+      "diagnosticsExportFailed": "Could not export diagnostics."
     },
     "actions": {
       "save": "保存",
       "saving": "保存中",
       "edit": "編集",
       "cancel": "キャンセル",
-      "openDocs": "Open docs"
+      "open": "開く",
+      "export": "書き出す",
+      "opening": "Opening...",
+      "exporting": "Exporting..."
     },
     "byok": {
       "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
@@ -290,6 +294,7 @@
       "newConfiguration": "新しいモデル設定",
       "newConfigurationHelp": "プロバイダーとモデルをワンクリックの選択肢として保存します。",
       "configurationName": "名前",
+      "configurationNameHelp": "保存済みのモデル設定の名前を変更します。",
       "configurationNamePlaceholder": "高速ライティング"
     },
     "timezone": {
@@ -397,6 +402,19 @@
       "featured": "おすすめ",
       "loading": "アプリを読み込み中...",
       "empty": "このフィルターに一致するアプリはありません。"
+    },
+    "oauth": {
+      "authentication": "OAuth authentication",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{account}}",
+      "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "signInRequired": "Sign in required",
+      "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
+      "signedIn": "Signed in",
+      "notSignedIn": "Not signed in"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
     "showMore": "さらに {{count}} 件表示",
+    "collapsed": "{{count}} 件のチャットを折りたたみ中",
+    "showLess": "折りたたむ",
     "actions": "「{{title}}」のチャット操作",
+    "newInProject": "「{{project}}」で新しいチャットを開始",
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished"
@@ -415,6 +436,9 @@
     "renameTitle": "Rename chat",
     "renameDescription": "Choose a local sidebar name for this chat.",
     "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "Pinned",
       "all": "Chats",
+      "projects": "Projects",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "greeting": "何をお手伝いしましょうか？",
+      "greetings": {
+        "workOn": "一緒に何に取り組みましょうか？",
+        "start": "今日はどこから始めましょう？",
+        "build": "今日は何を作りましょうか？",
+        "tackle": "一緒に何を解決しましょう？"
+      },
       "quickActions": {
         "plan": {
           "title": "プロジェクト計画を作成",
@@ -632,6 +662,13 @@
         "mcpBadge": "MCP",
         "cliDescription": "@{{name}} をローカル CLI アプリとして使用",
         "mcpDescription": "@{{name}} を MCP サーバーとして使用"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "プロジェクトを選択",
+        "projectPlaceholder": "プロジェクトを選択",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
     "scrollToBottom": "一番下へスクロール",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "メッセージが大きすぎます",
       "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "パスを貼り付け",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

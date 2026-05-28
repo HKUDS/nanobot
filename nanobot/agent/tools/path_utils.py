@@ -3,21 +3,15 @@
 from pathlib import Path
 
 from nanobot.config.paths import get_media_dir
-
-WORKSPACE_BOUNDARY_NOTE = (
-    " (this is a hard policy boundary, not a transient failure; "
-    "do not retry with shell tricks or alternative tools, and ask "
-    "the user how to proceed if the resource is genuinely required)"
+from nanobot.security.workspace_policy import (
+    is_path_within,
+    resolve_allowed_path,
 )
 
 
 def is_under(path: Path, directory: Path) -> bool:
     """Return True when path resolves under directory."""
-    try:
-        path.relative_to(directory.resolve())
-        return True
-    except ValueError:
-        return False
+    return is_path_within(path, directory)
 
 
 def resolve_workspace_path(
@@ -27,16 +21,10 @@ def resolve_workspace_path(
     extra_allowed_dirs: list[Path] | None = None,
 ) -> Path:
     """Resolve path against workspace and enforce allowed directory containment."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir, media_path, *(extra_allowed_dirs or [])]
-        if not any(is_under(resolved, d) for d in all_dirs):
-            raise PermissionError(
-                f"Path {path} is outside allowed directory {allowed_dir}"
-                + WORKSPACE_BOUNDARY_NOTE
-            )
-    return resolved
+    extra_roots = [get_media_dir(), *(extra_allowed_dirs or [])] if allowed_dir else None
+    return resolve_allowed_path(
+        path,
+        workspace=workspace,
+        allowed_root=allowed_dir,
+        extra_allowed_roots=extra_roots,
+    )

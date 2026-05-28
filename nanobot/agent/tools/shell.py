@@ -25,10 +25,13 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
+from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -140,6 +143,7 @@ class ExecTool(Tool):
             working_dir=ctx.workspace,
             timeout=cfg.timeout,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
+            webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
             path_append=cfg.path_append,
             allowed_env_keys=cfg.allowed_env_keys,
@@ -154,6 +158,8 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        webui_allow_local_service_access: bool = True,
+        allow_local_preview_access: bool | None = None,
         sandbox: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
@@ -183,6 +189,9 @@ class ExecTool(Tool):
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
+        if allow_local_preview_access is not None:
+            webui_allow_local_service_access = allow_local_preview_access
+        self.webui_allow_local_service_access = webui_allow_local_service_access
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
@@ -313,6 +322,7 @@ class ExecTool(Tool):
                 shell_program=prepared.shell_program,
                 login=prepared.login,
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
+                owner_session_key=current_request_session_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
                     DEFAULT_MAX_OUTPUT_CHARS,
@@ -346,29 +356,39 @@ class ExecTool(Tool):
         shell: str | None = None,
         login: bool | None = None,
     ) -> _PreparedCommand | str:
-        cwd = working_dir or self.working_dir or os.getcwd()
+        access = current_tool_workspace(
+            self.working_dir,
+            restrict_to_workspace=self.restrict_to_workspace,
+            sandbox_restricts_workspace=bool(self.sandbox),
+        )
+        workspace_root = str(access.project_path) if access.project_path is not None else self.working_dir
+        cwd = working_dir or workspace_root or os.getcwd()
 
         # Prevent an LLM-supplied working_dir from escaping the configured
         # workspace when restrict_to_workspace is enabled (#2826). Without
         # this, a caller can pass working_dir="/etc" and then all absolute
         # paths under /etc would pass the _guard_command check that anchors
         # on cwd.
-        if self.restrict_to_workspace and self.working_dir:
+        if access.restrict_to_workspace and workspace_root:
             try:
                 requested = Path(cwd).expanduser().resolve()
-                workspace_root = Path(self.working_dir).expanduser().resolve()
+                resolved_root = Path(workspace_root).expanduser().resolve()
             except Exception:
                 return (
                     "Error: working_dir could not be resolved"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
-            if requested != workspace_root and workspace_root not in requested.parents:
+            if not is_path_within(requested, resolved_root):
                 return (
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
                 )
 
-        guard_error = self._guard_command(command, cwd)
+        guard_error = self._guard_command(
+            command,
+            cwd,
+            restrict_to_workspace=access.restrict_to_workspace,
+        )
         if guard_error:
             return guard_error
 
@@ -379,7 +399,7 @@ class ExecTool(Tool):
                     self.sandbox,
                 )
             else:
-                workspace = self.working_dir or cwd
+                workspace = workspace_root or cwd
                 command = wrap_command(self.sandbox, command, workspace, cwd)
                 cwd = str(Path(workspace).resolve())
 
@@ -528,7 +548,13 @@ class ExecTool(Tool):
                 env[key] = val
         return env
 
-    def _guard_command(self, command: str, cwd: str) -> str | None:
+    def _guard_command(
+        self,
+        command: str,
+        cwd: str,
+        *,
+        restrict_to_workspace: bool | None = None,
+    ) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
@@ -548,11 +574,17 @@ class ExecTool(Tool):
                 return "Error: Command blocked by allowlist filter (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd):
+        if contains_internal_url(
+            cmd,
+            allow_loopback=current_scope_allows_loopback(
+                enabled=self.webui_allow_local_service_access,
+            ),
+        ):
             # The runner turns this marker into a non-retryable security hint.
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
-        if self.restrict_to_workspace:
+        should_restrict = self.restrict_to_workspace if restrict_to_workspace is None else restrict_to_workspace
+        if should_restrict:
             if "..\\" in cmd or "../" in cmd:
                 return (
                     "Error: Command blocked by safety guard (path traversal detected)"
@@ -577,11 +609,9 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if (p.is_absolute()
-                    and cwd_path not in p.parents
-                    and p != cwd_path
-                    and media_path not in p.parents
-                    and p != media_path
+                if p.is_absolute() and not (
+                    is_path_within(p, cwd_path)
+                    or is_path_within(p, media_path)
                 ):
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"

@@ -65,10 +65,28 @@ async def consume_sse(
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str]:
     """Consume a Responses API SSE stream into ``(content, tool_calls, finish_reason)``."""
+    content, tool_calls, finish_reason, _ = await consume_sse_with_reasoning(
+        response,
+        on_content_delta=on_content_delta,
+        on_tool_call_delta=on_tool_call_delta,
+    )
+    return content, tool_calls, finish_reason
+
+
+async def consume_sse_with_reasoning(
+    response: httpx.Response,
+    on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> tuple[str, list[ToolCallRequest], str, str | None]:
+    """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
+    tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
+    reasoning_content: str | None = None
+    streamed_reasoning = False
 
     async for event in iter_sse(response):
         event_type = event.get("type")
@@ -94,6 +112,26 @@ async def consume_sse(
             content += delta_text
             if on_content_delta and delta_text:
                 await on_content_delta(delta_text)
+        elif event_type == "response.reasoning_summary_text.delta":
+            delta_text = event.get("delta") or ""
+            if delta_text:
+                reasoning_content = (reasoning_content or "") + delta_text
+                streamed_reasoning = True
+                if on_reasoning_delta:
+                    await on_reasoning_delta(delta_text)
+        elif event_type == "response.reasoning_summary_text.done":
+            text = event.get("text") or ""
+            if text and not streamed_reasoning and not reasoning_content:
+                reasoning_content = text
+                if on_reasoning_delta:
+                    await on_reasoning_delta(text)
+        elif event_type == "response.reasoning_summary_part.done":
+            part = event.get("part") or {}
+            text = part.get("text") if part.get("type") == "summary_text" else None
+            if text and not streamed_reasoning and not reasoning_content:
+                reasoning_content = text
+                if on_reasoning_delta:
+                    await on_reasoning_delta(text)
         elif event_type == "response.function_call_arguments.delta":
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:
@@ -108,7 +146,15 @@ async def consume_sse(
         elif event_type == "response.function_call_arguments.done":
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
+                arguments = event.get("arguments") or ""
+                tool_call_buffers[call_id]["arguments"] = arguments
+                if on_tool_call_delta:
+                    tool_call_args_emitted.add(str(call_id))
+                    await on_tool_call_delta({
+                        "call_id": str(call_id),
+                        "name": str(tool_call_buffers[call_id].get("name") or ""),
+                        "arguments": str(arguments),
+                    })
         elif event_type == "response.output_item.done":
             item = event.get("item") or {}
             if item.get("type") == "function_call":
@@ -117,6 +163,13 @@ async def consume_sse(
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
                 args_raw = buf.get("arguments") or item.get("arguments") or "{}"
+                if on_tool_call_delta and str(call_id) not in tool_call_args_emitted:
+                    tool_call_args_emitted.add(str(call_id))
+                    await on_tool_call_delta({
+                        "call_id": str(call_id),
+                        "name": str(buf.get("name") or item.get("name") or ""),
+                        "arguments": str(args_raw),
+                    })
                 try:
                     args = json.loads(args_raw)
                 except Exception:
@@ -135,14 +188,44 @@ async def consume_sse(
                         arguments=args,
                     )
                 )
+            elif item.get("type") == "reasoning" and not reasoning_content:
+                summary = _extract_reasoning_summary_from_output([item])
+                if summary:
+                    reasoning_content = summary
+                    if on_reasoning_delta:
+                        await on_reasoning_delta(summary)
         elif event_type == "response.completed":
-            status = (event.get("response") or {}).get("status")
+            response_obj = event.get("response") or {}
+            status = response_obj.get("status")
             finish_reason = map_finish_reason(status)
+            if not reasoning_content:
+                summary = _extract_reasoning_summary_from_output(response_obj.get("output") or [])
+                if summary:
+                    reasoning_content = summary
+                    if on_reasoning_delta:
+                        await on_reasoning_delta(summary)
         elif event_type in {"error", "response.failed"}:
             detail = event.get("error") or event.get("message") or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
-    return content, tool_calls, finish_reason
+    return content, tool_calls, finish_reason, reasoning_content
+
+
+def _extract_reasoning_summary_from_output(output: Any) -> str | None:
+    parts: list[str] = []
+    for item in output or []:
+        if not isinstance(item, dict):
+            dump = getattr(item, "model_dump", None)
+            item = dump() if callable(dump) else vars(item)
+        if item.get("type") != "reasoning":
+            continue
+        for summary in item.get("summary") or []:
+            if not isinstance(summary, dict):
+                dump = getattr(summary, "model_dump", None)
+                summary = dump() if callable(dump) else vars(summary)
+            if summary.get("type") == "summary_text" and summary.get("text"):
+                parts.append(summary["text"])
+    return "".join(parts) or None
 
 
 def parse_response_output(response: Any) -> LLMResponse:
@@ -230,6 +313,7 @@ async def consume_sdk_stream(
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
+    tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
     usage: dict[str, int] = {}
     reasoning_content: str | None = None
@@ -272,7 +356,15 @@ async def consume_sdk_stream(
         elif event_type == "response.function_call_arguments.done":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
-                tool_call_buffers[call_id]["arguments"] = getattr(event, "arguments", "") or ""
+                arguments = getattr(event, "arguments", "") or ""
+                tool_call_buffers[call_id]["arguments"] = arguments
+                if on_tool_call_delta:
+                    tool_call_args_emitted.add(str(call_id))
+                    await on_tool_call_delta({
+                        "call_id": str(call_id),
+                        "name": str(tool_call_buffers[call_id].get("name") or ""),
+                        "arguments": str(arguments),
+                    })
         elif event_type == "response.output_item.done":
             item = getattr(event, "item", None)
             if item and getattr(item, "type", None) == "function_call":
@@ -281,6 +373,13 @@ async def consume_sdk_stream(
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
                 args_raw = buf.get("arguments") or getattr(item, "arguments", None) or "{}"
+                if on_tool_call_delta and str(call_id) not in tool_call_args_emitted:
+                    tool_call_args_emitted.add(str(call_id))
+                    await on_tool_call_delta({
+                        "call_id": str(call_id),
+                        "name": str(buf.get("name") or getattr(item, "name", None) or ""),
+                        "arguments": str(args_raw),
+                    })
                 try:
                     args = json.loads(args_raw)
                 except Exception:

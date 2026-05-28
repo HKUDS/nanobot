@@ -59,7 +59,7 @@ export function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
         cluster.push(current);
         i += 1;
       }
-      out.push({ type: "cluster", messages: cluster });
+      pushActivityCluster(out, cluster);
       continue;
     }
     const previous = out[out.length - 1];
@@ -83,6 +83,42 @@ export function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
     i += 1;
   }
   return out;
+}
+
+function pushActivityCluster(out: DisplayUnit[], cluster: UIMessage[]) {
+  const previous = out[out.length - 1];
+  if (
+    previous?.type !== "single"
+    || !shouldPlaceLateActivityBeforeAssistant(out, previous.message)
+  ) {
+    out.push({ type: "cluster", messages: cluster });
+    return;
+  }
+
+  const beforeAssistant = out[out.length - 2];
+  if (beforeAssistant?.type === "cluster" && canMergeActivityClusters(beforeAssistant.messages, cluster)) {
+    beforeAssistant.messages.push(...cluster);
+    return;
+  }
+
+  out.splice(out.length - 1, 0, { type: "cluster", messages: cluster });
+}
+
+function shouldPlaceLateActivityBeforeAssistant(out: DisplayUnit[], message: UIMessage): boolean {
+  if (message.role !== "assistant" || message.kind === "trace") return false;
+  if (message.isStreaming) return true;
+  if (hasTurnLatency(message)) return true;
+
+  const beforeAssistant = out[out.length - 2];
+  return beforeAssistant?.type === "cluster";
+}
+
+function hasTurnLatency(message: UIMessage): boolean {
+  return (
+    typeof message.latencyMs === "number"
+    && Number.isFinite(message.latencyMs)
+    && message.latencyMs >= 0
+  );
 }
 
 function clusterSegmentId(messages: UIMessage[]): string | undefined {
@@ -113,6 +149,19 @@ function canFoldInlineReasoning(cluster: UIMessage[], message: UIMessage): boole
   const segmentId = clusterSegmentId(cluster);
   if (!segmentId || !message.activitySegmentId) return true;
   return segmentId === message.activitySegmentId;
+}
+
+function canMergeActivityClusters(target: UIMessage[], incoming: UIMessage[]): boolean {
+  let segmentId = clusterSegmentId(target);
+  let includesFileEdits = clusterHasFileEdits(target);
+  for (const message of incoming) {
+    if (!canJoinActivityCluster(segmentId, includesFileEdits, message)) return false;
+    if (!segmentId && message.activitySegmentId) {
+      segmentId = message.activitySegmentId;
+    }
+    includesFileEdits = includesFileEdits || hasFileEdits(message);
+  }
+  return true;
 }
 
 function assistantHasInlineReasoning(message: UIMessage): boolean {
@@ -261,8 +310,14 @@ function activityClusterTurnLatencyMs(
 }
 
 function currentActivityClusterIndex(units: DisplayUnit[]): number {
-  const last = units.length - 1;
-  return units[last]?.type === "cluster" ? last : -1;
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    const unit = units[i];
+    if (unit.type === "cluster") return i;
+    if (unit.message.role === "assistant" && unit.message.isStreaming) continue;
+    if (unit.message.role === "user") break;
+    return -1;
+  }
+  return -1;
 }
 
 function unitKey(unit: DisplayUnit, index: number): string {

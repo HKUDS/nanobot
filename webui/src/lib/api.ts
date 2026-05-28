@@ -4,13 +4,17 @@ import type {
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   ModelConfigurationCreate,
+  ModelConfigurationUpdate,
+  NetworkSafetySettingsUpdate,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
   SidebarStatePayload,
   SlashCommand,
   WebSearchSettingsUpdate,
+  WorkspacesPayload,
   WebuiThreadPersistedPayload,
+  WorkspaceScopePayload,
 } from "./types";
 
 export class ApiError extends Error {
@@ -37,6 +41,17 @@ async function request<T>(
   });
   if (!res.ok) {
     throw new ApiError(res.status, `HTTP ${res.status}`);
+  }
+  const contentType = res.headers?.get?.("content-type") ?? "";
+  if (contentType && !contentType.toLowerCase().includes("application/json")) {
+    const text = typeof res.text === "function" ? await res.text() : "";
+    const isHtml = text.trimStart().toLowerCase().startsWith("<!doctype");
+    throw new ApiError(
+      res.status,
+      isHtml
+        ? "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again."
+        : "Gateway returned a non-JSON response.",
+    );
   }
   return (await res.json()) as T;
 }
@@ -73,6 +88,7 @@ export async function listSessions(
     title?: string;
     preview?: string;
     run_started_at?: number | null;
+    workspace_scope?: WorkspaceScopePayload | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -86,6 +102,7 @@ export async function listSessions(
     title: s.title ?? "",
     preview: s.preview ?? "",
     runStartedAt: s.run_started_at ?? null,
+    workspaceScope: s.workspace_scope ?? null,
   }));
 }
 
@@ -122,6 +139,13 @@ export async function fetchSettings(
   base: string = "",
 ): Promise<SettingsPayload> {
   return request<SettingsPayload>(`${base}/api/settings`, token);
+}
+
+export async function fetchWorkspaces(
+  token: string,
+  base: string = "",
+): Promise<WorkspacesPayload> {
+  return request<WorkspacesPayload>(`${base}/api/workspaces`, token);
 }
 
 export async function fetchCliApps(
@@ -281,6 +305,22 @@ export async function createModelConfiguration(
   );
 }
 
+export async function updateModelConfiguration(
+  token: string,
+  configuration: ModelConfigurationUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("name", configuration.name);
+  if (configuration.label !== undefined) query.set("label", configuration.label);
+  if (configuration.provider !== undefined) query.set("provider", configuration.provider);
+  if (configuration.model !== undefined) query.set("model", configuration.model);
+  return request<SettingsPayload>(
+    `${base}/api/settings/model-configurations/update?${query}`,
+    token,
+  );
+}
+
 export async function updateProviderSettings(
   token: string,
   update: ProviderSettingsUpdate,
@@ -293,6 +333,32 @@ export async function updateProviderSettings(
   if (update.apiType !== undefined) query.set("api_type", update.apiType);
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
+    token,
+  );
+}
+
+export async function loginProviderOAuth(
+  token: string,
+  provider: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/oauth-login?${query}`,
+    token,
+  );
+}
+
+export async function logoutProviderOAuth(
+  token: string,
+  provider: string,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/oauth-logout?${query}`,
     token,
   );
 }
@@ -313,6 +379,20 @@ export async function updateWebSearchSettings(
   }
   return request<SettingsPayload>(
     `${base}/api/settings/web-search/update?${query}`,
+    token,
+  );
+}
+
+export async function updateNetworkSafetySettings(
+  token: string,
+  update: NetworkSafetySettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("webui_allow_local_service_access", String(update.webuiAllowLocalServiceAccess));
+  query.set("webui_default_access_mode", update.webuiDefaultAccessMode);
+  return request<SettingsPayload>(
+    `${base}/api/settings/network-safety/update?${query}`,
     token,
   );
 }

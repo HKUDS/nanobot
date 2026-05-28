@@ -25,7 +25,9 @@
       "section": "Sistem",
       "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
       "restart": "Mulai ulang nanobot",
-      "restarting": "Memulai ulang..."
+      "restarting": "Memulai ulang...",
+      "restartEngine": "Mulai ulang engine",
+      "restartingEngine": "Memulai ulang engine..."
     },
     "restart": {
       "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
-    "globalActions": "Aksi global",
     "collapse": "Ciutkan sidebar",
-    "toggleTheme": "Ganti tema",
-    "home": "Beranda",
     "newChat": "Obrolan baru",
     "searchAria": "Cari",
-    "viewOptions": "View",
-    "compactList": "Compact list",
-    "showPreviews": "Show previews",
-    "showTimestamps": "Show time",
-    "sortLabel": "Sort",
-    "sortUpdated": "Recently updated",
-    "sortCreated": "Recently created",
-    "sortTitle": "Title A-Z",
     "searchPlaceholder": "Cari",
     "searchResults": "Hasil",
     "noSearchResults": "Tidak ada chat yang cocok.",
     "recent": "Terbaru",
-    "refreshSessions": "Segarkan sesi",
     "settings": "Pengaturan",
     "language": {
       "label": "Bahasa",
@@ -80,9 +70,9 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "browser": "Web",
+      "runtime": "Sistem",
+      "advanced": "Security",
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
       "apps": "Aplikasi"
@@ -99,12 +89,13 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "Web safety",
       "capabilities": "Kapabilitas",
-      "integrations": "Integrations",
       "cliApps": "App CLI",
       "mcp": "Layanan MCP",
-      "apps": "Aplikasi"
+      "apps": "Aplikasi",
+      "nativeHost": "Native host",
+      "hostSafety": "App safety"
     },
     "rows": {
       "theme": "Tema",
@@ -137,22 +128,16 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs",
+      "workspacePath": "Workspace default",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "currentModel": "Model saat ini",
       "brandLogos": "Logo merek",
       "cliAppsCatalog": "Katalog aplikasi CLI",
-      "cliAppsFilter": "Filter aplikasi CLI"
+      "cliAppsFilter": "Filter aplikasi CLI",
+      "engine": "Engine",
+      "logs": "Log",
+      "diagnostics": "Diagnostik"
     },
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
@@ -175,17 +160,22 @@
       "defaultAspectRatio": "Digunakan saat prompt tidak memilih rasio aspek.",
       "defaultImageSize": "Petunjuk ukuran yang dikirim ke penyedia yang mendukungnya.",
       "maxImagesPerTurn": "Batas atas untuk satu permintaan generate_image.",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "botName": "Ditampilkan di tempat nanobot memakai nama tampilan.",
+      "botIcon": "Emoji atau teks pendek yang tampil bersama nama bot.",
+      "timezone": "Dipakai untuk jadwal dan balasan yang peka waktu.",
+      "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
+      "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
       "currentModel": "Pilih model yang digunakan nanobot untuk balasan berikutnya.",
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
       "brandLogos": "Logo dimuat dari domain merek dengan ikon lokal sebagai cadangan.",
       "cliAppsCatalog": "Jelajahi CLI aplikasi yang dapat dijalankan nanobot secara lokal.",
-      "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan."
+      "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan.",
+      "logs": "Buka folder log native engine.",
+      "diagnostics": "Ekspor laporan runtime kecil untuk dukungan.",
+      "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
     },
     "values": {
       "light": "Terang",
@@ -201,8 +191,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "Tertunda",
+      "restartingEngine": "Memulai ulang"
     },
     "status": {
       "loading": "Memuat pengaturan...",
@@ -212,14 +206,24 @@
       "savedRestart": "Tersimpan. Mulai ulang nanobot untuk menerapkan.",
       "restartAfterSaving": "Simpan perubahan, lalu restart saat siap.",
       "savedRestartApply": "Tersimpan. Restart saat siap.",
-      "imageProviderRestart": "Perubahan penyedia gambar tersimpan. Restart saat siap."
+      "imageProviderRestart": "Perubahan penyedia gambar tersimpan. Restart saat siap.",
+      "hostRestartAfterSaving": "Simpan perubahan dan nanobot akan memulai ulang engine.",
+      "hostRestartPending": "Tersimpan. Engine akan dimulai ulang saat siap.",
+      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "logsOpened": "Opened logs folder.",
+      "logsOpenFailed": "Could not open logs folder.",
+      "diagnosticsExported": "Diagnostics exported to {{path}}.",
+      "diagnosticsExportFailed": "Could not export diagnostics."
     },
     "actions": {
       "save": "Simpan",
       "saving": "Menyimpan",
       "edit": "Edit",
       "cancel": "Batal",
-      "openDocs": "Open docs"
+      "open": "Buka",
+      "export": "Ekspor",
+      "opening": "Opening...",
+      "exporting": "Exporting..."
     },
     "byok": {
       "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
@@ -290,6 +294,7 @@
       "newConfiguration": "Konfigurasi model baru",
       "newConfigurationHelp": "Simpan penyedia dan model sebagai opsi sekali klik.",
       "configurationName": "Nama",
+      "configurationNameHelp": "Ganti nama konfigurasi model yang tersimpan ini.",
       "configurationNamePlaceholder": "Penulisan cepat"
     },
     "timezone": {
@@ -397,6 +402,19 @@
       "featured": "Unggulan",
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok dengan filter ini."
+    },
+    "oauth": {
+      "authentication": "OAuth authentication",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{account}}",
+      "signInHelp": "Sign in from this device; no API key is stored in config.",
+      "signInRequired": "Sign in required",
+      "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
+      "signedIn": "Signed in",
+      "notSignedIn": "Not signed in"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "showMore": "Tampilkan {{count}} lagi",
+    "collapsed": "{{count}} obrolan diciutkan",
+    "showLess": "Tampilkan lebih sedikit",
     "actions": "Aksi obrolan untuk {{title}}",
+    "newInProject": "Mulai obrolan baru di {{project}}",
     "activity": {
       "running": "Agent running",
       "complete": "Agent finished"
@@ -415,6 +436,9 @@
     "renameTitle": "Rename chat",
     "renameDescription": "Choose a local sidebar name for this chat.",
     "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
     "renameSave": "Save",
     "archive": "Archive",
     "unarchive": "Unarchive",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "Pinned",
       "all": "Chats",
+      "projects": "Projects",
       "today": "Today",
       "yesterday": "Yesterday",
       "earlier": "Earlier",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "Memuat percakapan…",
     "empty": {
-      "greeting": "Apa yang bisa saya bantu?",
+      "greetings": {
+        "workOn": "Apa yang kita kerjakan bersama?",
+        "start": "Kita mulai dari mana?",
+        "build": "Apa yang kita bangun hari ini?",
+        "tackle": "Apa yang kita selesaikan bersama?"
+      },
       "quickActions": {
         "plan": {
           "title": "Buat rencana proyek",
@@ -632,6 +662,13 @@
         "mcpBadge": "MCP",
         "cliDescription": "Gunakan @{{name}} sebagai aplikasi CLI lokal",
         "mcpDescription": "Gunakan @{{name}} sebagai server MCP"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "Pilih proyek",
+        "projectPlaceholder": "Pilih proyek",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
     "scrollToBottom": "Gulir ke bawah",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "Pesan terlalu besar",
       "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "Tempel path",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

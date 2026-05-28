@@ -25,7 +25,9 @@
       "section": "系統",
       "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
       "restart": "重新啟動 nanobot",
-      "restarting": "正在重新啟動..."
+      "restarting": "正在重新啟動...",
+      "restartEngine": "重新啟動引擎",
+      "restartingEngine": "正在重新啟動引擎..."
     },
     "restart": {
       "completed": "重新啟動已完成，耗時 {{seconds}} 秒。"
@@ -40,25 +42,13 @@
   },
   "sidebar": {
     "navigation": "側邊欄導覽",
-    "globalActions": "全域操作",
     "collapse": "收合側邊欄",
-    "toggleTheme": "切換主題",
-    "home": "首頁",
     "newChat": "新增對話",
     "searchAria": "搜尋",
-    "viewOptions": "檢視",
-    "compactList": "緊湊列表",
-    "showPreviews": "顯示預覽",
-    "showTimestamps": "顯示時間",
-    "sortLabel": "排序",
-    "sortUpdated": "最近更新",
-    "sortCreated": "最近建立",
-    "sortTitle": "標題 A-Z",
     "searchPlaceholder": "搜尋",
     "searchResults": "搜尋結果",
     "noSearchResults": "沒有符合的對話。",
     "recent": "最近對話",
-    "refreshSessions": "重新整理會話",
     "settings": "設定",
     "language": {
       "label": "語言",
@@ -80,9 +70,9 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
-      "web": "Web",
-      "runtime": "Runtime",
-      "advanced": "Advanced",
+      "browser": "Web",
+      "runtime": "系統",
+      "advanced": "Security",
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用"
@@ -99,12 +89,13 @@
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
-      "safety": "Safety",
+      "webuiSafety": "網頁端安全",
       "capabilities": "功能",
-      "integrations": "Integrations",
       "cliApps": "CLI 應用",
       "mcp": "MCP 服務",
-      "apps": "應用"
+      "apps": "應用",
+      "nativeHost": "App",
+      "hostSafety": "App 安全"
     },
     "rows": {
       "theme": "主題",
@@ -137,22 +128,16 @@
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
-      "toolHintMaxLength": "Tool hint length",
-      "workspacePath": "Workspace path",
-      "heartbeat": "Heartbeat",
-      "dream": "Dream",
-      "unifiedSession": "Unified session",
-      "restrictWorkspace": "Restrict to workspace",
-      "execTool": "Exec tool",
-      "execSandbox": "Exec sandbox",
-      "ssrfWhitelist": "SSRF whitelist",
-      "mcpServers": "MCP servers",
-      "pathAppend": "PATH append",
-      "configurationDocs": "Configuration docs",
+      "workspacePath": "預設工作區",
+      "localServiceAccess": "Local services",
+      "webuiDefaultAccess": "Default access",
       "currentModel": "目前模型",
       "brandLogos": "品牌標誌",
       "cliAppsCatalog": "CLI 應用目錄",
-      "cliAppsFilter": "CLI 應用篩選"
+      "cliAppsFilter": "CLI 應用篩選",
+      "engine": "引擎",
+      "logs": "日誌",
+      "diagnostics": "診斷"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
@@ -175,17 +160,22 @@
       "defaultAspectRatio": "當提示詞未指定長寬比時使用。",
       "defaultImageSize": "傳送給支援此功能的服務商的尺寸提示。",
       "maxImagesPerTurn": "單次 generate_image 請求的上限。",
-      "botName": "Shown in runtime surfaces that use the configured bot identity.",
-      "botIcon": "Short emoji or text shown beside the bot name.",
-      "timezone": "IANA timezone used by runtime context and schedules.",
-      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
-      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed.",
+      "botName": "顯示在 nanobot 使用名稱的地方。",
+      "botIcon": "顯示在 bot 名稱旁的短 emoji 或文字。",
+      "timezone": "用於排程與需要時間感知的回覆。",
+      "localServiceAccess": "允許完全存取模式下的 shell 命令存取 localhost 服務。",
+      "webuiDefaultAccess": "用於沒有單獨選擇權限的網頁端對話。",
+      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
       "currentModel": "選擇 nanobot 接下來回覆時使用的模型。",
       "selectedModelProvider": "由目前模型決定。",
       "selectedModelValue": "由目前模型決定。",
       "brandLogos": "標誌會從品牌網域載入，並提供本地圖示作為備援。",
       "cliAppsCatalog": "瀏覽 nanobot 可在本機執行的應用 CLI。",
-      "cliAppsFilter": "按應用、分類或能力搜尋。"
+      "cliAppsFilter": "按應用、分類或能力搜尋。",
+      "logs": "開啟App引擎日誌資料夾。",
+      "diagnostics": "匯出一份供支援排查用的執行階段報告。",
+      "localServiceAccessNative": "允許完全存取模式下的 shell 命令存取這台 Mac 上的服務。",
+      "webuiDefaultAccessNative": "用於沒有單獨選擇權限的原生 App 對話。"
     },
     "values": {
       "light": "淺色",
@@ -201,8 +191,12 @@
       "expanded": "Expanded",
       "on": "On",
       "off": "Off",
+      "defaultPermission": "Default Permission",
+      "fullAccess": "Full Access",
       "configured": "Configured",
-      "notConfigured": "Not configured"
+      "notConfigured": "Not configured",
+      "pending": "待套用",
+      "restartingEngine": "正在重新啟動"
     },
     "status": {
       "loading": "正在載入設定...",
@@ -212,14 +206,24 @@
       "savedRestart": "已儲存。重新啟動 nanobot 後生效。",
       "restartAfterSaving": "儲存變更後，可在準備好時重新啟動。",
       "savedRestartApply": "已儲存，可在準備好時重新啟動。",
-      "imageProviderRestart": "圖片服務商變更已儲存，可在準備好時重新啟動。"
+      "imageProviderRestart": "圖片服務商變更已儲存，可在準備好時重新啟動。",
+      "hostRestartAfterSaving": "儲存後，nanobot 會自動重新啟動引擎。",
+      "hostRestartPending": "已儲存，將在適當時重新啟動引擎。",
+      "hostApiUnavailable": "宿主操作只能在原生 App 內使用。",
+      "logsOpened": "已開啟日誌資料夾。",
+      "logsOpenFailed": "無法開啟日誌資料夾。",
+      "diagnosticsExported": "診斷已匯出到 {{path}}。",
+      "diagnosticsExportFailed": "無法匯出診斷。"
     },
     "actions": {
       "save": "儲存",
       "saving": "儲存中",
       "edit": "編輯",
       "cancel": "取消",
-      "openDocs": "Open docs"
+      "open": "開啟",
+      "export": "匯出",
+      "opening": "開啟中...",
+      "exporting": "匯出中..."
     },
     "byok": {
       "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
@@ -290,6 +294,7 @@
       "newConfiguration": "新增模型設定",
       "newConfigurationHelp": "把服務商和模型儲存為一個可直接切換的選項。",
       "configurationName": "名稱",
+      "configurationNameHelp": "重新命名這個已儲存的模型配置。",
       "configurationNamePlaceholder": "快速寫作"
     },
     "timezone": {
@@ -397,6 +402,19 @@
       "featured": "精選",
       "loading": "正在載入應用...",
       "empty": "沒有符合篩選條件的應用。"
+    },
+    "oauth": {
+      "authentication": "OAuth 驗證",
+      "signIn": "登入",
+      "signingIn": "正在登入…",
+      "signInAgain": "重新登入",
+      "signOut": "登出",
+      "signedInAs": "已登入為 {{account}}",
+      "signInHelp": "在這台裝置上登入；不會把 API key 寫入設定。",
+      "signInRequired": "需要登入",
+      "signInBeforeSaving": "請先登入這個 OAuth 提供商，再儲存為目前模型提供商。",
+      "signedIn": "已登入",
+      "notSignedIn": "未登入"
     }
   },
   "chat": {
@@ -404,7 +422,10 @@
     "loading": "載入中…",
     "noSessions": "目前還沒有會話。",
     "showMore": "再顯示 {{count}} 個",
+    "collapsed": "已折疊 {{count}} 個對話",
+    "showLess": "收起",
     "actions": "「{{title}}」的會話操作",
+    "newInProject": "在 {{project}} 中開始新對話",
     "activity": {
       "running": "Agent 正在執行",
       "complete": "Agent 已完成"
@@ -415,6 +436,9 @@
     "renameTitle": "重新命名對話",
     "renameDescription": "為這個對話設定僅用於 WebUI 側邊欄的名稱。",
     "renamePlaceholder": "對話名稱",
+    "renameProjectTitle": "重新命名專案",
+    "renameProjectDescription": "為這個專案設定僅用於 WebUI 側邊欄的名稱。",
+    "renameProjectPlaceholder": "專案名稱",
     "renameSave": "儲存",
     "archive": "封存",
     "unarchive": "取消封存",
@@ -425,6 +449,7 @@
     "groups": {
       "pinned": "置頂",
       "all": "對話",
+      "projects": "專案",
       "today": "今天",
       "yesterday": "昨天",
       "earlier": "更早",
@@ -448,7 +473,12 @@
   "thread": {
     "loadingConversation": "正在載入對話…",
     "empty": {
-      "greeting": "我可以幫你做什麼？",
+      "greetings": {
+        "workOn": "我們要一起做點什麼？",
+        "start": "今天從哪裡開始？",
+        "build": "今天一起構建什麼？",
+        "tackle": "我們要一起解決什麼？"
+      },
       "quickActions": {
         "plan": {
           "title": "建立專案計畫",
@@ -632,6 +662,13 @@
         "mcpBadge": "MCP",
         "cliDescription": "使用 @{{name}} 呼叫本機 CLI",
         "mcpDescription": "使用 @{{name}} 呼叫 MCP 服務"
+      },
+      "workspace": {
+        "accessAria": "工作區存取權限",
+        "projectAria": "選擇專案",
+        "projectPlaceholder": "選擇專案",
+        "default": "預設權限",
+        "full": "完全存取權限"
       }
     },
     "scrollToBottom": "捲動到底部",
@@ -690,6 +727,19 @@
     "messageTooBig": {
       "title": "訊息過大",
       "body": "伺服器因超過大小限制拒收了上一則訊息。可移除部分圖片或改用較小的圖片後再試。"
+    },
+    "workspaceScopeRejected": {
+      "title": "工作區未變更",
+      "body": "閘道拒絕了要求的專案或存取權限，Nanobot 已繼續使用先前的工作區。"
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "預設工作區",
+      "manual": "貼上路徑",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "使用路徑",
+      "absolutePathRequired": "請輸入這台機器上的絕對資料夾路徑。"
     }
   }
 }

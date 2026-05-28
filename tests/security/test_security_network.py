@@ -49,7 +49,7 @@ def test_rejects_missing_domain():
 ])
 def test_blocks_private_ipv4(ip: str, label: str):
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("evil.com", [ip])):
-        ok, err = validate_url_target(f"http://evil.com/path")
+        ok, err = validate_url_target("http://evil.com/path")
         assert not ok, f"Should block {label} ({ip})"
         assert "private" in err.lower() or "blocked" in err.lower()
 
@@ -90,6 +90,21 @@ def test_detects_curl_metadata():
 def test_detects_wget_localhost():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("localhost", ["127.0.0.1"])):
         assert contains_internal_url("wget http://localhost:8080/secret")
+
+
+def test_loopback_exception_allows_literal_localhost_only():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("localhost", ["127.0.0.1"])):
+        assert not contains_internal_url("curl http://localhost:8765/", allow_loopback=True)
+
+
+def test_loopback_exception_rejects_public_name_resolving_to_loopback():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["127.0.0.1"])):
+        assert contains_internal_url("curl http://example.com:8765/", allow_loopback=True)
+
+
+def test_loopback_exception_rejects_metadata():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("169.254.169.254", ["169.254.169.254"])):
+        assert contains_internal_url("curl http://169.254.169.254/latest/meta-data/", allow_loopback=True)
 
 
 def test_allows_normal_curl():
