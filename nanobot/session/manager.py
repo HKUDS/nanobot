@@ -20,6 +20,7 @@ from nanobot.utils.helpers import (
     image_placeholder_text,
     safe_filename,
 )
+from nanobot.utils.sender_identity import annotate_user_content_with_sender
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 FILE_MAX_MESSAGES = 2000
@@ -206,6 +207,8 @@ class Session:
                 if mcp_lines:
                     breadcrumbs = "\n".join(mcp_lines)
                     content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            if role == "user":
+                content = annotate_user_content_with_sender(message, content)
             if include_timestamps:
                 content = self._annotate_message_time(message, content)
             if role == "assistant" and isinstance(content, str) and not content.strip():
