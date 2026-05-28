@@ -121,6 +121,7 @@ def _seed_catalog(manager: CliAppManager) -> None:
     }
     _write_cache(manager._cache_path("harness"), harness)
     _write_cache(manager._cache_path("public"), public)
+    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
 
 
 def test_payload_merges_catalog_and_marks_unsupported_installs(tmp_path: Path) -> None:
@@ -187,12 +188,82 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
             ],
         },
     )
+    _write_cache(manager._cache_path("extensions"), {"meta": {}, "clis": []})
 
     payload = manager.payload()
 
     app = payload["apps"][0]
     assert app["name"] == "anygen"
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
+
+
+def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
+    _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
+    _write_cache(
+        manager._cache_path("extensions"),
+        {
+            "meta": {"updated": "2026-05-29"},
+            "clis": [
+                {
+                    "name": "hyperframes",
+                    "display_name": "HyperFrames",
+                    "version": "latest",
+                    "description": "HTML-to-MP4 motion graphics CLI",
+                    "category": "video",
+                    "package_manager": "npm",
+                    "npm_package": "hyperframes",
+                    "install_cmd": "npm install -g hyperframes",
+                    "entry_point": "hyperframes",
+                    "skill_md": "skills/hyperframes/SKILL.md",
+                }
+            ],
+        },
+    )
+
+    payload = manager.payload()
+
+    assert payload["catalog_updated_at"] == "2026-05-29"
+    app = payload["apps"][0]
+    assert app["name"] == "hyperframes"
+    assert app["source"] == "extensions"
+    assert app["install_supported"] is True
+    assert app["manifest"]["source"] == "nanobot-extension"
+    assert app["manifest"]["trust"]["registry"] == "nanobot-extension"
+
+
+def test_optional_extension_registry_failure_does_not_break_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(
+        manager._cache_path("harness"),
+        {
+            "meta": {"updated": "2026-04-16"},
+            "clis": [
+                {
+                    "name": "gimp",
+                    "display_name": "GIMP",
+                    "description": "Image editing",
+                    "install_cmd": "pip install cli-anything-gimp",
+                    "entry_point": "cli-anything-gimp",
+                }
+            ],
+        },
+    )
+    _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
+
+    def fail_get(*args, **kwargs):
+        raise RuntimeError("network unavailable")
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+
+    payload = manager.payload()
+
+    assert payload["catalog_updated_at"] == "2026-04-18"
+    assert [app["name"] for app in payload["apps"]] == ["gimp"]
 
 
 def test_install_dispatches_safe_pip_and_installs_skill(
@@ -330,6 +401,38 @@ def test_fetch_skill_content_allows_cli_anything_raw_skill_url(
     assert content and "# Test" in content
     assert seen == [
         "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/skills/cli-anything-gimp/SKILL.md"
+    ]
+
+
+def test_fetch_skill_content_uses_extension_raw_base_for_relative_skills(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    seen: list[str] = []
+
+    class Response:
+        text = "---\nname: hyperframes\ndescription: HyperFrames\n---\n# HyperFrames\n"
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+    def fake_get(url: str, **kwargs):
+        seen.append(url)
+        return Response()
+
+    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fake_get)
+
+    content = manager._fetch_skill_content({
+        "name": "hyperframes",
+        "skill_md": "skills/hyperframes/SKILL.md",
+        "_raw_base": "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main",
+    })
+
+    assert content and "# HyperFrames" in content
+    assert seen == [
+        "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/skills/hyperframes/SKILL.md"
     ]
 
 

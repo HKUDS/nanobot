@@ -25,7 +25,13 @@ from nanobot.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
-CLI_ANYTHING_RAW_SKILLS_BASE = f"{CLI_ANYTHING_RAW_BASE}/skills/"
+NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
+NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
+_CATALOG_SOURCES = (
+    ("harness", CLI_ANYTHING_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
+    ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
+    ("extensions", NANOBOT_EXTENSION_REGISTRY_URL, NANOBOT_EXTENSION_RAW_BASE, False),
+)
 
 _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_ARTIFACT_SCAN_PATHS = 4_000
@@ -344,16 +350,17 @@ def _safe_skill_path(value: str) -> str | None:
     return value if parts[-1] == "SKILL.md" else None
 
 
-def _skill_content_url(skill_md: str) -> str | None:
+def _skill_content_url(skill_md: str, *, raw_base: str = CLI_ANYTHING_RAW_BASE) -> str | None:
     safe_path = _safe_skill_path(skill_md)
     if safe_path:
-        return f"{CLI_ANYTHING_RAW_BASE}/{safe_path}"
+        return f"{raw_base.rstrip('/')}/{safe_path}"
     parsed = urlparse(skill_md)
     if parsed.scheme != "https" or parsed.netloc != "raw.githubusercontent.com":
         return None
-    if not skill_md.startswith(CLI_ANYTHING_RAW_SKILLS_BASE):
+    raw_prefix = raw_base.rstrip("/") + "/"
+    if not skill_md.startswith(raw_prefix):
         return None
-    suffix = skill_md.removeprefix(f"{CLI_ANYTHING_RAW_BASE}/")
+    suffix = skill_md.removeprefix(raw_prefix)
     return skill_md if _safe_skill_path(suffix) else None
 
 
@@ -435,27 +442,22 @@ class CliAppManager:
         return data
 
     def catalog(self, *, force_refresh: bool = False) -> tuple[list[dict[str, Any]], str | None]:
-        registries = [
-            (
-                "harness",
-                self._fetch_registry(
-                    CLI_ANYTHING_REGISTRY_URL,
-                    self._cache_path("harness"),
+        registries: list[tuple[str, str, dict[str, Any]]] = []
+        for source, url, raw_base, required in _CATALOG_SOURCES:
+            try:
+                registry = self._fetch_registry(
+                    url,
+                    self._cache_path(source),
                     force_refresh=force_refresh,
-                ),
-            ),
-            (
-                "public",
-                self._fetch_registry(
-                    CLI_ANYTHING_PUBLIC_REGISTRY_URL,
-                    self._cache_path("public"),
-                    force_refresh=force_refresh,
-                ),
-            ),
-        ]
+                )
+            except Exception:
+                if required:
+                    raise
+                continue
+            registries.append((source, raw_base, registry))
         apps_by_name: dict[str, dict[str, Any]] = {}
         updated_values: list[str] = []
-        for source, registry in registries:
+        for source, raw_base, registry in registries:
             meta = registry.get("meta")
             if isinstance(meta, dict) and isinstance(meta.get("updated"), str):
                 updated_values.append(meta["updated"])
@@ -464,6 +466,7 @@ class CliAppManager:
                     continue
                 entry = dict(row)
                 entry["_source"] = source
+                entry["_raw_base"] = raw_base
                 key = str(entry["name"]).lower()
                 previous = apps_by_name.get(key)
                 if previous:
@@ -475,6 +478,15 @@ class CliAppManager:
                 else:
                     apps_by_name[key] = entry
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
+
+    def _manifest_source(self, app: dict[str, Any]) -> str:
+        source = str(app.get("_source") or "harness")
+        if source == "extensions":
+            return "nanobot-extension"
+        return f"cli-anything:{source}"
+
+    def _trust_registry(self, app: dict[str, Any]) -> str:
+        return "nanobot-extension" if str(app.get("_source") or "") == "extensions" else "cli-anything"
 
     def get_app(self, name: str, *, force_refresh: bool = False) -> dict[str, Any]:
         wanted = name.lower()
@@ -640,14 +652,14 @@ class CliAppManager:
             version=str(app.get("version") or ""),
             description=_catalog_description(app),
             category=str(app.get("category") or "uncategorized"),
-            source=f"cli-anything:{app.get('_source') or 'harness'}",
+            source=self._manifest_source(app),
             logo_url=logo_url,
             brand_color=brand_color,
             capabilities=capabilities,
             install=install,
             remove=remove,
             trust={
-                "registry": "cli-anything",
+                "registry": self._trust_registry(app),
                 "level": "catalog",
                 "review_status": "catalog_entry",
             },
@@ -793,7 +805,7 @@ class CliAppManager:
         skill_md = str(app.get("skill_md") or "").strip()
         if not skill_md:
             return None
-        url = _skill_content_url(skill_md)
+        url = _skill_content_url(skill_md, raw_base=str(app.get("_raw_base") or CLI_ANYTHING_RAW_BASE))
         if not url:
             return None
         try:

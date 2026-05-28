@@ -261,6 +261,10 @@ async def test_cli_app_scope_controls_working_dir(
         json.dumps({"_cached_at": time.time(), "data": {"meta": {}, "clis": []}}),
         encoding="utf-8",
     )
+    (data_dir / "extensions_registry_cache.json").write_text(
+        json.dumps({"_cached_at": time.time(), "data": {"meta": {}, "clis": []}}),
+        encoding="utf-8",
+    )
     CliAppManager(workspace=project, data_dir=data_dir)._save_installed(
         {"demo": {"entry_point": "demo-cli"}}
     )
