@@ -359,12 +359,22 @@ class HeartbeatConfig(Base):
     model: str = ""  # Override model for heartbeat (e.g. cheaper model). Empty = use default agent model.
 
 
+class DreamingConfig(Base):
+    """Dreaming/promotion service configuration. See vault/typed-memory-port-from-openclaw.md."""
+
+    enabled: bool = False  # opt-in; runs an LLM pass once per interval to promote daily-note facts into MEMORY.md
+    interval_s: int = 24 * 60 * 60  # once per day
+    days_window: int = 7  # consider daily notes from the last N days
+    model: str = ""  # override model for dreaming (cheaper is fine). Empty = use default agent model.
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    dreaming: DreamingConfig = Field(default_factory=DreamingConfig)
 
 
 class WebSearchConfig(Base):

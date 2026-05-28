@@ -258,6 +258,7 @@ def gateway(
     from nanobot.session.manager import SessionManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from nanobot.dream.service import DreamingService
     from nanobot.heartbeat.service import HeartbeatService
     
     if verbose:
@@ -383,6 +384,16 @@ def gateway(
         enabled=hb_cfg.enabled,
         schedule=hb_cfg.schedule or [],
     )
+
+    dream_cfg = config.gateway.dreaming
+    dreaming = DreamingService(
+        workspace=config.workspace_path,
+        provider=provider,
+        model=dream_cfg.model or agent.model,
+        enabled=dream_cfg.enabled,
+        interval_s=dream_cfg.interval_s,
+        days_window=dream_cfg.days_window,
+    )
     
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -399,6 +410,7 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            await dreaming.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -408,6 +420,7 @@ def gateway(
         finally:
             await agent.close_mcp()
             heartbeat.stop()
+            dreaming.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
