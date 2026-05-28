@@ -63,3 +63,118 @@ class TestBuildDreamPrompt:
         # The full 2000 chars should not appear — truncated to 500
         assert long_content not in prompt
         assert "x" * 500 in prompt
+
+
+class TestEphemeralDirect:
+    """Tests for the ephemeral flag that skips history.jsonl writes for Dream."""
+
+    @pytest.fixture
+    def _make_loop(self, tmp_path):
+        """Factory fixture that builds a minimal AgentLoop with mocked deps."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.memory import MemoryStore
+        from nanobot.bus.queue import MessageBus
+
+        store = MemoryStore(tmp_path)
+        store.write_soul("# Soul")
+        store.write_memory("# Memory")
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+        provider.chat_with_retry = AsyncMock(
+            return_value=MagicMock(
+                content="done", finish_reason="stop", tool_calls=[], usage={},
+            )
+        )
+
+        with (
+            patch("nanobot.agent.loop.SessionManager"),
+            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
+            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+        ):
+            mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
+            loop = AgentLoop(
+                bus=bus,
+                provider=provider,
+                workspace=tmp_path,
+                context_window_tokens=8000,
+            )
+
+        return loop, store
+
+    async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
+        """When ephemeral=True, raw_archive must not be called."""
+        from unittest.mock import patch
+
+        loop, store = _make_loop
+
+        with patch.object(store, "raw_archive") as mock_archive:
+            await loop.process_direct(
+                "test", session_key="dream:test", ephemeral=True,
+            )
+            mock_archive.assert_not_called()
+
+    async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
+        """Without ephemeral, the normal path is untouched — no crash."""
+        loop, store = _make_loop
+        await loop.process_direct("test", session_key="cli:normal")
+
+    async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
+        """Verify that ephemeral=True is forwarded to TurnContext."""
+        from unittest.mock import patch
+
+        loop, store = _make_loop
+
+        captured = {}
+
+        original_save = loop._state_save
+
+        async def patched_save(ctx):
+            captured["ephemeral"] = ctx.ephemeral
+            return await original_save(ctx)
+
+        with patch.object(loop, "_state_save", side_effect=patched_save):
+            await loop.process_direct(
+                "test", session_key="dream:check", ephemeral=True,
+            )
+
+        assert captured.get("ephemeral") is True
+
+    async def test_default_ephemeral_is_false(self, tmp_path, _make_loop):
+        """By default ephemeral is False in TurnContext."""
+        from unittest.mock import patch
+
+        loop, store = _make_loop
+
+        captured = {}
+
+        original_save = loop._state_save
+
+        async def patched_save(ctx):
+            captured["ephemeral"] = ctx.ephemeral
+            return await original_save(ctx)
+
+        with patch.object(loop, "_state_save", side_effect=patched_save):
+            await loop.process_direct("test", session_key="cli:normal")
+
+        assert captured.get("ephemeral") is False
+
+    async def test_ephemeral_skips_consolidator(self, tmp_path, _make_loop):
+        """When ephemeral=True, consolidator.maybe_consolidate_by_tokens is not called."""
+        from unittest.mock import patch
+
+        loop, store = _make_loop
+
+        with patch.object(
+            loop.consolidator, "maybe_consolidate_by_tokens",
+        ) as mock_consolidate:
+            await loop.process_direct(
+                "test", session_key="dream:consolidate-test", ephemeral=True,
+            )
+            mock_consolidate.assert_not_called()

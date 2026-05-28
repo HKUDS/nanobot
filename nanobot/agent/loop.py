@@ -123,6 +123,9 @@ class TurnContext:
 
     pending_queue: asyncio.Queue | None = None
     pending_summary: str | None = None
+
+    ephemeral: bool = False
+
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
@@ -1180,6 +1183,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
+        ephemeral: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
@@ -1210,6 +1214,7 @@ class AgentLoop:
             on_stream=on_stream,
             on_stream_end=on_stream_end,
             pending_queue=pending_queue,
+            ephemeral=ephemeral,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1366,10 +1371,11 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
-        await self.consolidator.maybe_consolidate_by_tokens(
-            ctx.session,
-            replay_max_messages=self._max_messages,
-        )
+        if not ctx.ephemeral:
+            await self.consolidator.maybe_consolidate_by_tokens(
+                ctx.session,
+                replay_max_messages=self._max_messages,
+            )
         self._set_tool_context(
             ctx.msg.channel,
             ctx.msg.chat_id,
@@ -1465,16 +1471,17 @@ class AgentLoop:
             ctx.session_key,
             ctx.turn_latency_ms,
         )
-        ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+        if not ctx.ephemeral:
+            ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+            self._schedule_background(
+                self.consolidator.maybe_consolidate_by_tokens(
+                    ctx.session,
+                    replay_max_messages=self._max_messages,
+                )
+            )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
-        self._schedule_background(
-            self.consolidator.maybe_consolidate_by_tokens(
-                ctx.session,
-                replay_max_messages=self._max_messages,
-            )
-        )
         return "ok"
 
     async def _state_respond(self, ctx: TurnContext) -> str:
@@ -1714,6 +1721,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        ephemeral: bool = False,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -1731,6 +1739,7 @@ class AgentLoop:
                     on_progress=on_progress,
                     on_stream=on_stream,
                     on_stream_end=on_stream_end,
+                    ephemeral=ephemeral,
                 )
         finally:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
