@@ -253,6 +253,7 @@ export function AgentActivityCluster({
   const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
   const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
+  const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
   const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
   const activityDuration = formatActivityDuration(durationMs);
   const thoughtLabel = isTurnStreaming
@@ -418,6 +419,25 @@ export function AgentActivityCluster({
 
   if (!hasVisibleActivity) return null;
 
+  if (hasOnlyFileActivity) {
+    return (
+      <FileEditFlatActivity
+        edits={fileEdits}
+        active={isTurnStreaming}
+        hasBodyBelow={hasBodyBelow}
+        summary={summary}
+        singleFilePath={singleFilePath}
+        singleFileTooltipPath={singleFileTooltipPath}
+        hasLiveEditingFiles={hasLiveEditingFiles}
+        hasFailedFiles={hasFailedFiles}
+        hasDeletedFiles={hasDeletedFiles}
+        added={added}
+        deleted={deleted}
+        hasDiffStats={hasDiffStats}
+      />
+    );
+  }
+
   return (
     <div className={cn("w-full", hasBodyBelow && "mb-2")}>
       <button
@@ -506,6 +526,77 @@ export function AgentActivityCluster({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function messageHasOnlyFileActivity(message: UIMessage): boolean {
+  if (message.kind !== "trace" || !message.fileEdits?.length) return false;
+  return traceLines(message).every((line) => !line.trim() || isFileEditTraceLine(line));
+}
+
+function FileEditFlatActivity({
+  edits,
+  active,
+  hasBodyBelow,
+  summary,
+  singleFilePath,
+  singleFileTooltipPath,
+  hasLiveEditingFiles,
+  hasFailedFiles,
+  hasDeletedFiles,
+  added,
+  deleted,
+  hasDiffStats,
+}: {
+  edits: FileEditSummary[];
+  active: boolean;
+  hasBodyBelow: boolean;
+  summary: string;
+  singleFilePath?: string;
+  singleFileTooltipPath?: string;
+  hasLiveEditingFiles: boolean;
+  hasFailedFiles: boolean;
+  hasDeletedFiles: boolean;
+  added: number;
+  deleted: number;
+  hasDiffStats: boolean;
+}) {
+  const showRows = edits.length > 1 || edits.some((edit) => edit.status === "error" || edit.pending);
+  return (
+    <div className={cn("w-full", hasBodyBelow && "mb-2")} aria-label={summary}>
+      <div
+        className={cn(
+          "flex max-w-full items-center gap-1.5 px-1 py-1",
+          "text-[12.5px] text-muted-foreground/72",
+        )}
+      >
+        <StreamingLabelSheen active={active} className="min-w-0">
+          {singleFilePath
+            ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)
+            : summary}
+        </StreamingLabelSheen>
+        {singleFilePath ? (
+          <FileReferenceChip
+            path={singleFilePath}
+            tooltipPath={singleFileTooltipPath}
+            active={hasLiveEditingFiles}
+            className="-my-0.5 min-w-0"
+            textClassName="text-xs"
+            testId="activity-header-file-reference"
+          />
+        ) : null}
+        {hasDiffStats ? (
+          <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
+            <DiffPair added={added} deleted={deleted} />
+          </span>
+        ) : null}
+      </div>
+      {showRows ? (
+        <div className="mt-0.5 pl-4">
+          <FileEditGroup edits={edits} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1045,6 +1136,10 @@ function isCliRunTraceLine(line: string): boolean {
 
 function isMcpRunTraceLine(line: string): boolean {
   return MCP_TOOL_NAME_RE.test(line.trim().split("(", 1)[0] ?? "");
+}
+
+function isFileEditTraceLine(line: string): boolean {
+  return /^(write_file|edit_file|apply_patch)\(/.test(line.trim());
 }
 
 function parseCliRunTrace(line: string, status: CliRunStatus = "running"): CliRunSummary | null {

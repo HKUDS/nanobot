@@ -464,6 +464,41 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByRole("button", { name: /edited angry-birds\.html/i })).not.toBeInTheDocument();
   });
 
+  it("renders file-only edits without a redundant disclosure", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-file-only",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [{
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "src/app.tsx",
+            absolute_path: "/Users/renxubin/project/src/app.tsx",
+            phase: "end",
+            added: 12,
+            deleted: 3,
+            approximate: false,
+            status: "done",
+          }],
+          createdAt: 3,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
+    expect(screen.getByText("+12")).toBeInTheDocument();
+    expect(screen.getByText("-3")).toBeInTheDocument();
+  });
+
   it("renders CLI app runs as dedicated activity rows", () => {
     const line = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
     render(
