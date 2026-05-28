@@ -122,14 +122,26 @@ class TestLoadBootstrapFiles:
         assert "Be helpful." in result
 
     def test_multiple_bootstrap_files(self, tmp_path):
+        (tmp_path / "AUTHORITY.md").write_text("Authority.", encoding="utf-8")
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
         (tmp_path / "SOUL.md").write_text("Soul.", encoding="utf-8")
         builder = _builder(tmp_path)
         result = builder._load_bootstrap_files()
+        assert "## AUTHORITY.md" in result
         assert "## AGENTS.md" in result
         assert "## SOUL.md" in result
+        assert "Authority." in result
         assert "Rules." in result
         assert "Soul." in result
+        assert result.index("## AUTHORITY.md") < result.index("## AGENTS.md")
+
+    def test_empty_bootstrap_files_are_skipped(self, tmp_path):
+        (tmp_path / "AUTHORITY.md").write_text("", encoding="utf-8")
+        (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
+        builder = _builder(tmp_path)
+        result = builder._load_bootstrap_files()
+        assert "## AUTHORITY.md" not in result
+        assert "## AGENTS.md" in result
 
     def test_all_bootstrap_files(self, tmp_path):
         for name in ContextBuilder.BOOTSTRAP_FILES:

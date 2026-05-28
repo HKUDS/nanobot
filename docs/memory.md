@@ -14,7 +14,7 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 - `session.messages` holds the living short-term conversation.
 - `memory/history.jsonl` is the running archive of compressed past turns.
-- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
+- `AUTHORITY.md`, `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
 - `GitStore` records how those durable files change over time.
 
 This keeps the system light in the moment, but reflective over time.
@@ -61,10 +61,15 @@ Then it works in two phases:
 
 This is why nanobot's memory is not just archival. It is interpretive.
 
+`AUTHORITY.md` is separate from Dream-managed memory: when it has content,
+nanobot injects it near the start of the system prompt as user-authored
+authority for model behavior.
+
 ## The Files
 
 ```text
 workspace/
+├── AUTHORITY.md         # Optional high-priority moral/behavioral authority
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
 └── memory/
@@ -77,6 +82,7 @@ workspace/
 
 These files play different roles:
 
+- `AUTHORITY.md` is intentionally blank by default. Fill it only when you want high-priority moral or behavioral authority text injected near the start of the system prompt.
 - `SOUL.md` remembers how nanobot should sound.
 - `USER.md` remembers who the user is and what they prefer.
 - `MEMORY.md` remembers what remains true about the work itself.
@@ -110,7 +116,7 @@ python -c "import json; [print(json.loads(l).get('content','')) for l in open('m
 The difference is philosophical as much as technical:
 
 - `history.jsonl` is for structure
-- `SOUL.md`, `USER.md`, and `MEMORY.md` are for meaning
+- `AUTHORITY.md`, `SOUL.md`, `USER.md`, and `MEMORY.md` are for meaning
 
 ## Commands
 

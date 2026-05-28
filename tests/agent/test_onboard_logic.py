@@ -332,6 +332,8 @@ class TestSyncWorkspaceTemplates:
 
         # Check that some files were created
         assert isinstance(added, list)
+        assert "AUTHORITY.md" in added
+        assert (workspace / "AUTHORITY.md").read_text(encoding="utf-8") == ""
         # The actual files depend on the templates directory
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
