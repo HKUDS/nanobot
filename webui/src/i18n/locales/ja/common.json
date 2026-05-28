@@ -739,8 +739,7 @@
       "manual": "パスを貼り付け",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "フォルダを選択..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

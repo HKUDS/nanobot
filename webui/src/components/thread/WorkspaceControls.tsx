@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type {
-  RuntimeSurface,
   WorkspaceAccessMode,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -33,7 +32,6 @@ export function WorkspaceProjectPicker({
   defaultScope,
   controls,
   error,
-  runtimeSurface,
   onChange,
 }: {
   isHero: boolean;
@@ -42,7 +40,6 @@ export function WorkspaceProjectPicker({
   defaultScope: WorkspaceScopePayload | null;
   controls: WorkspacesPayload["controls"] | null;
   error?: string | null;
-  runtimeSurface?: RuntimeSurface;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
@@ -58,7 +55,8 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const nativeProjectPicker = runtimeSurface === "native" || !!getHostApi();
+  const hostApi = getHostApi();
+  const nativeProjectPicker = !!hostApi;
 
   useEffect(() => {
     if (!open) return;
@@ -92,18 +90,17 @@ export function WorkspaceProjectPicker({
   );
 
   const pickNativeFolder = useCallback(async () => {
-    const host = getHostApi();
-    if (!host || disabled) return;
+    if (!hostApi || disabled) return;
     setPickingFolder(true);
     try {
-      const picked = await host.pickFolder();
+      const picked = await hostApi.pickFolder();
       if (picked) applyProjectPath(picked);
     } catch (err) {
       setPathError((err as Error).message);
     } finally {
       setPickingFolder(false);
     }
-  }, [applyProjectPath, disabled]);
+  }, [applyProjectPath, disabled, hostApi]);
 
   if (!visible || !defaultScope || !onChange) return null;
 
@@ -179,23 +176,6 @@ export function WorkspaceProjectPicker({
             {!currentProjectScope ? <Check className="h-4 w-4 text-foreground/80" /> : null}
           </DropdownMenuItem>
           <div className="my-1 h-px bg-border/45" />
-          {getHostApi() ? (
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                void pickNativeFolder();
-              }}
-              disabled={disabled || pickingFolder}
-              className="flex min-h-[44px] cursor-default gap-3 rounded-[16px] px-3 py-2 focus:bg-muted/55"
-            >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/80">
-                <Folder className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-                {t("workspace.dialog.chooseFolder")}
-              </span>
-            </DropdownMenuItem>
-          ) : null}
           <div
             className="space-y-1.5 px-1.5 py-1.5"
             onKeyDown={(event) => {

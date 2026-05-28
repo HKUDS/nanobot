@@ -739,8 +739,7 @@
       "manual": "Tempel path",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "Pilih folder..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

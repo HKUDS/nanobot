@@ -739,8 +739,7 @@
       "manual": "貼上路徑",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "使用路徑",
-      "absolutePathRequired": "請輸入這台機器上的絕對資料夾路徑。",
-      "chooseFolder": "選擇資料夾..."
+      "absolutePathRequired": "請輸入這台機器上的絕對資料夾路徑。"
     }
   }
 }

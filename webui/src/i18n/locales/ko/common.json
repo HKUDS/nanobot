@@ -739,8 +739,7 @@
       "manual": "경로 붙여넣기",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "폴더 선택..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

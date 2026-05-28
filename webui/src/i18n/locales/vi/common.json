@@ -739,8 +739,7 @@
       "manual": "Dán đường dẫn",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "Chọn thư mục..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

@@ -739,8 +739,7 @@
       "manual": "Pegar ruta",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "Elegir carpeta..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

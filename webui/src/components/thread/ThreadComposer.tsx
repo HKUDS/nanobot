@@ -61,7 +61,6 @@ import type {
   McpPresetInfo,
   OutboundCliAppMention,
   OutboundMcpPresetMention,
-  RuntimeSurface,
   SlashCommand,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -108,7 +107,6 @@ interface ThreadComposerProps {
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
-  runtimeSurface?: RuntimeSurface;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
 }
 
@@ -497,7 +495,6 @@ export function ThreadComposer({
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
-  runtimeSurface = "browser",
   onWorkspaceScopeChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
@@ -1364,7 +1361,6 @@ export function ThreadComposer({
           defaultScope={workspaceDefaultScope}
           controls={workspaceControls}
           error={workspaceError}
-          runtimeSurface={runtimeSurface}
           onChange={onWorkspaceScopeChange}
         />
       </div>

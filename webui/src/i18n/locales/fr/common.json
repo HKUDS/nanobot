@@ -739,8 +739,7 @@
       "manual": "Coller un chemin",
       "manualPlaceholder": "/Users/name/project",
       "usePath": "Use Path",
-      "absolutePathRequired": "Enter an absolute folder path on this machine.",
-      "chooseFolder": "Choisir un dossier..."
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

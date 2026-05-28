@@ -23,7 +23,6 @@ import type {
   ChatSummary,
   CliAppInfo,
   McpPresetInfo,
-  RuntimeSurface,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -69,7 +68,6 @@ interface ThreadShellProps {
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
-  runtimeSurface?: RuntimeSurface;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
 }
@@ -150,7 +148,6 @@ export function ThreadShell({
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
-  runtimeSurface = "browser",
   onWorkspaceScopeChange,
   settingsSnapshot = null,
 }: ThreadShellProps) {
@@ -522,7 +519,6 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
-          runtimeSurface={runtimeSurface}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
         />
       ) : (
@@ -552,7 +548,6 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
-          runtimeSurface={runtimeSurface}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
         />
       )}

@@ -304,7 +304,6 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        runtimeSurface="native"
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
@@ -321,7 +320,7 @@ describe("ThreadComposer", () => {
     }));
   });
 
-  it("does not fall back to the web path menu on native surface", () => {
+  it("uses the web path menu when no native host picker is available", async () => {
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
       project_name: "workspace",
@@ -337,15 +336,14 @@ describe("ThreadComposer", () => {
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        runtimeSurface="native"
         onWorkspaceScopeChange={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Choose project" }));
 
-    expect(screen.queryByRole("menuitem", { name: /Default workspace/ })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /Default workspace/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Paste path")).toBeInTheDocument();
   });
 
   it("shows turn run timer when runStartedAt is set", () => {

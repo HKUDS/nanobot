@@ -38,6 +38,7 @@ import {
   createRuntimeHost,
   toRuntimeSurface,
 } from "@/lib/runtime";
+import { projectNameFromPath } from "@/lib/workspace";
 
 type BootState =
   | { status: "loading" }
@@ -170,11 +171,6 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
     access_mode: accessMode,
     restrict_to_workspace: accessMode === "restricted",
   };
-}
-
-function projectNameFromPath(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).pop() || path;
 }
 
 function HostChrome({
@@ -1156,7 +1152,6 @@ function Shell({
                 workspaceControls={workspaces?.controls ?? null}
                 workspaceScopeDisabled={activeChatRunning}
                 workspaceError={workspaceError}
-                runtimeSurface={effectiveRuntimeSurface}
                 onWorkspaceScopeChange={applyWorkspaceScope}
                 settingsSnapshot={settingsSnapshot}
               />
