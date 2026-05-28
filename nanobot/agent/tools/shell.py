@@ -143,7 +143,7 @@ class ExecTool(Tool):
             working_dir=ctx.workspace,
             timeout=cfg.timeout,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
-            webui_allow_local_service_access=ctx.config.tools.webui_allow_local_service_access,
+            webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
             path_append=cfg.path_append,
             allowed_env_keys=cfg.allowed_env_keys,
