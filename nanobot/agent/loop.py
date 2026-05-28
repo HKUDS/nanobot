@@ -1298,6 +1298,32 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    def _schedule_l0_capture(
+        self,
+        *,
+        session_key: str,
+        all_messages: list[dict],
+        skip: int,
+        turn_id: str,
+        is_subagent: bool,
+    ) -> None:
+        """Persist sanitized turn slice to L0 (LM2-A), non-blocking."""
+        if not self._layered_memory.capture_enabled(is_subagent=is_subagent):
+            return
+        if skip < 0:
+            skip = 0
+        new_slice = [dict(m) for m in all_messages[skip:]]
+        if not new_slice:
+            return
+        self._schedule_background(
+            self._layered_memory_facade.capture_turn(
+                session_key,
+                new_slice,
+                turn_id=turn_id,
+                is_subagent=is_subagent,
+            ),
+        )
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -1408,6 +1434,13 @@ class AgentLoop:
         session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
+        self._schedule_l0_capture(
+            session_key=key,
+            all_messages=all_msgs,
+            skip=1 + len(history),
+            turn_id=f"{key}:{time.time_ns()}",
+            is_subagent=is_subagent,
+        )
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
@@ -1731,6 +1764,13 @@ class AgentLoop:
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
+        self._schedule_l0_capture(
+            session_key=ctx.session_key,
+            all_messages=ctx.all_messages,
+            skip=ctx.save_skip,
+            turn_id=ctx.turn_id,
+            is_subagent=ctx.msg.sender_id == "subagent",
+        )
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,

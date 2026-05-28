@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
+from nanobot.agent.layered_memory.l0_store import L0Store
 from nanobot.agent.layered_memory.offload.canvas import TaskCanvas, format_canvas_runtime_lines
+from nanobot.agent.layered_memory.sanitize import sanitize_turn_messages
 from nanobot.agent.layered_memory.offload.node_registry import (
     NodeRegistry,
     summarize_tool_result,
@@ -30,12 +35,13 @@ class LayeredMemoryFacade:
     LM0-C：如果配置未开启则直接空操作。LM1及以上由子模块具体实现。
     """
 
-    __slots__ = ("_config", "_offload_tool_counts", "_workspace")
+    __slots__ = ("_config", "_l0_store", "_offload_tool_counts", "_workspace")
 
     def __init__(self, workspace: Path, config: LayeredMemoryConfig | None = None) -> None:
         self._workspace = workspace
         self._config = config or LayeredMemoryConfig()
         self._offload_tool_counts: dict[str, int] = {}
+        self._l0_store = L0Store(workspace)
 
     @property
     def workspace(self) -> Path:
@@ -96,17 +102,34 @@ class LayeredMemoryFacade:
         session_key: str,
         new_messages: list[dict[str, Any]],
         *,
+        turn_id: str | None = None,
         is_subagent: bool = False,
     ) -> None:
-        """消息持久化 L0 片段，并在 _save_turn 后通知 pipeline（LM2）。
-        session_key: 会话标识
-        new_messages: 新增消息
-        is_subagent: 是否为子代理
-        """
+        """消息持久化 L0 片段，并在 _save_turn 后通知 pipeline（LM2-B）。"""
         if not self._config.capture_enabled(is_subagent=is_subagent):
-            # 如果未开启捕获功能则直接返回
             return
-        _ = session_key, new_messages  # 占位，避免未使用变量告警
+        if not session_key or not new_messages:
+            return
+        try:
+            rows = sanitize_turn_messages(new_messages)
+            if not rows:
+                return
+            inserted = await asyncio.to_thread(
+                self._l0_store.append_messages,
+                session_key,
+                turn_id,
+                rows,
+            )
+            retention = self._config.capture.l0_retention_days
+            if retention > 0:
+                await asyncio.to_thread(self._l0_store.prune_older_than_days, retention)
+            logger.debug(
+                "layered_memory l0_capture_done session={} inserted={}",
+                session_key,
+                inserted,
+            )
+        except Exception:
+            logger.exception("layered_memory capture_turn failed for {}", session_key)
 
     def register_tool_result(
         self,

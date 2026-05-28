@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.layered_memory import LayeredMemoryFacade, RecallResult
-from nanobot.config.schema import LayeredMemoryConfig, LayeredMemoryRecallConfig
+from nanobot.config.schema import (
+    LayeredMemoryCaptureConfig,
+    LayeredMemoryConfig,
+    LayeredMemoryRecallConfig,
+)
 
 
 @pytest.fixture
@@ -62,6 +66,24 @@ def test_canvas_lines_empty_when_offload_enabled_but_stub(workspace: Path) -> No
 async def test_capture_turn_noop(workspace: Path) -> None:
     facade = LayeredMemoryFacade(workspace)
     await facade.capture_turn("sess", [{"role": "user", "content": "hi"}])
+
+
+@pytest.mark.asyncio
+async def test_capture_turn_writes_l0_when_enabled(workspace: Path) -> None:
+    cfg = LayeredMemoryConfig(
+        enable=True,
+        capture=LayeredMemoryCaptureConfig(enable=True),
+    )
+    facade = LayeredMemoryFacade(workspace, cfg)
+    await facade.capture_turn(
+        "cli:direct",
+        [
+            {"role": "user", "content": "remember this"},
+            {"role": "assistant", "content": "ok"},
+        ],
+        turn_id="cli:direct:99",
+    )
+    assert facade._l0_store.count_messages("cli:direct") == 2
 
 
 def test_register_tool_result_noop(workspace: Path) -> None:

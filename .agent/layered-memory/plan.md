@@ -109,10 +109,10 @@
 
 ### LM2-A L0 存储
 
-- [ ] `l0_store.py`：SQLite `{workspace}/.nanobot/memory.sqlite` 表 `l0_messages`
-- [ ] `sanitize.py`：剥注入块、短消息过滤
-- [ ] `capture_turn`：仅写入本轮增量；checkpoint 防冷启动全量导入
-- [ ] 单测：两轮 capture 行数递增；sanitize 不去掉真实用户句
+- [x] `l0_store.py`：SQLite `{workspace}/.nanobot/memory.sqlite` 表 `l0_messages`
+- [x] `sanitize.py`：剥注入块、短消息过滤
+- [x] `capture_turn`：仅写入本轮增量；checkpoint 防冷启动全量导入
+- [x] 单测：两轮 capture 行数递增；sanitize 不去掉真实用户句
 
 ### LM2-B Pipeline 骨架
 
