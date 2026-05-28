@@ -205,66 +205,54 @@ class MCPToolWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
-        for attempt in range(2):  # At most 1 retry
-            try:
-                result = await asyncio.wait_for(
-                    self._session.call_tool(self._original_name, arguments=kwargs),
-                    timeout=self._tool_timeout,
-                )
-            except asyncio.TimeoutError:
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(self._original_name, arguments=kwargs),
+                timeout=self._tool_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
+            )
+            return f"(MCP tool call timed out after {self._tool_timeout}s)"
+        except asyncio.CancelledError:
+            # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
+            # Re-raise only if our task was externally cancelled (e.g. /stop).
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
+            return "(MCP tool call was cancelled)"
+        except Exception as exc:
+            if _is_transient(exc):
                 logger.warning(
-                    "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
-                )
-                return f"(MCP tool call timed out after {self._tool_timeout}s)"
-            except asyncio.CancelledError:
-                # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
-                # Re-raise only if our task was externally cancelled (e.g. /stop).
-                task = asyncio.current_task()
-                if task is not None and task.cancelling() > 0:
-                    raise
-                logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return "(MCP tool call was cancelled)"
-            except Exception as exc:
-                if _is_transient(exc):
-                    # Mark server disconnected so it reconnects on the next turn.
-                    # Don't retry with the stale session — it will fail again.
-                    if self._on_disconnected:
-                        try:
-                            self._on_disconnected(self._server_name)
-                        except Exception:
-                            logger.debug("on_disconnected callback error (ignored)")
-                    if attempt == 0:
-                        logger.warning(
-                            "MCP tool '{}' hit transient error ({}), "
-                            "server marked disconnected for reconnection",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        return "(MCP server connection lost, reconnecting. Please try again.)"
-                    logger.exception(
-                        "MCP tool '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return f"(MCP tool call failed after retry: {type(exc).__name__})"
-                logger.exception(
-                    "MCP tool '{}' failed: {}: {}",
+                    "MCP tool '{}' hit transient error ({}), "
+                    "server will be marked disconnected for reconnection",
                     self._name,
                     type(exc).__name__,
-                    exc,
                 )
-                return f"(MCP tool call failed: {type(exc).__name__})"
-            else:
-                # Success — extract result
-                parts = []
-                for block in result.content:
-                    if isinstance(block, types.TextContent):
-                        parts.append(block.text)
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
-
-        return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
+                if self._on_disconnected:
+                    try:
+                        self._on_disconnected(self._server_name)
+                    except Exception:
+                        logger.debug("on_disconnected callback error (ignored)")
+                return "(MCP server connection lost, reconnecting. Please try again.)"
+            logger.exception(
+                "MCP tool '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP tool call failed: {type(exc).__name__})"
+        else:
+            # Success — extract result
+            parts = []
+            for block in result.content:
+                if isinstance(block, types.TextContent):
+                    parts.append(block.text)
+                else:
+                    parts.append(str(block))
+            return "\n".join(parts) or "(no output)"
 
 
 class MCPResourceWrapper(Tool):
@@ -306,63 +294,53 @@ class MCPResourceWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
-        for attempt in range(2):
-            try:
-                result = await asyncio.wait_for(
-                    self._session.read_resource(self._uri),
-                    timeout=self._resource_timeout,
-                )
-            except asyncio.TimeoutError:
+        try:
+            result = await asyncio.wait_for(
+                self._session.read_resource(self._uri),
+                timeout=self._resource_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
+            )
+            return f"(MCP resource read timed out after {self._resource_timeout}s)"
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
+            return "(MCP resource read was cancelled)"
+        except Exception as exc:
+            if _is_transient(exc):
                 logger.warning(
-                    "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
-                )
-                return f"(MCP resource read timed out after {self._resource_timeout}s)"
-            except asyncio.CancelledError:
-                task = asyncio.current_task()
-                if task is not None and task.cancelling() > 0:
-                    raise
-                logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
-                return "(MCP resource read was cancelled)"
-            except Exception as exc:
-                if _is_transient(exc):
-                    if self._on_disconnected:
-                        try:
-                            self._on_disconnected(self._server_name)
-                        except Exception:
-                            logger.debug("on_disconnected callback error (ignored)")
-                    if attempt == 0:
-                        logger.warning(
-                            "MCP resource '{}' hit transient error ({}), "
-                            "server marked disconnected for reconnection",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        return "(MCP server connection lost, reconnecting. Please try again.)"
-                    logger.exception(
-                        "MCP resource '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return f"(MCP resource read failed after retry: {type(exc).__name__})"
-                logger.exception(
-                    "MCP resource '{}' failed: {}: {}",
+                    "MCP resource '{}' hit transient error ({}), "
+                    "server will be marked disconnected for reconnection",
                     self._name,
                     type(exc).__name__,
-                    exc,
                 )
-                return f"(MCP resource read failed: {type(exc).__name__})"
-            else:
-                parts: list[str] = []
-                for block in result.contents:
-                    if isinstance(block, types.TextResourceContents):
-                        parts.append(block.text)
-                    elif isinstance(block, types.BlobResourceContents):
-                        parts.append(f"[Binary resource: {len(block.blob)} bytes]")
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
-
-        return "(MCP resource read failed)"  # Unreachable
+                if self._on_disconnected:
+                    try:
+                        self._on_disconnected(self._server_name)
+                    except Exception:
+                        logger.debug("on_disconnected callback error (ignored)")
+                return "(MCP server connection lost, reconnecting. Please try again.)"
+            logger.exception(
+                "MCP resource '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP resource read failed: {type(exc).__name__})"
+        else:
+            parts: list[str] = []
+            for block in result.contents:
+                if isinstance(block, types.TextResourceContents):
+                    parts.append(block.text)
+                elif isinstance(block, types.BlobResourceContents):
+                    parts.append(f"[Binary resource: {len(block.blob)} bytes]")
+                else:
+                    parts.append(str(block))
+            return "\n".join(parts) or "(no output)"
 
 
 class MCPPromptWrapper(Tool):
@@ -419,76 +397,66 @@ class MCPPromptWrapper(Tool):
         from mcp import types
         from mcp.shared.exceptions import McpError
 
-        for attempt in range(2):
-            try:
-                result = await asyncio.wait_for(
-                    self._session.get_prompt(self._prompt_name, arguments=kwargs),
-                    timeout=self._prompt_timeout,
-                )
-            except asyncio.TimeoutError:
+        try:
+            result = await asyncio.wait_for(
+                self._session.get_prompt(self._prompt_name, arguments=kwargs),
+                timeout=self._prompt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
+            )
+            return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
+            return "(MCP prompt call was cancelled)"
+        except McpError as exc:
+            logger.exception(
+                "MCP prompt '{}' failed: code={} message={}",
+                self._name,
+                exc.error.code,
+                exc.error.message,
+            )
+            return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+        except Exception as exc:
+            if _is_transient(exc):
                 logger.warning(
-                    "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
-                )
-                return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
-            except asyncio.CancelledError:
-                task = asyncio.current_task()
-                if task is not None and task.cancelling() > 0:
-                    raise
-                logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
-                return "(MCP prompt call was cancelled)"
-            except McpError as exc:
-                logger.exception(
-                    "MCP prompt '{}' failed: code={} message={}",
-                    self._name,
-                    exc.error.code,
-                    exc.error.message,
-                )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
-            except Exception as exc:
-                if _is_transient(exc):
-                    if self._on_disconnected:
-                        try:
-                            self._on_disconnected(self._server_name)
-                        except Exception:
-                            logger.debug("on_disconnected callback error (ignored)")
-                    if attempt == 0:
-                        logger.warning(
-                            "MCP prompt '{}' hit transient error ({}), "
-                            "server marked disconnected for reconnection",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        return "(MCP server connection lost, reconnecting. Please try again.)"
-                    logger.exception(
-                        "MCP prompt '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return f"(MCP prompt call failed after retry: {type(exc).__name__})"
-                logger.exception(
-                    "MCP prompt '{}' failed: {}: {}",
+                    "MCP prompt '{}' hit transient error ({}), "
+                    "server will be marked disconnected for reconnection",
                     self._name,
                     type(exc).__name__,
-                    exc,
                 )
-                return f"(MCP prompt call failed: {type(exc).__name__})"
-            else:
-                parts: list[str] = []
-                for message in result.messages:
-                    content = message.content
-                    if isinstance(content, types.TextContent):
-                        parts.append(content.text)
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, types.TextContent):
-                                parts.append(block.text)
-                            else:
-                                parts.append(str(block))
-                    else:
-                        parts.append(str(content))
-                return "\n".join(parts) or "(no output)"
-
-        return "(MCP prompt call failed)"  # Unreachable
+                if self._on_disconnected:
+                    try:
+                        self._on_disconnected(self._server_name)
+                    except Exception:
+                        logger.debug("on_disconnected callback error (ignored)")
+                return "(MCP server connection lost, reconnecting. Please try again.)"
+            logger.exception(
+                "MCP prompt '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP prompt call failed: {type(exc).__name__})"
+        else:
+            parts: list[str] = []
+            for message in result.messages:
+                content = message.content
+                if isinstance(content, types.TextContent):
+                    parts.append(content.text)
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, types.TextContent):
+                            parts.append(block.text)
+                        else:
+                            parts.append(str(block))
+                else:
+                    parts.append(str(content))
+            return "\n".join(parts) or "(no output)"
 
 
 async def connect_mcp_servers(
@@ -767,21 +735,28 @@ def mark_server_disconnected(state: Any, registry: ToolRegistry, server_name: st
 
     Called by wrapper ``on_disconnected`` callbacks when a transient error
     indicates the underlying session is dead.  This:
-    1. Closes the server's ``AsyncExitStack`` and removes it from ``_mcp_stacks``.
+    1. Pops the server's ``AsyncExitStack`` from ``_mcp_stacks`` and schedules async cleanup.
     2. Unregisters all tools/resources/prompts for that server.
     3. Resets ``_mcp_connected`` so ``connect_missing_servers`` will attempt reconnection.
     """
     stack = state._mcp_stacks.pop(server_name, None)
     if stack is not None:
-        # Schedule the async cleanup; we can't await here (called from sync callback context)
+        # Schedule the async cleanup via loop.create_task since we already
+        # popped the stack — close it directly via a local async closure.
+        async def _close_popped(stack: AsyncExitStack, server_name: str) -> None:
+            try:
+                await stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_close_server_stack(stack, server_name))
+            loop.create_task(_close_popped(stack, server_name))
         except RuntimeError:
-            # No running loop — best-effort sync close
+            # No running loop (e.g. called from sync context) — fire-and-forget
+            # cleanup in a new loop.
             with suppress(Exception):
-                import asyncio as _aio
-                _aio.run(_close_server_stack(stack, server_name))
+                asyncio.run(_close_popped(stack, server_name))
     removed = _unregister_server_tools(state, registry, server_name)
     state._mcp_connected = bool(state._mcp_stacks)
     logger.info(
@@ -791,12 +766,18 @@ def mark_server_disconnected(state: Any, registry: ToolRegistry, server_name: st
     )
 
 
-async def _close_server_stack(stack: AsyncExitStack, server_name: str) -> None:
-    """Close an MCP server exit stack, swallowing cleanup errors."""
-    try:
-        await stack.aclose()
-    except (RuntimeError, BaseExceptionGroup):
-        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+async def _close_server(state: Any, server_name: str) -> None:
+    """Close an MCP server's exit stack, swallowing cleanup errors.
+
+    Used during graceful shutdown (disconnect_all_servers) and by
+    connect_missing_servers to close stale connections before reconnecting.
+    """
+    stack = state._mcp_stacks.pop(server_name, None)
+    if stack is not None:
+        try:
+            await stack.aclose()
+        except (RuntimeError, BaseExceptionGroup):
+            logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
 
 
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
@@ -1001,11 +982,3 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
     return removed
 
 
-async def _close_server(state: Any, server_name: str) -> None:
-    stack = state._mcp_stacks.pop(server_name, None)
-    if stack is None:
-        return
-    try:
-        await stack.aclose()
-    except (RuntimeError, BaseExceptionGroup):
-        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
