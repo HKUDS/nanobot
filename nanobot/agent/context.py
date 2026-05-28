@@ -3,8 +3,6 @@
 import base64
 import mimetypes
 import platform
-from contextlib import suppress
-from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -12,12 +10,13 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.bus.events import InboundMessage
 from nanobot.apps.cli import utils as cli_app_utils
+from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
     detect_image_mime,
+    load_bundled_template,
     truncate_text,
 )
 from nanobot.utils.prompt_templates import render_template
@@ -171,10 +170,9 @@ class ContextBuilder:
     @staticmethod
     def _is_template_content(content: str, template_path: str) -> bool:
         """Check if *content* is identical to the bundled template (user hasn't customized it)."""
-        with suppress(Exception):
-            tpl = pkg_files("nanobot") / "templates" / template_path
-            if tpl.is_file():
-                return content.strip() == tpl.read_text(encoding="utf-8").strip()
+        tpl = load_bundled_template(template_path)
+        if tpl is not None:
+            return content.strip() == tpl.strip()
         return False
 
     def build_messages(

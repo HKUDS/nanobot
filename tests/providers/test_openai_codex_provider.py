@@ -76,8 +76,8 @@ async def test_codex_request_non_200_populates_http_metadata(monkeypatch) -> Non
             request=request,
         )
 
-    def fake_client(*, timeout: float, verify: bool) -> httpx.AsyncClient:
-        assert timeout == 60.0
+    def fake_client(*, timeout: int, verify: bool) -> httpx.AsyncClient:
+        assert timeout == 90
         assert verify is True
         return original_client(transport=httpx.MockTransport(handler), timeout=timeout)
 
@@ -93,6 +93,27 @@ async def test_codex_request_non_200_populates_http_metadata(monkeypatch) -> Non
     assert error.error_type == "rate_limit_exceeded"
     assert error.error_code == "rate_limit_exceeded"
     assert error.should_retry is True
+
+
+@pytest.mark.asyncio
+async def test_codex_request_honors_stream_idle_timeout_env(monkeypatch) -> None:
+    """NANOBOT_STREAM_IDLE_TIMEOUT_S overrides the default Codex stream timeout."""
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "5")
+    original_client = httpx.AsyncClient
+    seen: dict[str, int] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request)
+
+    def fake_client(*, timeout: int, verify: bool) -> httpx.AsyncClient:
+        seen["timeout"] = timeout
+        return original_client(transport=httpx.MockTransport(handler), timeout=timeout)
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.httpx.AsyncClient", fake_client)
+
+    await _request_codex("https://codex.example/responses", {}, {"input": []}, verify=True)
+
+    assert seen["timeout"] == 5
 
 
 @pytest.mark.asyncio
