@@ -55,14 +55,23 @@ async def test_protected_patterns_match_nested_paths(tmp_path: Path) -> None:
 # --- Memory size limits ---
 
 
-def test_memory_truncates_at_limit(tmp_path: Path) -> None:
+def test_memory_kept_whole_on_disk_truncated_only_in_context(tmp_path: Path) -> None:
+    """M2: writing >MAX_MEMORY_LINES no longer drops content on disk; only the
+    copy injected via get_memory_context is capped, with a marker pointing the
+    agent at the full file. See vault/typed-memory-port-from-openclaw.md."""
     store = MemoryStore(tmp_path)
     big_content = "\n".join(f"line {i}" for i in range(300))
     store.write_long_term(big_content)
 
+    # On-disk file is untouched.
     saved = store.read_long_term()
-    assert "[Truncated" in saved
-    assert saved.count("\n") <= store._MAX_MEMORY_LINES + 5
+    assert saved == big_content
+    assert "Truncated" not in saved
+
+    # Injected copy is capped with a clear marker.
+    injected = store.get_memory_context()
+    assert "Context-truncated" in injected
+    assert "memory/MEMORY.md" in injected
 
 
 def test_history_trims_oldest_entries(tmp_path: Path) -> None:

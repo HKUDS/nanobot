@@ -101,12 +101,10 @@ class MemoryStore:
         return ""
 
     def write_long_term(self, content: str) -> None:
-        lines = content.splitlines()
-        if len(lines) > self._MAX_MEMORY_LINES:
-            logger.warning(
-                "Memory truncated: {} lines exceeds limit of {}", len(lines), self._MAX_MEMORY_LINES
-            )
-            content = "\n".join(lines[: self._MAX_MEMORY_LINES]) + "\n\n[Truncated — memory exceeds limit]"
+        """Persist MEMORY.md to disk in full. The injected copy is capped
+        separately by `get_memory_context`; the on-disk file is the source of
+        truth and never silently truncated.
+        """
         self.memory_file.write_text(content, encoding="utf-8")
 
     def append_history(self, entry: str) -> None:
@@ -123,8 +121,23 @@ class MemoryStore:
                 self.history_file.write_text(trimmed + "\n", encoding="utf-8")
 
     def get_memory_context(self) -> str:
+        """Return MEMORY.md formatted for system-prompt injection. The on-disk
+        file is the source of truth; if it exceeds the injection cap, return a
+        truncated copy with a marker pointing the agent at the full file."""
         long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+        if not long_term:
+            return ""
+        lines = long_term.splitlines()
+        if len(lines) > self._MAX_MEMORY_LINES:
+            kept = "\n".join(lines[: self._MAX_MEMORY_LINES])
+            dropped = len(lines) - self._MAX_MEMORY_LINES
+            marker = (
+                f"\n\n[Context-truncated — showing first {self._MAX_MEMORY_LINES} of "
+                f"{len(lines)} lines. {dropped} lines remain on disk in "
+                f"`memory/MEMORY.md` (read with read_file if needed).]"
+            )
+            return f"## Long-term Memory\n{kept}{marker}"
+        return f"## Long-term Memory\n{long_term}"
 
     async def consolidate(
         self,
