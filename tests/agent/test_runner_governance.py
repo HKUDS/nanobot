@@ -105,6 +105,60 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
     assert trimmed[0]["role"] == "system"
     non_system = [m for m in trimmed if m["role"] != "system"]
     assert non_system[0]["role"] == "user", f"Expected user after system, got {non_system[0]['role']}"
+
+
+def test_snip_history_reserves_budget_for_tool_definitions(monkeypatch):
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "large_tool"}}]
+    runner = AgentRunner(provider)
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {"role": "assistant", "content": "old assistant"},
+        {"role": "user", "content": "recent one"},
+        {"role": "assistant", "content": "recent answer"},
+        {"role": "user", "content": "recent two"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=500,
+    )
+
+    def _estimate(_provider, _model, estimate_messages, estimate_tools):
+        if estimate_messages == messages:
+            return 1000, None
+        assert estimate_messages == [{"role": "system", "content": "system"}]
+        assert estimate_tools == tools.get_definitions.return_value
+        return 350, None
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", _estimate)
+    token_sizes = {
+        "system": 50,
+        "old user": 200,
+        "old assistant": 200,
+        "recent one": 200,
+        "recent answer": 200,
+        "recent two": 200,
+    }
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_message_tokens",
+        lambda msg: token_sizes.get(str(msg.get("content")), 40),
+    )
+
+    trimmed = runner._snip_history(spec, messages)
+
+    contents = [message.get("content") for message in trimmed]
+    assert contents == ["system", "recent two"]
+
+
 async def test_backfill_missing_tool_results_inserts_error():
     """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
     from nanobot.agent.runner import AgentRunner, _BACKFILL_CONTENT

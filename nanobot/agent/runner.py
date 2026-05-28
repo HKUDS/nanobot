@@ -1273,7 +1273,13 @@ class AgentRunner:
             return messages
 
         system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
-        remaining_budget = max(128, budget - system_tokens)
+        fixed_tokens, _ = estimate_prompt_tokens_chain(
+            self.provider,
+            spec.model,
+            system_messages,
+            spec.tools.get_definitions(),
+        )
+        remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
         kept: list[dict[str, Any]] = []
         kept_tokens = 0
         for message in reversed(non_system):
