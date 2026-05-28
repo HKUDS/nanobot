@@ -771,6 +771,38 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Preparing file edit…")).toBeInTheDocument();
   });
 
+  it("shows the reason when a file edit fails", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [{
+            call_id: "call-patch",
+            tool: "apply_patch",
+            path: "angry-birds.html",
+            phase: "error",
+            added: 0,
+            deleted: 0,
+            approximate: false,
+            status: "error",
+            error: "Error applying patch: old_text not found in angry-birds.html",
+          }],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /failed angry-birds\.html/i }));
+
+    expect(screen.getByText("Target text was not found in angry-birds.html.")).toBeInTheDocument();
+  });
+
   it("merges repeated edits for the same path and lets successful edits win over failures", async () => {
     const restoreMotion = installReducedMotion();
     try {

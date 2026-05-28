@@ -1525,6 +1525,23 @@ function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): 
   return edit.added > 0 || edit.deleted > 0;
 }
 
+function formatFileEditError(error?: string): string {
+  const firstLine = (error || "").replace(/\s+/g, " ").trim();
+  if (!firstLine) return "";
+  const cleaned = firstLine
+    .replace(/^Error applying patch:\s*/i, "")
+    .replace(/^Error writing file:\s*/i, "")
+    .replace(/^Error editing file:\s*/i, "")
+    .replace(/^Error:\s*/i, "");
+
+  return cleaned
+    .replace(/^old_text not found in (.+)$/i, "Target text was not found in $1.")
+    .replace(/^old_text appears multiple times in (.+)$/i, "Target text matched multiple places in $1.")
+    .replace(/^file to (?:update|delete) does not exist: (.+)$/i, "File does not exist: $1.")
+    .replace(/^path to (?:update|delete) is not a file: (.+)$/i, "Path is not a file: $1.")
+    .slice(0, 180);
+}
+
 function CliRunGroup({
   runs,
   active,
@@ -1758,8 +1775,15 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
+  const failureDetail = failed
+    ? formatFileEditError(edit.error)
+      || t("message.fileEditFailedFallback", { defaultValue: "File change was not applied." })
+    : "";
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-0.5 text-xs">
+    <li
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-0.5 text-xs"
+      title={failureDetail || edit.absolute_path || edit.path}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <span className="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground/50">
           {failed ? (
@@ -1789,8 +1813,8 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
           />
         )}
         {failed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-destructive/75">
-            {t("message.fileEditFailed", { defaultValue: "Failed" })}
+          <span className="min-w-0 truncate text-[11px] leading-4 text-destructive/75">
+            {failureDetail}
           </span>
         ) : null}
       </div>
