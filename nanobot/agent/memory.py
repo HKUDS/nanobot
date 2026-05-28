@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,8 +44,19 @@ _SAVE_MEMORY_TOOL = [
 ]
 
 
+_DAILY_FILE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
+
+
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+    """Three-layer memory:
+    - MEMORY.md   — long-term durable facts (LLM-curated, may compress)
+    - HISTORY.md  — paragraph-per-consolidation log (LLM-summarised, FIFO-capped)
+    - memory/YYYY-MM-DD.md — daily notes (raw consolidated message windows, append-only)
+
+    Daily notes back up the lossy summariser: if MEMORY.md / HISTORY.md lose a
+    specific, the verbatim text is still on disk and queryable via the
+    memory_search / memory_get tools.
+    """
 
     _MAX_MEMORY_LINES = 200
     _MAX_HISTORY_LINES = 500
@@ -52,6 +65,35 @@ class MemoryStore:
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+
+    def _daily_file(self, when: datetime | None = None) -> Path:
+        when = when or datetime.now()
+        return self.memory_dir / f"{when.strftime('%Y-%m-%d')}.md"
+
+    def write_daily(self, entry: str, when: datetime | None = None) -> Path:
+        """Append a heading-tagged entry to today's daily notes file. Returns the file path."""
+        when = when or datetime.now()
+        path = self._daily_file(when)
+        header = f"## {when.strftime('%Y-%m-%d %H:%M')} — consolidation"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{header}\n\n{entry.rstrip()}\n\n")
+        return path
+
+    def list_daily_files(self, days: int = 30) -> list[Path]:
+        """Return daily-note paths within the last `days` calendar days, newest first."""
+        cutoff = datetime.now().date().toordinal() - max(0, days - 1)
+        out: list[Path] = []
+        for p in self.memory_dir.iterdir():
+            if not (p.is_file() and _DAILY_FILE_RE.match(p.name)):
+                continue
+            try:
+                d = datetime.strptime(p.stem, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if d.toordinal() >= cutoff:
+                out.append(p)
+        out.sort(key=lambda p: p.stem, reverse=True)
+        return out
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -118,6 +160,15 @@ class MemoryStore:
                 continue
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+
+        # Append raw consolidated window to today's daily note BEFORE the LLM call.
+        # If the LLM consolidation fails (it has — see vault/typed-memory-port-from-openclaw.md)
+        # the verbatim text is still on disk, queryable via memory_search / memory_get.
+        if lines:
+            try:
+                self.write_daily(f"session={session.key}\n\n" + "\n".join(lines))
+            except Exception:
+                logger.exception("Failed to write daily note (continuing with consolidation)")
 
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
