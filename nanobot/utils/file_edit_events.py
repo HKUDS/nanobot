@@ -457,14 +457,14 @@ class StreamingFileEditTracker:
             segment_end = path_matches[i + 1].start() if i + 1 < len(path_matches) else len(state.arguments)
             segment = state.arguments[segment_start:segment_end]
 
-            action_match = re.search(r'"action"\s*:\s*"(replace|add|delete)"', segment)
+            action_match = re.search(r'"action"\s*:\s*"(replace|add)"', segment)
             action = action_match.group(1) if action_match else "replace"
 
             old_text = _extract_json_string_prefix(segment, "old_text") or ""
             new_text = _extract_json_string_prefix(segment, "new_text") or ""
 
             added = _text_line_count(new_text) if action in ("replace", "add") else 0
-            deleted = _text_line_count(old_text) if action in ("replace", "delete") else 0
+            deleted = _text_line_count(old_text) if action == "replace" else 0
 
             file_state = state.patch_files.get(raw_path)
             if file_state is None:
