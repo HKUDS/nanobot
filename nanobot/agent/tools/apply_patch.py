@@ -88,15 +88,15 @@ def _format_summary(summary: _PatchSummary) -> str:
             items=ObjectSchema(
                 path=StringSchema("Relative path to the file to edit."),
                 action=StringSchema(
-                    "Operation type: replace, add, delete, or delete_file.",
-                    enum=["replace", "add", "delete", "delete_file"],
+                    "Operation type: replace, add, or delete.",
+                    enum=["replace", "add", "delete"],
                 ),
                 old_text=StringSchema(
-                    "Exact text to search for in the file. Required for replace and delete; not used for delete_file.",
+                    "Exact text to search for in the file. Required for replace and delete.",
                     nullable=True,
                 ),
                 new_text=StringSchema(
-                    "Text to replace with or append. Required for replace and add; not used for delete_file.",
+                    "Text to replace with or append. Required for replace and add.",
                     nullable=True,
                 ),
                 required=["path", "action"],
@@ -125,8 +125,7 @@ class ApplyPatchTool(_FsTool):
         return (
             "Default tool for code edits. Supports multi-file changes in a single call. "
             "Provide a list of structured edits, each specifying a file path, action "
-            "(replace/add/delete/delete_file), and the text to change when needed. "
-            "Use delete_file to remove an entire obsolete file. "
+            "(replace/add/delete), and the exact text to change. "
             "Paths must be relative. Set dry_run=true to validate and preview without writing files. "
             "Use edit_file only for small exact replacements on a single file."
         )
@@ -256,38 +255,24 @@ class ApplyPatchTool(_FsTool):
                         )
                     )
 
-                elif action in {"delete", "delete_file"}:
-                    delete_file = action == "delete_file"
+                elif action == "delete":
                     old_text = edit.get("old_text") or ""
-                    if not delete_file and not old_text:
+                    if not old_text:
                         raise _PatchError(f"old_text required for delete: {path}")
 
                     pending = writes.get(source)
-                    target = "delete" if delete_file else "update"
                     if pending is not None:
-                        content: str | None = pending
+                        content = pending
                     elif source.exists():
                         if not source.is_file():
-                            raise _PatchError(f"path to {target} is not a file: {path}")
+                            raise _PatchError(f"path to update is not a file: {path}")
                         try:
                             content = source.read_bytes().decode("utf-8")
                         except UnicodeDecodeError:
-                            if delete_file:
-                                content = None
-                            else:
-                                raise _PatchError(f"file is not UTF-8 text: {path}")
+                            raise _PatchError(f"file is not UTF-8 text: {path}")
                     else:
-                        raise _PatchError(f"file to {target} does not exist: {path}")
+                        raise _PatchError(f"file to update does not exist: {path}")
 
-                    if delete_file:
-                        deletes.add(source)
-                        writes.pop(source, None)
-                        summaries.append(_PatchSummary(
-                            action="delete", path=path, deleted=_text_line_count(content or "")
-                        ))
-                        continue
-
-                    assert content is not None
                     uses_crlf = "\r\n" in content
                     norm_content = content.replace("\r\n", "\n")
                     norm_old = old_text.replace("\r\n", "\n")

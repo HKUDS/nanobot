@@ -131,7 +131,7 @@ def test_apply_patch_edits_delete_entire_file(tmp_path):
     assert not target.exists()
 
 
-def test_apply_patch_edits_delete_file_without_full_contents(tmp_path):
+def test_apply_patch_rejects_delete_file_action(tmp_path):
     target = tmp_path / "obsolete.txt"
     target.write_text("remove me\nwithout matching the full file\n", encoding="utf-8")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -147,29 +147,8 @@ def test_apply_patch_edits_delete_file_without_full_contents(tmp_path):
         )
     )
 
-    assert "delete obsolete.txt" in result
-    assert "(+0/-2)" in result
-    assert not target.exists()
-
-
-def test_apply_patch_edits_delete_file_rejects_directory(tmp_path):
-    target = tmp_path / "src"
-    target.mkdir()
-    tool = ApplyPatchTool(workspace=tmp_path)
-
-    result = asyncio.run(
-        tool.execute(
-            edits=[
-                {
-                    "path": "src",
-                    "action": "delete_file",
-                }
-            ]
-        )
-    )
-
-    assert "path to delete is not a file: src" in result
-    assert target.is_dir()
+    assert "unknown action: delete_file" in result
+    assert target.exists()
 
 
 def test_apply_patch_edits_delete_substring_with_surrounding_whitespace(tmp_path):

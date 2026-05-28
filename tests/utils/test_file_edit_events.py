@@ -95,7 +95,7 @@ def test_apply_patch_prepares_trackers_for_each_touched_file(tmp_path: Path) -> 
         {"path": "src/new.py", "action": "add", "new_text": "fresh"},
         {"path": "src/existing.py", "action": "replace", "old_text": "old", "new_text": "new"},
         {"path": "src/delete_me.py", "action": "delete", "old_text": "gone\n"},
-        {"path": "src/delete_whole.py", "action": "delete_file"},
+        {"path": "src/delete_whole.py", "action": "delete", "old_text": "gone\nfor good\n"},
     ]
 
     trackers = prepare_file_edit_trackers(
@@ -223,7 +223,7 @@ def test_streaming_apply_patch_tracker_emits_live_counts_per_file(tmp_path: Path
             "arguments_delta": (
                 '{"edits":[{"path":"src/existing.py","action":"replace","old_text":"old","new_text":"new"}'
                 ',{"path":"src/new.py","action":"add","new_text":"fresh"}'
-                ',{"path":"src/remove.py","action":"delete_file"}]}'
+                ',{"path":"src/remove.py","action":"delete","old_text":"old\\nremove\\n"}]}'
             ),
         })
 
@@ -236,7 +236,6 @@ def test_streaming_apply_patch_tracker_emits_live_counts_per_file(tmp_path: Path
     assert (by_path["src/existing.py"]["added"], by_path["src/existing.py"]["deleted"]) == (1, 1)
     assert (by_path["src/new.py"]["added"], by_path["src/new.py"]["deleted"]) == (1, 0)
     assert (by_path["src/remove.py"]["added"], by_path["src/remove.py"]["deleted"]) == (0, 2)
-    assert by_path["src/remove.py"]["operation"] == "delete"
 
 
 def test_streaming_apply_patch_tracker_skips_dry_run(tmp_path: Path) -> None:

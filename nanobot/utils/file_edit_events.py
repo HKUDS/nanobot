@@ -457,7 +457,7 @@ class StreamingFileEditTracker:
             segment_end = path_matches[i + 1].start() if i + 1 < len(path_matches) else len(state.arguments)
             segment = state.arguments[segment_start:segment_end]
 
-            action_match = re.search(r'"action"\s*:\s*"(replace|add|delete|delete_file)"', segment)
+            action_match = re.search(r'"action"\s*:\s*"(replace|add|delete)"', segment)
             action = action_match.group(1) if action_match else "replace"
 
             old_text = _extract_json_string_prefix(segment, "old_text") or ""
@@ -465,7 +465,6 @@ class StreamingFileEditTracker:
 
             added = _text_line_count(new_text) if action in ("replace", "add") else 0
             deleted = _text_line_count(old_text) if action in ("replace", "delete") else 0
-            delete_file = action in {"delete", "delete_file"}
 
             file_state = state.patch_files.get(raw_path)
             if file_state is None:
@@ -478,8 +477,6 @@ class StreamingFileEditTracker:
                 )
                 file_state = _StreamingPatchFileState(tracker=tracker)
                 state.patch_files[raw_path] = file_state
-            if delete_file and added == 0 and deleted == 0 and file_state.tracker.before.countable:
-                deleted = _text_line_count(file_state.tracker.before.text or "")
             if not file_state.should_emit(added, deleted, now):
                 continue
             file_state.mark_emitted(added, deleted, now)
@@ -487,7 +484,6 @@ class StreamingFileEditTracker:
                 file_state.tracker,
                 added=added,
                 deleted=deleted,
-                operation="delete" if action == "delete_file" else None,
             ))
         if events:
             await self._emit(events)
