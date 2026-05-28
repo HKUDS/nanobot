@@ -124,7 +124,7 @@ class AgentLoop:
         self._register_default_tools()
 
     _PROTECTED_FILES = [
-        "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md",
+        "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md", "MEMORY_SCHEMA.md",
     ]
 
     def _register_default_tools(self) -> None:

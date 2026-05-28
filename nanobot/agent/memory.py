@@ -107,6 +107,100 @@ class MemoryStore:
         """
         self.memory_file.write_text(content, encoding="utf-8")
 
+    # ---- M4: section-aware operations ---------------------------------------
+    # MEMORY.md sections are marked by ## headings. The heading text (after
+    # stripping any "(annotation)" suffix) is the section name. A section runs
+    # from its heading to the next ## heading or EOF. Section names are
+    # case-insensitive but preserved on round-trip.
+
+    PINNED_SECTION = "Pinned"
+
+    def _parse_sections(self, content: str) -> list[tuple[str, str, str]]:
+        """Split content into (heading_line, name_lower, body) tuples.
+
+        The first chunk (before any ##) is returned with heading_line="" and
+        name_lower="" so callers can re-emit pre-section content verbatim.
+        """
+        if not content:
+            return []
+        heading_re = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+        positions = [(m.start(), m.group(0), m.group(1)) for m in heading_re.finditer(content)]
+        if not positions:
+            return [("", "", content)]
+        out: list[tuple[str, str, str]] = []
+        first_start = positions[0][0]
+        if first_start > 0:
+            out.append(("", "", content[:first_start]))
+        for i, (start, heading_line, raw_name) in enumerate(positions):
+            end = positions[i + 1][0] if i + 1 < len(positions) else len(content)
+            # body excludes the heading line itself
+            heading_end = content.find("\n", start)
+            body_start = heading_end + 1 if heading_end != -1 else end
+            body = content[body_start:end]
+            # Strip "(annotation)" suffix when matching: "Pinned (do not compress)" → "pinned"
+            normalised = re.sub(r"\s*\(.*\)\s*$", "", raw_name).strip().lower()
+            out.append((heading_line, normalised, body))
+        return out
+
+    def get_section(self, name: str) -> str | None:
+        """Return the body of a section by name (case-insensitive). None if absent."""
+        target = name.strip().lower()
+        for _heading, sec_name, body in self._parse_sections(self.read_long_term()):
+            if sec_name == target:
+                return body
+        return None
+
+    def list_sections(self) -> list[str]:
+        """Return section names (in document order, normalised lowercase). Skips the pre-section preamble."""
+        return [
+            name for _h, name, _body in self._parse_sections(self.read_long_term())
+            if name
+        ]
+
+    def upsert_section(self, name: str, body: str, heading_line: str | None = None) -> None:
+        """Replace section `name` (case-insensitive) in place, or append it if absent.
+        `heading_line` is the literal heading line written to disk (default: '## <name>').
+        Preserves all other sections verbatim.
+        """
+        target = name.strip().lower()
+        heading_line = heading_line or f"## {name.strip()}"
+        # Normalise body so it begins with one blank line and ends with one.
+        body_norm = "\n" + body.strip("\n") + "\n" if body.strip("\n") else "\n"
+
+        parsed = self._parse_sections(self.read_long_term())
+        if not parsed:
+            self.write_long_term(f"{heading_line}\n{body_norm}".rstrip() + "\n")
+            return
+
+        out_parts: list[str] = []
+        found = False
+        for heading, sec_name, sec_body in parsed:
+            if sec_name == target:
+                out_parts.append(f"{heading_line}\n{body_norm}")
+                found = True
+            elif heading == "":  # preamble (pre-section content)
+                out_parts.append(sec_body)
+            else:
+                out_parts.append(f"{heading}\n{sec_body}")
+        if not found:
+            # Append the new section to the end
+            tail = out_parts[-1] if out_parts else ""
+            if tail and not tail.endswith("\n"):
+                out_parts.append("\n")
+            out_parts.append(f"{heading_line}\n{body_norm}")
+
+        self.write_long_term("".join(out_parts).rstrip() + "\n")
+
+    def append_to_section(self, name: str, line: str, heading_line: str | None = None) -> None:
+        """Append a line to a section (creating it if needed)."""
+        existing = self.get_section(name) or ""
+        body = (existing.rstrip() + "\n" + line.rstrip()).lstrip("\n")
+        self.upsert_section(name, body, heading_line=heading_line)
+
+    def get_pinned(self) -> str:
+        """Return the verbatim body of the Pinned section, or empty string."""
+        return self.get_section(self.PINNED_SECTION) or ""
+
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
@@ -184,6 +278,30 @@ class MemoryStore:
                 logger.exception("Failed to write daily note (continuing with consolidation)")
 
         current_memory = self.read_long_term()
+        # M4: capture the Pinned section verbatim so it survives the LLM rewrite
+        # byte-identically, regardless of what the LLM does. Safety/critical
+        # facts live here precisely so consolidation can't silently smooth them.
+        pinned_before = self.get_pinned()
+        pinned_heading_line = None
+        for heading, sec_name, _body in self._parse_sections(current_memory):
+            if sec_name == self.PINNED_SECTION.lower():
+                pinned_heading_line = heading
+                break
+
+        system_prompt = (
+            "You are a memory consolidation agent. Call the save_memory tool "
+            "with your consolidation of the conversation.\n\n"
+            "RULES:\n"
+            "- The `## Pinned` section (if present) holds facts that MUST NOT "
+            "be modified, summarised, deleted, or paraphrased. Carry it "
+            "through unchanged — same heading, same body, byte-for-byte. The "
+            "system will verify and restore it after your call, so any "
+            "modifications you make are wasted work.\n"
+            "- For everything else: preserve specifics relating to safety, "
+            "health, crises, triggers, coping strategies, clinical guidance, "
+            "and named people/dates verbatim where possible. Compress "
+            "casual/transient context only."
+        )
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
 ## Current Long-term Memory
@@ -195,7 +313,7 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
@@ -223,6 +341,15 @@ class MemoryStore:
                     update = json.dumps(update, ensure_ascii=False)
                 if update != current_memory:
                     self.write_long_term(update)
+                    # M4: force-restore the Pinned section byte-for-byte if it
+                    # existed before. This is the guarantee — the LLM's
+                    # cooperation is hopeful; the post-write restore is firm.
+                    if pinned_before:
+                        self.upsert_section(
+                            self.PINNED_SECTION,
+                            pinned_before,
+                            heading_line=pinned_heading_line,
+                        )
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
