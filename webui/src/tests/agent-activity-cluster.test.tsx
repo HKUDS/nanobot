@@ -433,6 +433,37 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("labels whole-file deletes as deleted instead of edited", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t-delete",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [{
+            call_id: "call-delete",
+            tool: "apply_patch",
+            path: "angry-birds.html",
+            phase: "end",
+            added: 0,
+            deleted: 590,
+            approximate: false,
+            status: "done",
+            operation: "delete",
+          }],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /deleted angry-birds\.html/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edited angry-birds\.html/i })).not.toBeInTheDocument();
+  });
+
   it("renders CLI app runs as dedicated activity rows", () => {
     const line = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
     render(

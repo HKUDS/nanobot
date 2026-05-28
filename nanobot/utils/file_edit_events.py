@@ -299,6 +299,7 @@ def build_file_edit_end_event(
         deleted=deleted,
         approximate=False,
         binary=(after.binary or after.oversized or after.unreadable) and not counted,
+        operation="delete" if tracker.before.exists and not after.exists else None,
     )
 
 
@@ -324,6 +325,7 @@ def build_file_edit_live_event(
     *,
     added: int,
     deleted: int = 0,
+    operation: str | None = None,
 ) -> dict[str, Any]:
     """Build an approximate in-progress event while tool-call arguments stream."""
     return _event_payload(
@@ -333,6 +335,7 @@ def build_file_edit_live_event(
         added=added,
         deleted=deleted,
         approximate=True,
+        operation=operation,
     )
 
 
@@ -484,6 +487,7 @@ class StreamingFileEditTracker:
                 file_state.tracker,
                 added=added,
                 deleted=deleted,
+                operation="delete" if action == "delete_file" else None,
             ))
         if events:
             await self._emit(events)
@@ -916,6 +920,7 @@ def _event_payload(
     deleted: int,
     approximate: bool,
     binary: bool = False,
+    operation: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "version": 1,
@@ -931,6 +936,8 @@ def _event_payload(
     }
     if binary:
         payload["binary"] = True
+    if operation:
+        payload["operation"] = operation
     return payload
 
 

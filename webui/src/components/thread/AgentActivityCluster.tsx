@@ -48,6 +48,7 @@ interface ActivityCounts {
   hasDiffStats: boolean;
   hasEditingFiles: boolean;
   hasFailedFiles: boolean;
+  hasDeletedFiles: boolean;
   primaryFilePath?: string;
   primaryFileTooltipPath?: string;
   primaryCliName?: string;
@@ -66,6 +67,7 @@ interface FileEditSummary {
   approximate: boolean;
   binary: boolean;
   status: UIFileEdit["status"];
+  operation?: UIFileEdit["operation"];
   pending: boolean;
   error?: string;
 }
@@ -126,6 +128,7 @@ function countActivity(
   let hasDiffStats = false;
   let hasEditingFiles = false;
   let failedFileCount = 0;
+  let deletedFileCount = 0;
   let primaryFilePath: string | undefined;
   let primaryFileTooltipPath: string | undefined;
   for (const edit of fileEdits) {
@@ -136,6 +139,9 @@ function countActivity(
     }
     if (edit.status === "error") {
       failedFileCount += 1;
+    }
+    if (edit.operation === "delete") {
+      deletedFileCount += 1;
     }
     if (edit.status === "error" || edit.binary) {
       continue;
@@ -158,6 +164,7 @@ function countActivity(
     hasDiffStats,
     hasEditingFiles,
     hasFailedFiles: fileEdits.length > 0 && failedFileCount === fileEdits.length,
+    hasDeletedFiles: fileEdits.length > 0 && deletedFileCount === fileEdits.length,
     primaryFilePath,
     primaryFileTooltipPath,
     primaryCliName,
@@ -217,6 +224,7 @@ export function AgentActivityCluster({
     hasDiffStats,
     hasEditingFiles,
     hasFailedFiles,
+    hasDeletedFiles,
     primaryFilePath,
     primaryFileTooltipPath,
     primaryCliName,
@@ -263,13 +271,13 @@ export function AgentActivityCluster({
     ? hasPendingFileEdit && !singleFilePath
       ? t("message.fileActivityPreparing", { defaultValue: "Preparing edit…" })
       : singleFilePath
-      ? t(fileActivitySummaryKey(hasLiveEditingFiles, hasFailedFiles), {
+      ? t(fileActivitySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
           file: shortFileName(singleFilePath),
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles)} {{file}}`,
+          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{file}}`,
         })
-      : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles), {
+      : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles), {
           count: fileCount,
-          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles)} {{count}} files`,
+          defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles)} {{count}} files`,
         })
     : "";
 
@@ -426,7 +434,7 @@ export function AgentActivityCluster({
           active={isTurnStreaming}
           className="min-w-0"
         >
-          {singleFilePath ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles) : thoughtLabel}
+          {singleFilePath ? fileActivityVerb(hasLiveEditingFiles, hasFailedFiles, hasDeletedFiles) : thoughtLabel}
         </StreamingLabelSheen>
         {singleFilePath ? (
           <FileReferenceChip
@@ -1365,18 +1373,21 @@ function mcpRunLabelDefault(run: McpRunSummary, active: boolean): string {
   return active && run.status === "running" ? "Using" : "Used";
 }
 
-function fileActivityVerb(editing: boolean, failed: boolean): string {
+function fileActivityVerb(editing: boolean, failed: boolean, deleted: boolean): string {
   if (failed) return "Failed";
+  if (deleted) return editing ? "Deleting" : "Deleted";
   return editing ? "Editing" : "Edited";
 }
 
-function fileActivitySummaryKey(editing: boolean, failed: boolean): string {
+function fileActivitySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
   if (failed) return "message.fileActivityFailedOne";
+  if (deleted) return editing ? "message.fileActivityDeletingOne" : "message.fileActivityDeletedOne";
   return editing ? "message.fileActivityEditingOne" : "message.fileActivityEditedOne";
 }
 
-function fileActivityManySummaryKey(editing: boolean, failed: boolean): string {
+function fileActivityManySummaryKey(editing: boolean, failed: boolean, deleted: boolean): string {
   if (failed) return "message.fileActivityFailedMany";
+  if (deleted) return editing ? "message.fileActivityDeletingMany" : "message.fileActivityDeletedMany";
   return editing ? "message.fileActivityEditingMany" : "message.fileActivityEditedMany";
 }
 
@@ -1419,6 +1430,7 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
     hasSuccessfulChange: boolean;
     hasActiveEditing: boolean;
     hasFailed: boolean;
+    operation?: UIFileEdit["operation"];
     error?: string;
   }
 
@@ -1440,6 +1452,7 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
         hasSuccessfulChange: false,
         hasActiveEditing: false,
         hasFailed: false,
+        operation: undefined,
       };
       byPath.set(key, summary);
       order.push(key);
@@ -1450,6 +1463,9 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
     }
     if (edit.absolute_path) {
       summary.absolute_path = edit.absolute_path;
+    }
+    if (edit.operation === "delete") {
+      summary.operation = "delete";
     }
     summary.pending = summary.pending || !!edit.pending || !edit.path;
     if (!edit.path && edit.pending) {
@@ -1515,6 +1531,7 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
       approximate: summary.approximate,
       binary: summary.binary,
       status,
+      operation: summary.operation,
       pending: summary.pending && !summary.path,
       error: summary.error,
     }];
