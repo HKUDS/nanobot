@@ -116,17 +116,17 @@
 
 ### LM2-B Pipeline 骨架
 
-- [ ] `pipeline.py`：`MemoryPipelineManager`（buffer、`every_n`、idle timer、warm-up）
-- [ ] `SerialQueue` 或 `asyncio.Lock` 串行 L1 job
-- [ ] `loop.py`：`_save_turn` 后 `asyncio.create_task(facade.capture_turn(...))`
-- [ ] 单测：mock LLM 下 N 轮触发一次 L1
+- [x] `pipeline.py`：`MemoryPipelineManager`（buffer、`every_n`、idle timer、warm-up）
+- [x] `SerialQueue` 或 `asyncio.Lock` 串行 L1 job
+- [x] `loop.py`：`_save_turn` 后 `asyncio.create_task(facade.capture_turn(...))`
+- [x] 单测：mock LLM 下 N 轮触发一次 L1
 
 ### LM2-C L1 抽取
 
-- [ ] `l1_store.py`：FTS5 `l1_memories`
-- [ ] `l1_extractor.py` + `templates/` 或 `prompts/l1_extraction.md`
-- [ ] `l1_dedup.py`：与已有 atoms 冲突合并/跳过
-- [ ] 单测：fixture 对话 → 抽出 ≥1 atom；重复不双写
+- [x] `l1_store.py`：FTS5 `l1_memories`
+- [x] `l1_extractor.py` + `templates/` 或 `prompts/l1_extraction.md`
+- [x] `l1_dedup.py`：与已有 atoms 冲突合并/跳过
+- [x] 单测：fixture 对话 → 抽出 ≥1 atom；重复不双写
 
 ### LM2-D Recall
 

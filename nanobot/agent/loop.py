@@ -262,7 +262,11 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._evolution = evolution or EvolutionConfig()
         self._layered_memory = layered_memory or LayeredMemoryConfig()
-        self._layered_memory_facade = LayeredMemoryFacade(workspace, self._layered_memory)
+        self._layered_memory_facade = LayeredMemoryFacade(
+            workspace,
+            self._layered_memory,
+            provider=provider,
+        )
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
@@ -1285,6 +1289,11 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        if self._layered_memory.capture_enabled():
+            try:
+                await self._layered_memory_facade.shutdown_pipeline()
+            except Exception:
+                logger.exception("layered_memory pipeline shutdown failed")
         for name, stack in self._mcp_stacks.items():
             try:
                 await stack.aclose()

@@ -10,7 +10,9 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.layered_memory.l0_store import L0Store
+from nanobot.agent.layered_memory.l1_extractor import L1Extractor
 from nanobot.agent.layered_memory.offload.canvas import TaskCanvas, format_canvas_runtime_lines
+from nanobot.agent.layered_memory.pipeline import L1JobHandler, MemoryPipelineManager
 from nanobot.agent.layered_memory.sanitize import sanitize_turn_messages
 from nanobot.agent.layered_memory.offload.node_registry import (
     NodeRegistry,
@@ -18,7 +20,7 @@ from nanobot.agent.layered_memory.offload.node_registry import (
     tool_result_char_len,
 )
 from nanobot.config.schema import LayeredMemoryConfig
-from nanobot.providers.base import ToolCallRequest
+from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import persist_path_from_tool_content
 
 
@@ -35,13 +37,24 @@ class LayeredMemoryFacade:
     LM0-C：如果配置未开启则直接空操作。LM1及以上由子模块具体实现。
     """
 
-    __slots__ = ("_config", "_l0_store", "_offload_tool_counts", "_workspace")
+    __slots__ = ("_config", "_l0_store", "_offload_tool_counts", "_pipeline", "_workspace")
 
-    def __init__(self, workspace: Path, config: LayeredMemoryConfig | None = None) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        config: LayeredMemoryConfig | None = None,
+        *,
+        provider: LLMProvider | None = None,
+        l1_handler: L1JobHandler | None = None,
+    ) -> None:
         self._workspace = workspace
         self._config = config or LayeredMemoryConfig()
         self._offload_tool_counts: dict[str, int] = {}
         self._l0_store = L0Store(workspace)
+        handler = l1_handler
+        if handler is None and provider is not None and self._config.enable:
+            handler = L1Extractor(workspace, self._config, provider, l0_store=self._l0_store).run
+        self._pipeline = MemoryPipelineManager(self._config, l1_handler=handler)
 
     @property
     def workspace(self) -> Path:
@@ -128,8 +141,17 @@ class LayeredMemoryFacade:
                 session_key,
                 inserted,
             )
+            await self._pipeline.notify_turn(
+                session_key,
+                turn_id=turn_id,
+                is_subagent=is_subagent,
+            )
         except Exception:
             logger.exception("layered_memory capture_turn failed for {}", session_key)
+
+    async def shutdown_pipeline(self) -> None:
+        """Flush pending pipeline buffers (gateway shutdown)."""
+        await self._pipeline.close()
 
     def register_tool_result(
         self,

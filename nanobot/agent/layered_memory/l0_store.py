@@ -23,6 +23,20 @@ class L0Checkpoint:
     enabled_at: float
 
 
+@dataclass(frozen=True)
+class L0MessageRecord:
+    """One sanitized L0 row (includes sqlite ``id`` for L1 provenance)."""
+
+    id: int
+    session_key: str
+    turn_id: str
+    role: str
+    name: str | None
+    tool_call_id: str | None
+    content: str
+    timestamp_ms: int
+
+
 class L0Store:
     """Append-only L0 message store at ``{workspace}/.nanobot/memory.sqlite``."""
 
@@ -98,6 +112,52 @@ class L0Store:
             ).fetchone()
         return int(row["n"]) if row is not None else 0
 
+    def fetch_for_turns(
+        self,
+        session_key: str,
+        turn_ids: tuple[str, ...],
+    ) -> list[L0MessageRecord]:
+        """Return L0 rows for ``turn_ids`` in chronological order."""
+        if not turn_ids:
+            return []
+        placeholders = ",".join("?" * len(turn_ids))
+        rows = self._connect().execute(
+            f"""
+            SELECT id, session_key, turn_id, role, name, tool_call_id,
+                   content, timestamp_ms
+            FROM l0_messages
+            WHERE session_key = ? AND turn_id IN ({placeholders})
+            ORDER BY timestamp_ms ASC, id ASC
+            """,
+            (session_key, *turn_ids),
+        ).fetchall()
+        return [L0Store._row_to_record(row) for row in rows]
+
+    def fetch_recent_turns(
+        self,
+        session_key: str,
+        turn_count: int,
+    ) -> list[L0MessageRecord]:
+        """Return messages from the last ``turn_count`` distinct non-empty turn_ids."""
+        if turn_count <= 0:
+            return []
+        conn = self._connect()
+        turn_rows = conn.execute(
+            """
+            SELECT turn_id
+            FROM l0_messages
+            WHERE session_key = ? AND turn_id != ''
+            GROUP BY turn_id
+            ORDER BY MAX(timestamp_ms) DESC, MAX(id) DESC
+            LIMIT ?
+            """,
+            (session_key, turn_count),
+        ).fetchall()
+        turn_ids = tuple(str(row["turn_id"]) for row in turn_rows)
+        if not turn_ids:
+            return []
+        return self.fetch_for_turns(session_key, turn_ids)
+
     def get_checkpoint(self, session_key: str) -> L0Checkpoint | None:
         row = self._connect().execute(
             """
@@ -171,6 +231,19 @@ class L0Store:
                 "INSERT INTO l0_meta (key, value) VALUES (?, ?)",
                 (_META_PLUGIN_START, str(now)),
             )
+
+    @staticmethod
+    def _row_to_record(row: sqlite3.Row) -> L0MessageRecord:
+        return L0MessageRecord(
+            id=int(row["id"]),
+            session_key=str(row["session_key"]),
+            turn_id=str(row["turn_id"]),
+            role=str(row["role"]),
+            name=row["name"],
+            tool_call_id=row["tool_call_id"],
+            content=str(row["content"]),
+            timestamp_ms=int(row["timestamp_ms"]),
+        )
 
     @staticmethod
     def _init_schema(conn: sqlite3.Connection) -> None:

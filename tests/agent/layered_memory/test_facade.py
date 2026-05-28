@@ -84,6 +84,9 @@ async def test_capture_turn_writes_l0_when_enabled(workspace: Path) -> None:
         turn_id="cli:direct:99",
     )
     assert facade._l0_store.count_messages("cli:direct") == 2
+    # Warm-up default: first turn fires L1 immediately; next threshold becomes 2.
+    assert facade._pipeline.session_turns_pending("cli:direct") == 0
+    assert facade._pipeline.session_threshold("cli:direct") == 2
 
 
 def test_register_tool_result_noop(workspace: Path) -> None:
