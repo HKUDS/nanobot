@@ -305,6 +305,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
+        from nanobot.agent.dream_session import dream_session_key, prune_dream_sessions
+
         store = loop.context.memory
         content = ""
         t0 = time.monotonic()
@@ -317,7 +319,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 ))
                 return
             prompt, last_cursor = result
-            resp = await loop.process_direct(prompt, session_key="dream")
+            key = dream_session_key()
+            resp = await loop.process_direct(prompt, session_key=key, ephemeral=True)
             elapsed = time.monotonic() - t0
             if resp is not None:
                 store.set_last_dream_cursor(last_cursor)
@@ -331,6 +334,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
+            prune_dream_sessions(loop.sessions.sessions_dir)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
