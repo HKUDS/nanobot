@@ -137,7 +137,8 @@
       "cliAppsFilter": "CLI 應用篩選",
       "engine": "引擎",
       "logs": "日誌",
-      "diagnostics": "診斷"
+      "diagnostics": "診斷",
+      "contextWindow": "上下文視窗"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
@@ -175,7 +176,8 @@
       "logs": "開啟App引擎日誌資料夾。",
       "diagnostics": "匯出一份供支援排查用的執行階段報告。",
       "localServiceAccessNative": "允許完全存取模式下的 shell 命令存取這台 Mac 上的服務。",
-      "webuiDefaultAccessNative": "用於沒有單獨選擇權限的原生 App 對話。"
+      "webuiDefaultAccessNative": "用於沒有單獨選擇權限的原生 App 對話。",
+      "contextWindow": "選擇這個模型設定預設使用的上下文預算。"
     },
     "values": {
       "light": "淺色",

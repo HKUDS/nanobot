@@ -139,6 +139,7 @@ interface AgentSettingsDraft {
   provider: string;
   modelPreset: string;
   presetLabel: string;
+  contextWindowTokens: number;
   timezone: string;
   botName: string;
   botIcon: string;
@@ -164,6 +165,7 @@ type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType 
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
+const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -279,6 +281,10 @@ function defaultPreset(payload: SettingsPayload): SettingsPayload["model_presets
   return payload.model_presets.find((preset) => preset.is_default) ?? null;
 }
 
+function normalizeContextWindowTokens(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 65_536;
+}
+
 function editableDefaultProvider(payload: SettingsPayload): string {
   const base = defaultPreset(payload);
   return base?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "";
@@ -373,6 +379,7 @@ export function SettingsView({
     provider: "",
     modelPreset: "default",
     presetLabel: "Default",
+    contextWindowTokens: 65_536,
     timezone: "UTC",
     botName: "nanobot",
     botIcon: "",
@@ -398,6 +405,9 @@ export function SettingsView({
         : activePreset?.provider ?? editableDefaultProvider(payload),
       modelPreset: activePresetName,
       presetLabel: activePreset?.label ?? activePresetName,
+      contextWindowTokens: normalizeContextWindowTokens(
+        activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
+      ),
       timezone: payload.agent.timezone,
       botName: payload.agent.bot_name,
       botIcon: payload.agent.bot_icon,
@@ -533,6 +543,7 @@ export function SettingsView({
       form.modelPreset !== activePresetName ||
       form.model !== selectedPreset.model ||
       form.provider !== selectedProvider ||
+      form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       (!selectedPreset.is_default && form.presetLabel.trim() !== selectedPreset.label)
     );
   }, [form, settings]);
@@ -644,14 +655,23 @@ export function SettingsView({
           label: form.presetLabel.trim(),
           model: form.model,
           provider: form.provider,
+          ...(form.contextWindowTokens !== selectedPreset.context_window_tokens
+            ? { contextWindowTokens: form.contextWindowTokens }
+            : {}),
         });
       } else {
         const defaultModel = defaultPreset(settings)?.model ?? settings.agent.model;
         const defaultProvider = editableDefaultProvider(settings);
+        const defaultContextWindowTokens = normalizeContextWindowTokens(
+          defaultPreset(settings)?.context_window_tokens ?? settings.agent.context_window_tokens,
+        );
         payload = await updateSettings(token, {
           modelPreset: form.modelPreset,
           ...(form.model !== defaultModel ? { model: form.model } : {}),
           ...(form.provider !== defaultProvider ? { provider: form.provider } : {}),
+          ...(form.contextWindowTokens !== defaultContextWindowTokens
+            ? { contextWindowTokens: form.contextWindowTokens }
+            : {}),
         });
       }
       applyPayload(payload);
@@ -1876,6 +1896,9 @@ function ModelsSettings({
                     ? editableDefaultProvider(settings)
                     : nextPreset?.provider ?? prev.provider,
                   presetLabel: nextPreset?.label ?? modelPreset,
+                  contextWindowTokens: normalizeContextWindowTokens(
+                    nextPreset?.context_window_tokens ?? prev.contextWindowTokens,
+                  ),
                 }));
               }}
               onCreateConfiguration={onCreateConfiguration}
@@ -1895,49 +1918,73 @@ function ModelsSettings({
               />
             </SettingsRow>
           ) : null}
-              <SettingsRow
-                title={t("settings.rows.provider")}
-                description={t("settings.help.provider")}
+          <SettingsRow
+            title={t("settings.rows.provider")}
+            description={t("settings.help.provider")}
+          >
+            <ProviderPicker
+              providers={providerOptions}
+              value={providerValue}
+              emptyLabel={t("settings.byok.noConfiguredProviders")}
+              showProviderLogos={showBrandLogos}
+              onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
+            />
+          </SettingsRow>
+          {selectedProviderNeedsSignIn ? (
+            <SettingsRow
+              title={tx("settings.oauth.signInRequired", "Sign in required")}
+              description={tx(
+                "settings.oauth.signInBeforeSaving",
+                "Sign in before saving this OAuth provider as the active model provider.",
+              )}
+            >
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
+                disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
+                className="rounded-full"
               >
-                <ProviderPicker
-                  providers={providerOptions}
-                  value={providerValue}
-                  emptyLabel={t("settings.byok.noConfiguredProviders")}
-                  showProviderLogos={showBrandLogos}
-                  onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
-                />
-              </SettingsRow>
-              {selectedProviderNeedsSignIn ? (
-                <SettingsRow
-                  title={tx("settings.oauth.signInRequired", "Sign in required")}
-                  description={tx("settings.oauth.signInBeforeSaving", "Sign in before saving this OAuth provider as the active model provider.")}
-                >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => selectedProvider && onProviderOAuthLogin(selectedProvider.name)}
-                    disabled={!selectedProvider?.oauth_login_supported || selectedProviderSigningIn}
-                    className="rounded-full"
-                  >
-                    {selectedProviderSigningIn ? (
-                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                    ) : null}
-                    {selectedProviderSigningIn
-                      ? tx("settings.oauth.signingIn", "Signing in...")
-                      : tx("settings.oauth.signIn", "Sign in")}
-                  </Button>
-                </SettingsRow>
-              ) : null}
-              <SettingsRow
-                title={t("settings.rows.model")}
-                description={t("settings.help.model")}
-              >
-                <Input
-                  value={form.model}
-                  onChange={(event) => setForm((prev) => ({ ...prev, model: event.target.value }))}
-                  className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-                />
-              </SettingsRow>
+                {selectedProviderSigningIn ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : null}
+                {selectedProviderSigningIn
+                  ? tx("settings.oauth.signingIn", "Signing in...")
+                  : tx("settings.oauth.signIn", "Sign in")}
+              </Button>
+            </SettingsRow>
+          ) : null}
+          <SettingsRow
+            title={t("settings.rows.model")}
+            description={t("settings.help.model")}
+          >
+            <Input
+              value={form.model}
+              onChange={(event) => setForm((prev) => ({ ...prev, model: event.target.value }))}
+              className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.contextWindow", "Context window")}
+            description={tx(
+              "settings.help.contextWindow",
+              "Choose the default context budget for this model configuration.",
+            )}
+          >
+            <SegmentedControl
+              value={String(form.contextWindowTokens)}
+              options={CONTEXT_WINDOW_TOKEN_OPTIONS.map((tokens) => ({
+                value: String(tokens),
+                label: tokens === 262_144 ? "256K" : "64K",
+              }))}
+              onChange={(value) =>
+                setForm((prev) => ({
+                  ...prev,
+                  contextWindowTokens: normalizeContextWindowTokens(Number(value)),
+                }))
+              }
+            />
+          </SettingsRow>
           <SettingsFooter
             dirty={dirty}
             saving={saving}
