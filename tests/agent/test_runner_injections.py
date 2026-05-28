@@ -566,10 +566,21 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
     active_pending = asyncio.Queue(maxsize=1)
     loop._pending_queues[session_key] = active_pending
 
-    waiting = asyncio.create_task(
-        loop._dispatch(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="queued"))
-    )
-    await asyncio.sleep(0.05)
+    waiting_at_lock = asyncio.Event()
+    original_acquire = asyncio.Lock.acquire
+
+    async def _patched_acquire(self, *args, **kwargs):
+        if self is lock:
+            waiting_at_lock.set()
+        return await original_acquire(self, *args, **kwargs)
+
+    with patch.object(asyncio.Lock, "acquire", _patched_acquire):
+        waiting = asyncio.create_task(
+            loop._dispatch(
+                InboundMessage(channel="cli", sender_id="u", chat_id="c", content="queued")
+            )
+        )
+        await asyncio.wait_for(waiting_at_lock.wait(), timeout=2.0)
 
     assert loop._pending_queues[session_key] is active_pending
 

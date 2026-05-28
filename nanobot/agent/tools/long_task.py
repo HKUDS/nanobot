@@ -46,6 +46,9 @@ class _GoalToolsMixin(ContextAware):
     def __init__(self, sessions: SessionManager, bus: Any | None = None) -> None:
         self._sessions = sessions
         self._bus = bus
+        # Each subclass gets its own ContextVar so concurrent tasks across
+        # different tool types (LongTaskTool vs CompleteGoalTool) do not
+        # interfere with each other.
         self._request_ctx: ContextVar[RequestContext | None] = ContextVar(
             f"{self.__class__.__name__}_request_ctx",
             default=None,
