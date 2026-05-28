@@ -127,6 +127,109 @@ class SkillRetrievalConfig(Base):
     llm_max_tokens: int = Field(default=256, ge=32, le=4096)  # LLM 检索最大 token 数
 
 
+class LayeredMemoryOffloadConfig(Base):
+    """短期记忆：Task Canvas + node_id（对标 Tencent context offload 顶层）。"""
+
+    enable: bool = False
+    max_canvas_chars: int = Field(default=1500, ge=200, le=8000)
+    max_node_summary_chars: int = Field(default=120, ge=20, le=500)
+    update_canvas_every_n_tools: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+    )  # 0 = 仅 turn 末刷新 canvas.mmd
+
+
+class LayeredMemoryCaptureConfig(Base):
+    """L0 原始对话落盘。"""
+
+    enable: bool = False
+    l0_retention_days: int = Field(default=30, ge=0)  # 0 = 不自动清理
+
+
+class LayeredMemoryPipelineConfig(Base):
+    """L1→L2→L3 异步流水线触发参数。"""
+
+    every_n_conversations: int = Field(default=5, ge=1)
+    enable_warmup: bool = True  # 1→2→4→…→every_n
+    l1_idle_timeout_seconds: int = Field(default=600, ge=0)
+    l2_delay_after_l1_seconds: int = Field(default=90, ge=0)
+    l2_min_interval_seconds: int = Field(default=900, ge=0)
+    l2_max_interval_seconds: int = Field(default=3600, ge=1)
+    session_active_window_hours: int = Field(default=24, ge=1)
+    max_memories_per_session: int = Field(default=20, ge=1)
+    enable_l1_dedup: bool = True
+    extraction_model: str | None = None  # None = 主 agent provider
+
+
+class LayeredMemoryRecallConfig(Base):
+    """Turn 前记忆召回。"""
+
+    enable: bool = False
+    strategy: Literal["fts", "embedding", "hybrid"] = "hybrid"
+    top_k: int = Field(default=8, ge=1, le=50)
+    timeout_ms: int = Field(default=5000, ge=500, le=60_000)
+    max_prepend_chars: int = Field(default=4000, ge=500, le=20_000)
+    max_search_calls_per_turn: int = Field(default=3, ge=1, le=10)
+
+
+class LayeredMemoryEmbeddingConfig(Base):
+    """L1 hybrid 召回可选向量（LM2+）。"""
+
+    enable: bool = False
+    model: str | None = None
+    provider: str = "auto"
+
+
+class LayeredMemorySubagentConfig(Base):
+    """子 agent 默认不启用分层记忆，避免污染主会话画布。"""
+
+    enable_offload: bool = False
+    enable_recall: bool = False
+    enable_capture: bool = False
+
+
+class LayeredMemoryConfig(Base):
+    """分层记忆（L0–L3 + Task Canvas）。详见 ``.agent/layered-memory/design.md``。
+
+    默认全关；与 Context Budget、Evolution 正交。
+    """
+
+    enable: bool = False
+
+    offload: LayeredMemoryOffloadConfig = Field(default_factory=LayeredMemoryOffloadConfig)
+    capture: LayeredMemoryCaptureConfig = Field(default_factory=LayeredMemoryCaptureConfig)
+    pipeline: LayeredMemoryPipelineConfig = Field(default_factory=LayeredMemoryPipelineConfig)
+    recall: LayeredMemoryRecallConfig = Field(default_factory=LayeredMemoryRecallConfig)
+    embedding: LayeredMemoryEmbeddingConfig = Field(
+        default_factory=LayeredMemoryEmbeddingConfig,
+    )
+    subagent: LayeredMemorySubagentConfig = Field(
+        default_factory=LayeredMemorySubagentConfig,
+    )
+
+    def offload_enabled(self, *, is_subagent: bool = False) -> bool:
+        if not self.enable or not self.offload.enable:
+            return False
+        if is_subagent and not self.subagent.enable_offload:
+            return False
+        return True
+
+    def capture_enabled(self, *, is_subagent: bool = False) -> bool:
+        if not self.enable or not self.capture.enable:
+            return False
+        if is_subagent and not self.subagent.enable_capture:
+            return False
+        return True
+
+    def recall_enabled(self, *, is_subagent: bool = False) -> bool:
+        if not self.enable or not self.recall.enable:
+            return False
+        if is_subagent and not self.subagent.enable_recall:
+            return False
+        return True
+
+
 class EvolutionTraceConfig(Base):
     """Turn 执行轨迹存储（PostTask 与 GEPA 共用）。"""
 
@@ -254,6 +357,7 @@ class AgentDefaults(Base):
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
     evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
+    layered_memory: LayeredMemoryConfig = Field(default_factory=LayeredMemoryConfig)
 
 
 class AgentsConfig(Base):

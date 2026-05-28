@@ -37,6 +37,7 @@ from nanobot.agent.evolution.trace_recorder import TraceRecorder
 from nanobot.config.schema import (
     AgentDefaults,
     EvolutionConfig,
+    LayeredMemoryConfig,
     ModelPresetConfig,
     SkillRetrievalConfig,
 )
@@ -196,6 +197,7 @@ class AgentLoop:
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
         evolution: EvolutionConfig | None = None,
+        layered_memory: LayeredMemoryConfig | None = None,
         provider_config: Any | None = None,
         skill_llm_provider: LLMProvider | None = None,
         tools_config: ToolsConfig | None = None,
@@ -257,6 +259,7 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
         self._evolution = evolution or EvolutionConfig()
+        self._layered_memory = layered_memory or LayeredMemoryConfig()
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
@@ -415,6 +418,7 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             skill_retrieval=skill_retrieval,
             evolution=defaults.evolution,
+            layered_memory=defaults.layered_memory,
             provider_config=config,
             skill_llm_provider=skill_llm_provider,
             session_ttl_minutes=defaults.session_ttl_minutes,

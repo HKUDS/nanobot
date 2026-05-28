@@ -35,16 +35,17 @@
 
 ### LM0-A Hook 扩展
 
-- [ ] `nanobot/agent/hook.py`：新增 `async def after_tools(self, context) -> None`（默认 pass）
-- [ ] `CompositeHook`：fan-out `after_tools`
-- [ ] `nanobot/agent/runner.py`：tool 循环结束、`tools_completed` checkpoint 之后 `await hook.after_tools(context)`
-- [ ] `tests/agent/test_agent_hook.py` 或扩展现有 hook 测：after_tools 被调用
+- [x] `nanobot/agent/hook.py`：新增 `async def after_tools(self, context) -> None`（默认 pass）
+- [x] `CompositeHook`：fan-out `after_tools`
+- [x] `nanobot/agent/runner.py`：`tools_completed` 之后、`after_iteration` 之前 `await hook.after_tools`；tool 失败路径同样调用
+- [x] `tests/agent/test_runner_hooks.py`、`test_hook_composite.py`：顺序与 fan-out、错误隔离
 
 ### LM0-B 配置 schema
 
-- [ ] `nanobot/config/schema.py`：`LayeredMemoryConfig` 及子配置（见 design §8）
-- [ ] `AgentDefaults.layeredMemory: LayeredMemoryConfig = Field(default_factory=...)`
-- [ ] `AgentLoop` / CLI：加载并传入 `layered_memory` config
+- [x] `nanobot/config/schema.py`：`LayeredMemoryConfig` 及子配置（见 design §8）
+- [x] `AgentDefaults.layered_memory`（JSON：`layeredMemory`）
+- [x] `AgentLoop.__init__` / `from_config`：传入 `layered_memory`
+- [x] `tests/config/test_layered_memory_config.py`
 
 ### LM0-C 包骨架
 

@@ -368,6 +368,7 @@ class AgentRunner:
                     context.final_content = final_content
                     context.error = error
                     context.stop_reason = stop_reason
+                    await hook.after_tools(context)
                     await hook.after_iteration(context)
                     should_continue, injection_cycles = await self._try_drain_injections(
                         spec, messages, None, injection_cycles,
@@ -388,6 +389,7 @@ class AgentRunner:
                         "pending_tool_calls": [],
                     },
                 )
+                await hook.after_tools(context)
                 empty_content_retries = 0
                 length_recovery_count = 0
                 # Checkpoint 1: drain injections after tools, before next LLM call

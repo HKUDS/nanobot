@@ -68,6 +68,9 @@ async def test_composite_fans_out_all_async_methods():
         async def before_execute_tools(self, context: AgentHookContext) -> None:
             events.append("before_execute_tools")
 
+        async def after_tools(self, context: AgentHookContext) -> None:
+            events.append("after_tools")
+
         async def after_iteration(self, context: AgentHookContext) -> None:
             events.append("after_iteration")
 
@@ -79,6 +82,7 @@ async def test_composite_fans_out_all_async_methods():
     await hook.on_stream(ctx, "hi")
     await hook.on_stream_end(ctx, resuming=True)
     await hook.before_execute_tools(ctx)
+    await hook.after_tools(ctx)
     await hook.after_iteration(ctx)
 
     assert events == [
@@ -87,6 +91,7 @@ async def test_composite_fans_out_all_async_methods():
         "on_stream:hi", "on_stream:hi",
         "on_stream_end:True", "on_stream_end:True",
         "before_execute_tools", "before_execute_tools",
+        "after_tools", "after_tools",
         "after_iteration", "after_iteration",
     ]
 
@@ -114,6 +119,23 @@ async def test_composite_error_isolation_before_iteration():
 
 
 @pytest.mark.asyncio
+async def test_composite_error_isolation_after_tools():
+    calls: list[str] = []
+
+    class Bad(AgentHook):
+        async def after_tools(self, context: AgentHookContext) -> None:
+            raise RuntimeError("after-tools-boom")
+
+    class Good(AgentHook):
+        async def after_tools(self, context: AgentHookContext) -> None:
+            calls.append("good")
+
+    hook = CompositeHook([Bad(), Good()])
+    await hook.after_tools(_ctx())
+    assert calls == ["good"]
+
+
+@pytest.mark.asyncio
 async def test_composite_error_isolation_on_stream():
     calls: list[str] = []
 
@@ -132,7 +154,7 @@ async def test_composite_error_isolation_on_stream():
 
 @pytest.mark.asyncio
 async def test_composite_error_isolation_all_async():
-    """Error isolation for on_stream_end, before_execute_tools, after_iteration."""
+    """Error isolation for on_stream_end, before/after tools, after_iteration."""
     calls: list[str] = []
 
     class Bad(AgentHook):
@@ -141,6 +163,8 @@ async def test_composite_error_isolation_all_async():
         async def on_stream_end(self, context, *, resuming):
             raise RuntimeError("err")
         async def before_execute_tools(self, context):
+            raise RuntimeError("err")
+        async def after_tools(self, context):
             raise RuntimeError("err")
         async def after_iteration(self, context):
             raise RuntimeError("err")
@@ -152,6 +176,8 @@ async def test_composite_error_isolation_all_async():
             calls.append("on_stream_end")
         async def before_execute_tools(self, context):
             calls.append("before_execute_tools")
+        async def after_tools(self, context):
+            calls.append("after_tools")
         async def after_iteration(self, context):
             calls.append("after_iteration")
 
@@ -160,8 +186,15 @@ async def test_composite_error_isolation_all_async():
     await hook.emit_reasoning("test")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
+    await hook.after_tools(ctx)
     await hook.after_iteration(ctx)
-    assert calls == ["emit_reasoning", "on_stream_end", "before_execute_tools", "after_iteration"]
+    assert calls == [
+        "emit_reasoning",
+        "on_stream_end",
+        "before_execute_tools",
+        "after_tools",
+        "after_iteration",
+    ]
 
 
 # ---------------------------------------------------------------------------
