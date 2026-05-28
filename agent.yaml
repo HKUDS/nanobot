@@ -1,0 +1,50 @@
+spec_version: "0.1.0"
+name: nanobot
+version: 0.2.0
+description: >
+  nanobot is an ultra-lightweight, open-source AI agent framework that keeps
+  the core agent loop small and readable. It supports multi-channel deployment
+  (Telegram, Discord, Slack, Feishu, WhatsApp, WeChat, Matrix, DingTalk,
+  email, WebSocket, and more), integrates with any OpenAI-compatible or
+  Anthropic provider, and exposes a rich set of built-in tools — filesystem,
+  shell execution, web search/fetch, MCP servers, cron scheduling, image
+  generation, and subagent spawning. A Dream two-phase memory system and
+  per-session history compaction let it run as a long-lived personal assistant.
+  Ships with a React/TypeScript WebUI and an OpenAI-compatible HTTP API for
+  programmatic access.
+author: HKUDS
+license: MIT
+
+model:
+  preferred: anthropic:claude-sonnet-4-6
+  fallback:
+    - openai:gpt-4o
+    - openai:gpt-4o-mini
+  constraints:
+    max_tokens: 8192
+
+skills:
+  - shell-execution
+  - filesystem
+  - web-search
+  - web-fetch
+  - mcp-servers
+  - cron-scheduling
+  - image-generation
+  - subagent-spawning
+  - dream-memory
+  - long-goal
+
+runtime:
+  max_turns: 100
+  timeout: 600
+
+compliance:
+  risk_tier: standard
+  supervision:
+    human_in_the_loop: destructive
+    kill_switch: true
+  recordkeeping:
+    audit_logging: true
+  data_governance:
+    pii_handling: redact
