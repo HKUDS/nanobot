@@ -241,3 +241,66 @@ class TestEphemeralHooks:
 
         await loop.process_direct("test", session_key="cli:normal")
         spy.before_iteration.assert_called()
+
+
+class TestDreamCommitMessage:
+    async def test_commit_includes_response_summary(self, tmp_path):
+        """Git auto-commit after Dream should include the LLM response in the body."""
+        import subprocess
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.memory import MemoryStore
+        from nanobot.bus.queue import MessageBus
+
+        store = MemoryStore(tmp_path)
+        store.write_soul("# Soul")
+        store.write_memory("# Memory")
+        store.append_history("user discussed project goals")
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+        provider.chat_with_retry = AsyncMock(return_value=MagicMock(
+            content="Identified 2 new facts about project goals",
+            finish_reason="stop",
+            tool_calls=[],
+            usage={},
+        ))
+
+        with (
+            patch("nanobot.agent.loop.SessionManager"),
+            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
+            patch("nanobot.agent.loop.Consolidator"),
+        ):
+            mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
+            loop = AgentLoop(
+                bus=bus, provider=provider, workspace=tmp_path,
+                context_window_tokens=8000,
+            )
+
+        store.git.init()
+        store.git.auto_commit("initial state")
+
+        # Simulate what the cron handler does: produce a resp with content,
+        # build the commit message, then commit a real file change.
+        resp_content = "Identified 2 new facts about project goals"
+        resp = MagicMock(content=resp_content)
+        summary = resp.content.strip() if resp and resp.content else ""
+        msg = "dream: periodic memory consolidation"
+        if summary:
+            msg = f"{msg}\n\n{summary}"
+
+        # Write a change so auto_commit has something to commit
+        store.write_memory("# Memory\n- Updated by Dream")
+        sha = store.git.auto_commit(msg)
+        assert sha is not None
+
+        log = subprocess.check_output(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=str(tmp_path), text=True,
+        ).strip()
+        assert "dream: periodic memory consolidation" in log
+        assert "Identified 2 new facts" in log

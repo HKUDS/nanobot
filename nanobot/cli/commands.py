@@ -987,6 +987,7 @@ def _run_gateway(
             from nanobot.agent.dream_session import dream_session_key, prune_dream_sessions
 
             store = agent.context.memory
+            resp = None
             try:
                 result = store.build_dream_prompt()
                 if result is None:
@@ -1002,7 +1003,11 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             finally:
                 if store.git.is_initialized():
-                    sha = store.git.auto_commit("dream: periodic memory consolidation")
+                    summary = resp.content.strip() if resp and resp.content else ""
+                    msg = "dream: periodic memory consolidation"
+                    if summary:
+                        msg = f"{msg}\n\n{summary}"
+                    sha = store.git.auto_commit(msg)
                     if sha:
                         logger.info("Dream commit: {}", sha)
                 store.compact_history()
