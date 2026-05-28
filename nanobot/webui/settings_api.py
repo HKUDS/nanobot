@@ -85,6 +85,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 
 
@@ -255,6 +256,18 @@ def _parse_bool(value: str, field: str) -> bool:
     if normalized not in {"1", "0", "true", "false", "yes", "no"}:
         raise WebUISettingsError(f"{field} must be boolean")
     return normalized in {"1", "true", "yes"}
+
+
+def _parse_context_window_tokens(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise WebUISettingsError("context_window_tokens must be an integer") from None
+    if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
+        raise WebUISettingsError("context_window_tokens must be 65536 or 262144")
+    return parsed
 
 
 def _model_configuration_slug(label: str) -> str:
@@ -544,6 +557,16 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
             defaults.provider = provider
             changed = True
 
+    context_window_tokens = _parse_context_window_tokens(
+        _query_first_alias(query, "context_window_tokens", "contextWindowTokens")
+    )
+    if (
+        context_window_tokens is not None
+        and defaults.context_window_tokens != context_window_tokens
+    ):
+        defaults.context_window_tokens = context_window_tokens
+        changed = True
+
     timezone = _query_first(query, "timezone")
     if timezone is not None:
         timezone = timezone.strip()
@@ -670,6 +693,16 @@ def update_model_configuration(query: QueryParams) -> dict[str, Any]:
         if preset.provider != provider:
             preset.provider = provider
             changed = True
+
+    context_window_tokens = _parse_context_window_tokens(
+        _query_first_alias(query, "context_window_tokens", "contextWindowTokens")
+    )
+    if (
+        context_window_tokens is not None
+        and preset.context_window_tokens != context_window_tokens
+    ):
+        preset.context_window_tokens = context_window_tokens
+        changed = True
 
     if config.agents.defaults.model_preset != name:
         config.agents.defaults.model_preset = name

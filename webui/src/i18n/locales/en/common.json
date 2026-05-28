@@ -146,7 +146,8 @@
       "cliAppsFilter": "Filter",
       "engine": "Engine",
       "logs": "Logs",
-      "diagnostics": "Diagnostics"
+      "diagnostics": "Diagnostics",
+      "contextWindow": "Context window"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
@@ -184,7 +185,8 @@
       "logs": "Open the native engine log folder.",
       "diagnostics": "Export a small runtime report for support.",
       "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
-      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission.",
+      "contextWindow": "Choose the default context budget for this model configuration."
     },
     "timezone": {
       "select": "Select timezone",
