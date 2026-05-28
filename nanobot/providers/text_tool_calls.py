@@ -31,6 +31,9 @@ from __future__ import annotations
 
 import re
 import secrets
+import string
+
+from loguru import logger
 
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -47,9 +50,12 @@ _PARAMETER_RE = re.compile(
     re.DOTALL,
 )
 
+_ALNUM = string.ascii_letters + string.digits
+
 
 def _short_tool_id() -> str:
-    return "call_" + secrets.token_hex(6)
+    """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
+    return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
 def parse_text_tool_calls(content: str) -> tuple[str, list[ToolCallRequest]]:
@@ -68,6 +74,7 @@ def parse_text_tool_calls(content: str) -> tuple[str, list[ToolCallRequest]]:
         body = block_match.group(1)
         func_match = _FUNCTION_RE.search(body)
         if not func_match:
+            logger.warning("Malformed <tool_call> block: missing <function=...> tag")
             continue
         name = func_match.group(1).strip()
         params_body = func_match.group(2)
@@ -77,6 +84,7 @@ def parse_text_tool_calls(content: str) -> tuple[str, list[ToolCallRequest]]:
             value = param_match.group(2)
             args[key] = value
         if not name:
+            logger.warning("Malformed <tool_call> block: empty function name")
             continue
         tool_calls.append(ToolCallRequest(
             id=_short_tool_id(),
