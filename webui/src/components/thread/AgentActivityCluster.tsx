@@ -1793,11 +1793,6 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
             {t("message.fileEditFailed", { defaultValue: "Failed" })}
           </span>
         ) : null}
-        {edit.approximate && !failed ? (
-          <span className="shrink-0 text-[10.5px] font-medium text-muted-foreground/55">
-            {t("message.fileEditApproximate", { defaultValue: "estimated" })}
-          </span>
-        ) : null}
       </div>
       {hasCountedDiff ? (
         <DiffPair added={edit.added} deleted={edit.deleted} />
