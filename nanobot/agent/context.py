@@ -57,9 +57,10 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None, agent_id: str | None = None):
         self.workspace = workspace
         self.timezone = timezone
+        self.agent_id = agent_id
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -103,6 +104,17 @@ class ContextBuilder:
 
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
+
+        # Load optional bot-specific prompt file: {agent_id}_PROMPT.md
+        if self.agent_id:
+            bot_prompt_path = self.workspace / f"{self.agent_id}_PROMPT.md"
+            if bot_prompt_path.exists():
+                try:
+                    bot_prompt_content = bot_prompt_path.read_text(encoding="utf-8").strip()
+                    if bot_prompt_content:
+                        parts.append(f"\n\n---\n\n# Bot-Specific Prompt\n\n{bot_prompt_content}")
+                except Exception as e:
+                    logger.warning(f"Failed to load bot prompt file {bot_prompt_path}: {e}")
 
         return "\n\n---\n\n".join(parts)
 
