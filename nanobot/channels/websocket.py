@@ -601,7 +601,6 @@ class WebSocketChannel(BaseChannel):
             session_manager=self._session_manager,
             default_workspace=self._workspace_path,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
-            logger_=self.logger,
         )
         self._runtime_model_name = runtime_model_name
         self._runtime_surface = (

@@ -323,6 +323,11 @@ class Config(BaseSettings):
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
 
+    def __init__(self, **values: Any) -> None:
+        if not type(self).__pydantic_complete__:
+            _resolve_tool_config_refs()
+        super().__init__(**values)
+
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
         if "default" in self.model_presets:

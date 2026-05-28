@@ -165,15 +165,6 @@ export interface WorkspacesPayload {
   schema_version: number;
   default_access_mode: WebuiDefaultAccessMode;
   default_scope: WorkspaceScopePayload;
-  last_scope?: {
-    project_path: string;
-    project_name?: string;
-    access_mode: WorkspaceAccessMode;
-  } | null;
-  recent_projects: Array<{
-    project_path: string;
-    project_name?: string;
-  }>;
   controls: {
     can_change_project: boolean;
     can_use_full_access: boolean;
@@ -225,7 +216,6 @@ export type SettingsApplyStatus =
 export interface RuntimeCapabilities {
   can_restart_engine: boolean;
   can_pick_folder: boolean;
-  can_auto_update: boolean;
   can_open_logs: boolean;
   can_export_diagnostics: boolean;
 }

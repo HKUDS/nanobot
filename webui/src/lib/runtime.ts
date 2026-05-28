@@ -29,7 +29,6 @@ export interface NanobotHostApi {
   pickFolder(): Promise<string | null>;
   openLogs(): Promise<void>;
   exportDiagnostics(): Promise<string>;
-  checkForUpdates(): Promise<{ supported: boolean; message?: string }>;
   openSocket?(url: string): Promise<string>;
   sendSocket?(id: string, data: string): Promise<void>;
   closeSocket?(id: string): Promise<void>;
@@ -63,14 +62,6 @@ export function getHostApi(): NanobotHostApi | null {
   return window.nanobotHost ?? null;
 }
 
-export function hasHostApi(): boolean {
-  return getHostApi() !== null;
-}
-
-export function hasHostSocketBridge(): boolean {
-  return getHostSocketBridge() !== null;
-}
-
 export function toRuntimeSurface(surface: string | null | undefined): RuntimeSurface {
   return surface === "native" ? "native" : "browser";
 }
@@ -81,7 +72,6 @@ export function createRuntimeHost(
 ): RuntimeHost {
   const api = getHostApi();
   const mergedCapabilities = {
-    can_auto_update: false,
     can_export_diagnostics: false,
     can_open_logs: false,
     can_pick_folder: false,

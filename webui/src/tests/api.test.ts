@@ -382,8 +382,6 @@ describe("webui API helpers", () => {
         access_mode: "restricted" as const,
         restrict_to_workspace: true,
       },
-      last_scope: null,
-      recent_projects: [],
       controls: {
         can_change_project: true,
         can_use_full_access: true,

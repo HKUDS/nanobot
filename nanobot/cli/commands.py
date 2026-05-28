@@ -842,7 +842,6 @@ def desktop_gateway(
         webui_runtime_capabilities={
             "can_restart_engine": True,
             "can_pick_folder": True,
-            "can_auto_update": True,
             "can_open_logs": True,
             "can_export_diagnostics": True,
         },

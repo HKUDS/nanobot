@@ -10,6 +10,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.config.paths import get_webui_dir
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScope,
@@ -18,11 +19,9 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.config.paths import get_webui_dir
 
 WEBUI_WORKSPACE_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 128 * 1024
-_MAX_RECENT_PROJECTS = 20
 _DEFAULT_ACCESS_MODES = {"default", "full"}
 _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
 _WEBUI_SCOPE_CHANNEL = "websocket"
@@ -35,29 +34,8 @@ def webui_workspace_state_path() -> Path:
 def default_webui_workspace_state() -> dict[str, Any]:
     return {
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
-        "recent_projects": [],
-        "last_scope": None,
         "default_access_mode": "default",
         "updated_at": None,
-    }
-
-
-def _clean_project(value: Any) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    raw_path = value.get("project_path") or value.get("path")
-    if not isinstance(raw_path, str) or not raw_path.strip() or "\0" in raw_path:
-        return None
-    try:
-        path = Path(raw_path).expanduser().resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        return None
-    if not path.is_dir():
-        return None
-    name = value.get("project_name")
-    return {
-        "project_path": str(path),
-        "project_name": name if isinstance(name, str) and name.strip() else (path.name or str(path)),
     }
 
 
@@ -65,30 +43,6 @@ def normalize_webui_workspace_state(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     state = default_webui_workspace_state()
-    seen: set[str] = set()
-    projects: list[dict[str, str]] = []
-    raw_projects = raw.get("recent_projects")
-    for item in raw_projects if isinstance(raw_projects, list) else []:
-        cleaned = _clean_project(item)
-        if cleaned is None:
-            continue
-        path = cleaned["project_path"]
-        if path in seen:
-            continue
-        seen.add(path)
-        projects.append(cleaned)
-        if len(projects) >= _MAX_RECENT_PROJECTS:
-            break
-    state["recent_projects"] = projects
-    last = raw.get("last_scope")
-    if isinstance(last, dict):
-        cleaned_last = _clean_project(last)
-        mode = last.get("access_mode")
-        if cleaned_last and mode in {"restricted", "full"}:
-            state["last_scope"] = {
-                **cleaned_last,
-                "access_mode": mode,
-            }
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None
     default_access_mode = raw.get("default_access_mode")
@@ -145,25 +99,6 @@ def write_webui_workspace_state(raw: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def remember_workspace_scope(scope: WorkspaceScope) -> dict[str, Any]:
-    state = read_webui_workspace_state()
-    project = {
-        "project_path": str(scope.project_path),
-        "project_name": scope.project_name,
-    }
-    recent = [
-        item
-        for item in state["recent_projects"]
-        if item.get("project_path") != project["project_path"]
-    ]
-    state["recent_projects"] = [project, *recent][:_MAX_RECENT_PROJECTS]
-    state["last_scope"] = {
-        **project,
-        "access_mode": scope.access_mode,
-    }
-    return write_webui_workspace_state(state)
-
-
 def read_webui_default_access_mode() -> str:
     state = read_webui_workspace_state()
     mode = state.get("default_access_mode")
@@ -213,15 +148,10 @@ def workspaces_payload(
         if default_access_mode == "default"
         else build_workspace_scope(default_workspace, default_access_mode, source_channel=_WEBUI_SCOPE_CHANNEL)
     )
-    state = read_webui_workspace_state()
-    last_scope = state.get("last_scope") if controls_available else None
-    recent_projects = state.get("recent_projects", []) if controls_available else []
     return {
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
         "default_access_mode": default_access_mode,
         "default_scope": default_scope.payload(),
-        "last_scope": last_scope,
-        "recent_projects": recent_projects,
         "controls": {
             "can_change_project": controls_available,
             "can_use_full_access": controls_available,
@@ -238,12 +168,10 @@ class WebUIWorkspaceController:
         session_manager: Any | None,
         default_workspace: Path,
         default_restrict_to_workspace: bool,
-        logger_: Any = logger,
     ) -> None:
         self._sessions = session_manager
         self._default_workspace = default_workspace
         self._default_restrict_to_workspace = default_restrict_to_workspace
-        self._logger = logger_
 
     def default_scope(self) -> WorkspaceScope:
         return default_scope_for_webui(
@@ -353,7 +281,3 @@ class WebUIWorkspaceController:
             session.metadata["webui"] = True
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)
-        try:
-            remember_workspace_scope(scope)
-        except Exception as exc:
-            self._logger.warning("failed to persist WebUI workspace state: {}", exc)

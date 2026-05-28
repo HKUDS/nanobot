@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.subagent import SubagentStatus
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.runtime_state import RuntimeState
 from nanobot.config.schema import Base
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentStatus
 
 
 class MyToolConfig(Base):
@@ -31,6 +33,12 @@ def _has_real_attr(obj: Any, key: str) -> bool:
         if key in cls.__dict__:
             return True
     return False
+
+
+def _is_subagent_status(value: Any) -> bool:
+    from nanobot.agent.subagent import SubagentStatus
+
+    return isinstance(value, SubagentStatus)
 
 
 class MyTool(Tool, ContextAware):
@@ -215,7 +223,7 @@ class MyTool(Tool, ContextAware):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_status(st: SubagentStatus, indent: str = "  ") -> str:
+    def _format_status(st: "SubagentStatus", indent: str = "  ") -> str:
         elapsed = time.monotonic() - st.started_at
         tool_summary = ", ".join(
             f"{e.get('name', '?')}({e.get('status', '?')})" for e in st.tool_events[-5:]
@@ -233,14 +241,14 @@ class MyTool(Tool, ContextAware):
 
     @staticmethod
     def _format_value(val: Any, key: str = "") -> str:
-        if isinstance(val, SubagentStatus):
+        if _is_subagent_status(val):
             header = f"Subagent [{val.task_id}] '{val.label}'"
             detail = MyTool._format_status(val, "  ")
             return f"{header}\n  task: {val.task_description}\n{detail}"
         # SubagentManager: delegate to its _task_statuses dict
         if hasattr(val, "_task_statuses") and isinstance(val._task_statuses, dict):
             return MyTool._format_value(val._task_statuses, key)
-        if isinstance(val, dict) and val and isinstance(next(iter(val.values())), SubagentStatus):
+        if isinstance(val, dict) and val and _is_subagent_status(next(iter(val.values()))):
             prefix = f"{key}: " if key else ""
             lines = [f"{prefix}{len(val)} subagent(s):"]
             for tid, st in val.items():

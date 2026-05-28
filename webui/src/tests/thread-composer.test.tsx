@@ -293,7 +293,6 @@ describe("ThreadComposer", () => {
         pickFolder,
         openLogs: vi.fn(),
         exportDiagnostics: vi.fn(),
-        checkForUpdates: vi.fn(),
       },
     });
 
