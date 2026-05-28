@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 
@@ -487,7 +487,6 @@ class WriteStdinTool(Tool):
                     ),
                     max_output_chars=output_limit,
                 )
-            request_ctx = current_request_context()
             poll = await self._manager.write(
                 session_id=session_id,
                 chars=chars,
@@ -495,7 +494,7 @@ class WriteStdinTool(Tool):
                 terminate=terminate,
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
                 max_output_chars=output_limit,
-                owner_session_key=request_ctx.session_key if request_ctx else None,
+                owner_session_key=current_request_session_key(),
             )
             return format_session_poll(session_id, poll)
         except KeyError:
@@ -522,7 +521,6 @@ class WriteStdinTool(Tool):
         while True:
             remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
             step_ms = min(500, remaining_ms)
-            request_ctx = current_request_context()
             poll = await self._manager.write(
                 session_id=session_id,
                 chars=chars if first else None,
@@ -530,7 +528,7 @@ class WriteStdinTool(Tool):
                 terminate=terminate if first else False,
                 yield_time_ms=step_ms,
                 max_output_chars=max_output_chars,
-                owner_session_key=request_ctx.session_key if request_ctx else None,
+                owner_session_key=current_request_session_key(),
             )
             first = False
             if poll.output:
@@ -594,9 +592,8 @@ class ListExecSessionsTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            request_ctx = current_request_context()
             sessions = await self._manager.list(
-                owner_session_key=request_ctx.session_key if request_ctx else None,
+                owner_session_key=current_request_session_key(),
             )
             if not sessions:
                 return "No active exec sessions."

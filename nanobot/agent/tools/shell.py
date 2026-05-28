@@ -25,10 +25,10 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_workspace_scope
+from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.workspace_policy import is_path_within
@@ -314,7 +314,6 @@ class ExecTool(Tool):
         max_output_chars: int | None,
     ) -> str:
         try:
-            request_ctx = current_request_context()
             session_id, poll = await self._session_manager.start(
                 command=prepared.command,
                 cwd=prepared.cwd,
@@ -323,7 +322,7 @@ class ExecTool(Tool):
                 shell_program=prepared.shell_program,
                 login=prepared.login,
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
-                owner_session_key=request_ctx.session_key if request_ctx else None,
+                owner_session_key=current_request_session_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
                     DEFAULT_MAX_OUTPUT_CHARS,
@@ -357,12 +356,12 @@ class ExecTool(Tool):
         shell: str | None = None,
         login: bool | None = None,
     ) -> _PreparedCommand | str:
-        scope = current_workspace_scope()
-        workspace_root = str(scope.project_path) if scope is not None else self.working_dir
-        restrict_to_workspace = (
-            scope.restrict_to_workspace if scope is not None else self.restrict_to_workspace
+        access = current_tool_workspace(
+            self.working_dir,
+            restrict_to_workspace=self.restrict_to_workspace,
+            sandbox_restricts_workspace=bool(self.sandbox),
         )
-        sandbox_restricts = bool(self.sandbox)
+        workspace_root = str(access.project_path) if access.project_path is not None else self.working_dir
         cwd = working_dir or workspace_root or os.getcwd()
 
         # Prevent an LLM-supplied working_dir from escaping the configured
@@ -370,7 +369,7 @@ class ExecTool(Tool):
         # this, a caller can pass working_dir="/etc" and then all absolute
         # paths under /etc would pass the _guard_command check that anchors
         # on cwd.
-        if (restrict_to_workspace or sandbox_restricts) and workspace_root:
+        if access.restrict_to_workspace and workspace_root:
             try:
                 requested = Path(cwd).expanduser().resolve()
                 resolved_root = Path(workspace_root).expanduser().resolve()
@@ -388,7 +387,7 @@ class ExecTool(Tool):
         guard_error = self._guard_command(
             command,
             cwd,
-            restrict_to_workspace=restrict_to_workspace or sandbox_restricts,
+            restrict_to_workspace=access.restrict_to_workspace,
         )
         if guard_error:
             return guard_error
@@ -574,16 +573,13 @@ class ExecTool(Tool):
             if self.allow_patterns:
                 return "Error: Command blocked by allowlist filter (not in allowlist)"
 
-        scope = current_workspace_scope()
-        allow_loopback_url = bool(
-            self.webui_allow_local_service_access
-            and scope is not None
-            and scope.source_channel == "websocket"
-            and scope.access_mode == "full"
-            and not scope.restrict_to_workspace
-        )
         from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd, allow_loopback=allow_loopback_url):
+        if contains_internal_url(
+            cmd,
+            allow_loopback=current_scope_allows_loopback(
+                enabled=self.webui_allow_local_service_access,
+            ),
+        ):
             # The runner turns this marker into a non-retryable security hint.
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 

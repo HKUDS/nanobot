@@ -39,6 +39,11 @@ def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
 
 
+def current_request_session_key() -> str | None:
+    ctx = current_request_context()
+    return ctx.session_key if ctx else None
+
+
 @dataclass
 class ToolContext:
     config: Any

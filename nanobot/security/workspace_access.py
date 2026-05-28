@@ -92,6 +92,21 @@ class WorkspaceScope:
 
 
 @dataclass(frozen=True)
+class ToolWorkspace:
+    """Workspace policy resolved for a tool call."""
+
+    project_path: Path | None
+    restrict_to_workspace: bool
+    scope: WorkspaceScope | None = None
+
+    @property
+    def allowed_root(self) -> Path | None:
+        if self.restrict_to_workspace and self.project_path is not None:
+            return self.project_path
+        return None
+
+
+@dataclass(frozen=True)
 class WorkspaceScopeResolver:
     """Resolve the effective workspace scope at an agent turn boundary."""
 
@@ -332,6 +347,45 @@ def reset_workspace_scope(token: Token[WorkspaceScope | None]) -> None:
 
 def current_workspace_scope() -> WorkspaceScope | None:
     return _CURRENT_WORKSPACE_SCOPE.get()
+
+
+def current_tool_workspace(
+    default_workspace: str | Path | None,
+    *,
+    restrict_to_workspace: bool = False,
+    sandbox_restricts_workspace: bool = False,
+) -> ToolWorkspace:
+    """Return the workspace/access policy for the current tool call."""
+
+    scope = current_workspace_scope()
+    project_path = (
+        scope.project_path
+        if scope is not None
+        else Path(default_workspace).expanduser() if default_workspace is not None else None
+    )
+    restrict = (
+        scope.restrict_to_workspace
+        if scope is not None
+        else bool(restrict_to_workspace)
+    ) or sandbox_restricts_workspace
+    return ToolWorkspace(
+        project_path=project_path,
+        restrict_to_workspace=restrict,
+        scope=scope,
+    )
+
+
+def current_scope_allows_loopback(*, enabled: bool) -> bool:
+    """Return True when the current WebUI Full Access turn may touch loopback URLs."""
+
+    scope = current_workspace_scope()
+    return bool(
+        enabled
+        and scope is not None
+        and scope.source_channel == "websocket"
+        and scope.access_mode == "full"
+        and not scope.restrict_to_workspace
+    )
 
 
 def _env_system_provider(environ: dict[str, str] | None = None) -> str | None:
