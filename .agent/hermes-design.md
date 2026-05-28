@@ -8,6 +8,10 @@
 
 ---
 
+相关：**分层记忆**（TencentDB 式 L0–L3 + Task Canvas）见 [`.agent/layered-memory/design.md`](./layered-memory/design.md) 与 [`plan.md`](./layered-memory/plan.md)。与 Evolution（Skill/trace）正交：L1 存用户事实，不写 `skills/`。
+
+---
+
 ## 1. 背景与目标
 
 ### 1.1 nanobot 已有能力

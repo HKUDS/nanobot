@@ -1,0 +1,254 @@
+# Layered Memory（分层记忆）· 实施计划
+
+> 设计规格：[`design.md`](./design.md)  
+> 参考：TencentDB Agent Memory（语义对齐，Python 自研实现）  
+> 状态：**待实现**  
+> 最后更新：2026-05-28
+
+**范围**：
+
+- **LM1**：Task Canvas + `node_id` + `read_memory_node`（短期）。
+- **LM2**：L0 capture + L1 Pipeline + Recall + `memory_search` / `conversation_search`（长期 MVP）。
+- **LM3**：L2 Scenario + L3 Persona 与 Dream 边界收敛（后置）。
+- **LM4**（可选）：发 LLM 前 message 级 offload 压缩（对标 Tencent `llm-input-l3`）。
+
+**不含**：npm 插件、OpenClaw 适配、离线 benchmark suite。
+
+**原则**：`loop.py` / `runner.py` 薄改动；逻辑在 `nanobot/agent/layered_memory/`；默认全关。
+
+---
+
+## 推荐 PR 切分
+
+| PR | Phase | 内容 | 风险 |
+|----|-------|------|------|
+| **LM-PR-1** | LM0 + LM1 | `after_tools` hook、`NodeRegistry`、canvas、config、`read_memory_node` | 低 |
+| **LM-PR-2** | LM2 | L0 store、capture、`MemoryPipeline`、L1 抽取+FTS、recall、search tools | 中 |
+| **LM-PR-3** | LM3 | L2 scene、L3 persona job、Dream/USER 单 writer 文档+锁 | 中 |
+| **LM-PR-4** | LM4 | message 替换 + 紧急压缩（可选，依赖 CB3 评估） | 高 |
+
+可与 Context Budget **CB3**、Harness 并行，但 **LM-PR-1** 应独立于 CB 新 PR 以便 review。
+
+---
+
+## Phase LM0 — 基础设施
+
+### LM0-A Hook 扩展
+
+- [ ] `nanobot/agent/hook.py`：新增 `async def after_tools(self, context) -> None`（默认 pass）
+- [ ] `CompositeHook`：fan-out `after_tools`
+- [ ] `nanobot/agent/runner.py`：tool 循环结束、`tools_completed` checkpoint 之后 `await hook.after_tools(context)`
+- [ ] `tests/agent/test_agent_hook.py` 或扩展现有 hook 测：after_tools 被调用
+
+### LM0-B 配置 schema
+
+- [ ] `nanobot/config/schema.py`：`LayeredMemoryConfig` 及子配置（见 design §8）
+- [ ] `AgentDefaults.layeredMemory: LayeredMemoryConfig = Field(default_factory=...)`
+- [ ] `AgentLoop` / CLI：加载并传入 `layered_memory` config
+
+### LM0-C 包骨架
+
+- [ ] `nanobot/agent/layered_memory/__init__.py`
+- [ ] `facade.py`：`LayeredMemoryFacade` 空实现 + `enabled` 短路
+- [ ] `.agent/layered-memory/design.md`、`plan.md`（本文档）
+
+**验收**：`enable: false` 时 hook 新增不改变行为；pytest 通过。
+
+---
+
+## Phase LM1 — 短期：Task Canvas + node_id（LM-PR-1）
+
+### LM1-A Node 登记
+
+- [ ] `offload/node_registry.py`：`upsert(node_id, tool, path, summary, chars)`
+- [ ] `helpers.py`：`maybe_persist_tool_result` 返回或日志中带 `node_id`；引用串增加 `node_id: …` 行
+- [ ] `runner._normalize_tool_result`：persist 后若 `layered_memory.offload.enable` 调用 registry（**在 CB2 filter 之后**，与 design 一致）
+- [ ] 单测：大 tool 结果 → `nodes.json` 有条目且 path 存在
+
+### LM1-B Canvas
+
+- [ ] `offload/canvas.py`：读写 `workspace/.nanobot/canvas/{session}/canvas.mmd`
+- [ ] v1 **规则更新**：每 turn 末根据 `nodes.json` 生成简单 `graph TD`（不调 LLM）
+- [ ] `facade.canvas_lines(session_key)` → 截断至 `max_canvas_chars`
+- [ ] 单测：多 node 生成 mmd 行数受限
+
+### LM1-C Hook + runtime 注入
+
+- [ ] `offload/hook.py`：`LayeredMemoryHook`（`after_tools` 批量 summary）
+- [ ] `loop.py`：`build_messages` 前合并 `canvas_lines` + recall 占位到 `current_runtime_lines`
+- [ ] `loop.py`：`CompositeHook` 在 `layered_memory.offload.enable` 时注册
+- [ ] 单测：runtime 含 `[Task canvas]` 标记
+
+### LM1-D Tool
+
+- [ ] `nanobot/agent/tools/memory_node.py`：`read_memory_node(node_id)`
+- [ ] 注册到默认 tools；Harness 下 read 路径仍受 policy 约束
+- [ ] 单测：读回 persist 全文；非法 id 友好错误
+
+### LM1-E 文档
+
+- [ ] `docs/layered-memory.md`：LM1 配置示例、与 CB2/persist 关系
+- [ ] `docs/configuration.md`：链接与配置表（简短）
+
+**验收**：
+
+- 本地长会话：10 次大 `read_file`/`grep` 后 `/status` context 涨幅趋缓（相对无 canvas）。
+- `read_memory_node` 与直接 `read_file` persist 路径一致。
+
+---
+
+## Phase LM2 — 长期 MVP：L0 + L1 + Recall（LM-PR-2）
+
+### LM2-A L0 存储
+
+- [ ] `l0_store.py`：SQLite `{workspace}/.nanobot/memory.sqlite` 表 `l0_messages`
+- [ ] `sanitize.py`：剥注入块、短消息过滤
+- [ ] `capture_turn`：仅写入本轮增量；checkpoint 防冷启动全量导入
+- [ ] 单测：两轮 capture 行数递增；sanitize 不去掉真实用户句
+
+### LM2-B Pipeline 骨架
+
+- [ ] `pipeline.py`：`MemoryPipelineManager`（buffer、`every_n`、idle timer、warm-up）
+- [ ] `SerialQueue` 或 `asyncio.Lock` 串行 L1 job
+- [ ] `loop.py`：`_save_turn` 后 `asyncio.create_task(facade.capture_turn(...))`
+- [ ] 单测：mock LLM 下 N 轮触发一次 L1
+
+### LM2-C L1 抽取
+
+- [ ] `l1_store.py`：FTS5 `l1_memories`
+- [ ] `l1_extractor.py` + `templates/` 或 `prompts/l1_extraction.md`
+- [ ] `l1_dedup.py`：与已有 atoms 冲突合并/跳过
+- [ ] 单测：fixture 对话 → 抽出 ≥1 atom；重复不双写
+
+### LM2-D Recall
+
+- [ ] `recall.py`：`perform_recall`（fts / hybrid、timeout、prepend_lines）
+- [ ] `loop.py`：`consolidate` 之后、`get_history` 之前 `await facade.recall`
+- [ ] L3 v2 简化：**只读现有 `USER.md`** 作摘要，不跑 L3 生成 job
+- [ ] 单测：种子 atom + query → prepend 含关键词；超时返回空
+
+### LM2-E 搜索 Tools
+
+- [ ] `tools/memory_search.py`
+- [ ] `tools/conversation_search.py`
+- [ ] recall 注入 **工具指南**（每轮 search ≤3）
+- [ ] 单测：各 tool 返回格式稳定
+
+### LM2-F 集成
+
+- [ ] `facade.py` 接通 capture/recall/canvas
+- [ ] 子 agent：`layered_memory` 默认子集关闭（config 或 loop 判断 `is_subagent`）
+- [ ] 结构化 log：`layered_memory …`（见 design §10）
+
+**验收**：
+
+- 5 轮对话后 `memory_search` 可命中。
+- `conversation_search` 可找回 L0 原文片段。
+- recall 超时 5s 不卡住 gateway。
+
+---
+
+## Phase LM3 — L2 Scenario + L3 Persona（LM-PR-3）
+
+### LM3-A L2
+
+- [ ] `scene/extractor.py`：L1 完成后 LLM 生成/更新 scene md
+- [ ] `scene/index.py`：`scene_index.json`
+- [ ] Pipeline：L2 定时器（delay-after-L1、maxInterval、session 冷取消）
+- [ ] recall：注入场景导航（非全文）
+
+### LM3-B L3
+
+- [ ] `persona/generator.py`：L2 后更新 `USER.md`（mutex）
+- [ ] **Dream 边界**：更新 `hermes-design.md` / `gotchas.md` — USER 单 writer
+- [ ] 可选：file lock `workspace/.nanobot/persona.lock`
+
+### LM3-C 文档
+
+- [ ] `docs/layered-memory.md` 补 L2/L3、与 Dream 对照表
+
+**验收**：
+
+- L1 跑批后 `memory/scenes/` 有新文件；recall 含导航。
+- L3 job 后 `USER.md` 反映新偏好；Dream cron 不覆盖冲突（或显式跳过 USER phase）。
+
+---
+
+## Phase LM4 — 可选：Message 级 Offload（后置）
+
+- [ ] 设计评审：与 CB3 `critical_replay_cap` 是否重复
+- [ ] `runner` 或 hook：在 `before_iteration` 将旧 tool message 替换为 node 摘要
+- [ ] 历史 MMD 注入（对标 `mmd-injector`）
+- [ ] integration：长 session replay token 下降
+
+**默认 v1 不做**，仅在 LM1–LM3 稳定后立项。
+
+---
+
+## 测试矩阵
+
+| 场景 | 类型 | Phase |
+|------|------|-------|
+| `enable: false` 无 registry / 无 recall | unit | LM0 |
+| `after_tools` 调用顺序 | unit | LM0 |
+| persist → nodes.json | unit | LM1 |
+| canvas 注入 runtime | unit | LM1 |
+| `read_memory_node` | unit | LM1 |
+| L0 sanitize + checkpoint | unit | LM2 |
+| pipeline every_n + idle | unit | LM2 |
+| L1 extract + dedup | unit | LM2 |
+| recall timeout | unit | LM2 |
+| memory_search / conversation_search | unit | LM2 |
+| L2 scene 文件生成 | integration | LM3 |
+| USER 单 writer | integration | LM3 |
+| 长任务 context % vs baseline | manual | LM1 |
+
+---
+
+## `loop.py` / `runner.py` 改动清单（审查用）
+
+| 文件 | 预估行数 | 内容 |
+|------|----------|------|
+| `hook.py` | +15 | `after_tools` |
+| `runner.py` | +5 | 调用 `after_tools` |
+| `runner.py` | +8 | normalize 后 registry |
+| `loop.py` | +12 | recall + canvas runtime + capture task |
+| `loop.py` | +5 | 注册 `LayeredMemoryHook` |
+| `helpers.py` | +10 | node_id  in reference string |
+| `schema.py` | +80 | config models |
+| `context.py` | 0 | 不改签名，仅用 `current_runtime_lines` |
+
+---
+
+## 调参（实现后）
+
+见 `docs/layered-memory.md`（LM1 完成后起草）：
+
+- 长 SWE 任务：`offload.enable` + `readFilterLevel: aggressive`（CB2）叠加
+- 多 session 用户：`recall.strategy: hybrid`、`pipeline.every_n: 3`
+- 省 LLM 成本：`pipeline.enable_warmup: true`、L2 `min_interval` 调大
+
+---
+
+## 完成定义（v1）
+
+- [ ] LM-PR-1 merged：canvas + node + `read_memory_node` + 文档 LM1 章
+- [ ] LM-PR-2 merged：L0/L1/Recall + 两 search tools
+- [ ] 默认 `enable: false`；CI `tests/agent/layered_memory/` 绿
+- [ ] `.agent/layered-memory/design.md` 与实现一致（偏差在 PR 描述中说明）
+- [ ] LM3 可单独 follow-up，不阻塞 v1 叙事（「短期+长期 MVP」）
+
+---
+
+## 依赖与顺序
+
+```text
+LM0 (hook + schema)
+  → LM1 (offload)     ─┐
+  → LM2 (L0/L1/recall) ├─ LM2 可与 LM1 并行开发，但 merge 建议 LM1 先
+  → LM3 (L2/L3)       ─┘ 依赖 LM2 Pipeline
+  → LM4 (optional)
+```
+
+**与 Hermes Evolution**：无硬依赖；TraceStore 可被 L0 引用 `turn_id`。  
+**与 Context Budget**：CB2 应在 persist 前；CB1 recall 行与 layered recall 合并顺序：**cli → layered recall → CB1 budget → canvas**（实现时在 `loop.py` 固定顺序并单测快照）。
