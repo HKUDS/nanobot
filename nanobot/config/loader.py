@@ -54,6 +54,10 @@ def load_config(config_path: Path | None = None) -> Config:
                 data = json.load(f)
             data = _migrate_config(data)
             config = Config.model_validate(data)
+            mem_extra = list((config.memory.model_extra or {}).keys())
+            if mem_extra:
+                logger.info("Config loaded. Memory backends in config: {}", mem_extra)
+            return config
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning("Failed to load config from {}: {}", path, e)
             logger.warning("Using default configuration.")

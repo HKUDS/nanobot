@@ -91,6 +91,34 @@ discord = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+
+# ── Memory backends ────────────────────────────────────────────────────────
+# long_term: built-in, no extra dependencies required.
+
+# mem0: vector + graph memory with pluggable backends (Qdrant, Neo4j, …)
+mem0 = [
+    "mem0ai>=1.0.7,<2.0.0",
+    "qdrant-client>=1.17.0,<2.0.0",
+]
+
+# graphiti: temporal knowledge-graph memory (FalkorDB backend)
+graphiti = [
+    "graphiti-core[falkordb]>=0.28.0,<1.0.0",
+]
+
+# memobase: user-profile-based long-term memory (requires a Memobase server)
+memobase = [
+    "memobase>=0.0.27,<1.0.0",
+]
+
+# memory: all PyPI-available memory backends in one shot
+memory = [
+    "mem0ai>=1.0.7,<2.0.0",
+    "qdrant-client>=1.17.0,<2.0.0",
+    "graphiti-core[falkordb]>=0.28.0,<1.0.0",
+    "memobase>=0.0.27,<1.0.0",
+]
+
 pdf = [
     "pymupdf>=1.25.0",
 ]

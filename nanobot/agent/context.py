@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory.base import BaseMemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
@@ -58,17 +59,28 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        memory_store: BaseMemoryStore | None = None,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
-        self.memory = MemoryStore(workspace)
+        self.memory = memory_store or MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._is_file_based_memory = getattr(self.memory, "_is_file_based", True)
 
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
+        *,
+        user_id: str | None = None,
+        query: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
@@ -79,9 +91,32 @@ class ContextBuilder:
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
-            parts.append(f"# Memory\n\n{memory}")
+        mem_kwargs: dict = {}
+        if user_id:
+            mem_kwargs["user_id"] = user_id
+        if query:
+            mem_kwargs["query"] = query
+        memory = self.memory.get_memory_context(**mem_kwargs)
+        if memory:
+            if self._is_file_based_memory:
+                raw = getattr(self.memory, "read_memory", lambda: None)()
+                if raw is None or not self._is_template_content(raw, "memory/MEMORY.md"):
+                    parts.append(f"# Memory\n\n{memory}")
+            else:
+                backend = type(self.memory).__name__
+                parts.append(
+                    f"# Memory\n\n"
+                    f"The following memories are auto-retrieved from {backend}. "
+                    f"Use ONLY this section when answering memory-related questions. "
+                    f"Do NOT use read_file/edit_file on MEMORY.md or HISTORY.md.\n\n"
+                    f"{memory}"
+                )
+        elif not self._is_file_based_memory:
+            parts.append(
+                "# Memory\n\n"
+                "No memories stored yet. Memories will be accumulated automatically from conversations. "
+                "Do NOT use read_file/edit_file on MEMORY.md or HISTORY.md."
+            )
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -211,8 +246,17 @@ class ContextBuilder:
             merged = f"{user_content}\n\n{runtime_ctx}"
         else:
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
+        # Pass chat_id as user_id so each conversation has isolated memory.
+        # Pass current_message as query so vector/graph backends retrieve
+        # contextually relevant memories instead of returning everything.
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
+            {"role": "system", "content": self.build_system_prompt(
+                skill_names,
+                channel=channel,
+                session_summary=session_summary,
+                user_id=chat_id or None,
+                query=current_message if current_message != "[token-probe]" else None,
+            )},
             *history,
         ]
         if messages[-1].get("role") == current_role:

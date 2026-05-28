@@ -18,14 +18,14 @@ WORKDIR /app
 # hook from hatch_build.py even for this metadata-only install.
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
+    uv pip install --system --no-cache ".[memory]" && \
     rm -rf nanobot bridge
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 COPY webui/ webui/
-RUN uv pip install --system --no-cache .
+RUN uv pip install --system --no-cache ".[memory]"
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge

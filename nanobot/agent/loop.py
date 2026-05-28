@@ -57,6 +57,7 @@ from nanobot.utils.runtime import (
 if TYPE_CHECKING:
     from nanobot.config.schema import (
         ChannelsConfig,
+        MemoryConfig,
         ProviderConfig,
         ToolsConfig,
     )
@@ -180,6 +181,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_config: MemoryConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
@@ -246,7 +248,23 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        memory_store = None
+        if memory_config:
+            from nanobot.agent.memory import create_memory_store_from_config
+            try:
+                memory_store = create_memory_store_from_config(memory_config, workspace)
+                logger.info(
+                    "Memory backend active: {} ({})",
+                    type(memory_store).__name__,
+                    memory_store.__class__.__module__,
+                )
+            except Exception as exc:
+                logger.error("Failed to create memory store, falling back to file-based: {}", exc)
+                memory_store = None
+
+        self.context = ContextBuilder(
+            workspace, memory_store=memory_store, timezone=timezone, disabled_skills=disabled_skills
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self._webui_turns = WebuiTurnCoordinator(
             bus=self.bus,
