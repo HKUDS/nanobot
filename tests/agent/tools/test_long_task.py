@@ -101,6 +101,22 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
+    """LongTaskTool and CompleteGoalTool must not share routing context."""
+    sm = SessionManager(tmp_path)
+    lt = LongTaskTool(sessions=sm)
+    cg = CompleteGoalTool(sessions=sm)
+    ctx = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
+
+    lt.set_context(ctx)
+    assert cg._request_ctx.get() is None
+
+    cg.set_context(ctx)
+    assert lt._request_ctx.get() is ctx
+    assert cg._request_ctx.get() is ctx
+
+
+@pytest.mark.asyncio
 async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
