@@ -137,7 +137,8 @@
       "cliAppsFilter": "CLI 앱 필터",
       "engine": "엔진",
       "logs": "로그",
-      "diagnostics": "진단"
+      "diagnostics": "진단",
+      "contextWindow": "Context window"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
@@ -175,7 +176,8 @@
       "logs": "App 엔진 로그 폴더를 엽니다.",
       "diagnostics": "지원용 작은 런타임 보고서를 내보냅니다.",
       "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
-      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission."
+      "webuiDefaultAccessNative": "Used by native chats without a project-specific permission.",
+      "contextWindow": "Choose the default context budget for this model configuration."
     },
     "values": {
       "light": "라이트",

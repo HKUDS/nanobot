@@ -11,6 +11,7 @@ from nanobot.webui.settings_api import (
     _oauth_provider_status,
     create_model_configuration,
     settings_payload,
+    update_agent_settings,
     update_model_configuration,
     update_network_safety_settings,
 )
@@ -117,6 +118,60 @@ def test_update_model_configuration_edits_named_preset_and_selects(
     assert saved.model_presets["codex"].label == "Codex"
     assert saved.model_presets["codex"].provider == "openai_codex"
     assert saved.model_presets["codex"].model == "openai-codex/gpt-5.5"
+
+
+def test_update_agent_settings_accepts_context_window_options(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_agent_settings({"context_window_tokens": ["262144"]})
+
+    assert payload["agent"]["context_window_tokens"] == 262144
+    saved = load_config(config_path)
+    assert saved.agents.defaults.context_window_tokens == 262144
+
+
+def test_update_model_configuration_accepts_context_window_options(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.model_presets["codex"] = ModelPresetConfig(
+        label="Codex",
+        provider="openai",
+        model="openai/gpt-4.1",
+    )
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_model_configuration(
+        {
+            "name": ["codex"],
+            "context_window_tokens": ["262144"],
+        }
+    )
+
+    assert payload["agent"]["context_window_tokens"] == 262144
+    saved = load_config(config_path)
+    assert saved.model_presets["codex"].context_window_tokens == 262144
+
+
+def test_update_context_window_rejects_unknown_values(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="context_window_tokens must be 65536 or 262144"):
+        update_agent_settings({"context_window_tokens": ["128000"]})
 
 
 def test_update_model_configuration_rejects_default_preset(

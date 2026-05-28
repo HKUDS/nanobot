@@ -121,7 +121,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "apps" | "advanced";
+    initialSection?: "apps" | "advanced" | "models";
     onSettingsChange?: (payload: SettingsPayload) => void;
   } = {},
 ) {
@@ -220,6 +220,29 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ onSettingsChange });
 
     await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
+  });
+
+  it("shows context window options in model settings", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    expect(await screen.findByText("Context window")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
   });
 
   it("saves network safety without exposing technical SSRF copy", async () => {

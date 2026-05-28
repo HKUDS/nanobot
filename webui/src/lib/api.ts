@@ -280,6 +280,9 @@ export async function updateSettings(
   }
   if (update.model !== undefined) query.set("model", update.model);
   if (update.provider !== undefined) query.set("provider", update.provider);
+  if (update.contextWindowTokens !== undefined) {
+    query.set("context_window_tokens", String(update.contextWindowTokens));
+  }
   if (update.timezone !== undefined) query.set("timezone", update.timezone);
   if (update.botName !== undefined) query.set("bot_name", update.botName);
   if (update.botIcon !== undefined) query.set("bot_icon", update.botIcon);
@@ -315,6 +318,9 @@ export async function updateModelConfiguration(
   if (configuration.label !== undefined) query.set("label", configuration.label);
   if (configuration.provider !== undefined) query.set("provider", configuration.provider);
   if (configuration.model !== undefined) query.set("model", configuration.model);
+  if (configuration.contextWindowTokens !== undefined) {
+    query.set("context_window_tokens", String(configuration.contextWindowTokens));
+  }
   return request<SettingsPayload>(
     `${base}/api/settings/model-configurations/update?${query}`,
     token,
