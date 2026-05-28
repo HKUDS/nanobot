@@ -758,11 +758,13 @@ def _configure_desktop_gateway(
     config: Config,
     *,
     webui_port: int,
+    webui_socket: str | None,
     token_issue_secret: str,
 ) -> None:
     """Force a local WebSocket-only gateway for the desktop app process."""
     config.gateway.host = "127.0.0.1"
     config.gateway.port = webui_port
+    config.gateway.heartbeat.enabled = False
 
     extras = dict(getattr(config.channels, "__pydantic_extra__", None) or {})
     for name, section in list(extras.items()):
@@ -783,6 +785,7 @@ def _configure_desktop_gateway(
             "enabled": True,
             "host": "127.0.0.1",
             "port": webui_port,
+            "unix_socket_path": webui_socket or "",
             "path": "/",
             "token_issue_secret": token_issue_secret,
             "websocket_requires_token": True,
@@ -796,7 +799,8 @@ def _configure_desktop_gateway(
 
 @app.command("desktop-gateway", hidden=True)
 def desktop_gateway(
-    webui_port: int = typer.Option(..., "--webui-port", min=1, max=65535),
+    webui_port: int = typer.Option(0, "--webui-port", min=0, max=65535),
+    webui_socket: str | None = typer.Option(None, "--webui-socket", help="Unix socket path for desktop IPC"),
     token_issue_secret: str = typer.Option(..., "--token-issue-secret"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Desktop workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Desktop config file"),
@@ -805,6 +809,9 @@ def desktop_gateway(
     """Start the private local gateway used by nanobot Desktop."""
     if not token_issue_secret.strip():
         console.print("[red]Error: --token-issue-secret is required[/red]")
+        raise typer.Exit(1)
+    if webui_port <= 0 and not (webui_socket or "").strip():
+        console.print("[red]Error: --webui-port or --webui-socket is required[/red]")
         raise typer.Exit(1)
     if verbose:
         logger.remove(_log_handler_id)
@@ -824,13 +831,14 @@ def desktop_gateway(
     _configure_desktop_gateway(
         cfg,
         webui_port=webui_port,
+        webui_socket=webui_socket,
         token_issue_secret=token_issue_secret,
     )
     _run_gateway(
         cfg,
         port=webui_port,
         webui_static_dist=False,
-        webui_runtime_surface="desktop",
+        webui_runtime_surface="native",
         webui_runtime_capabilities={
             "can_restart_engine": True,
             "can_pick_folder": True,
@@ -848,7 +856,7 @@ def _run_gateway(
     port: int | None = None,
     open_browser_url: str | None = None,
     webui_static_dist: bool = True,
-    webui_runtime_surface: str = "web",
+    webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
 ) -> None:

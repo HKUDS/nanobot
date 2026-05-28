@@ -89,7 +89,8 @@ function settingsPayload(): SettingsPayload {
     },
     advanced: {
       restrict_to_workspace: false,
-      allow_local_preview_access: true,
+      webui_allow_local_service_access: true,
+      webui_default_access_mode: "default",
       private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
@@ -232,10 +233,10 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         return jsonResponse({ presets: [], installed_count: 0 });
       }
-      if (url === "/api/settings/network-safety/update?allow_local_preview_access=false") {
+      if (url === "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default") {
         return jsonResponse({
           ...payload,
-          advanced: { ...payload.advanced, allow_local_preview_access: false },
+          advanced: { ...payload.advanced, webui_allow_local_service_access: false },
           requires_restart: true,
           restart_required_sections: ["runtime"],
         });
@@ -246,19 +247,48 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "advanced" });
 
-    expect(await screen.findByText("Network Safety")).toBeInTheDocument();
+    expect(await screen.findByText("Web safety")).toBeInTheDocument();
     expect(screen.queryByText(/SSRF/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Private Service Protection")).not.toBeInTheDocument();
+    expect(screen.getByText("Default access")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restricted" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Default Permission" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Full Access" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("switch", { name: "Local Preview Access" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings/network-safety/update?allow_local_preview_access=false",
+        "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default",
         expect.objectContaining({
           headers: { Authorization: "Bearer tok" },
         }),
       ),
     );
+  });
+
+  it("uses native host safety copy on the native surface", async () => {
+    const payload = {
+      ...settingsPayload(),
+      surface: "native" as const,
+      runtime_surface: "native" as const,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "advanced" });
+
+    expect(await screen.findByText("App safety")).toBeInTheDocument();
+    expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
+    expect(screen.getByText("Allow Full Access shell commands to reach services on this Mac.")).toBeInTheDocument();
   });
 });

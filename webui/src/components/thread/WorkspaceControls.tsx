@@ -11,11 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type {
+  RuntimeSurface,
   WorkspaceAccessMode,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { getDesktopApi } from "@/lib/desktop";
+import { getHostApi } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
@@ -32,6 +33,7 @@ export function WorkspaceProjectPicker({
   defaultScope,
   controls,
   error,
+  runtimeSurface,
   onChange,
 }: {
   isHero: boolean;
@@ -40,6 +42,7 @@ export function WorkspaceProjectPicker({
   defaultScope: WorkspaceScopePayload | null;
   controls: WorkspacesPayload["controls"] | null;
   error?: string | null;
+  runtimeSurface?: RuntimeSurface;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
@@ -55,6 +58,7 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
+  const nativeProjectPicker = runtimeSurface === "native" || !!getHostApi();
 
   useEffect(() => {
     if (!open) return;
@@ -88,11 +92,11 @@ export function WorkspaceProjectPicker({
   );
 
   const pickNativeFolder = useCallback(async () => {
-    const desktop = getDesktopApi();
-    if (!desktop || disabled) return;
+    const host = getHostApi();
+    if (!host || disabled) return;
     setPickingFolder(true);
     try {
-      const picked = await desktop.pickFolder();
+      const picked = await host.pickFolder();
       if (picked) applyProjectPath(picked);
     } catch (err) {
       setPathError((err as Error).message);
@@ -102,6 +106,34 @@ export function WorkspaceProjectPicker({
   }, [applyProjectPath, disabled]);
 
   if (!visible || !defaultScope || !onChange) return null;
+
+  if (nativeProjectPicker) {
+    return (
+      <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
+        <button
+          type="button"
+          disabled={disabled || pickingFolder}
+          aria-label={t("thread.composer.workspace.projectAria")}
+          title={currentProjectScope?.project_path}
+          onClick={() => void pickNativeFolder()}
+          className={cn(
+            "inline-flex h-7 max-w-[18rem] items-center gap-2 rounded-full px-2.5",
+            "text-[12px] font-medium text-muted-foreground/90 transition-colors",
+            "hover:bg-background/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-55",
+            currentProjectScope && "text-foreground/82",
+          )}
+        >
+          <Folder className={cn("h-3.5 w-3.5 shrink-0", currentProjectScope && "text-primary")} />
+          <span className="truncate">{projectLabel}</span>
+        </button>
+        {pathError || error ? (
+          <span role="alert" className="ml-2 truncate text-[11.5px] font-medium text-destructive">
+            {pathError ?? error}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
@@ -127,11 +159,7 @@ export function WorkspaceProjectPicker({
           align="start"
           side="bottom"
           sideOffset={8}
-          className={cn(
-            "w-[min(25rem,calc(100vw-2rem))] rounded-[22px] border-border/60 bg-popover/96 p-1.5",
-            "shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl",
-            "dark:border-white/10 dark:shadow-[0_22px_60px_rgba(0,0,0,0.46)]",
-          )}
+          className="w-[min(25rem,calc(100vw-2rem))] rounded-[22px]"
         >
           <DropdownMenuItem
             onSelect={() => applyProjectPath(defaultScope.project_path, defaultScope.project_name)}
@@ -151,7 +179,7 @@ export function WorkspaceProjectPicker({
             {!currentProjectScope ? <Check className="h-4 w-4 text-foreground/80" /> : null}
           </DropdownMenuItem>
           <div className="my-1 h-px bg-border/45" />
-          {getDesktopApi() ? (
+          {getHostApi() ? (
             <DropdownMenuItem
               onSelect={(event) => {
                 event.preventDefault();
@@ -264,7 +292,7 @@ export function WorkspaceAccessMenu({
           <ChevronDown className={cn("ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56 rounded-2xl p-1.5">
+      <DropdownMenuContent align="start" className="w-56">
         <AccessMenuItem
           icon={<Hand className="h-4 w-4" />}
           label={t("thread.composer.workspace.default")}

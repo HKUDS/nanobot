@@ -99,7 +99,8 @@ function baseSettingsPayload() {
     },
     advanced: {
       restrict_to_workspace: false,
-      allow_local_preview_access: true,
+      webui_allow_local_service_access: true,
+      webui_default_access_mode: "default",
       private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
@@ -767,7 +768,8 @@ describe("App layout", () => {
               },
               advanced: {
                 restrict_to_workspace: false,
-                allow_local_preview_access: true,
+                webui_allow_local_service_access: true,
+                webui_default_access_mode: "default",
                 private_service_protection_enabled: true,
                 ssrf_whitelist_count: 0,
                 mcp_server_count: 0,
@@ -812,8 +814,8 @@ describe("App layout", () => {
     expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Apps" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
+    expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Appearance" }));
     expect(screen.getByText("Brand logos")).toBeInTheDocument();
@@ -890,9 +892,13 @@ describe("App layout", () => {
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
 
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Runtime" }));
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
     expect(screen.getByText("Bot name")).toBeInTheDocument();
     expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
+    expect(screen.queryByText("Heartbeat")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dream")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
+    expect(screen.getByText("Default workspace")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.pointerDown(screen.getByRole("button", { name: "UTC" }));
     expect(screen.getByPlaceholderText("Search timezone")).toBeInTheDocument();
@@ -1055,7 +1061,8 @@ describe("App layout", () => {
               },
               advanced: {
                 restrict_to_workspace: false,
-                allow_local_preview_access: true,
+                webui_allow_local_service_access: true,
+                webui_default_access_mode: "default",
                 private_service_protection_enabled: true,
                 ssrf_whitelist_count: 0,
                 mcp_server_count: 0,
@@ -1252,8 +1259,8 @@ describe("App layout", () => {
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    const desktopAside = container.querySelector("aside.lg\\:block") as HTMLElement;
-    await waitFor(() => expect(desktopAside.style.width).toBe("56px"));
+    const sidebarAside = container.querySelector("aside.lg\\:block") as HTMLElement;
+    await waitFor(() => expect(sidebarAside.style.width).toBe("56px"));
 
     expect(screen.queryByRole("button", { name: "Start a new chat" })).not.toBeInTheDocument();
     const rail = screen.getByRole("navigation", { name: "Sidebar navigation" });
@@ -1263,7 +1270,7 @@ describe("App layout", () => {
     expect(within(rail).queryByText("Existing chat")).not.toBeInTheDocument();
 
     fireEvent.click(within(rail).getByRole("button", { name: "Toggle sidebar" }));
-    await waitFor(() => expect(desktopAside.style.width).toBe("272px"));
+    await waitFor(() => expect(sidebarAside.style.width).toBe("272px"));
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));

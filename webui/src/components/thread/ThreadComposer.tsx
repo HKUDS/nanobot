@@ -61,6 +61,7 @@ import type {
   McpPresetInfo,
   OutboundCliAppMention,
   OutboundMcpPresetMention,
+  RuntimeSurface,
   SlashCommand,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -94,6 +95,7 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  imageGenerationEnabled?: boolean;
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
   onStop?: () => void;
@@ -106,6 +108,7 @@ interface ThreadComposerProps {
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
+  runtimeSurface?: RuntimeSurface;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
 }
 
@@ -483,6 +486,7 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
+  imageGenerationEnabled = true,
   imageMode: controlledImageMode,
   onImageModeChange,
   onStop,
@@ -493,6 +497,7 @@ export function ThreadComposer({
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
+  runtimeSurface = "browser",
   onWorkspaceScopeChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
@@ -518,7 +523,8 @@ export function ThreadComposer({
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
-  const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const requestedImageMode = controlledImageMode ?? uncontrolledImageMode;
+  const imageMode = imageGenerationEnabled && requestedImageMode;
   const setImageMode = useCallback(
     (enabled: boolean) => {
       if (controlledImageMode === undefined) {
@@ -528,6 +534,13 @@ export function ThreadComposer({
     },
     [controlledImageMode, onImageModeChange],
   );
+
+  useEffect(() => {
+    if (imageGenerationEnabled || !requestedImageMode) return;
+    setImageMode(false);
+    setAspectMenuOpen(false);
+  }, [imageGenerationEnabled, requestedImageMode, setImageMode]);
+
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
     : imageMode
@@ -1252,30 +1265,31 @@ export function ThreadComposer({
                 onChange={onWorkspaceScopeChange}
               />
             ) : null}
-            <div ref={aspectControlRef} className="relative flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={disabled}
-                aria-pressed={imageMode}
-                aria-label={t("thread.composer.imageMode.toggle")}
-                onClick={() => {
-                  setImageMode(!imageMode);
-                  setAspectMenuOpen(false);
-                  textareaRef.current?.focus();
-                }}
-                className={cn(
-                  "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
-                  isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
-                  imageMode
-                    ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
-                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
-                )}
-              >
-                <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-                <span className="truncate">{t("thread.composer.imageMode.label")}</span>
-              </Button>
-              {imageMode ? (
+            {imageGenerationEnabled ? (
+              <div ref={aspectControlRef} className="relative flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-pressed={imageMode}
+                  aria-label={t("thread.composer.imageMode.toggle")}
+                  onClick={() => {
+                    setImageMode(!imageMode);
+                    setAspectMenuOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                  className={cn(
+                    "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
+                    imageMode
+                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
+                      : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                  )}
+                >
+                  <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+                  <span className="truncate">{t("thread.composer.imageMode.label")}</span>
+                </Button>
+                {imageMode ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -1292,19 +1306,20 @@ export function ThreadComposer({
                   <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
                   <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
                 </Button>
-              ) : null}
-              {imageMode && aspectMenuOpen ? (
-                <ImageAspectMenu
-                  selected={imageAspectRatio}
-                  isHero={isHero}
-                  onSelect={(ratio) => {
-                    setImageAspectRatio(ratio);
-                    setAspectMenuOpen(false);
-                    textareaRef.current?.focus();
-                  }}
-                />
-              ) : null}
-            </div>
+                ) : null}
+                {imageMode && aspectMenuOpen ? (
+                  <ImageAspectMenu
+                    selected={imageAspectRatio}
+                    isHero={isHero}
+                    onSelect={(ratio) => {
+                      setImageAspectRatio(ratio);
+                      setAspectMenuOpen(false);
+                      textareaRef.current?.focus();
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {modelLabel ? (
@@ -1349,6 +1364,7 @@ export function ThreadComposer({
           defaultScope={workspaceDefaultScope}
           controls={workspaceControls}
           error={workspaceError}
+          runtimeSurface={runtimeSurface}
           onChange={onWorkspaceScopeChange}
         />
       </div>

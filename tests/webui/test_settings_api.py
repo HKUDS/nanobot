@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from nanobot.config.loader import load_config, save_config
@@ -168,32 +170,78 @@ def test_settings_payload_includes_network_safety_fields(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.tools.allow_local_preview_access = False
+    config.tools.webui_allow_local_service_access = False
     config.tools.ssrf_whitelist = ["100.64.0.0/10"]
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
 
     payload = settings_payload()
 
+    assert payload["advanced"]["webui_allow_local_service_access"] is False
     assert payload["advanced"]["allow_local_preview_access"] is False
+    assert payload["advanced"]["webui_default_access_mode"] == "default"
     assert payload["advanced"]["private_service_protection_enabled"] is True
     assert payload["advanced"]["ssrf_whitelist_count"] == 1
 
 
-def test_update_network_safety_settings_writes_local_preview_flag(
+def test_update_network_safety_settings_writes_local_service_flag(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
 
-    payload = update_network_safety_settings({"allow_local_preview_access": ["false"]})
+    payload = update_network_safety_settings(
+        {
+            "webui_allow_local_service_access": ["false"],
+            "webui_default_access_mode": ["full"],
+        }
+    )
 
     saved = load_config(config_path)
-    assert saved.tools.allow_local_preview_access is False
-    assert payload["advanced"]["allow_local_preview_access"] is False
+    saved_raw = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved.tools.webui_allow_local_service_access is False
+    assert saved_raw["tools"]["webuiAllowLocalServiceAccess"] is False
+    assert "allowLocalPreviewAccess" not in saved_raw["tools"]
+    assert payload["advanced"]["webui_allow_local_service_access"] is False
+    assert payload["advanced"]["webui_default_access_mode"] == "full"
     assert payload["requires_restart"] is True
+
+
+def test_update_network_safety_settings_accepts_legacy_restricted_default_access(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+
+    payload = update_network_safety_settings({"webui_default_access_mode": ["restricted"]})
+
+    assert payload["advanced"]["webui_default_access_mode"] == "default"
+
+
+def test_update_network_safety_settings_default_access_is_webui_only(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    before = config_path.read_text(encoding="utf-8")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+
+    payload = update_network_safety_settings({"webui_default_access_mode": ["full"]})
+
+    saved = load_config(config_path)
+    assert config_path.read_text(encoding="utf-8") == before
+    assert saved.tools.restrict_to_workspace is False
+    assert payload["advanced"]["webui_default_access_mode"] == "full"
+    assert payload["requires_restart"] is False
 
 
 def test_openai_codex_oauth_status_uses_available_token(

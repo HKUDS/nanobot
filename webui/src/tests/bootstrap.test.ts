@@ -9,6 +9,12 @@ describe("bootstrap helpers", () => {
     );
   });
 
+  it("preserves the host socket bridge URL", () => {
+    expect(deriveWsUrl("/", "tok en", "nanobot-host://engine/")).toBe(
+      "nanobot-host://engine/?token=tok%20en",
+    );
+  });
+
   it("falls back to the current window host for legacy bootstrap payloads", () => {
     expect(deriveWsUrl("/", "tok")).toBe(
       "ws://localhost:3000/?token=tok",

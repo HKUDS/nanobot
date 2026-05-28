@@ -100,6 +100,19 @@ def test_normalize_config_path_matches_request() -> None:
     assert _normalize_config_path("/") == "/"
 
 
+def test_websocket_config_accepts_absolute_unix_socket(tmp_path) -> None:
+    socket_path = tmp_path / "engine.sock"
+
+    cfg = WebSocketConfig(unix_socket_path=str(socket_path))
+
+    assert cfg.unix_socket_path == str(socket_path)
+
+
+def test_websocket_config_rejects_relative_unix_socket() -> None:
+    with pytest.raises(ValueError, match="absolute path"):
+        WebSocketConfig(unix_socket_path="engine.sock")
+
+
 def test_parse_query_extracts_token_and_client_id() -> None:
     query = _parse_query("/?token=secret&client_id=u1")
     assert query.get("token") == ["secret"]
@@ -1444,7 +1457,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert workspace_path.endswith("/.nanobot/workspace")
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
-        assert body["advanced"]["allow_local_preview_access"] is True
+        assert body["advanced"]["webui_allow_local_service_access"] is True
+        assert body["advanced"]["webui_default_access_mode"] == "default"
         assert body["advanced"]["private_service_protection_enabled"] is True
         assert body["advanced"]["mcp_server_count"] == 0
         assert body["restart_required_sections"] == []
@@ -1562,7 +1576,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_updated.status_code == 200
         search_body = search_updated.json()
         assert search_body["requires_restart"] is True
-        assert search_body["restart_required_sections"] == ["runtime", "web"]
+        assert search_body["restart_required_sections"] == ["browser", "runtime"]
         assert search_body["web_search"]["provider"] == "searxng"
         assert search_body["web_search"]["api_key_hint"] is None
         assert search_body["web_search"]["base_url"] == "https://search.example.com"
@@ -1571,14 +1585,15 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
 
         network_safety_updated = await _http_get(
             "http://127.0.0.1:"
-            f"{port}/api/settings/network-safety/update?allow_local_preview_access=false",
+            f"{port}/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=full",
             headers={"Authorization": "Bearer tok"},
         )
         assert network_safety_updated.status_code == 200
         network_safety_body = network_safety_updated.json()
         assert network_safety_body["requires_restart"] is True
-        assert network_safety_body["restart_required_sections"] == ["runtime", "web"]
-        assert network_safety_body["advanced"]["allow_local_preview_access"] is False
+        assert network_safety_body["restart_required_sections"] == ["browser", "runtime"]
+        assert network_safety_body["advanced"]["webui_allow_local_service_access"] is False
+        assert network_safety_body["advanced"]["webui_default_access_mode"] == "full"
         assert network_safety_body["advanced"]["private_service_protection_enabled"] is True
 
         image_updated = await _http_get(
@@ -1592,7 +1607,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_updated.status_code == 200
         image_body = image_updated.json()
         assert image_body["requires_restart"] is True
-        assert image_body["restart_required_sections"] == ["image", "runtime", "web"]
+        assert image_body["restart_required_sections"] == ["browser", "image", "runtime"]
         assert image_body["image_generation"]["enabled"] is True
         assert image_body["image_generation"]["model"] == "openai/gpt-image-1"
         assert image_body["image_generation"]["default_aspect_ratio"] == "16:9"
@@ -1608,9 +1623,9 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_provider_updated.status_code == 200
         assert image_provider_updated.json()["requires_restart"] is True
         assert image_provider_updated.json()["restart_required_sections"] == [
+            "browser",
             "image",
             "runtime",
-            "web",
         ]
         assert "sk-or-next" not in image_provider_updated.text
 
@@ -1648,7 +1663,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.tools.web.search.max_results == 8
         assert saved.tools.web.search.timeout == 45
         assert saved.tools.web.fetch.use_jina_reader is False
-        assert saved.tools.allow_local_preview_access is False
+        assert saved.tools.webui_allow_local_service_access is False
         assert saved.tools.image_generation.enabled is True
         assert saved.tools.image_generation.provider == "openrouter"
         assert saved.tools.image_generation.model == "openai/gpt-image-1"
@@ -1689,7 +1704,7 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_exposes_desktop_surface(bus: MagicMock) -> None:
+async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
     port = 29893
     channel = WebSocketChannel(
         {
@@ -1698,11 +1713,11 @@ async def test_bootstrap_exposes_desktop_surface(bus: MagicMock) -> None:
             "host": "127.0.0.1",
             "port": port,
             "path": "/ws",
-            "tokenIssueSecret": "desktop-secret",
+            "tokenIssueSecret": "native-secret",
             "websocketRequiresToken": True,
         },
         bus,
-        runtime_surface="desktop",
+        runtime_surface="native",
         runtime_capabilities_overrides={"can_pick_folder": True},
     )
 
@@ -1712,11 +1727,11 @@ async def test_bootstrap_exposes_desktop_surface(bus: MagicMock) -> None:
     try:
         response = await _http_get(
             f"http://127.0.0.1:{port}/webui/bootstrap",
-            headers={"X-Nanobot-Auth": "desktop-secret"},
+            headers={"X-Nanobot-Auth": "native-secret"},
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["runtime_surface"] == "desktop"
+        assert body["runtime_surface"] == "native"
         assert body["runtime_capabilities"]["can_pick_folder"] is True
         assert body["runtime_capabilities"]["can_restart_engine"] is True
         assert body["token"].startswith("nbwt_")
@@ -1773,19 +1788,19 @@ def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> No
     assert sandbox["provider_label"] == "macOS App Sandbox"
 
 
-def test_settings_payload_includes_desktop_runtime_surface(monkeypatch, tmp_path) -> None:
+def test_settings_payload_includes_native_runtime_surface(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     body = settings_payload(
-        surface="desktop",
+        surface="native",
         runtime_capability_overrides={"can_open_logs": True},
         restart_required_sections=["runtime"],
     )
 
-    assert body["surface"] == "desktop"
-    assert body["runtime_surface"] == "desktop"
+    assert body["surface"] == "native"
+    assert body["runtime_surface"] == "native"
     assert body["runtime_capabilities"]["can_open_logs"] is True
     assert body["runtime_capabilities"]["can_restart_engine"] is True
     assert body["restart_behavior_by_section"]["runtime"] == "engineRestart"

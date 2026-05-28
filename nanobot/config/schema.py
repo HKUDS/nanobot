@@ -296,7 +296,15 @@ class ToolsConfig(Base):
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
-    allow_local_preview_access: bool = True  # allow Full Access shell checks against localhost dev servers
+    webui_allow_local_service_access: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "webuiAllowLocalServiceAccess",
+            "webui_allow_local_service_access",
+            "allowLocalPreviewAccess",
+            "allow_local_preview_access",
+        ),
+    )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 

@@ -98,7 +98,7 @@ const MCP_PRESETS: McpPresetInfo[] = [
     description: "Design context",
     docs_url: "https://figma.com",
     transport: "streamableHttp",
-    requires: "Figma desktop",
+    requires: "Figma local app",
     note: "",
     install_supported: true,
     installed: true,
@@ -115,6 +115,7 @@ const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  Reflect.deleteProperty(window, "nanobotHost");
   window.localStorage.clear();
   Object.defineProperty(window, "innerHeight", {
     value: ORIGINAL_INNER_HEIGHT,
@@ -264,15 +265,88 @@ describe("ThreadComposer", () => {
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Choose project" }));
     const reopenedInput = await screen.findByLabelText("Paste path");
-    fireEvent.change(reopenedInput, { target: { value: "~/Desktop/Photos" } });
+    fireEvent.change(reopenedInput, { target: { value: "~/Pictures/Photos" } });
     fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      project_path: "~/Desktop/Photos",
+      project_path: "~/Pictures/Photos",
       project_name: "Photos",
       access_mode: "full",
       restrict_to_workspace: false,
     }));
+  });
+
+  it("uses the native folder picker for project selection on native host", async () => {
+    const onWorkspaceScopeChange = vi.fn();
+    const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    Object.defineProperty(window, "nanobotHost", {
+      configurable: true,
+      value: {
+        getRuntimeInfo: vi.fn(),
+        restartEngine: vi.fn(),
+        pickFolder,
+        openLogs: vi.fn(),
+        exportDiagnostics: vi.fn(),
+        checkForUpdates: vi.fn(),
+      },
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        runtimeSurface="native"
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
+    expect(screen.queryByRole("menuitem", { name: /Default workspace/ })).not.toBeInTheDocument();
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_path: "/Users/test/native-project",
+      project_name: "native-project",
+      access_mode: "full",
+      restrict_to_workspace: false,
+    }));
+  });
+
+  it("does not fall back to the web path menu on native surface", () => {
+    const defaultScope = {
+      project_path: "/Users/test/.nanobot/workspace",
+      project_name: "workspace",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        runtimeSurface="native"
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(screen.queryByRole("menuitem", { name: /Default workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
   });
 
   it("shows turn run timer when runStartedAt is set", () => {

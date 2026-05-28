@@ -18,13 +18,14 @@ import ssl
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
-from websockets.asyncio.server import ServerConnection, serve
+from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
@@ -171,6 +172,7 @@ class WebSocketConfig(Base):
     enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8765
+    unix_socket_path: str = ""
     path: str = "/"
     token: str = ""
     token_issue_path: str = ""
@@ -188,6 +190,19 @@ class WebSocketConfig(Base):
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+
+    @field_validator("unix_socket_path")
+    @classmethod
+    def unix_socket_path_format(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        if "\x00" in value:
+            raise ValueError("unix_socket_path must not contain NUL bytes")
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            raise ValueError("unix_socket_path must be an absolute path")
+        return str(path)
 
     @field_validator("path")
     @classmethod
@@ -553,7 +568,7 @@ class WebSocketChannel(BaseChannel):
         workspace_path: Path | None = None,
         restrict_to_workspace: bool = False,
         runtime_model_name: Callable[[], str | None] | None = None,
-        runtime_surface: str = "web",
+        runtime_surface: str = "browser",
         runtime_capabilities_overrides: dict[str, Any] | None = None,
     ):
         if isinstance(config, dict):
@@ -589,7 +604,9 @@ class WebSocketChannel(BaseChannel):
             logger_=self.logger,
         )
         self._runtime_model_name = runtime_model_name
-        self._runtime_surface = "desktop" if runtime_surface == "desktop" else "web"
+        self._runtime_surface = (
+            "native" if runtime_surface in {"native", "desktop"} else "browser"
+        )
         self._runtime_capabilities = runtime_capabilities(
             self._runtime_surface,
             runtime_capabilities_overrides,
@@ -1099,7 +1116,7 @@ class WebSocketChannel(BaseChannel):
             payload = update_web_search_settings(query)
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
-        return _http_json_response(self._with_settings_restart_state(payload, section="web"))
+        return _http_json_response(self._with_settings_restart_state(payload, section="browser"))
 
     def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -1517,34 +1534,63 @@ class WebSocketChannel(BaseChannel):
             await self._connection_loop(connection)
 
         self.logger.info(
-            "WebSocket server listening on {}://{}:{}{}",
-            scheme,
-            self.config.host,
-            self.config.port,
-            self.config.path,
+            "WebSocket server listening on {}",
+            (
+                f"unix:{self.config.unix_socket_path}{self.config.path}"
+                if self.config.unix_socket_path
+                else f"{scheme}://{self.config.host}:{self.config.port}{self.config.path}"
+            ),
         )
         if self.config.token_issue_path:
             self.logger.info(
-                "WebSocket token issue route: {}://{}:{}{}",
-                scheme,
-                self.config.host,
-                self.config.port,
-                _normalize_config_path(self.config.token_issue_path),
+                "WebSocket token issue route: {}",
+                (
+                    f"unix:{self.config.unix_socket_path}{_normalize_config_path(self.config.token_issue_path)}"
+                    if self.config.unix_socket_path
+                    else (
+                        f"{scheme}://{self.config.host}:{self.config.port}"
+                        f"{_normalize_config_path(self.config.token_issue_path)}"
+                    )
+                ),
             )
 
         async def runner() -> None:
-            async with serve(
-                handler,
-                self.config.host,
-                self.config.port,
-                process_request=process_request,
-                max_size=self.config.max_message_bytes,
-                ping_interval=self.config.ping_interval_s,
-                ping_timeout=self.config.ping_timeout_s,
-                ssl=ssl_context,
-            ):
+            socket_path = self.config.unix_socket_path
+            if socket_path:
+                path_obj = Path(socket_path)
+                path_obj.parent.mkdir(parents=True, exist_ok=True)
+                with suppress(FileNotFoundError):
+                    path_obj.unlink()
+                server = await unix_serve(
+                    handler,
+                    socket_path,
+                    process_request=process_request,
+                    max_size=self.config.max_message_bytes,
+                    ping_interval=self.config.ping_interval_s,
+                    ping_timeout=self.config.ping_timeout_s,
+                )
+                with suppress(OSError):
+                    path_obj.chmod(0o600)
+            else:
+                server = await serve(
+                    handler,
+                    self.config.host,
+                    self.config.port,
+                    process_request=process_request,
+                    max_size=self.config.max_message_bytes,
+                    ping_interval=self.config.ping_interval_s,
+                    ping_timeout=self.config.ping_timeout_s,
+                    ssl=ssl_context,
+                )
+            try:
                 assert self._stop_event is not None
                 await self._stop_event.wait()
+            finally:
+                server.close()
+                await server.wait_closed()
+                if socket_path:
+                    with suppress(FileNotFoundError):
+                        Path(socket_path).unlink()
 
         self._server_task = asyncio.create_task(runner())
         await self._server_task

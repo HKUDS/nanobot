@@ -143,6 +143,7 @@ export interface ChatSummary {
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
+export type WebuiDefaultAccessMode = "default" | "full";
 
 export interface WorkspaceScopePayload {
   project_path: string;
@@ -162,6 +163,7 @@ export interface WorkspaceScopePayload {
 
 export interface WorkspacesPayload {
   schema_version: number;
+  default_access_mode: WebuiDefaultAccessMode;
   default_scope: WorkspaceScopePayload;
   last_scope?: {
     project_path: string;
@@ -211,7 +213,7 @@ export interface BootstrapResponse {
   runtime_capabilities?: RuntimeCapabilities;
 }
 
-export type RuntimeSurface = "web" | "desktop";
+export type RuntimeSurface = "browser" | "native";
 export type RestartBehavior = "none" | "nextTurn" | "engineRestart" | "appRestart";
 export type SettingsApplyStatus =
   | "idle"
@@ -351,7 +353,9 @@ export interface SettingsPayload {
       summary: string;
     };
     ssrf_whitelist_count: number;
-    allow_local_preview_access: boolean;
+    webui_allow_local_service_access: boolean;
+    allow_local_preview_access?: boolean;
+    webui_default_access_mode: WebuiDefaultAccessMode;
     private_service_protection_enabled: boolean;
     mcp_server_count: number;
     exec_enabled: boolean;
@@ -359,7 +363,7 @@ export interface SettingsPayload {
     exec_path_append_set: boolean;
   };
   requires_restart: boolean;
-  restart_required_sections?: Array<"runtime" | "web" | "image">;
+  restart_required_sections?: Array<"runtime" | "browser" | "image">;
 }
 
 export interface AppPackageRef {
@@ -559,7 +563,8 @@ export interface WebSearchSettingsUpdate {
 }
 
 export interface NetworkSafetySettingsUpdate {
-  allowLocalPreviewAccess: boolean;
+  webuiAllowLocalServiceAccess: boolean;
+  webuiDefaultAccessMode: WebuiDefaultAccessMode;
 }
 
 export interface ImageGenerationSettingsUpdate {

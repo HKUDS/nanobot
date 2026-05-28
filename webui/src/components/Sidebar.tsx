@@ -52,6 +52,7 @@ interface SidebarProps {
   showArchived?: boolean;
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
+  hostChromeInset?: boolean;
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -65,11 +66,15 @@ export function Sidebar(props: SidebarProps) {
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
-      className="flex h-full w-full min-w-0 flex-col border-r border-sidebar-border/60 bg-sidebar text-sidebar-foreground"
+      className={cn(
+        "flex h-full w-full min-w-0 flex-col bg-sidebar text-sidebar-foreground",
+        !props.hostChromeInset && "border-r border-sidebar-border/60",
+      )}
     >
       <div
         className={cn(
-          "flex items-center px-3 pb-2.5 pt-3",
+          "flex items-center px-3 pb-2.5",
+          props.hostChromeInset ? "pt-[2.85rem]" : "pt-3",
           collapsed ? "w-14 justify-start" : "justify-between",
         )}
       >
@@ -94,7 +99,7 @@ export function Sidebar(props: SidebarProps) {
             draggable={false}
           />
         </button>
-        {!collapsed && (
+        {!collapsed && !props.hostChromeInset && (
           <Button
             variant="ghost"
             size="icon"

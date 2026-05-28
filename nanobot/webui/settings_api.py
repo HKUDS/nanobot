@@ -20,9 +20,13 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import PROVIDERS, find_by_name
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.webui.workspaces import (
+    read_webui_default_access_mode,
+    write_webui_default_access_mode,
+)
 
 QueryParams = dict[str, list[str]]
-RuntimeSurface = Literal["web", "desktop"]
+RuntimeSurface = Literal["browser", "native"]
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -32,7 +36,7 @@ _RUNTIME_CAPABILITIES = {
     "can_export_diagnostics": False,
 }
 
-_DESKTOP_RUNTIME_CAPABILITIES = {
+_NATIVE_RUNTIME_CAPABILITIES = {
     **_RUNTIME_CAPABILITIES,
     "can_restart_engine": True,
     "can_pick_folder": True,
@@ -41,21 +45,21 @@ _DESKTOP_RUNTIME_CAPABILITIES = {
     "can_export_diagnostics": True,
 }
 
-_WEB_RESTART_BEHAVIOR_BY_SECTION = {
+_BROWSER_RESTART_BEHAVIOR_BY_SECTION = {
     "appearance": "none",
     "models": "none",
     "providers": "none",
     "runtime": "engineRestart",
-    "web": "engineRestart",
+    "browser": "engineRestart",
     "image": "engineRestart",
     "apps": "engineRestart",
     "advanced": "appRestart",
 }
 
-_DESKTOP_RESTART_BEHAVIOR_BY_SECTION = {
-    **_WEB_RESTART_BEHAVIOR_BY_SECTION,
+_NATIVE_RESTART_BEHAVIOR_BY_SECTION = {
+    **_BROWSER_RESTART_BEHAVIOR_BY_SECTION,
     "runtime": "engineRestart",
-    "web": "engineRestart",
+    "browser": "engineRestart",
     "image": "engineRestart",
     "apps": "engineRestart",
 }
@@ -96,17 +100,17 @@ class WebUISettingsError(ValueError):
 
 
 def _normalize_surface(surface: str | None) -> RuntimeSurface:
-    return "desktop" if surface == "desktop" else "web"
+    return "native" if surface in {"native", "desktop"} else "browser"
 
 
 def runtime_capabilities(
-    surface: str | None = "web",
+    surface: str | None = "browser",
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
     """Return the capability flags exposed to the WebUI runtime."""
     base = (
-        _DESKTOP_RUNTIME_CAPABILITIES
-        if _normalize_surface(surface) == "desktop"
+        _NATIVE_RUNTIME_CAPABILITIES
+        if _normalize_surface(surface) == "native"
         else _RUNTIME_CAPABILITIES
     )
     result = dict(base)
@@ -116,18 +120,18 @@ def runtime_capabilities(
     return result
 
 
-def restart_behavior_by_section(surface: str | None = "web") -> dict[str, str]:
+def restart_behavior_by_section(surface: str | None = "browser") -> dict[str, str]:
     return dict(
-        _DESKTOP_RESTART_BEHAVIOR_BY_SECTION
-        if _normalize_surface(surface) == "desktop"
-        else _WEB_RESTART_BEHAVIOR_BY_SECTION
+        _NATIVE_RESTART_BEHAVIOR_BY_SECTION
+        if _normalize_surface(surface) == "native"
+        else _BROWSER_RESTART_BEHAVIOR_BY_SECTION
     )
 
 
 def decorate_settings_payload(
     payload: dict[str, Any],
     *,
-    surface: str | None = "web",
+    surface: str | None = "browser",
     runtime_capability_overrides: dict[str, Any] | None = None,
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
@@ -312,7 +316,7 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
 def settings_payload(
     *,
     requires_restart: bool = False,
-    surface: str | None = "web",
+    surface: str | None = "browser",
     runtime_capability_overrides: dict[str, Any] | None = None,
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
@@ -487,7 +491,9 @@ def settings_payload(
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
-            "allow_local_preview_access": config.tools.allow_local_preview_access,
+            "webui_allow_local_service_access": config.tools.webui_allow_local_service_access,
+            "allow_local_preview_access": config.tools.webui_allow_local_service_access,
+            "webui_default_access_mode": read_webui_default_access_mode(),
             "private_service_protection_enabled": True,
             "ssrf_whitelist_count": len(config.tools.ssrf_whitelist),
             "mcp_server_count": len(config.tools.mcp_servers),
@@ -804,23 +810,34 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
 
 
 def update_network_safety_settings(query: QueryParams) -> dict[str, Any]:
-    raw_allow = _query_first_alias(
-        query,
-        "allow_local_preview_access",
-        "allowLocalPreviewAccess",
+    raw_allow = (
+        _query_first_alias(query, "webui_allow_local_service_access", "webuiAllowLocalServiceAccess")
+        or _query_first_alias(query, "allow_local_preview_access", "allowLocalPreviewAccess")
     )
-    if raw_allow is None:
-        raise WebUISettingsError("allow_local_preview_access is required")
+    raw_default_access_mode = _query_first_alias(query, "webui_default_access_mode", "webuiDefaultAccessMode")
+    if raw_allow is None and raw_default_access_mode is None:
+        raise WebUISettingsError("webui_allow_local_service_access or webui_default_access_mode is required")
 
-    allow_local_preview_access = _parse_bool(raw_allow, "allow_local_preview_access")
     config = load_config()
     changed = False
-    if config.tools.allow_local_preview_access != allow_local_preview_access:
-        config.tools.allow_local_preview_access = allow_local_preview_access
-        changed = True
+    if raw_allow is not None:
+        webui_allow_local_service_access = _parse_bool(raw_allow, "webui_allow_local_service_access")
+        if config.tools.webui_allow_local_service_access != webui_allow_local_service_access:
+            config.tools.webui_allow_local_service_access = webui_allow_local_service_access
+            changed = True
 
     if changed:
         save_config(config)
+    if raw_default_access_mode is not None:
+        default_access_mode = raw_default_access_mode.strip().lower()
+        if default_access_mode == "restricted":
+            default_access_mode = "default"
+        if default_access_mode not in {"default", "full"}:
+            raise WebUISettingsError("webui_default_access_mode must be default or full")
+        try:
+            write_webui_default_access_mode(default_access_mode)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from exc
     return settings_payload(requires_restart=changed)
 
 

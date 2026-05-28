@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
@@ -25,13 +26,18 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   ChatSummary,
+  RuntimeSurface,
   SettingsPayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchWorkspaces } from "@/lib/api";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import {
+  createRuntimeHost,
+  toRuntimeSurface,
+} from "@/lib/runtime";
 
 type BootState =
   | { status: "loading" }
@@ -43,6 +49,7 @@ type BootState =
       token: string;
       tokenExpiresAt: number;
       modelName: string | null;
+      runtimeSurface: RuntimeSurface;
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
@@ -170,6 +177,57 @@ function projectNameFromPath(path: string): string {
   return normalized.split("/").filter(Boolean).pop() || path;
 }
 
+function HostChrome({
+  onToggleSidebar,
+  theme,
+  onToggleTheme,
+  showThemeButton = true,
+}: {
+  onToggleSidebar?: () => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  showThemeButton?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-start justify-between bg-transparent px-3 pt-2 text-foreground/90">
+      <div className="flex min-w-[8rem] items-center">
+        {onToggleSidebar ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("thread.header.toggleSidebar")}
+            onClick={onToggleSidebar}
+            className="host-no-drag pointer-events-auto ml-[88px] h-8 w-8 rounded-xl text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+      {showThemeButton ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("thread.header.toggleTheme")}
+          onClick={onToggleTheme}
+          className="host-no-drag pointer-events-auto h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+        >
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4" />
+          ) : (
+            <Moon className="h-4 w-4" />
+          )}
+        </Button>
+      ) : (
+        <div aria-hidden className="h-8 w-8" />
+      )}
+    </header>
+  );
+}
+
 export default function App() {
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
@@ -185,8 +243,11 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+          const runtimeSurface = toRuntimeSurface(boot.runtime_surface);
+          const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
             url,
+            socketFactory: runtimeHost.socketFactory,
             onReauth: async () => {
               try {
                 const refreshed = await fetchBootstrap("", bootstrapSecretRef.current);
@@ -203,6 +264,10 @@ export default function App() {
                         token: refreshed.token,
                         tokenExpiresAt,
                         modelName: refreshed.model_name ?? current.modelName,
+                        runtimeSurface:
+                          refreshed.runtime_surface
+                            ? toRuntimeSurface(refreshed.runtime_surface)
+                            : current.runtimeSurface,
                       }
                     : current,
                 );
@@ -220,6 +285,7 @@ export default function App() {
             token: boot.token,
             tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
             modelName: boot.model_name ?? null,
+            runtimeSurface,
           });
         } catch (e) {
           if (cancelled) return;
@@ -254,6 +320,9 @@ export default function App() {
                 token: boot.token,
                 tokenExpiresAt,
                 modelName: boot.model_name ?? current.modelName,
+                runtimeSurface: boot.runtime_surface
+                  ? toRuntimeSurface(boot.runtime_surface)
+                  : current.runtimeSurface,
               }
             : current,
         );
@@ -329,15 +398,21 @@ export default function App() {
       token={state.token}
       modelName={state.modelName}
     >
-      <Shell onModelNameChange={handleModelNameChange} onLogout={handleLogout} />
+      <Shell
+        runtimeSurface={state.runtimeSurface}
+        onModelNameChange={handleModelNameChange}
+        onLogout={handleLogout}
+      />
     </ClientProvider>
   );
 }
 
 function Shell({
+  runtimeSurface,
   onModelNameChange,
   onLogout,
 }: {
+  runtimeSurface: RuntimeSurface;
   onModelNameChange: (modelName: string | null) => void;
   onLogout: () => void;
 }) {
@@ -350,7 +425,7 @@ function Shell({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [view, setView] = useState<ShellView>("chat");
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>("overview");
-  const [desktopSidebarOpen, setDesktopSidebarOpen] =
+  const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
@@ -381,15 +456,29 @@ function Shell({
   const runningChatIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    let cancelled = false;
+    fetchSettings(token)
+      .then((payload) => {
+        if (!cancelled) setSettingsSnapshot(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setSettingsSnapshot(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
-        desktopSidebarOpen ? "1" : "0",
+        hostSidebarOpen ? "1" : "0",
       );
     } catch {
       // ignore storage errors (private mode, etc.)
     }
-  }, [desktopSidebarOpen]);
+  }, [hostSidebarOpen]);
 
   useEffect(() => {
     writeCompletedRunChatIds(completedChatIds);
@@ -500,12 +589,12 @@ function Shell({
     });
   }, [client, loading, sessions]);
 
-  const closeDesktopSidebar = useCallback(() => {
-    setDesktopSidebarOpen(false);
+  const closeHostSidebar = useCallback(() => {
+    setHostSidebarOpen(false);
   }, []);
 
-  const openDesktopSidebar = useCallback(() => {
-    setDesktopSidebarOpen(true);
+  const openHostSidebar = useCallback(() => {
+    setHostSidebarOpen(true);
   }, []);
 
   const closeMobileSidebar = useCallback(() => {
@@ -513,11 +602,11 @@ function Shell({
   }, []);
 
   const toggleSidebar = useCallback(() => {
-    const isDesktop =
+    const isNativeHost =
       typeof window !== "undefined" &&
       window.matchMedia("(min-width: 1024px)").matches;
-    if (isDesktop) {
-      setDesktopSidebarOpen((v) => !v);
+    if (isNativeHost) {
+      setHostSidebarOpen((v) => !v);
     } else {
       setMobileSidebarOpen((v) => !v);
     }
@@ -952,109 +1041,146 @@ function Shell({
     archivedCount: sidebarState.archived_keys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
+  const effectiveRuntimeSurface =
+    settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
+  const isNativeHostSetupSurface = effectiveRuntimeSurface === "native";
+  const showHostChrome = isNativeHostSetupSurface;
   const showMainSidebar = view !== "settings";
 
   return (
     <ThemeProvider theme={theme}>
-      <div className="relative flex h-full w-full overflow-hidden">
-        {/* Desktop sidebar: in normal flow, so the thread area width stays honest. */}
-        {showMainSidebar ? (
-          <aside
+      <div
+        className={cn(
+          "relative h-full w-full overflow-hidden",
+          showHostChrome && "bg-sidebar",
+        )}
+      >
+        {showHostChrome ? (
+          <HostChrome
+            onToggleSidebar={showMainSidebar ? toggleSidebar : undefined}
+            theme={theme}
+            onToggleTheme={toggle}
+            showThemeButton={view !== "chat"}
+          />
+        ) : null}
+        <div
+          className={cn(
+            "relative flex h-full w-full overflow-hidden",
+          )}
+        >
+          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
+          {showMainSidebar ? (
+            <aside
+              className={cn(
+                "relative z-20 hidden shrink-0 overflow-hidden lg:block",
+                "transition-[width] duration-300 ease-out",
+              )}
+              style={{
+                width: hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH,
+              }}
+            >
+              <div
+                className={cn(
+                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden bg-sidebar",
+                  !showHostChrome && "shadow-inner-right",
+                )}
+              >
+                <Sidebar
+                  {...sidebarProps}
+                  collapsed={!hostSidebarOpen}
+                  hostChromeInset={showHostChrome}
+                  onCollapse={closeHostSidebar}
+                  onExpand={openHostSidebar}
+                />
+              </div>
+            </aside>
+          ) : null}
+
+          {showMainSidebar ? (
+            <Sheet
+              open={mobileSidebarOpen}
+              onOpenChange={(open) => setMobileSidebarOpen(open)}
+            >
+              <SheetContent
+                side="left"
+                showCloseButton={false}
+                aria-describedby={undefined}
+                className="p-0 lg:hidden"
+                style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
+              >
+                <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
+                <Sidebar
+                  {...sidebarProps}
+                  onCollapse={closeMobileSidebar}
+                  containActionMenus
+                />
+              </SheetContent>
+            </Sheet>
+          ) : null}
+
+          <SessionSearchDialog
+            open={sessionSearchOpen}
+            onOpenChange={setSessionSearchOpen}
+            sessions={sessions}
+            activeKey={activeKey}
+            loading={loading}
+            titleOverrides={sidebarState.title_overrides}
+            onSelect={onSelectSearchResult}
+          />
+          <main
             className={cn(
-              "relative z-20 hidden shrink-0 overflow-hidden lg:block",
-              "transition-[width] duration-300 ease-out",
+              "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
+              showHostChrome &&
+                "rounded-l-[28px] shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.45)] dark:shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.85)]",
             )}
-            style={{
-              width: desktopSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH,
-            }}
           >
             <div
-              className="absolute inset-y-0 left-0 h-full w-full overflow-hidden bg-sidebar shadow-inner-right"
+              className={cn(
+                "absolute inset-0 flex flex-col",
+                view !== "chat" && "invisible pointer-events-none",
+              )}
             >
-              <Sidebar
-                {...sidebarProps}
-                collapsed={!desktopSidebarOpen}
-                onCollapse={closeDesktopSidebar}
-                onExpand={openDesktopSidebar}
-              />
-            </div>
-          </aside>
-        ) : null}
-
-        {showMainSidebar ? (
-          <Sheet
-            open={mobileSidebarOpen}
-            onOpenChange={(open) => setMobileSidebarOpen(open)}
-          >
-            <SheetContent
-              side="left"
-              showCloseButton={false}
-              aria-describedby={undefined}
-              className="p-0 lg:hidden"
-              style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
-            >
-              <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
-              <Sidebar
-                {...sidebarProps}
-                onCollapse={closeMobileSidebar}
-                containActionMenus
-              />
-            </SheetContent>
-          </Sheet>
-        ) : null}
-
-        <SessionSearchDialog
-          open={sessionSearchOpen}
-          onOpenChange={setSessionSearchOpen}
-          sessions={sessions}
-          activeKey={activeKey}
-          loading={loading}
-          titleOverrides={sidebarState.title_overrides}
-          onSelect={onSelectSearchResult}
-        />
-        <main className="relative flex h-full min-w-0 flex-1 flex-col">
-          <div
-            className={cn(
-              "absolute inset-0 flex flex-col",
-              view !== "chat" && "invisible pointer-events-none",
-            )}
-          >
-            <ThreadShell
-              session={activeSession}
-              title={headerTitle}
-              onToggleSidebar={toggleSidebar}
-              onNewChat={onNewChat}
-              onCreateChat={onCreateChat}
-              onTurnEnd={onTurnEnd}
-              theme={theme}
-              onToggleTheme={toggle}
-              hideSidebarToggleOnDesktop
-              workspaceScope={activeWorkspaceScope}
-              workspaceDefaultScope={workspaces?.default_scope ?? null}
-              workspaceControls={workspaces?.controls ?? null}
-              workspaceScopeDisabled={activeChatRunning}
-              workspaceError={workspaceError}
-              onWorkspaceScopeChange={applyWorkspaceScope}
-              settingsSnapshot={settingsSnapshot}
-            />
-          </div>
-          {view !== "chat" && (
-            <div className="absolute inset-0 flex flex-col">
-              <SettingsView
+              <ThreadShell
+                session={activeSession}
+                title={headerTitle}
+                onToggleSidebar={toggleSidebar}
+                onNewChat={onNewChat}
+                onCreateChat={onCreateChat}
+                onTurnEnd={onTurnEnd}
                 theme={theme}
-                initialSection={settingsInitialSection}
-                showSidebar={view === "settings"}
                 onToggleTheme={toggle}
-                onBackToChat={onBackToChat}
-                onModelNameChange={onModelNameChange}
-                onSettingsChange={setSettingsSnapshot}
-                onLogout={onLogout}
-                onRestart={onRestart}
-                isRestarting={isRestarting}
+                hideSidebarToggleForHostChrome
+                hideHeader={false}
+                workspaceScope={activeWorkspaceScope}
+                workspaceDefaultScope={workspaces?.default_scope ?? null}
+                workspaceControls={workspaces?.controls ?? null}
+                workspaceScopeDisabled={activeChatRunning}
+                workspaceError={workspaceError}
+                runtimeSurface={effectiveRuntimeSurface}
+                onWorkspaceScopeChange={applyWorkspaceScope}
+                settingsSnapshot={settingsSnapshot}
               />
             </div>
-          )}
-        </main>
+            {view !== "chat" && (
+              <div className="absolute inset-0 flex flex-col">
+                <SettingsView
+                  theme={theme}
+                  initialSection={settingsInitialSection}
+                  showSidebar={view === "settings"}
+                  onToggleTheme={toggle}
+                  onBackToChat={onBackToChat}
+                  onModelNameChange={onModelNameChange}
+                  onSettingsChange={setSettingsSnapshot}
+                  onWorkspaceSettingsChange={refreshWorkspaces}
+                  onLogout={onLogout}
+                  onRestart={onRestart}
+                  isRestarting={isRestarting}
+                  hostChromeInset={showHostChrome}
+                />
+              </div>
+            )}
+          </main>
+        </div>
 
         <DeleteConfirm
           open={!!pendingDelete}

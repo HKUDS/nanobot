@@ -190,7 +190,8 @@ function modelSettings(model: string, provider: string): SettingsPayload {
     },
     advanced: {
       restrict_to_workspace: false,
-      allow_local_preview_access: true,
+      webui_allow_local_service_access: true,
+      webui_default_access_mode: "default",
       private_service_protection_enabled: true,
       ssrf_whitelist_count: 0,
       mcp_server_count: 0,
@@ -267,6 +268,52 @@ describe("ThreadShell", () => {
     });
 
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+  });
+
+  it("only shows image generation controls when the setting is enabled", async () => {
+    const client = makeClient();
+    const disabledSettings = modelSettings("deepseek-v4-pro", "deepseek");
+    const enabledSettings: SettingsPayload = {
+      ...disabledSettings,
+      image_generation: {
+        ...disabledSettings.image_generation,
+        enabled: true,
+        provider_configured: true,
+      },
+    };
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("image-generation-disabled")}
+          title="Image generation disabled"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={disabledSettings}
+        />,
+        "deepseek-v4-pro",
+      ),
+    );
+
+    await screen.findByLabelText("Message input");
+    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("image-generation-disabled")}
+            title="Image generation disabled"
+            onToggleSidebar={() => {}}
+            settingsSnapshot={enabledSettings}
+          />,
+          "deepseek-v4-pro",
+        ),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: "Toggle image generation mode" })).toBeInTheDocument();
   });
 
   it("restores in-memory messages when switching away and back to a session", async () => {
@@ -1020,6 +1067,7 @@ describe("ThreadShell", () => {
 
   it("does not bring back welcome cards when image mode is enabled", async () => {
     const client = makeClient();
+    const settings = modelSettings("deepseek-v4-pro", "deepseek");
     render(
       wrap(
         client,
@@ -1028,6 +1076,14 @@ describe("ThreadShell", () => {
           title="nanobot"
           onToggleSidebar={() => {}}
           onNewChat={() => {}}
+          settingsSnapshot={{
+            ...settings,
+            image_generation: {
+              ...settings.image_generation,
+              enabled: true,
+              provider_configured: true,
+            },
+          }}
         />,
       ),
     );

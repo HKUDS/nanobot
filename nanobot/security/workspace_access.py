@@ -70,6 +70,7 @@ class WorkspaceScope:
     access_mode: WorkspaceAccessMode
     restrict_to_workspace: bool
     sandbox_status: WorkspaceSandboxStatus
+    source_channel: str | None = None
 
     @property
     def project_name(self) -> str:
@@ -133,6 +134,7 @@ class WorkspaceScopeResolver:
             session_metadata=session_metadata,
             default_workspace=self.default_workspace,
             default_restrict_to_workspace=self.default_restrict_to_workspace,
+            source_channel=channel,
         )
 
     def persist_message_scope(self, session: Any, msg: Any) -> None:
@@ -197,6 +199,8 @@ def default_access_mode(restrict_to_workspace: bool) -> WorkspaceAccessMode:
 def build_workspace_scope(
     project_path: str | Path,
     access_mode: str,
+    *,
+    source_channel: str | None = None,
 ) -> WorkspaceScope:
     mode = _normalize_access_mode(access_mode)
     root = Path(project_path).expanduser().resolve(strict=False)
@@ -209,16 +213,20 @@ def build_workspace_scope(
             restrict_to_workspace=restrict,
             workspace=root,
         ),
+        source_channel=source_channel,
     )
 
 
 def default_workspace_scope(
     workspace: str | Path,
     restrict_to_workspace: bool,
+    *,
+    source_channel: str | None = None,
 ) -> WorkspaceScope:
     return build_workspace_scope(
         workspace,
         default_access_mode(restrict_to_workspace),
+        source_channel=source_channel,
     )
 
 
@@ -227,10 +235,15 @@ def validate_workspace_scope_payload(
     *,
     default_workspace: str | Path,
     default_restrict_to_workspace: bool,
+    source_channel: str | None = None,
 ) -> WorkspaceScope:
     """Validate a client-requested workspace scope."""
     if raw is None:
-        return default_workspace_scope(default_workspace, default_restrict_to_workspace)
+        return default_workspace_scope(
+            default_workspace,
+            default_restrict_to_workspace,
+            source_channel=source_channel,
+        )
     if not isinstance(raw, dict):
         raise WorkspaceScopeError("workspace_scope must be an object")
 
@@ -254,7 +267,7 @@ def validate_workspace_scope_payload(
         raw_mode = default_access_mode(default_restrict_to_workspace)
     if not isinstance(raw_mode, str):
         raise WorkspaceScopeError("access_mode must be a string")
-    return build_workspace_scope(project, raw_mode)
+    return build_workspace_scope(project, raw_mode, source_channel=source_channel)
 
 
 def workspace_scope_from_metadata(
@@ -262,18 +275,28 @@ def workspace_scope_from_metadata(
     *,
     default_workspace: str | Path,
     default_restrict_to_workspace: bool,
+    source_channel: str | None = None,
 ) -> WorkspaceScope:
     """Resolve persisted metadata, falling back safely for old or stale sessions."""
     if not isinstance(metadata, dict):
-        return default_workspace_scope(default_workspace, default_restrict_to_workspace)
+        return default_workspace_scope(
+            default_workspace,
+            default_restrict_to_workspace,
+            source_channel=source_channel,
+        )
     try:
         return validate_workspace_scope_payload(
             metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
+            source_channel=source_channel,
         )
     except WorkspaceScopeError:
-        return default_workspace_scope(default_workspace, default_restrict_to_workspace)
+        return default_workspace_scope(
+            default_workspace,
+            default_restrict_to_workspace,
+            source_channel=source_channel,
+        )
 
 
 def resolve_effective_workspace_scope(
@@ -282,17 +305,20 @@ def resolve_effective_workspace_scope(
     session_metadata: Any,
     default_workspace: str | Path,
     default_restrict_to_workspace: bool,
+    source_channel: str | None = None,
 ) -> WorkspaceScope:
     if isinstance(message_metadata, dict) and WORKSPACE_SCOPE_METADATA_KEY in message_metadata:
         return workspace_scope_from_metadata(
             message_metadata,
             default_workspace=default_workspace,
             default_restrict_to_workspace=default_restrict_to_workspace,
+            source_channel=source_channel,
         )
     return workspace_scope_from_metadata(
         session_metadata,
         default_workspace=default_workspace,
         default_restrict_to_workspace=default_restrict_to_workspace,
+        source_channel=source_channel,
     )
 
 

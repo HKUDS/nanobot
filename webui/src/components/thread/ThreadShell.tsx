@@ -23,6 +23,7 @@ import type {
   ChatSummary,
   CliAppInfo,
   McpPresetInfo,
+  RuntimeSurface,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -61,12 +62,14 @@ interface ThreadShellProps {
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
-  hideSidebarToggleOnDesktop?: boolean;
+  hideSidebarToggleForHostChrome?: boolean;
+  hideHeader?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
+  runtimeSurface?: RuntimeSurface;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
 }
@@ -140,12 +143,14 @@ export function ThreadShell({
   onTurnEnd,
   theme = "light",
   onToggleTheme = () => {},
-  hideSidebarToggleOnDesktop = false,
+  hideSidebarToggleForHostChrome = false,
+  hideHeader = false,
   workspaceScope = null,
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
   workspaceError = null,
+  runtimeSurface = "browser",
   onWorkspaceScopeChange,
   settingsSnapshot = null,
 }: ThreadShellProps) {
@@ -164,7 +169,7 @@ export function ThreadShell({
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
   const [mcpPresets, setMcpPresets] = useState<McpPresetInfo[]>([]);
-  const [settings, setSettings] = useState<SettingsPayload | null>(null);
+  const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroImageMode, setHeroImageMode] = useState(false);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -209,6 +214,7 @@ export function ThreadShell({
     () => toModelBadgeInfo(modelName, settings),
     [modelName, settings],
   );
+  const imageGenerationEnabled = settings?.image_generation.enabled === true;
 
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
@@ -232,17 +238,17 @@ export function ThreadShell({
     try {
       setSettings(await fetchSettings(token));
     } catch {
-      setSettings(null);
+      if (!settingsSnapshot) setSettings(null);
     }
-  }, [token]);
+  }, [settingsSnapshot, token]);
 
   useEffect(() => {
+    if (settingsSnapshot) {
+      setSettings(settingsSnapshot);
+      return;
+    }
     void refreshModelSettings();
-  }, [refreshModelSettings]);
-
-  useEffect(() => {
-    if (settingsSnapshot) setSettings(settingsSnapshot);
-  }, [settingsSnapshot]);
+  }, [refreshModelSettings, settingsSnapshot]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {
@@ -505,6 +511,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          imageGenerationEnabled={imageGenerationEnabled}
           imageMode={showHeroComposer ? heroImageMode : undefined}
           onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
@@ -515,6 +522,7 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          runtimeSurface={runtimeSurface}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
         />
       ) : (
@@ -534,6 +542,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
+          imageGenerationEnabled={imageGenerationEnabled}
           imageMode={heroImageMode}
           onImageModeChange={setHeroImageMode}
           runStartedAt={runStartedAt}
@@ -543,6 +552,7 @@ export function ThreadShell({
           workspaceControls={workspaceControls}
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
+          runtimeSurface={runtimeSurface}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
         />
       )}
@@ -563,14 +573,16 @@ export function ThreadShell({
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      <ThreadHeader
-        title={title}
-        onToggleSidebar={onToggleSidebar}
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        hideSidebarToggleOnDesktop={hideSidebarToggleOnDesktop}
-        minimal={!session && !loading}
-      />
+      {!hideHeader ? (
+        <ThreadHeader
+          title={title}
+          onToggleSidebar={onToggleSidebar}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
+          minimal={!session && !loading}
+        />
+      ) : null}
       <ThreadViewport
         messages={displayMessages}
         isStreaming={isStreaming}

@@ -58,7 +58,7 @@ class ChannelManager:
         session_manager: "SessionManager | None" = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_static_dist: bool = True,
-        webui_runtime_surface: str = "web",
+        webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
     ):
         self.config = config

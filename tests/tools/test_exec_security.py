@@ -45,7 +45,7 @@ async def test_exec_blocks_wget_localhost():
 
 def test_exec_full_workspace_scope_allows_loopback(tmp_path):
     tool = ExecTool(working_dir=str(tmp_path))
-    scope = build_workspace_scope(tmp_path, "full")
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
     token = bind_workspace_scope(scope)
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
@@ -55,9 +55,22 @@ def test_exec_full_workspace_scope_allows_loopback(tmp_path):
     assert error is None
 
 
-def test_exec_full_workspace_scope_blocks_loopback_when_local_preview_disabled(tmp_path):
-    tool = ExecTool(working_dir=str(tmp_path), allow_local_preview_access=False)
+def test_exec_core_full_workspace_scope_blocks_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
     scope = build_workspace_scope(tmp_path, "full")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_full_workspace_scope_blocks_loopback_when_local_service_disabled(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), webui_allow_local_service_access=False)
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
     token = bind_workspace_scope(scope)
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
@@ -70,7 +83,7 @@ def test_exec_full_workspace_scope_blocks_loopback_when_local_preview_disabled(t
 
 def test_exec_restricted_workspace_scope_blocks_loopback(tmp_path):
     tool = ExecTool(working_dir=str(tmp_path))
-    scope = build_workspace_scope(tmp_path, "restricted")
+    scope = build_workspace_scope(tmp_path, "restricted", source_channel="websocket")
     token = bind_workspace_scope(scope)
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
@@ -83,7 +96,7 @@ def test_exec_restricted_workspace_scope_blocks_loopback(tmp_path):
 
 def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
     tool = ExecTool(working_dir=str(tmp_path))
-    scope = build_workspace_scope(tmp_path, "full")
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
     token = bind_workspace_scope(scope)
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):

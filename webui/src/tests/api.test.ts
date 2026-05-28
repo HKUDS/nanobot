@@ -184,11 +184,12 @@ describe("webui API helpers", () => {
 
   it("serializes network safety settings updates", async () => {
     await updateNetworkSafetySettings("tok", {
-      allowLocalPreviewAccess: false,
+      webuiAllowLocalServiceAccess: false,
+      webuiDefaultAccessMode: "full",
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/network-safety/update?allow_local_preview_access=false",
+      "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=full",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -374,6 +375,7 @@ describe("webui API helpers", () => {
   it("fetches workspace project state", async () => {
     const payload = {
       schema_version: 1,
+      default_access_mode: "default" as const,
       default_scope: {
         project_path: "/tmp/workspace",
         project_name: "workspace",

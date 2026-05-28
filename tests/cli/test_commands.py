@@ -1530,15 +1530,22 @@ def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
         "websocket": {"enabled": False, "port": 8765},
     }
 
-    _configure_desktop_gateway(config, webui_port=29888, token_issue_secret="secret")
+    _configure_desktop_gateway(
+        config,
+        webui_port=29888,
+        webui_socket="/tmp/nanobot-test.sock",
+        token_issue_secret="secret",
+    )
 
     extras = config.channels.__pydantic_extra__ or {}
     assert config.gateway.host == "127.0.0.1"
     assert config.gateway.port == 29888
+    assert config.gateway.heartbeat.enabled is False
     assert extras["telegram"]["enabled"] is False
     assert extras["websocket"]["enabled"] is True
     assert extras["websocket"]["host"] == "127.0.0.1"
     assert extras["websocket"]["port"] == 29888
+    assert extras["websocket"]["unix_socket_path"] == "/tmp/nanobot-test.sock"
     assert extras["websocket"]["token_issue_secret"] == "secret"
     assert extras["websocket"]["websocket_requires_token"] is True
 

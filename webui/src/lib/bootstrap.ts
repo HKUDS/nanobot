@@ -70,7 +70,7 @@ export function deriveWsUrl(
   wsUrl?: string | null,
 ): string {
   const query = `?token=${encodeURIComponent(token)}`;
-  if (wsUrl && /^wss?:\/\//i.test(wsUrl)) {
+  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
     const join = wsUrl.includes("?") ? "&" : "?";
     return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
   }

@@ -14,15 +14,18 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScope,
     WorkspaceScopeError,
+    build_workspace_scope,
     default_workspace_scope,
     validate_workspace_scope_payload,
-    workspace_scope_from_metadata,
 )
 from nanobot.config.paths import get_webui_dir
 
 WEBUI_WORKSPACE_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 128 * 1024
 _MAX_RECENT_PROJECTS = 20
+_DEFAULT_ACCESS_MODES = {"default", "full"}
+_LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE = "restricted"
+_WEBUI_SCOPE_CHANNEL = "websocket"
 
 
 def webui_workspace_state_path() -> Path:
@@ -34,6 +37,7 @@ def default_webui_workspace_state() -> dict[str, Any]:
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
         "recent_projects": [],
         "last_scope": None,
+        "default_access_mode": "default",
         "updated_at": None,
     }
 
@@ -87,6 +91,9 @@ def normalize_webui_workspace_state(raw: Any) -> dict[str, Any]:
             }
     updated_at = raw.get("updated_at")
     state["updated_at"] = updated_at if isinstance(updated_at, str) else None
+    default_access_mode = raw.get("default_access_mode")
+    if default_access_mode in _DEFAULT_ACCESS_MODES:
+        state["default_access_mode"] = default_access_mode
     return state
 
 
@@ -157,18 +164,61 @@ def remember_workspace_scope(scope: WorkspaceScope) -> dict[str, Any]:
     return write_webui_workspace_state(state)
 
 
+def read_webui_default_access_mode() -> str:
+    state = read_webui_workspace_state()
+    mode = state.get("default_access_mode")
+    return mode if mode in _DEFAULT_ACCESS_MODES else "default"
+
+
+def write_webui_default_access_mode(mode: str) -> bool:
+    if mode == _LEGACY_RESTRICTED_DEFAULT_ACCESS_MODE:
+        mode = "default"
+    if mode not in _DEFAULT_ACCESS_MODES:
+        raise ValueError("default access mode must be default or full")
+    state = read_webui_workspace_state()
+    changed = state.get("default_access_mode") != mode
+    if changed:
+        state["default_access_mode"] = mode
+        write_webui_workspace_state(state)
+    return changed
+
+
+def default_scope_for_webui(
+    default_workspace: Path,
+    default_restrict_to_workspace: bool,
+) -> WorkspaceScope:
+    mode = read_webui_default_access_mode()
+    if mode == "default":
+        return default_workspace_scope(
+            default_workspace,
+            default_restrict_to_workspace,
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+    return build_workspace_scope(default_workspace, mode, source_channel=_WEBUI_SCOPE_CHANNEL)
+
+
 def workspaces_payload(
     *,
     default_workspace: Path,
     default_restrict_to_workspace: bool,
     controls_available: bool,
 ) -> dict[str, Any]:
-    default_scope = default_workspace_scope(default_workspace, default_restrict_to_workspace)
+    default_access_mode = read_webui_default_access_mode()
+    default_scope = (
+        default_workspace_scope(
+            default_workspace,
+            default_restrict_to_workspace,
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+        if default_access_mode == "default"
+        else build_workspace_scope(default_workspace, default_access_mode, source_channel=_WEBUI_SCOPE_CHANNEL)
+    )
     state = read_webui_workspace_state()
     last_scope = state.get("last_scope") if controls_available else None
     recent_projects = state.get("recent_projects", []) if controls_available else []
     return {
         "schema_version": WEBUI_WORKSPACE_STATE_SCHEMA_VERSION,
+        "default_access_mode": default_access_mode,
         "default_scope": default_scope.payload(),
         "last_scope": last_scope,
         "recent_projects": recent_projects,
@@ -196,7 +246,7 @@ class WebUIWorkspaceController:
         self._logger = logger_
 
     def default_scope(self) -> WorkspaceScope:
-        return default_workspace_scope(
+        return default_scope_for_webui(
             self._default_workspace,
             self._default_restrict_to_workspace,
         )
@@ -206,11 +256,17 @@ class WebUIWorkspaceController:
             return self.default_scope()
         data = self._sessions.read_session_file(session_key)
         metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
-        return workspace_scope_from_metadata(
-            metadata,
-            default_workspace=self._default_workspace,
-            default_restrict_to_workspace=self._default_restrict_to_workspace,
-        )
+        if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
+            return self.default_scope()
+        try:
+            return validate_workspace_scope_payload(
+                metadata.get(WORKSPACE_SCOPE_METADATA_KEY),
+                default_workspace=self._default_workspace,
+                default_restrict_to_workspace=self._default_restrict_to_workspace,
+                source_channel=_WEBUI_SCOPE_CHANNEL,
+            )
+        except WorkspaceScopeError:
+            return self.default_scope()
 
     def payload(self, *, controls_available: bool) -> dict[str, Any]:
         return workspaces_payload(
@@ -229,11 +285,14 @@ class WebUIWorkspaceController:
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
         if raw is None and session_key:
             scope = self.scope_for_session_key(session_key)
+        elif raw is None:
+            scope = self.default_scope()
         else:
             scope = validate_workspace_scope_payload(
                 raw,
                 default_workspace=self._default_workspace,
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
+                source_channel=_WEBUI_SCOPE_CHANNEL,
             )
         if not controls_available and scope.metadata() != self.default_scope().metadata():
             raise WorkspaceScopeError("workspace controls are localhost-only", status=403)
