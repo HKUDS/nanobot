@@ -812,16 +812,16 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
+            raw = msg.content.strip()
+            effective_key = self._effective_session_key(msg)
             if await agent_context.handle_runtime_control(self, msg, self.tools):
                 continue
-            raw = msg.content.strip()
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
-                    msg, msg.session_key, raw,
+                    msg, effective_key, raw,
                     self.commands.dispatch_priority,
                 )
                 continue
-            effective_key = self._effective_session_key(msg)
             # If this session already has an active pending queue (i.e. a task
             # is processing this session), route the message there for mid-turn
             # injection instead of creating a competing task.
@@ -872,13 +872,13 @@ class AgentLoop:
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
-        # Register a pending queue so follow-up messages for this session are
-        # routed here (mid-turn injection) instead of spawning a new task.
-        pending = asyncio.Queue(maxsize=20)
-        self._pending_queues[session_key] = pending
-
+        pending: asyncio.Queue | None = None
         try:
             async with lock, gate:
+                # Only the task that owns the session lock may publish the
+                # active mid-turn injection queue for this session.
+                pending = asyncio.Queue(maxsize=20)
+                self._pending_queues[session_key] = pending
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
@@ -962,28 +962,39 @@ class AgentLoop:
                         channel=msg.channel, chat_id=msg.chat_id,
                         content="Sorry, I encountered an error.",
                     ))
+                finally:
+                    # Drain any messages still in the pending queue and re-publish
+                    # them to the bus so they are processed as fresh inbound messages
+                    # rather than silently lost.  Only remove our own queue; a
+                    # later task waiting on the lock must not be able to steal
+                    # cleanup ownership.
+                    queue = None
+                    if self._pending_queues.get(session_key) is pending:
+                        queue = self._pending_queues.pop(session_key, None)
+                    else:
+                        queue = pending
+                    if queue is not None:
+                        leftover = 0
+                        while True:
+                            try:
+                                item = queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                            await self.bus.publish_inbound(item)
+                            leftover += 1
+                        if leftover:
+                            logger.info(
+                                "Re-published {} leftover message(s) to bus for session {}",
+                                leftover, session_key,
+                            )
+                    await self._webui_turns.publish_run_status(msg, "idle")
+                    self._pending_turn_latency_ms.pop(session_key, None)
+                    self._webui_turns.discard(session_key)
         finally:
-            # Drain any messages still in the pending queue and re-publish
-            # them to the bus so they are processed as fresh inbound messages
-            # rather than silently lost.
-            queue = self._pending_queues.pop(session_key, None)
-            if queue is not None:
-                leftover = 0
-                while True:
-                    try:
-                        item = queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    await self.bus.publish_inbound(item)
-                    leftover += 1
-                if leftover:
-                    logger.info(
-                        "Re-published {} leftover message(s) to bus for session {}",
-                        leftover, session_key,
-                    )
-            await self._webui_turns.publish_run_status(msg, "idle")
-            self._pending_turn_latency_ms.pop(session_key, None)
-            self._webui_turns.discard(session_key)
+            if pending is None:
+                await self._webui_turns.publish_run_status(msg, "idle")
+                self._pending_turn_latency_ms.pop(session_key, None)
+                self._webui_turns.discard(session_key)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
