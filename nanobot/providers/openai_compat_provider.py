@@ -7,12 +7,14 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import string
 import time
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -27,6 +29,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.utils.helpers import repair_tool_result_protocol, resolve_stream_idle_timeout_s
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -509,7 +512,12 @@ class OpenAICompatProvider(LLMProvider):
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
-        sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
+        sanitized = []
+        for msg in messages:
+            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            if clean.get("role") == "assistant" and "content" not in clean:
+                clean["content"] = None
+            sanitized.append(clean)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
         force_string_content = bool(self._spec and self._spec.name == "deepseek")
@@ -588,7 +596,7 @@ class OpenAICompatProvider(LLMProvider):
                 and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
             ):
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
-        return self._enforce_role_alternation(sanitized)
+        return self._enforce_role_alternation(repair_tool_result_protocol(sanitized))
 
     # ------------------------------------------------------------------
     # Build kwargs
@@ -966,6 +974,61 @@ class OpenAICompatProvider(LLMProvider):
                 current = getattr(current, segment, None)
         return int(current or 0) if current is not None else 0
 
+    @staticmethod
+    def _unique_parsed_tool_id(value: Any, used_ids: set[str]) -> str:
+        base = str(value) if isinstance(value, str) and value else _short_tool_id()
+        if base not in used_ids:
+            used_ids.add(base)
+            return base
+        salt = 1
+        while True:
+            candidate = f"{base}_{salt}"
+            if candidate not in used_ids:
+                used_ids.add(candidate)
+                return candidate
+            salt += 1
+
+    @classmethod
+    def _parse_text_tool_calls(cls, content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
+        """Parse common text-format tool call blocks from OpenAI-compatible gateways."""
+        if not isinstance(content, str) or "<tool_call" not in content:
+            return content, []
+
+        calls: list[ToolCallRequest] = []
+        used_ids: set[str] = set()
+
+        def _parse_payload(raw: str) -> ToolCallRequest | None:
+            try:
+                payload = json_repair.loads(raw)
+            except Exception:
+                return None
+            if not isinstance(payload, dict):
+                return None
+            fn = payload.get("function") if isinstance(payload.get("function"), dict) else payload
+            name = fn.get("name") if isinstance(fn, dict) else None
+            if not isinstance(name, str) or not name:
+                return None
+            args = fn.get("arguments", {}) if isinstance(fn, dict) else {}
+            if isinstance(args, str):
+                with suppress(Exception):
+                    args = json_repair.loads(args)
+            return ToolCallRequest(
+                id=cls._unique_parsed_tool_id(payload.get("id"), used_ids),
+                name=name,
+                arguments=args if isinstance(args, dict) else {},
+            )
+
+        def _replace(match: re.Match[str]) -> str:
+            parsed = _parse_payload(match.group(1))
+            if parsed is None:
+                return match.group(0)
+            calls.append(parsed)
+            return ""
+
+        stripped = re.sub(r"<tool_call>\s*(.*?)\s*</tool_call>", _replace, content, flags=re.DOTALL)
+        stripped = stripped.strip() or None
+        return stripped, calls
+
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
             return LLMResponse(content=response, finish_reason="stop")
@@ -1015,6 +1078,7 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning_content = m.get("reasoning_content")
 
             parsed_tool_calls = []
+            used_tool_ids: set[str] = set()
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
@@ -1023,13 +1087,18 @@ class OpenAICompatProvider(LLMProvider):
                     args = json_repair.loads(args)
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=str(tc_map.get("id") or _short_tool_id()),
+                    id=self._unique_parsed_tool_id(tc_map.get("id"), used_tool_ids),
                     name=str(fn.get("name") or ""),
                     arguments=args if isinstance(args, dict) else {},
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
                 ))
+
+            if not parsed_tool_calls:
+                content, parsed_tool_calls = self._parse_text_tool_calls(content)
+                if parsed_tool_calls:
+                    finish_reason = "tool_calls"
 
             return LLMResponse(
                 content=content,
@@ -1060,13 +1129,14 @@ class OpenAICompatProvider(LLMProvider):
                 content = m.reasoning
 
         tool_calls = []
+        used_tool_ids: set[str] = set()
         for tc in raw_tool_calls:
             args = tc.function.arguments
             if isinstance(args, str):
                 args = json_repair.loads(args)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
-                id=str(getattr(tc, "id", None) or _short_tool_id()),
+                id=self._unique_parsed_tool_id(getattr(tc, "id", None), used_tool_ids),
                 name=tc.function.name,
                 arguments=args,
                 extra_content=ec,
@@ -1077,6 +1147,11 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_content = getattr(msg, "reasoning_content", None) or None
         if not reasoning_content and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
+
+        if not tool_calls:
+            content, tool_calls = self._parse_text_tool_calls(content)
+            if tool_calls:
+                finish_reason = "tool_calls"
 
         return LLMResponse(
             content=content,
@@ -1198,9 +1273,7 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
-        return LLMResponse(
-            content="".join(content_parts) or None,
-            tool_calls=[
+        parsed_tool_calls = [
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
@@ -1210,7 +1283,16 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=b.get("fn_prov"),
                 )
                 for b in tc_bufs.values()
-            ],
+            ]
+        content = "".join(content_parts) or None
+        if not parsed_tool_calls:
+            content, parsed_tool_calls = cls._parse_text_tool_calls(content)
+            if parsed_tool_calls:
+                finish_reason = "tool_calls"
+
+        return LLMResponse(
+            content=content,
+            tool_calls=parsed_tool_calls,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
@@ -1357,7 +1439,9 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S"), default=90,
+        )
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
