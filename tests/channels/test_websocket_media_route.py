@@ -21,10 +21,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from nanobot.channels.websocket import (
-    WebSocketChannel,
-    _b64url_decode,
-    _b64url_encode,
+from nanobot.channels.websocket import WebSocketChannel
+from nanobot.webui.media_api import (
+    b64url_decode,
+    b64url_encode,
 )
 from nanobot.session.manager import Session, SessionManager
 
@@ -129,9 +129,9 @@ def test_sign_media_path_round_trips_via_hmac(
     expected = hmac.new(
         channel._media_secret, payload.encode("ascii"), hashlib.sha256
     ).digest()[:16]
-    assert _b64url_decode(sig) == expected
+    assert b64url_decode(sig) == expected
     # The payload decodes back to the *relative* path — no absolute-path leaks.
-    assert _b64url_decode(payload).decode() == "a.png"
+    assert b64url_decode(payload).decode() == "a.png"
 
 
 def test_local_markdown_image_is_staged_and_rewritten(
@@ -153,6 +153,28 @@ def test_local_markdown_image_is_staged_and_rewritten(
     staged = list((media / "websocket").iterdir())
     assert len(staged) == 1
     assert staged[0].read_bytes() == _PNG_BYTES
+
+
+def test_local_markdown_video_is_staged_and_rewritten(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    video_bytes = b"fake mp4"
+    (workspace / "nanobot-intro.mp4").write_bytes(video_bytes)
+    media = tmp_path / "media"
+    channel = _ch(bus, workspace_path=workspace, port=0)
+
+    with patch("nanobot.channels.websocket.get_media_dir", side_effect=_fake_media_dir(media)):
+        rewritten = channel._rewrite_local_markdown_images(
+            "The result:\n![nanobot-intro.mp4](nanobot-intro.mp4)"
+        )
+
+    assert "![nanobot-intro.mp4](/api/media/" in rewritten
+    staged = list((media / "websocket").iterdir())
+    assert len(staged) == 1
+    assert staged[0].read_bytes() == video_bytes
 
 
 def test_local_markdown_image_rejects_workspace_escape(
@@ -205,8 +227,101 @@ async def test_media_route_serves_signed_file(
     assert resp.headers["content-type"].startswith("image/png")
     # Immutable cache header lets the browser skip round-trips on replay.
     assert "immutable" in resp.headers.get("cache-control", "")
+    # Video players rely on byte ranges; images get the header for consistency.
+    assert resp.headers.get("accept-ranges") == "bytes"
     # nosniff keeps the browser from second-guessing our Content-Type.
     assert resp.headers.get("x-content-type-options") == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_media_route_serves_video_byte_ranges(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """MP4 playback needs HTTP Range support for mid-stream reads and seeking."""
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29927)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29927{url_path}",
+                headers={"Range": "bytes=2-5"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 206
+    assert resp.content == b"2345"
+    assert resp.headers["content-type"].startswith("video/mp4")
+    assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.headers.get("content-range") == "bytes 2-5/10"
+    assert resp.headers.get("content-length") == "4"
+
+
+@pytest.mark.asyncio
+async def test_media_route_serves_suffix_video_byte_ranges(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29928)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29928{url_path}",
+                headers={"Range": "bytes=-3"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 206
+    assert resp.content == b"789"
+    assert resp.headers.get("content-range") == "bytes 7-9/10"
+
+
+@pytest.mark.asyncio
+async def test_media_route_rejects_unsatisfiable_byte_range(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29929)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29929{url_path}",
+                headers={"Range": "bytes=100-200"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 416
+    assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.headers.get("content-range") == "bytes */10"
 
 
 @pytest.mark.asyncio
@@ -231,7 +346,7 @@ async def test_media_route_rejects_bad_signature(
         forged_mac = hmac.new(
             b"\x00" * 32, payload.encode("ascii"), hashlib.sha256
         ).digest()[:16]
-        forged = f"/api/media/{_b64url_encode(forged_mac)}/{payload}"
+        forged = f"/api/media/{b64url_encode(forged_mac)}/{payload}"
 
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -260,11 +375,11 @@ async def test_media_route_rejects_path_traversal_payload(
 
     channel = _ch(bus, port=29922)
     # Hand-craft a traversal payload the legit signer would refuse to mint.
-    payload = _b64url_encode(b"../secret.txt")
+    payload = b64url_encode(b"../secret.txt")
     mac = hmac.new(
         channel._media_secret, payload.encode("ascii"), hashlib.sha256
     ).digest()[:16]
-    url = f"/api/media/{_b64url_encode(mac)}/{payload}"
+    url = f"/api/media/{b64url_encode(mac)}/{payload}"
 
     with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
@@ -319,11 +434,11 @@ async def test_media_route_degrades_non_image_to_octet_stream(
 
     channel = _ch(bus, port=29924)
     with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
-        payload = _b64url_encode(b"scary.html")
+        payload = b64url_encode(b"scary.html")
         mac = hmac.new(
             channel._media_secret, payload.encode("ascii"), hashlib.sha256
         ).digest()[:16]
-        url = f"/api/media/{_b64url_encode(mac)}/{payload}"
+        url = f"/api/media/{b64url_encode(mac)}/{payload}"
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:

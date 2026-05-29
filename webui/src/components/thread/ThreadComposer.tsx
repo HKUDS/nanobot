@@ -44,6 +44,10 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
+  WorkspaceAccessMenu,
+  WorkspaceProjectPicker,
+} from "@/components/thread/WorkspaceControls";
+import {
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
@@ -58,6 +62,8 @@ import type {
   OutboundCliAppMention,
   OutboundMcpPresetMention,
   SlashCommand,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
 } from "@/lib/types";
 import {
   inferProviderFromModelName,
@@ -88,6 +94,7 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  imageGenerationEnabled?: boolean;
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
   onStop?: () => void;
@@ -95,6 +102,12 @@ interface ThreadComposerProps {
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
+  workspaceScope?: WorkspaceScopePayload | null;
+  workspaceDefaultScope?: WorkspaceScopePayload | null;
+  workspaceControls?: WorkspacesPayload["controls"] | null;
+  workspaceScopeDisabled?: boolean;
+  workspaceError?: string | null;
+  onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -471,11 +484,18 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
+  imageGenerationEnabled = true,
   imageMode: controlledImageMode,
   onImageModeChange,
   onStop,
   runStartedAt = null,
   goalState,
+  workspaceScope = null,
+  workspaceDefaultScope = null,
+  workspaceControls = null,
+  workspaceScopeDisabled = false,
+  workspaceError = null,
+  onWorkspaceScopeChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -495,7 +515,13 @@ export function ThreadComposer({
   const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
-  const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const showProjectPicker =
+    isHero
+    && !!workspaceDefaultScope
+    && !!onWorkspaceScopeChange
+    && workspaceControls?.can_change_project !== false;
+  const requestedImageMode = controlledImageMode ?? uncontrolledImageMode;
+  const imageMode = imageGenerationEnabled && requestedImageMode;
   const setImageMode = useCallback(
     (enabled: boolean) => {
       if (controlledImageMode === undefined) {
@@ -505,6 +531,13 @@ export function ThreadComposer({
     },
     [controlledImageMode, onImageModeChange],
   );
+
+  useEffect(() => {
+    if (imageGenerationEnabled || !requestedImageMode) return;
+    setImageMode(false);
+    setAspectMenuOpen(false);
+  }, [imageGenerationEnabled, requestedImageMode, setImageMode]);
+
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
     : imageMode
@@ -574,16 +607,17 @@ export function ThreadComposer({
   }, [disabled, slashMenuDismissed, value]);
 
   const visibleSlashCommands = useMemo(() => {
-    if (!(isStreaming && onStop)) return slashCommands;
-    if (slashCommands.some((command) => command.command === "/stop")) return slashCommands;
+    const baseCommands = slashCommands.filter((command) => command.command !== "/stop");
+    if (!(isStreaming && onStop)) return baseCommands;
+    const stopCommand = slashCommands.find((command) => command.command === "/stop") ?? {
+      command: "/stop",
+      title: "Stop current task",
+      description: "Cancel the active agent turn for this chat.",
+      icon: "square",
+    };
     return [
-      {
-        command: "/stop",
-        title: "Stop current task",
-        description: "Cancel the active agent turn for this chat.",
-        icon: "square",
-      },
-      ...slashCommands,
+      stopCommand,
+      ...baseCommands,
     ];
   }, [isStreaming, onStop, slashCommands]);
 
@@ -845,13 +879,6 @@ export function ThreadComposer({
 
   const chooseSlashCommand = useCallback(
     (command: SlashCommand) => {
-      const nextRecents = [
-        command.command,
-        ...recentSlashCommands.filter((item) => item !== command.command),
-      ].slice(0, SLASH_RECENTS_LIMIT);
-      setRecentSlashCommands(nextRecents);
-      storeSlashRecents(nextRecents);
-
       if (command.command === "/stop" && isStreaming && onStop) {
         onStop();
         setValue("");
@@ -861,6 +888,13 @@ export function ThreadComposer({
         resizeTextarea();
         return;
       }
+
+      const nextRecents = [
+        command.command,
+        ...recentSlashCommands.filter((item) => item !== command.command),
+      ].slice(0, SLASH_RECENTS_LIMIT);
+      setRecentSlashCommands(nextRecents);
+      storeSlashRecents(nextRecents);
 
       setValue(command.argHint ? `${command.command} ` : command.command);
       setSlashMenuDismissed(true);
@@ -1051,10 +1085,15 @@ export function ThreadComposer({
 
   const attachButtonDisabled = disabled || full;
   const showStopButton = isStreaming && !!onStop;
+  const centerHeroPlaceholder =
+    isHero && value.length === 0 && images.length === 0 && !isStreaming;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
-      ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
+      ? cn(
+          "min-h-[78px] px-5 text-[15px] leading-6",
+          centerHeroPlaceholder ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
+        )
       : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
   );
 
@@ -1093,11 +1132,12 @@ export function ThreadComposer({
       ) : null}
       <div
         className={cn(
-          "relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
+          "group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
+          "after:pointer-events-none after:absolute after:inset-[-1px] after:rounded-[inherit] after:border after:border-blue-300/75 after:opacity-0 after:transition-opacity after:duration-200 focus-within:after:opacity-100 dark:after:border-blue-400/55",
           isHero
             ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
             : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
-          "focus-within:ring-1 focus-within:ring-foreground/8",
+          "focus-within:border-blue-300/75 dark:focus-within:border-blue-400/55",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
           goalState?.active &&
@@ -1184,11 +1224,11 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "flex items-center justify-between gap-2",
-            isHero ? "px-4 pb-4" : "px-3 pb-2",
+            "flex items-center justify-between",
+            isHero ? cn("gap-1.5 px-4", showProjectPicker ? "pb-1.5" : "pb-3.5") : "gap-2 px-3 pb-2",
           )}
         >
-          <div className="flex min-w-0 items-center gap-2">
+          <div className={cn("flex min-w-0 flex-1 items-center", isHero ? "gap-1.5" : "gap-2")}>
             <input
               ref={fileInputRef}
               type="file"
@@ -1207,36 +1247,46 @@ export function ThreadComposer({
               className={cn(
                 "rounded-full text-muted-foreground hover:text-foreground",
                 isHero
-                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                  ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
                   : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
               )}
             >
-              <Plus className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
+              <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            <div ref={aspectControlRef} className="relative flex items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={disabled}
-                aria-pressed={imageMode}
-                aria-label={t("thread.composer.imageMode.toggle")}
-                onClick={() => {
-                  setImageMode(!imageMode);
-                  setAspectMenuOpen(false);
-                  textareaRef.current?.focus();
-                }}
-                className={cn(
-                  "rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
-                  "h-9 text-[12px]",
-                  imageMode
-                    ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
-                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
-                )}
-              >
-                <ImageIcon className={cn("mr-1.5", isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
-                {t("thread.composer.imageMode.label")}
-              </Button>
-              {imageMode ? (
+            {workspaceScope ? (
+              <WorkspaceAccessMenu
+                scope={workspaceScope}
+                disabled={disabled || workspaceScopeDisabled}
+                canUseFullAccess={workspaceControls?.can_use_full_access !== false}
+                isHero={isHero}
+                onChange={onWorkspaceScopeChange}
+              />
+            ) : null}
+            {imageGenerationEnabled ? (
+              <div ref={aspectControlRef} className="relative flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-pressed={imageMode}
+                  aria-label={t("thread.composer.imageMode.toggle")}
+                  onClick={() => {
+                    setImageMode(!imageMode);
+                    setAspectMenuOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                  className={cn(
+                    "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
+                    imageMode
+                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
+                      : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                  )}
+                >
+                  <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+                  <span className="truncate">{t("thread.composer.imageMode.label")}</span>
+                </Button>
+                {imageMode ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -1247,25 +1297,28 @@ export function ThreadComposer({
                   onClick={() => setAspectMenuOpen((open) => !open)}
                   className={cn(
                     "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
-                    "h-9 text-[12px]",
+                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
                   )}
                 >
                   <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
                   <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
                 </Button>
-              ) : null}
-              {imageMode && aspectMenuOpen ? (
-                <ImageAspectMenu
-                  selected={imageAspectRatio}
-                  isHero={isHero}
-                  onSelect={(ratio) => {
-                    setImageAspectRatio(ratio);
-                    setAspectMenuOpen(false);
-                    textareaRef.current?.focus();
-                  }}
-                />
-              ) : null}
-            </div>
+                ) : null}
+                {imageMode && aspectMenuOpen ? (
+                  <ImageAspectMenu
+                    selected={imageAspectRatio}
+                    isHero={isHero}
+                    onSelect={(ratio) => {
+                      setImageAspectRatio(ratio);
+                      setAspectMenuOpen(false);
+                      textareaRef.current?.focus();
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {modelLabel ? (
               <ComposerModelBadge
                 label={modelLabel}
@@ -1274,39 +1327,42 @@ export function ThreadComposer({
                 isHero={isHero}
               />
             ) : null}
-            {!isHero ? (
-              <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">
-                {t("thread.composer.sendHint")}
-              </span>
-            ) : null}
+            <Button
+              type={showStopButton ? "button" : "submit"}
+              size="icon"
+              disabled={showStopButton ? disabled : !canSend}
+              aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
+              onClick={showStopButton ? onStop : undefined}
+              className={cn(
+                "rounded-full transition-transform",
+                showStopButton
+                  ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                  : isHero
+                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
+                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
+                isHero ? "h-8 w-8" : "h-9 w-9",
+                (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
+              )}
+            >
+              {showStopButton ? (
+                <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
+              ) : isStreaming ? (
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
+              ) : (
+                <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+              )}
+            </Button>
           </div>
-          <span className={cn(isHero ? "hidden" : "sm:hidden")} aria-hidden />
-          <Button
-            type={showStopButton ? "button" : "submit"}
-            size="icon"
-            disabled={showStopButton ? disabled : !canSend}
-            aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
-            onClick={showStopButton ? onStop : undefined}
-            className={cn(
-              "rounded-full transition-transform",
-              showStopButton
-                ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
-                : isHero
-                  ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
-                  : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
-              "h-9 w-9",
-              (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
-            )}
-          >
-            {showStopButton ? (
-              <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-2.5 w-2.5")} />
-            ) : isStreaming ? (
-              <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4", "animate-spin")} />
-            ) : (
-              <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4")} />
-            )}
-          </Button>
         </div>
+        <WorkspaceProjectPicker
+          isHero={isHero}
+          disabled={disabled || workspaceScopeDisabled}
+          scope={workspaceScope}
+          defaultScope={workspaceDefaultScope}
+          controls={workspaceControls}
+          error={workspaceError}
+          onChange={onWorkspaceScopeChange}
+        />
       </div>
     </form>
   );
@@ -1338,14 +1394,14 @@ function ComposerModelBadge({
       className={cn(
         "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
-        isHero ? "h-9 max-w-[13.5rem] gap-2 px-2.5 text-[12px]" : "h-9 max-w-[12rem] gap-2 px-2.5 text-[12px]",
+        isHero ? "h-8 max-w-[12.5rem] gap-1.5 px-2 text-[11.5px]" : "h-9 max-w-[12rem] gap-2 px-2.5 text-[12px]",
       )}
     >
       <span
         data-testid={inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
         className={cn(
           "grid shrink-0 place-items-center overflow-hidden rounded-full border bg-background",
-          "h-5 w-5",
+          isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
         )}
         style={{
           borderColor: brand ? `${brand.color}28` : undefined,
@@ -1357,21 +1413,21 @@ function ComposerModelBadge({
           <img
             src={logoUrl}
             alt=""
-            className="h-3.5 w-3.5 object-contain"
+            className={cn("object-contain", isHero ? "h-3 w-3" : "h-3.5 w-3.5")}
             onError={() => setLogoIndex((index) => index + 1)}
           />
         ) : brand ? (
           <span
             className={cn(
               "grid h-full w-full place-items-center rounded-full text-white",
-              "text-[8px]",
+              isHero ? "text-[7.5px]" : "text-[8px]",
             )}
             style={{ backgroundColor: brand.color }}
           >
             {brand.initials.slice(0, 2)}
           </span>
         ) : (
-          <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
+          <Sparkles className={cn("text-muted-foreground/65", isHero ? "h-3 w-3" : "h-3 w-3")} />
         )}
       </span>
       <span className="truncate">{label}</span>
@@ -1440,6 +1496,23 @@ interface CliAppMentionPaletteProps {
   onChoose: (candidate: MentionCandidate) => void;
 }
 
+function useSelectedOptionScroll(selectedIndex: number) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const option = container.querySelector<HTMLElement>(
+      `[data-palette-index="${selectedIndex}"]`,
+    );
+    if (typeof option?.scrollIntoView === "function") {
+      option.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
+
+  return containerRef;
+}
+
 function ImageAspectMenu({
   selected,
   isHero,
@@ -1506,6 +1579,7 @@ function CliAppMentionPalette({
     0,
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
+  const listRef = useSelectedOptionScroll(selectedIndex);
   return (
     <div
       role="listbox"
@@ -1522,7 +1596,7 @@ function CliAppMentionPalette({
       <div className="px-2 pb-1.5 pt-0.5 text-[13px] font-semibold text-muted-foreground/78">
         {t("thread.composer.mentions.label")}
       </div>
-      <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
+      <div ref={listRef} className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
         {candidates.map((candidate, index) => {
           const selected = index === selectedIndex;
           const name = candidate.name;
@@ -1540,6 +1614,7 @@ function CliAppMentionPalette({
               key={`${candidate.kind}-${name}`}
               type="button"
               role="option"
+              data-palette-index={index}
               aria-selected={selected}
               aria-label={`${displayName} @${name} ${ariaDescription} ${typeLabel}`}
               onMouseEnter={() => onHover(index)}
@@ -1640,6 +1715,7 @@ function SlashCommandPalette({
     0,
     layout.maxHeight - SLASH_PALETTE_CHROME_PX,
   );
+  const listRef = useSelectedOptionScroll(selectedIndex);
   return (
     <div
       role="listbox"
@@ -1653,7 +1729,7 @@ function SlashCommandPalette({
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}
     >
-      <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
+      <div ref={listRef} className="overflow-y-auto pr-0.5" style={{ maxHeight: listMaxHeight }}>
         {commands.map((command, index) => {
           const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
           const selected = index === selectedIndex;
@@ -1669,6 +1745,7 @@ function SlashCommandPalette({
               key={command.command}
               type="button"
               role="option"
+              data-palette-index={index}
               aria-selected={selected}
               onMouseEnter={() => onHover(index)}
               onMouseDown={(e) => {

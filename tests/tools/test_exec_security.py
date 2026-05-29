@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -40,6 +41,70 @@ async def test_exec_blocks_wget_localhost():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
         result = await tool.execute(command="wget http://localhost:8080/secret -O /tmp/out")
     assert "Error" in result
+
+
+def test_exec_full_workspace_scope_allows_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is None
+
+
+def test_exec_core_full_workspace_scope_blocks_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_full_workspace_scope_blocks_loopback_when_local_service_disabled(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), webui_allow_local_service_access=False)
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_restricted_workspace_scope_blocks_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "restricted", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
+            error = tool._guard_command("curl http://169.254.169.254/latest/meta-data/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
 
 
 @pytest.mark.asyncio

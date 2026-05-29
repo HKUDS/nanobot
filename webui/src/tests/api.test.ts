@@ -7,15 +7,20 @@ import {
   fetchMcpPresets,
   fetchSidebarState,
   fetchWebuiThread,
+  fetchWorkspaces,
   importMcpConfig,
   listSessions,
   listSlashCommands,
+  loginProviderOAuth,
+  logoutProviderOAuth,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
   updateSidebarState,
   updateImageGenerationSettings,
+  updateModelConfiguration,
   updateMcpServerTools,
+  updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
@@ -60,6 +65,7 @@ describe("webui API helpers", () => {
       modelPreset: "default",
       model: "openrouter/test",
       provider: "openrouter",
+      contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
       botName: "nanobot",
       botIcon: "nb",
@@ -67,7 +73,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -89,6 +95,61 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("serializes model configuration updates", async () => {
+    await updateModelConfiguration("tok", {
+      name: "codex",
+      label: "Codex",
+      provider: "openai_codex",
+      model: "openai-codex/gpt-5.5",
+      contextWindowTokens: 65536,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&context_window_tokens=65536",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reports HTML API fallbacks as gateway mismatch errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        text: async () => "<!doctype html><html></html>",
+      }),
+    );
+
+    await expect(
+      updateModelConfiguration("tok", {
+        name: "codex",
+        model: "openai-codex/gpt-5.5",
+      }),
+    ).rejects.toMatchObject({
+      status: 200,
+      message: "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again.",
+    });
+  });
+
+  it("surfaces API error response bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "npm error ENOTEMPTY",
+      }),
+    );
+
+    await expect(runCliAppAction("tok", "install", "hyperframes")).rejects.toMatchObject({
+      status: 500,
+      message: "npm error ENOTEMPTY",
+    });
+  });
+
   it("serializes provider settings updates without returning secrets", async () => {
     await updateProviderSettings("tok", {
       provider: "openrouter",
@@ -98,6 +159,24 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes provider OAuth login and logout actions", async () => {
+    await loginProviderOAuth("tok", "openai_codex");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-login?provider=openai_codex",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await logoutProviderOAuth("tok", "openai_codex");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/oauth-logout?provider=openai_codex",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -115,6 +194,20 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes network safety settings updates", async () => {
+    await updateNetworkSafetySettings("tok", {
+      webuiAllowLocalServiceAccess: false,
+      webuiDefaultAccessMode: "full",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=full",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -257,6 +350,7 @@ describe("webui API helpers", () => {
       pinned_keys: ["websocket:chat-1"],
       archived_keys: ["websocket:old"],
       title_overrides: { "websocket:chat-1": "Release" },
+      project_name_overrides: { "/Users/me/nanobot": "Core" },
       tags_by_key: {},
       collapsed_groups: {},
       view: {
@@ -292,7 +386,37 @@ describe("webui API helpers", () => {
     expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
       pinned_keys: ["websocket:chat-1"],
       title_overrides: { "websocket:chat-1": "Release" },
+      project_name_overrides: { "/Users/me/nanobot": "Core" },
     });
+  });
+
+  it("fetches workspace project state", async () => {
+    const payload = {
+      schema_version: 1,
+      default_access_mode: "default" as const,
+      default_scope: {
+        project_path: "/tmp/workspace",
+        project_name: "workspace",
+        access_mode: "restricted" as const,
+        restrict_to_workspace: true,
+      },
+      controls: {
+        can_change_project: true,
+        can_use_full_access: true,
+      },
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => payload,
+    } as Response);
+
+    await expect(fetchWorkspaces("tok")).resolves.toEqual(payload);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/workspaces",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
   });
 
   it("maps generated session titles from the sessions list", async () => {

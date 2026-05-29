@@ -726,11 +726,144 @@ def gateway(
     _run_gateway(cfg, port=port)
 
 
+def _load_or_create_desktop_config(config: str | None, workspace: str | None) -> Config:
+    """Load the desktop-owned config, creating it on first launch."""
+    from nanobot.config.loader import (
+        get_config_path,
+        load_config,
+        resolve_config_env_vars,
+        save_config,
+        set_config_path,
+    )
+    from nanobot.config.schema import Config as NanobotConfig
+
+    config_path = Path(config).expanduser().resolve() if config else get_config_path()
+    set_config_path(config_path)
+    created = False
+    if config_path.exists():
+        try:
+            loaded = resolve_config_env_vars(load_config(config_path))
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        loaded = NanobotConfig()
+        created = True
+
+    if workspace:
+        workspace_path = Path(workspace).expanduser()
+        loaded.agents.defaults.workspace = str(workspace_path)
+        created = True
+
+    if created:
+        save_config(loaded, config_path)
+    return loaded
+
+
+def _configure_desktop_gateway(
+    config: Config,
+    *,
+    webui_port: int,
+    webui_socket: str | None,
+    token_issue_secret: str,
+) -> None:
+    """Force a local WebSocket-only gateway for the desktop app process."""
+    config.gateway.host = "127.0.0.1"
+    config.gateway.port = webui_port
+    config.gateway.heartbeat.enabled = False
+
+    extras = dict(getattr(config.channels, "__pydantic_extra__", None) or {})
+    for name, section in list(extras.items()):
+        if name == "websocket":
+            continue
+        if isinstance(section, dict):
+            extras[name] = {**section, "enabled": False}
+        else:
+            with suppress(Exception):
+                setattr(section, "enabled", False)
+            extras[name] = section
+
+    websocket_cfg = extras.get("websocket")
+    if not isinstance(websocket_cfg, dict):
+        websocket_cfg = {}
+    websocket_cfg.update(
+        {
+            "enabled": True,
+            "host": "127.0.0.1",
+            "port": webui_port,
+            "unix_socket_path": webui_socket or "",
+            "path": "/",
+            "token_issue_secret": token_issue_secret,
+            "websocket_requires_token": True,
+            "allow_from": ["*"],
+            "streaming": True,
+        }
+    )
+    extras["websocket"] = websocket_cfg
+    config.channels.__pydantic_extra__ = extras
+
+
+@app.command("desktop-gateway", hidden=True)
+def desktop_gateway(
+    webui_port: int = typer.Option(0, "--webui-port", min=0, max=65535),
+    webui_socket: str | None = typer.Option(None, "--webui-socket", help="Unix socket path for desktop IPC"),
+    token_issue_secret: str = typer.Option(..., "--token-issue-secret"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Desktop workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Desktop config file"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start the private local gateway used by nanobot Desktop."""
+    if not token_issue_secret.strip():
+        console.print("[red]Error: --token-issue-secret is required[/red]")
+        raise typer.Exit(1)
+    if webui_port <= 0 and not (webui_socket or "").strip():
+        console.print("[red]Error: --webui-port or --webui-socket is required[/red]")
+        raise typer.Exit(1)
+    if verbose:
+        logger.remove(_log_handler_id)
+        logger.add(
+            sys.stderr,
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+                "<level>{level: <5}</level> | "
+                "<cyan>{extra[channel]}</cyan> | "
+                "<level>{message}</level>"
+            ),
+            level="DEBUG",
+            colorize=None,
+            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+        )
+    cfg = _load_or_create_desktop_config(config, workspace)
+    _configure_desktop_gateway(
+        cfg,
+        webui_port=webui_port,
+        webui_socket=webui_socket,
+        token_issue_secret=token_issue_secret,
+    )
+    _run_gateway(
+        cfg,
+        port=webui_port,
+        webui_static_dist=False,
+        webui_runtime_surface="native",
+        webui_runtime_capabilities={
+            "can_restart_engine": True,
+            "can_pick_folder": True,
+            "can_open_logs": True,
+            "can_export_diagnostics": True,
+        },
+        health_server_enabled=False,
+    )
+
+
 def _run_gateway(
     config: Config,
     *,
     port: int | None = None,
     open_browser_url: str | None = None,
+    webui_static_dist: bool = True,
+    webui_runtime_surface: str = "browser",
+    webui_runtime_capabilities: dict[str, Any] | None = None,
+    health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.tools.cron import CronTool
@@ -963,6 +1096,9 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_static_dist=webui_static_dist,
+        webui_runtime_surface=webui_runtime_surface,
+        webui_runtime_capabilities=webui_runtime_capabilities,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
@@ -1095,8 +1231,9 @@ def _run_gateway(
             tasks = [
                 agent.run(),
                 channels.start_all(),
-                _health_server(config.gateway.host, port),
             ]
+            if health_server_enabled:
+                tasks.append(_health_server(config.gateway.host, port))
             if open_browser_url:
                 tasks.append(_open_browser_when_ready())
             await asyncio.gather(*tasks)

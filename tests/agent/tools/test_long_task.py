@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -70,6 +71,49 @@ async def test_complete_goal_closes_active_goal(tmp_path):
     blob = sess.metadata.get(GOAL_STATE_KEY)
     assert blob["status"] == "completed"
     assert blob["recap"] == "Done."
+
+
+@pytest.mark.asyncio
+async def test_goal_tools_keep_request_context_per_task(tmp_path):
+    sm = SessionManager(tmp_path)
+    lt = LongTaskTool(sessions=sm)
+    cg = CompleteGoalTool(sessions=sm)
+    ctx_a = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
+    ctx_b = RequestContext(channel="websocket", chat_id="b", session_key="websocket:b")
+
+    lt.set_context(ctx_a)
+    task_a = asyncio.create_task(lt.execute(goal="Goal A"))
+    lt.set_context(ctx_b)
+    task_b = asyncio.create_task(lt.execute(goal="Goal B"))
+    await asyncio.gather(task_a, task_b)
+
+    assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["objective"] == "Goal A"
+    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["objective"] == "Goal B"
+
+    cg.set_context(ctx_a)
+    done_a = asyncio.create_task(cg.execute(recap="Done A"))
+    cg.set_context(ctx_b)
+    done_b = asyncio.create_task(cg.execute(recap="Done B"))
+    await asyncio.gather(done_a, done_b)
+
+    assert sm.get_or_create("websocket:a").metadata[GOAL_STATE_KEY]["recap"] == "Done A"
+    assert sm.get_or_create("websocket:b").metadata[GOAL_STATE_KEY]["recap"] == "Done B"
+
+
+@pytest.mark.asyncio
+async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
+    """LongTaskTool and CompleteGoalTool must not share routing context."""
+    sm = SessionManager(tmp_path)
+    lt = LongTaskTool(sessions=sm)
+    cg = CompleteGoalTool(sessions=sm)
+    ctx = RequestContext(channel="websocket", chat_id="a", session_key="websocket:a")
+
+    lt.set_context(ctx)
+    assert cg._request_ctx.get() is None
+
+    cg.set_context(ctx)
+    assert lt._request_ctx.get() is ctx
+    assert cg._request_ctx.get() is ctx
 
 
 @pytest.mark.asyncio

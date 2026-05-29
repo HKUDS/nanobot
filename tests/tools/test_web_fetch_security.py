@@ -12,6 +12,7 @@ import pytest
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import WebFetchConfig
+from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
 
 _REAL_GETADDRINFO = socket.getaddrinfo
 
@@ -41,6 +42,24 @@ async def test_web_fetch_blocks_localhost():
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
     with patch("nanobot.security.network.socket.getaddrinfo", _resolve_localhost):
         result = await tool.execute(url="http://localhost/admin")
+    data = json.loads(result)
+    assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path):
+    tool = WebFetchTool()
+    scope = build_workspace_scope(tmp_path, "full")
+
+    def _resolve_localhost(hostname, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _resolve_localhost):
+            result = await tool.execute(url="http://localhost/admin")
+    finally:
+        reset_workspace_scope(token)
     data = json.loads(result)
     assert "error" in data
 

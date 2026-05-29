@@ -5,8 +5,6 @@ from dataclasses import fields
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from nanobot.agent.tools.base import Tool
 
 
@@ -113,6 +111,31 @@ def test_discover_skips_private_classes():
     discovered = loader.discover()
     for cls in discovered:
         assert not cls.__name__.startswith("_")
+
+
+def test_loader_registers_exec_with_real_tools_config(tmp_path):
+    """Real config objects catch bad ctx.config attribute paths that mocks hide."""
+    from types import SimpleNamespace
+
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
+
+    ctx = ToolContext(
+        config=ToolsConfig(),
+        workspace=str(tmp_path),
+        bus=None,
+        subagent_manager=SimpleNamespace(
+            get_running_count=lambda: 0,
+            max_concurrent_subagents=4,
+        ),
+        cron_service=None,
+        timezone="UTC",
+    )
+    registry = ToolRegistry()
+    registered = ToolLoader().load(ctx, registry)
+
+    assert "exec" in registered
+    assert registry.has("exec")
 
 
 # --- Task 4: _FsTool.create() ---

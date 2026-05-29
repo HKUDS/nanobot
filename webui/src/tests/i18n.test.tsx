@@ -5,9 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { resources } from "@/i18n";
+import { LOCALE_STORAGE_KEY, resolveInitialLocale } from "@/i18n/config";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
+const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
   "stop",
@@ -27,12 +29,11 @@ const SETTINGS_NAV_KEYS = [
   "appearance",
   "models",
   "image",
-  "web",
+  "browser",
   "apps",
   "runtime",
   "advanced",
 ];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -61,6 +62,14 @@ function interpolationKeys(value: unknown): string[] {
 }
 
 describe("webui i18n", () => {
+  it("defaults to English until the user chooses another language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    expect(resolveInitialLocale()).toBe("en");
+
+    localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
+    expect(resolveInitialLocale()).toBe("zh-CN");
+  });
+
   it("switches UI copy and document locale through the language switcher", async () => {
     const user = userEvent.setup();
 
@@ -97,10 +106,12 @@ describe("webui i18n", () => {
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
   });
 
-  it("keeps welcome quick actions localized for every registered locale", () => {
+  it("keeps empty landing resources localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const empty = resource.common.thread.empty;
-      expect(empty.greeting).toBeTruthy();
+      for (const key of HERO_GREETING_KEYS) {
+        expect(empty.greetings[key as keyof typeof empty.greetings]).toBeTruthy();
+      }
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
         expect(action.title).toBeTruthy();
@@ -182,7 +193,7 @@ describe("webui i18n", () => {
   it("keeps Simplified Chinese settings overview copy localized", () => {
     const settings = resources["zh-CN"].common.settings;
 
-    expect(settings.nav.web).toBe("网页");
+    expect(settings.nav.browser).toBe("网页");
     expect(settings.sections.webSearch).toBe("网页搜索");
     expect(settings.byok.tabs.webSearch).toBe("网页搜索");
     expect(settings.overview.webSearch).toBe("网页搜索");

@@ -12,6 +12,7 @@ import nanobot.providers.base as provider_base
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
     _codex_error_response,
+    _build_reasoning_options,
     _CodexHTTPError,
     _friendly_error,
     _request_codex,
@@ -128,11 +129,12 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
         body,
         verify,
         on_content_delta=None,
+        on_thinking_delta=None,
         on_tool_call_delta=None,
     ):
-        _ = on_tool_call_delta
+        _ = on_thinking_delta, on_tool_call_delta
         bodies.append(body)
-        return "ok", [], "stop"
+        return "ok", [], "stop", None
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
 
@@ -257,7 +259,7 @@ async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None
         calls += 1
         if calls == 1:
             raise httpx.ReadTimeout("")
-        return "ok", [], "stop"
+        return "ok", [], "stop", None
 
     async def fake_sleep(delay: float) -> None:
         delays.append(delay)
@@ -397,3 +399,56 @@ def test_codex_429_classification_uses_raw_error_semantics(
     error_type, error_code = provider_base.LLMProvider._extract_error_type_code(raw)
 
     assert _should_retry_status(429, error_type, error_code, raw) is expected_retry
+
+
+def test_codex_reasoning_options_request_summary_without_forcing_effort() -> None:
+    assert _build_reasoning_options(None) == {"summary": "auto"}
+    assert _build_reasoning_options("high") == {"summary": "auto", "effort": "high"}
+    assert _build_reasoning_options("none") == {"effort": "none"}
+
+
+@pytest.mark.asyncio
+async def test_codex_stream_surfaces_reasoning_summary(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.get_codex_token",
+        lambda: SimpleNamespace(account_id="acct", access="token"),
+    )
+
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        on_content_delta=None,
+        on_thinking_delta=None,
+        on_tool_call_delta=None,
+    ):
+        _ = url, headers, verify, on_tool_call_delta
+        assert body["reasoning"] == {"summary": "auto", "effort": "medium"}
+        if on_content_delta:
+            await on_content_delta("answer")
+        if on_thinking_delta:
+            await on_thinking_delta("summary")
+        return "answer", [], "stop", "summary"
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+
+    provider = OpenAICodexProvider()
+    content_deltas: list[str] = []
+    thinking_deltas: list[str] = []
+
+    response = await provider.chat_stream(
+        [{"role": "user", "content": "hi"}],
+        reasoning_effort="medium",
+        on_content_delta=lambda delta: _append(content_deltas, delta),
+        on_thinking_delta=lambda delta: _append(thinking_deltas, delta),
+    )
+
+    assert content_deltas == ["answer"]
+    assert thinking_deltas == ["summary"]
+    assert response.content == "answer"
+    assert response.reasoning_content == "summary"
+
+
+async def _append(target: list[str], value: str) -> None:
+    target.append(value)

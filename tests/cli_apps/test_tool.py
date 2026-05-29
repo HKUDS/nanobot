@@ -41,6 +41,7 @@ def test_run_cli_app_uses_installed_registry_app(
     }
     _write_cache(data_dir / "harness_registry_cache.json", registry)
     _write_cache(data_dir / "public_registry_cache.json", {"meta": {}, "clis": []})
+    _write_cache(data_dir / "extensions_registry_cache.json", {"meta": {}, "clis": []})
     CliAppManager(workspace=workspace, data_dir=data_dir)._save_installed(
         {"gimp": {"entry_point": "cli-anything-gimp"}}
     )
@@ -102,6 +103,7 @@ def test_run_cli_app_rejects_uninstalled_app(tmp_path: Path, monkeypatch) -> Non
     }
     _write_cache(data_dir / "harness_registry_cache.json", registry)
     _write_cache(data_dir / "public_registry_cache.json", {"meta": {}, "clis": []})
+    _write_cache(data_dir / "extensions_registry_cache.json", {"meta": {}, "clis": []})
     monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
     tool = CliAppsTool(workspace=workspace, restrict_to_workspace=True)
 

@@ -555,6 +555,42 @@ async def test_pending_queue_cleanup_on_dispatch(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
+    """A queued dispatch must not steal the active task's injection queue."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    session_key = "cli:c"
+    lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
+    await lock.acquire()
+    active_pending = asyncio.Queue(maxsize=1)
+    loop._pending_queues[session_key] = active_pending
+
+    waiting_at_lock = asyncio.Event()
+    original_acquire = asyncio.Lock.acquire
+
+    async def _patched_acquire(self, *args, **kwargs):
+        if self is lock:
+            waiting_at_lock.set()
+        return await original_acquire(self, *args, **kwargs)
+
+    with patch.object(asyncio.Lock, "acquire", _patched_acquire):
+        waiting = asyncio.create_task(
+            loop._dispatch(
+                InboundMessage(channel="cli", sender_id="u", chat_id="c", content="queued")
+            )
+        )
+        await asyncio.wait_for(waiting_at_lock.wait(), timeout=2.0)
+
+    assert loop._pending_queues[session_key] is active_pending
+
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    lock.release()
+
+
+@pytest.mark.asyncio
 async def test_followup_routed_to_pending_queue(tmp_path):
     """Unified-session follow-ups should route into the active pending queue."""
     from nanobot.agent.loop import UNIFIED_SESSION_KEY

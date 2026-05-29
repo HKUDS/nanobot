@@ -186,6 +186,18 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
     assert set(persisted.keys()) == {"conv-valid", "conv-missing-ts"}
 
 
+def test_default_trusted_service_urls_cover_official_teams_clouds(make_channel):
+    ch = make_channel()
+
+    assert ch._is_trusted_service_url("https://smba.trafficmanager.net/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.gcc.teams.microsoft.com/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.gov.teams.microsoft.us/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.dod.teams.microsoft.us/amer/")
+    assert ch._is_trusted_service_url("https://westus-api.botframework.com/")
+    assert not ch._is_trusted_service_url("http://smba.trafficmanager.net/amer/")
+    assert not ch._is_trusted_service_url("https://smba.trafficmanager.net.evil.example/")
+
+
 def test_save_prunes_unsupported_conversation_refs(make_channel, tmp_path, monkeypatch):
     now = 1_800_000_000.0
     monkeypatch.setattr(msteams_module.time, "time", lambda: now)
@@ -424,6 +436,38 @@ async def test_handle_activity_denied_sender_does_not_store_ref(make_channel, tm
         },
         "channelData": {
             "tenant": {"id": "tenant-id"},
+        },
+    }
+
+    await ch._handle_activity(activity)
+
+    assert ch.bus.inbound == []
+    assert ch._conversation_refs == {}
+    assert not (tmp_path / "state" / "msteams_conversations.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_handle_activity_rejects_untrusted_service_url(make_channel, tmp_path):
+    ch = make_channel(validateInboundAuth=False, allowFrom=["*"])
+
+    activity = {
+        "type": "message",
+        "id": "activity-poison",
+        "text": "Hello from forged Teams activity",
+        "serviceUrl": "https://attacker.example/collect",
+        "channelId": "msteams",
+        "conversation": {
+            "id": "conv-poison",
+            "conversationType": "personal",
+        },
+        "from": {
+            "id": "29:attacker-user-id",
+            "aadObjectId": "attacker-user-id",
+            "name": "Attacker",
+        },
+        "recipient": {
+            "id": "28:bot-id",
+            "name": "nanobot",
         },
     }
 
@@ -737,6 +781,25 @@ async def test_send_raises_when_conversation_ref_missing(make_channel):
 
     with pytest.raises(RuntimeError, match="conversation ref not found"):
         await ch.send(OutboundMessage(channel="msteams", chat_id="missing", content="Reply text"))
+
+
+@pytest.mark.asyncio
+async def test_send_rejects_untrusted_service_url_before_bearer_post(make_channel):
+    ch = make_channel()
+    fake_http = FakeHttpClient()
+    ch._http = fake_http
+    ch._token = "tok"
+    ch._token_expires_at = 9999999999
+    ch._conversation_refs["conv-poison"] = ConversationRef(
+        service_url="https://attacker.example/collect",
+        conversation_id="conv-poison",
+        activity_id="activity-poison",
+    )
+
+    with pytest.raises(RuntimeError, match="untrusted service_url"):
+        await ch.send(OutboundMessage(channel="msteams", chat_id="conv-poison", content="Reply text"))
+
+    assert fake_http.calls == []
 
 
 @pytest.mark.asyncio

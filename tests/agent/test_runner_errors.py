@@ -79,6 +79,31 @@ async def test_llm_error_not_appended_to_session_messages():
 
 
 @pytest.mark.asyncio
+async def test_llm_arrearage_error_surfaces_clear_message():
+    """Arrearage errors yield a clear user-facing message, not a raw dump (#3006)."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _ARREARAGE_ERROR_MESSAGE
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="HTTP 402 insufficient_quota", finish_reason="error", error_status_code=402,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == _ARREARAGE_ERROR_MESSAGE
+
+
+@pytest.mark.asyncio
 async def test_runner_tool_error_sets_final_content():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

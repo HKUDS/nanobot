@@ -16,6 +16,7 @@ There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui``
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -45,15 +46,22 @@ class _GoalToolsMixin(ContextAware):
     def __init__(self, sessions: SessionManager, bus: Any | None = None) -> None:
         self._sessions = sessions
         self._bus = bus
-        self._request_ctx: RequestContext | None = None
+        # Each subclass gets its own ContextVar so concurrent tasks across
+        # different tool types (LongTaskTool vs CompleteGoalTool) do not
+        # interfere with each other.
+        self._request_ctx: ContextVar[RequestContext | None] = ContextVar(
+            f"{self.__class__.__name__}_request_ctx",
+            default=None,
+        )
 
     def set_context(self, ctx: RequestContext) -> None:
-        self._request_ctx = ctx
+        self._request_ctx.set(ctx)
 
     def _session(self):
-        if self._request_ctx is None:
+        request_ctx = self._request_ctx.get()
+        if request_ctx is None:
             return None
-        key = self._request_ctx.session_key
+        key = request_ctx.session_key
         if not key:
             return None
         return self._sessions.get_or_create(key)
@@ -61,7 +69,7 @@ class _GoalToolsMixin(ContextAware):
     async def _publish_goal_state_ws(self, metadata: dict[str, Any]) -> None:
         """Fan-out authoritative goal snapshot for this WebSocket chat only."""
         bus = self._bus
-        rc = self._request_ctx
+        rc = self._request_ctx.get()
         if bus is None or rc is None or rc.channel != "websocket":
             return
         cid = (rc.chat_id or "").strip()
@@ -224,4 +232,3 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
         if tail:
             return f"Goal marked complete ({ended}). Recap:\n{tail}"
         return f"Goal marked complete ({ended})."
-
