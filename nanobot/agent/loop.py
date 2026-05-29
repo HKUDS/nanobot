@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+    from nanobot.runtime_health import RuntimeHealthState
 
 
 UNIFIED_SESSION_KEY = "unified:default"
@@ -185,6 +186,7 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        runtime_health: RuntimeHealthState | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -196,6 +198,7 @@ class AgentLoop:
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
         self._runtime_model_publisher = runtime_model_publisher
+        self._runtime_health = runtime_health
         self._provider_signature = provider_signature
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
@@ -813,6 +816,11 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                if self._runtime_health is not None:
+                    self._runtime_health.mark_agent_tick(
+                        inbound_queue=self.bus.inbound_size,
+                        outbound_queue=self.bus.outbound_size,
+                    )
                 self.auto_compact.check_expired(
                     self._schedule_background,
                     active_session_keys=self._pending_queues.keys(),
@@ -829,6 +837,11 @@ class AgentLoop:
                 continue
 
             raw = msg.content.strip()
+            if self._runtime_health is not None:
+                self._runtime_health.mark_inbound_received(
+                    inbound_queue=self.bus.inbound_size,
+                    outbound_queue=self.bus.outbound_size,
+                )
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
                     msg, msg.session_key, raw,
@@ -883,6 +896,9 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+        dispatch_id = f"{session_key}:{time.time_ns()}"
+        if self._runtime_health is not None:
+            self._runtime_health.mark_dispatch_start(dispatch_id)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
@@ -1003,6 +1019,8 @@ class AgentLoop:
                         content="Sorry, I encountered an error.",
                     ))
         finally:
+            if self._runtime_health is not None:
+                self._runtime_health.mark_dispatch_end(dispatch_id)
             # Drain any messages still in the pending queue and re-publish
             # them to the bus so they are processed as fresh inbound messages
             # rather than silently lost.

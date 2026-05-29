@@ -668,6 +668,7 @@ def _run_gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from nanobot.runtime_health import RuntimeHealthState
     from nanobot.session.manager import SessionManager
 
     port = port if port is not None else config.gateway.port
@@ -675,6 +676,8 @@ def _run_gateway(
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
+    runtime_health = RuntimeHealthState()
+    runtime_health.mark_gateway_starting()
     try:
         provider_snapshot = build_provider_snapshot(config)
     except ValueError as exc:
@@ -709,6 +712,7 @@ def _run_gateway(
             preset,
         ),
         provider_signature=provider_snapshot.signature,
+        runtime_health=runtime_health,
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
@@ -843,6 +847,7 @@ def _run_gateway(
         bus,
         session_manager=session_manager,
         webui_runtime_model_name=_webui_runtime_model_name,
+        runtime_health=runtime_health,
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:

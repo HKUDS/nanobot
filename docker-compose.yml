@@ -21,6 +21,10 @@ services:
     environment:
       NANOBOT_TELEGRAM_HEALTH_PATH: /tmp/nanobot-telegram-health.json
       NANOBOT_TELEGRAM_HEALTH_MAX_AGE_S: "120"
+      NANOBOT_RUNTIME_HEALTH_PATH: /tmp/nanobot-runtime-health.json
+      NANOBOT_RUNTIME_HEALTH_AGENT_MAX_AGE_S: "180"
+      NANOBOT_RUNTIME_HEALTH_DISPATCH_MAX_AGE_S: "900"
+      NANOBOT_RUNTIME_HEALTH_SEND_MAX_AGE_S: "180"
     ports:
       - 18790:18790
     deploy:

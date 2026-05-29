@@ -18,6 +18,7 @@ from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
 if TYPE_CHECKING:
+    from nanobot.runtime_health import RuntimeHealthState
     from nanobot.session.manager import SessionManager
 
 
@@ -57,11 +58,13 @@ class ChannelManager:
         *,
         session_manager: "SessionManager | None" = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
+        runtime_health: "RuntimeHealthState | None" = None,
     ):
         self.config = config
         self.bus = bus
         self._session_manager = session_manager
         self._webui_runtime_model_name = webui_runtime_model_name
+        self._runtime_health = runtime_health
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
@@ -431,12 +434,21 @@ class ChannelManager:
 
         for attempt in range(max_attempts):
             try:
+                if self._runtime_health is not None:
+                    self._runtime_health.mark_outbound_send_start(channel=msg.channel)
                 await self._send_once(channel, msg)
+                if self._runtime_health is not None:
+                    self._runtime_health.mark_outbound_send_ok(channel=msg.channel)
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
                 if attempt == max_attempts - 1:
+                    if self._runtime_health is not None:
+                        self._runtime_health.mark_outbound_send_error(
+                            channel=msg.channel,
+                            error=f"{type(e).__name__}: {e}",
+                        )
                     logger.exception(
                         "Failed to send to {} after {} attempts",
                         msg.channel, max_attempts

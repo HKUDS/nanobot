@@ -48,10 +48,14 @@ ENV HOME=/home/nanobot
 EXPOSE 18790
 
 ENV NANOBOT_TELEGRAM_HEALTH_PATH=/tmp/nanobot-telegram-health.json \
-    NANOBOT_TELEGRAM_HEALTH_MAX_AGE_S=120
+    NANOBOT_TELEGRAM_HEALTH_MAX_AGE_S=120 \
+    NANOBOT_RUNTIME_HEALTH_PATH=/tmp/nanobot-runtime-health.json \
+    NANOBOT_RUNTIME_HEALTH_AGENT_MAX_AGE_S=180 \
+    NANOBOT_RUNTIME_HEALTH_DISPATCH_MAX_AGE_S=900 \
+    NANOBOT_RUNTIME_HEALTH_SEND_MAX_AGE_S=180
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=1 \
-    CMD ["python", "-m", "nanobot.telegram_healthcheck"]
+    CMD ["sh", "/app/nanobot/telegram_healthcheck.sh"]
 
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["status"]
