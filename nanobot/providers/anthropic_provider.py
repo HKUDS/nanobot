@@ -228,6 +228,13 @@ class AnthropicProvider(LLMProvider):
                 if converted:
                     result.append(converted)
                 continue
+            if not item.get("type"):
+                # Anthropic requires every content block to declare a "type".
+                # A tool that returned a bare dict (or a list of dicts) lands
+                # here; coerce it to a text block instead of emitting a block
+                # the API rejects with "content.0.type: Field required".
+                result.append({"type": "text", "text": str(item)})
+                continue
             result.append(item)
         return result or "(empty)"
 
