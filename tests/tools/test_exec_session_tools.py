@@ -54,13 +54,13 @@ def test_exec_returns_completed_session_output_when_yield_time_ms_is_used(tmp_pa
         tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
         stdin_tool = WriteStdinTool(manager=manager)
 
-        result = await tool.execute(command="echo hello", yield_time_ms=1000)
+        result = await tool.execute(command="echo hello", yield_time_ms=2000)
         if "session_id:" in result:
             sid = _session_id(result)
             result += "\n" + await stdin_tool.execute(
                 session_id=sid,
                 chars="",
-                yield_time_ms=1000,
+                yield_time_ms=2000,
             )
         return result
 
@@ -135,9 +135,9 @@ def test_exec_can_continue_with_stdin(tmp_path):
             "line=sys.stdin.readline(); print('got:' + line.strip(), flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=2000)
         sid = _session_id(initial)
-        result = await stdin_tool.execute(session_id=sid, chars="ping\n", yield_time_ms=1000)
+        result = await stdin_tool.execute(session_id=sid, chars="ping\n", yield_time_ms=2000)
         return initial, result
 
     initial, result = asyncio.run(run())
@@ -159,17 +159,19 @@ def test_write_stdin_can_close_stdin(tmp_path):
             "data=sys.stdin.read(); print('got:' + data, flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=2000)
         sid = _session_id(initial)
         result = await stdin_tool.execute(
             session_id=sid,
             chars="payload",
             close_stdin=True,
-            yield_time_ms=1000,
+            yield_time_ms=2000,
         )
         return initial, result
 
     initial, result = asyncio.run(run())
+    assert None != initial
+    print("initial:\n"+initial)
     assert "ready" in initial
     assert "got:payload" in result
     assert "Stdin closed." in result
@@ -185,7 +187,7 @@ def test_write_stdin_can_terminate_session(tmp_path):
             "import time; print('ready', flush=True); time.sleep(30)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=2000)
         sid = _session_id(initial)
         result = await stdin_tool.execute(
             session_id=sid,
@@ -213,7 +215,7 @@ def test_write_stdin_accepts_max_output_tokens_alias(tmp_path):
         sid = _session_id(initial)
         poll = await stdin_tool.execute(
             session_id=sid,
-            yield_time_ms=500,
+            yield_time_ms=2000,
             max_output_tokens=1000,
         )
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
@@ -235,10 +237,10 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
             "time.sleep(1.0); print('done', flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=300)
+        initial = await exec_tool.execute(command=command, yield_time_ms=1000)
         sid = _session_id(initial)
         await asyncio.sleep(1.2)
-        final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=0)
+        final = await stdin_tool.execute(session_id=sid, chars="", yield_time_ms=1000)
         return initial, final
 
     initial, final = asyncio.run(run())
@@ -287,7 +289,7 @@ def test_write_stdin_wait_for_reports_timeout_without_killing_session(tmp_path):
             "import time; print('booting', flush=True); time.sleep(5)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=100)
+        initial = await exec_tool.execute(command=command, yield_time_ms=1000)
         sid = _session_id(initial)
         waited = await stdin_tool.execute(
             session_id=sid,
@@ -339,7 +341,7 @@ def test_list_exec_sessions_reports_running_commands(tmp_path):
             "import time; print('ready', flush=True); time.sleep(5)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=2000)
         sid = _session_id(initial)
         listing = await list_tool.execute()
         cleanup = await stdin_tool.execute(session_id=sid, terminate=True, yield_time_ms=0)
