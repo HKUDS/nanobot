@@ -171,6 +171,7 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
     class FakeIMAP:
         def __init__(self) -> None:
             self.search_calls: list[tuple] = []
+            self.uid_calls: list[tuple] = []
             self.store_calls: list[tuple[bytes, str, str]] = []
             self.expunge_calls = 0
 
@@ -185,6 +186,17 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
             if len(_args) >= 3 and _args[1] == "UID":
                 return "OK", [b"1"]
             return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "STORE":
+                return "OK", [b""]
+            if command == "EXPUNGE":
+                return "OK", [b""]
+            return "BAD", [b""]
 
         def fetch(self, _imap_id: bytes, _parts: str):
             return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
@@ -206,16 +218,21 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])
 
-    assert (b"1", "+FLAGS", "\\Deleted") in fake.store_calls
-    assert fake.expunge_calls == 2
-    uid_searches = [call for call in fake.search_calls if len(call) >= 3 and call[1] == "UID"]
-    assert uid_searches == [(None, "UID", "123"), (None, "UID", "124")]
+    assert fake.store_calls == []
+    assert fake.expunge_calls == 0
+    assert fake.search_calls == []
+    assert fake.uid_calls == [
+        ("STORE", "123", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "123"),
+        ("STORE", "124", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "124"),
+    ]
 
 
 def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
     class FakeIMAP:
         def __init__(self) -> None:
-            self.copy_calls: list[tuple[bytes, str]] = []
+            self.uid_calls: list[tuple] = []
             self.store_calls: list[tuple[bytes, str, str]] = []
             self.expunge_calls = 0
 
@@ -228,9 +245,18 @@ def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
         def search(self, *_args):
             return "OK", [b"1"]
 
-        def copy(self, imap_id: bytes, mailbox: str):
-            self.copy_calls.append((imap_id, mailbox))
-            return "OK", [b""]
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "COPY":
+                return "OK", [b""]
+            if command == "STORE":
+                return "OK", [b""]
+            if command == "EXPUNGE":
+                return "OK", [b""]
+            return "BAD", [b""]
 
         def store(self, imap_id: bytes, op: str, flags: str):
             self.store_calls.append((imap_id, op, flags))
@@ -252,9 +278,103 @@ def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
     )
     channel._apply_post_actions_batch(["123"])
 
-    assert fake.copy_calls == [(b"1", "Processed")]
-    assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted")]
-    assert fake.expunge_calls == 1
+    assert fake.uid_calls == [
+        ("COPY", "123", "Processed"),
+        ("STORE", "123", "+FLAGS", "(\\Deleted)"),
+        ("EXPUNGE", "123"),
+    ]
+    assert fake.store_calls == []
+    assert fake.expunge_calls == 0
+
+
+def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1 UIDPLUS MOVE"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "MOVE":
+                return "OK", [b""]
+            return "BAD", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(
+        _make_config(post_action="move", post_action_move_mailbox="Processed"),
+        MessageBus(),
+    )
+    channel._apply_post_actions_batch(["123"])
+
+    assert fake.uid_calls == [("MOVE", "123", "Processed")]
+
+
+def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch) -> None:
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.uid_calls: list[tuple] = []
+            self.search_calls: list[tuple] = []
+            self.store_calls: list[tuple[bytes, str, str]] = []
+            self.expunge_calls = 0
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"2"]
+
+        def capability(self):
+            return "OK", [b"IMAP4rev1"]
+
+        def uid(self, command: str, *args):
+            self.uid_calls.append((command, *args))
+            if command == "STORE":
+                return "NO", [b"unsupported"]
+            return "BAD", [b""]
+
+        def search(self, *_args):
+            self.search_calls.append(_args)
+            if _args == (None, "UID", "123"):
+                return "OK", [b"1"]
+            if _args == (None, "UID", "124"):
+                return "OK", [b"2"]
+            return "NO", [b""]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def expunge(self):
+            self.expunge_calls += 1
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    channel._apply_post_actions_batch(["123", "124"])
+
+    # UID STORE should be attempted only once, then cached as unsupported.
+    assert [call for call in fake.uid_calls if call[0] == "STORE"] == [("STORE", "123", "+FLAGS", "(\\Deleted)")]
+    assert fake.search_calls == [(None, "UID", "123"), (None, "UID", "124")]
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
+    assert fake.expunge_calls == 2
 
 
 @pytest.mark.asyncio
