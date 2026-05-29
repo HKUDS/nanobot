@@ -2,20 +2,20 @@
 import time
 from datetime import datetime
 
-from nanobot.agent.dream_session import dream_session_key, prune_dream_sessions
+from nanobot.agent.memory import MemoryStore
 
 
 class TestDreamSessionKey:
     def test_contains_timestamp(self):
-        key = dream_session_key()
+        key = MemoryStore.dream_session_key()
         assert key.startswith("dream:")
         ts_part = key.split(":", 1)[1]
         datetime.strptime(ts_part, "%Y%m%d-%H%M%S")
 
     def test_unique_across_calls(self):
-        k1 = dream_session_key()
+        k1 = MemoryStore.dream_session_key()
         time.sleep(1.1)
-        k2 = dream_session_key()
+        k2 = MemoryStore.dream_session_key()
         assert k1 != k2
 
 
@@ -38,7 +38,7 @@ class TestPruneDreamSessions:
         normal_path = sessions_dir / "telegram_123.jsonl"
         normal_path.write_text('{"_type": "metadata"}\n', encoding="utf-8")
 
-        prune_dream_sessions(sessions_dir, keep=10)
+        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
 
         dream_files = sorted(sessions_dir.glob("dream_*.jsonl"))
         assert len(dream_files) == 10
@@ -55,10 +55,10 @@ class TestPruneDreamSessions:
             safe_key = key.replace(":", "_")
             (sessions_dir / f"{safe_key}.jsonl").write_text("{}", encoding="utf-8")
 
-        prune_dream_sessions(sessions_dir, keep=10)
+        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
         assert len(list(sessions_dir.glob("dream_*.jsonl"))) == 3
 
     def test_empty_dir_noop(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
-        prune_dream_sessions(sessions_dir, keep=10)
+        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)

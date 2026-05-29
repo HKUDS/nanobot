@@ -984,7 +984,11 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            from nanobot.agent.dream_session import dream_session_key, prune_dream_sessions
+            from nanobot.agent.memory import MemoryStore
+
+            dream_session_key = MemoryStore.dream_session_key
+            build_dream_commit_message = MemoryStore.build_dream_commit_message
+            prune_dream_sessions = MemoryStore.prune_dream_sessions
 
             store = agent.context.memory
             resp = None
@@ -1003,10 +1007,9 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             finally:
                 if store.git.is_initialized():
-                    summary = resp.content.strip() if resp and resp.content else ""
-                    msg = "dream: periodic memory consolidation"
-                    if summary:
-                        msg = f"{msg}\n\n{summary}"
+                    msg = build_dream_commit_message(
+                        "dream: periodic memory consolidation", resp,
+                    )
                     sha = store.git.auto_commit(msg)
                     if sha:
                         logger.info("Dream commit: {}", sha)

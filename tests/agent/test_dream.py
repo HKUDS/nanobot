@@ -247,18 +247,15 @@ class TestDreamCommitMessage:
     async def test_commit_includes_response_summary(self, tmp_path):
         """Git auto-commit after Dream should include the LLM response in the body."""
         import subprocess
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock
 
-        from nanobot.agent.loop import AgentLoop
         from nanobot.agent.memory import MemoryStore
-        from nanobot.bus.queue import MessageBus
 
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")
         store.write_memory("# Memory")
         store.append_history("user discussed project goals")
 
-        bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
@@ -269,17 +266,6 @@ class TestDreamCommitMessage:
             tool_calls=[],
             usage={},
         ))
-
-        with (
-            patch("nanobot.agent.loop.SessionManager"),
-            patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator"),
-        ):
-            mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            loop = AgentLoop(
-                bus=bus, provider=provider, workspace=tmp_path,
-                context_window_tokens=8000,
-            )
 
         store.git.init()
         store.git.auto_commit("initial state")

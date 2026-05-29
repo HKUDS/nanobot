@@ -305,7 +305,11 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.dream_session import dream_session_key, prune_dream_sessions
+        from nanobot.agent.memory import MemoryStore
+
+        dream_session_key = MemoryStore.dream_session_key
+        build_dream_commit_message = MemoryStore.build_dream_commit_message
+        prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
         content = ""
@@ -331,11 +335,8 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
             if store.git.is_initialized():
-                summary = resp.content.strip() if resp and resp.content else ""
-                msg = "dream: manual run"
-                if summary:
-                    msg = f"{msg}\n\n{summary}"
-                sha = store.git.auto_commit(msg)
+                commit_msg = build_dream_commit_message("dream: manual run", resp)
+                sha = store.git.auto_commit(commit_msg)
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()

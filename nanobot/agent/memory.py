@@ -459,6 +459,44 @@ class MemoryStore:
 # Consolidator — lightweight token-budget triggered consolidation
 # ---------------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Dream helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def dream_session_key() -> str:
+        """Return a unique session key for a Dream run, e.g. ``dream:20260528-100000``."""
+        return f"dream:{datetime.now():%Y%m%d-%H%M%S}"
+
+    @staticmethod
+    def build_dream_commit_message(prefix: str, resp: object | None) -> str:
+        """Build a Dream auto-commit message, appending the LLM summary if present."""
+        msg = prefix
+        if resp is not None and getattr(resp, "content", None):
+            msg = f"{msg}\n\n{resp.content.strip()}"
+        return msg
+
+    @staticmethod
+    def prune_dream_sessions(sessions_dir: Path, *, keep: int = 10) -> None:
+        """Remove the oldest Dream session files, keeping only the N most recent.
+
+        Only files matching ``dream_*.jsonl`` are considered. Non-dream session
+        files are never touched.
+        """
+        dream_files = sorted(
+            sessions_dir.glob("dream_*.jsonl"), key=lambda p: p.stat().st_mtime,
+        )
+        if len(dream_files) <= keep:
+            return
+
+        to_remove = dream_files[: len(dream_files) - keep]
+        for path in to_remove:
+            try:
+                path.unlink()
+                logger.debug("Pruned old dream session: {}", path.stem)
+            except OSError:
+                logger.warning("Failed to prune dream session {}", path)
+
 
 # Individual history.jsonl writers cap their own payloads tightly; the
 # _HISTORY_ENTRY_HARD_CAP at append_history() is a belt-and-suspenders default
