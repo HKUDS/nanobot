@@ -160,10 +160,10 @@
 
 ### LM3-A L2
 
-- [ ] `scene/extractor.py`：L1 完成后 LLM 生成/更新 scene md
-- [ ] `scene/index.py`：`scene_index.json`
-- [ ] Pipeline：L2 定时器（delay-after-L1、maxInterval、session 冷取消）
-- [ ] recall：注入场景导航（非全文）
+- [x] `scene/extractor.py`：L1 完成后 LLM 生成/更新 scene md
+- [x] `scene/index.py`：`scene_index.json`
+- [x] Pipeline：L2 定时器（delay-after-L1、maxInterval、session 冷取消）
+- [x] recall：注入场景导航（非全文）
 
 ### LM3-B L3
 

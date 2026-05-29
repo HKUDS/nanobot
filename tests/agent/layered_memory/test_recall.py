@@ -10,6 +10,7 @@ import pytest
 from nanobot.agent.layered_memory import LayeredMemoryFacade, RecallResult
 from nanobot.agent.layered_memory.l1_store import L1Store
 from nanobot.agent.layered_memory.recall import perform_recall
+from nanobot.agent.layered_memory.scene.index import SceneEntry, SceneIndex
 from nanobot.config.schema import LayeredMemoryConfig, LayeredMemoryRecallConfig
 
 
@@ -88,6 +89,31 @@ def test_perform_recall_includes_tools_guide_when_requested(workspace: Path) -> 
     assert "[Memory tools]" in joined
     assert "memory_search" in joined
     assert "conversation_search" in joined
+
+
+def test_perform_recall_includes_scene_navigation(workspace: Path) -> None:
+    index = SceneIndex(workspace)
+    index.upsert(
+        SceneEntry(
+            slug="layered-memory",
+            title="Layered Memory 开发",
+            path="memory/scenes/layered-memory.md",
+            session_keys=["cli:direct"],
+            updated_at=1.0,
+        )
+    )
+    cfg = LayeredMemoryRecallConfig(enable=True)
+    result = perform_recall(
+        workspace=workspace,
+        config=cfg,
+        query="",
+        session_key="cli:direct",
+        scene_index=index,
+    )
+    joined = "\n".join(result.prepend_lines)
+    assert "[Scene navigation]" in joined
+    assert "Layered Memory 开发" in joined
+    assert "memory/scenes/layered-memory.md" in joined
 
 
 def test_perform_recall_empty_query_no_atoms(workspace: Path) -> None:

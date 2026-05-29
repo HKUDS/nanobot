@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from nanobot.agent.layered_memory.pipeline import (
+    L2TriggerReason,
     MemoryPipelineManager,
     PipelineTriggerReason,
     SerialQueue,
@@ -159,3 +160,73 @@ async def test_notify_noop_when_capture_disabled() -> None:
     mgr = MemoryPipelineManager(cfg, l1_handler=handler)
     await mgr.notify_turn("sess", turn_id="t1")
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_l2_runs_after_l1_delay(pipeline_cfg: LayeredMemoryConfig) -> None:
+    pipeline_cfg.pipeline.every_n_conversations = 1
+    pipeline_cfg.pipeline.enable_warmup = False
+    pipeline_cfg.pipeline.l2_delay_after_l1_seconds = 0.05
+    pipeline_cfg.pipeline.l2_min_interval_seconds = 0
+    l1_done = asyncio.Event()
+    l2_reasons: list[L2TriggerReason] = []
+
+    async def l1_handler(
+        session_key: str,
+        *,
+        reason: PipelineTriggerReason,
+        turn_ids: tuple[str, ...],
+        chunk: int,
+    ) -> None:
+        l1_done.set()
+
+    async def l2_handler(
+        session_key: str,
+        *,
+        reason: L2TriggerReason,
+    ) -> None:
+        l2_reasons.append(reason)
+
+    mgr = MemoryPipelineManager(
+        pipeline_cfg,
+        l1_handler=l1_handler,
+        l2_handler=l2_handler,
+    )
+    await mgr.notify_turn("sess", turn_id="t1")
+    await asyncio.wait_for(l1_done.wait(), timeout=1.0)
+    await asyncio.sleep(0.08)
+    assert L2TriggerReason.AFTER_L1 in l2_reasons
+    await mgr.close()
+
+
+@pytest.mark.asyncio
+async def test_l2_flush_on_shutdown(pipeline_cfg: LayeredMemoryConfig) -> None:
+    pipeline_cfg.pipeline.every_n_conversations = 1
+    pipeline_cfg.pipeline.enable_warmup = False
+    pipeline_cfg.pipeline.l2_delay_after_l1_seconds = 60
+    l2_reasons: list[L2TriggerReason] = []
+
+    async def l1_handler(
+        session_key: str,
+        *,
+        reason: PipelineTriggerReason,
+        turn_ids: tuple[str, ...],
+        chunk: int,
+    ) -> None:
+        return
+
+    async def l2_handler(
+        session_key: str,
+        *,
+        reason: L2TriggerReason,
+    ) -> None:
+        l2_reasons.append(reason)
+
+    mgr = MemoryPipelineManager(
+        pipeline_cfg,
+        l1_handler=l1_handler,
+        l2_handler=l2_handler,
+    )
+    await mgr.notify_turn("sess", turn_id="t1")
+    await mgr.close()
+    assert L2TriggerReason.SHUTDOWN in l2_reasons

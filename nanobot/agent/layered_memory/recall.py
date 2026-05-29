@@ -8,6 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 from nanobot.agent.layered_memory.l1_store import L1Memory, L1Store
+from nanobot.agent.layered_memory.scene.index import SceneIndex
 from nanobot.agent.layered_memory.search_format import format_memory_tools_guide
 from nanobot.agent.layered_memory.search_l1 import search_l1_memories
 from nanobot.config.schema import LayeredMemoryRecallConfig
@@ -30,7 +31,9 @@ def perform_recall(
     query: str,
     session_key: str,
     l1_store: L1Store | None = None,
+    scene_index: SceneIndex | None = None,
     include_tools_guide: bool = False,
+    include_scene_navigation: bool = True,
 ) -> RecallResult:
     """Synchronous recall body (run via ``asyncio.to_thread`` from facade)."""
     store = l1_store or L1Store(workspace)
@@ -42,9 +45,16 @@ def perform_recall(
         strategy=config.strategy,
     )
     user_note = _read_user_profile_note(workspace)
+    index = scene_index or SceneIndex(workspace)
+    scene_nav = (
+        index.format_navigation(session_key=session_key)
+        if include_scene_navigation
+        else None
+    )
     prepend = format_recall_prepend_lines(
         memories,
         user_profile=user_note,
+        scene_navigation=scene_nav,
         max_chars=config.max_prepend_chars,
         tools_guide=format_memory_tools_guide(max_calls=config.max_search_calls_per_turn)
         if include_tools_guide
@@ -93,10 +103,11 @@ def format_recall_prepend_lines(
     memories: list[L1Memory],
     *,
     user_profile: str | None,
+    scene_navigation: list[str] | None = None,
     max_chars: int,
     tools_guide: list[str] | None = None,
 ) -> list[str]:
-    """Build ``[Recalled memories]`` runtime block capped by ``max_prepend_chars``."""
+    """Build recall runtime block capped by ``max_prepend_chars``."""
     lines: list[str] = []
     if user_profile:
         lines.extend(["[User profile note]", user_profile])
@@ -104,6 +115,10 @@ def format_recall_prepend_lines(
         lines.append("[Recalled memories]")
         for mem in memories:
             lines.append(f"- ({mem.memory_type}) {mem.content}")
+    if scene_navigation:
+        if lines:
+            lines.append("")
+        lines.extend(scene_navigation)
     if tools_guide:
         if lines:
             lines.append("")
@@ -122,6 +137,9 @@ def _truncate_recall_lines(lines: list[str], *, max_chars: int) -> list[str]:
     # Drop lowest-ranked memory lines first; keep headers.
     trimmed = list(lines)
     while len(trimmed) > 1 and len("\n".join(trimmed)) > max_chars:
+        if trimmed and trimmed[-1].startswith("- ") and "[Scene navigation]" in trimmed:
+            trimmed.pop()
+            continue
         if trimmed and trimmed[-1].startswith("- ("):
             trimmed.pop()
             continue
