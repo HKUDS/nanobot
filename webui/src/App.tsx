@@ -1,0 +1,1212 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Menu, Moon, Sun } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { DeleteConfirm } from "@/components/DeleteConfirm";
+import { RenameChatDialog } from "@/components/RenameChatDialog";
+import { Sidebar } from "@/components/Sidebar";
+import { SessionSearchDialog } from "@/components/SessionSearchDialog";
+import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
+import { ThreadShell } from "@/components/thread/ThreadShell";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+
+import { useSessions } from "@/hooks/useSessions";
+import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
+import { useSidebarState } from "@/hooks/useSidebarState";
+import { ThemeProvider, useTheme } from "@/hooks/useTheme";
+import { cn } from "@/lib/utils";
+import {
+  clearSavedSecret,
+  deriveWsUrl,
+  fetchBootstrap,
+  loadSavedSecret,
+  saveSecret,
+} from "@/lib/bootstrap";
+import { deriveTitle } from "@/lib/format";
+import { NanobotClient } from "@/lib/nanobot-client";
+import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import type {
+  ChatSummary,
+  RuntimeSurface,
+  SettingsPayload,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
+} from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import {
+  createRuntimeHost,
+  toRuntimeSurface,
+} from "@/lib/runtime";
+import { projectNameFromPath } from "@/lib/workspace";
+
+type BootState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "auth"; failed?: boolean }
+  | {
+      status: "ready";
+      client: NanobotClient;
+      token: string;
+      tokenExpiresAt: number;
+      modelName: string | null;
+      runtimeSurface: RuntimeSurface;
+    };
+
+const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
+const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
+const SIDEBAR_WIDTH = 272;
+const SIDEBAR_RAIL_WIDTH = 56;
+const TOKEN_REFRESH_MARGIN_MS = 30_000;
+const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
+type ShellView = "chat" | "settings" | "apps";
+
+function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
+  return Date.now() + Math.max(0, expiresInSeconds) * 1000;
+}
+
+function tokenRefreshDelayMs(expiresAt: number): number {
+  const remaining = Math.max(0, expiresAt - Date.now());
+  const margin = Math.min(
+    TOKEN_REFRESH_MARGIN_MS,
+    Math.max(1_000, remaining / 2),
+  );
+  return Math.max(TOKEN_REFRESH_MIN_DELAY_MS, remaining - margin);
+}
+
+function AuthForm({
+  failed,
+  onSecret,
+}: {
+  failed: boolean;
+  onSecret: (secret: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const secret = value.trim();
+    if (!secret) return;
+    setSubmitting(true);
+    onSecret(secret);
+  };
+
+  return (
+    <div className="flex h-full w-full items-center justify-center px-6">
+      <form
+        onSubmit={handleSubmit}
+        className="flex w-full max-w-sm flex-col gap-4"
+      >
+        <div className="flex flex-col items-center gap-1 text-center">
+          <p className="text-lg font-semibold">{t("app.auth.title")}</p>
+          <p className="text-sm text-muted-foreground">{t("app.auth.hint")}</p>
+        </div>
+        {failed && (
+          <p className="text-center text-sm text-destructive">
+            {t("app.auth.invalid")}
+          </p>
+        )}
+        <Input
+          type="password"
+          placeholder={t("app.auth.placeholder")}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={submitting}
+          autoFocus
+        />
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={!value.trim() || submitting}
+        >
+          {t("app.auth.submit")}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+function readSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (raw === null) return true;
+    return raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function readCompletedRunChatIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(COMPLETED_RUNS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCompletedRunChatIds(chatIds: Set<string>): void {
+  try {
+    window.localStorage.setItem(
+      COMPLETED_RUNS_STORAGE_KEY,
+      JSON.stringify(Array.from(chatIds)),
+    );
+  } catch {
+    // ignore storage errors (private mode, etc.)
+  }
+}
+
+function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePayload {
+  const accessMode = scope.access_mode === "restricted" ? "restricted" : "full";
+  return {
+    ...scope,
+    project_name: scope.project_name ?? projectNameFromPath(scope.project_path),
+    access_mode: accessMode,
+    restrict_to_workspace: accessMode === "restricted",
+  };
+}
+
+function HostChrome({
+  onToggleSidebar,
+  theme,
+  onToggleTheme,
+  showThemeButton = true,
+}: {
+  onToggleSidebar?: () => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  showThemeButton?: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <header className="host-drag-region pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-start justify-between bg-transparent px-3 pt-2 text-foreground/90">
+      <div className="flex min-w-[8rem] items-center">
+        {onToggleSidebar ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("thread.header.toggleSidebar")}
+            onClick={onToggleSidebar}
+            className="host-no-drag pointer-events-auto ml-[88px] h-8 w-8 rounded-xl text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+      {showThemeButton ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("thread.header.toggleTheme")}
+          onClick={onToggleTheme}
+          className="host-no-drag pointer-events-auto h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+        >
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4" />
+          ) : (
+            <Moon className="h-4 w-4" />
+          )}
+        </Button>
+      ) : (
+        <div aria-hidden className="h-8 w-8" />
+      )}
+    </header>
+  );
+}
+
+export default function App() {
+  const { t } = useTranslation();
+  const [state, setState] = useState<BootState>({ status: "loading" });
+  const bootstrapSecretRef = useRef("");
+
+  const bootstrapWithSecret = useCallback(
+    (secret: string) => {
+      let cancelled = false;
+      (async () => {
+        setState({ status: "loading" });
+        try {
+          const boot = await fetchBootstrap("", secret);
+          if (cancelled) return;
+          if (secret) saveSecret(secret);
+          const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+          const runtimeSurface = toRuntimeSurface(boot.runtime_surface);
+          const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
+          const client = new NanobotClient({
+            url,
+            socketFactory: runtimeHost.socketFactory,
+            onReauth: async () => {
+              try {
+                const refreshed = await fetchBootstrap("", bootstrapSecretRef.current);
+                const refreshedUrl = deriveWsUrl(
+                  refreshed.ws_path,
+                  refreshed.token,
+                  refreshed.ws_url,
+                );
+                const tokenExpiresAt = bootstrapTokenExpiresAt(refreshed.expires_in);
+                setState((current) =>
+                  current.status === "ready" && current.client === client
+                    ? {
+                        ...current,
+                        token: refreshed.token,
+                        tokenExpiresAt,
+                        modelName: refreshed.model_name ?? current.modelName,
+                        runtimeSurface:
+                          refreshed.runtime_surface
+                            ? toRuntimeSurface(refreshed.runtime_surface)
+                            : current.runtimeSurface,
+                      }
+                    : current,
+                );
+                return refreshedUrl;
+              } catch {
+                return null;
+              }
+            },
+          });
+          bootstrapSecretRef.current = secret;
+          client.connect();
+          setState({
+            status: "ready",
+            client,
+            token: boot.token,
+            tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
+            modelName: boot.model_name ?? null,
+            runtimeSurface,
+          });
+        } catch (e) {
+          if (cancelled) return;
+          const msg = (e as Error).message;
+          if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
+            setState({ status: "auth", failed: true });
+          } else {
+            setState({ status: "error", message: msg });
+          }
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    const client = state.client;
+    const timer = window.setTimeout(async () => {
+      try {
+        const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+        const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+        const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
+        client.updateUrl(url);
+        setState((current) =>
+          current.status === "ready" && current.client === client
+            ? {
+                ...current,
+                token: boot.token,
+                tokenExpiresAt,
+                modelName: boot.model_name ?? current.modelName,
+                runtimeSurface: boot.runtime_surface
+                  ? toRuntimeSurface(boot.runtime_surface)
+                  : current.runtimeSurface,
+              }
+            : current,
+        );
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
+          setState({ status: "auth", failed: true });
+        }
+      }
+    }, tokenRefreshDelayMs(state.tokenExpiresAt));
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  useEffect(() => {
+    const saved = loadSavedSecret();
+    return bootstrapWithSecret(saved);
+  }, [bootstrapWithSecret]);
+
+  if (state.status === "loading") {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
+            </span>
+            {t("app.loading.connecting")}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (state.status === "auth") {
+    return (
+      <AuthForm
+        failed={!!state.failed}
+        onSecret={(s) => bootstrapWithSecret(s)}
+      />
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <div className="flex h-full w-full items-center justify-center px-4 text-center">
+        <div className="flex max-w-md flex-col items-center gap-3">
+          <p className="text-lg font-semibold">{t("app.error.title")}</p>
+          <p className="text-sm text-muted-foreground">{state.message}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("app.error.gatewayHint")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleModelNameChange = (modelName: string | null) => {
+    setState((current) =>
+      current.status === "ready" ? { ...current, modelName } : current,
+    );
+  };
+
+  const handleLogout = () => {
+    if (state.status === "ready") {
+      state.client.close();
+    }
+    clearSavedSecret();
+    setState({ status: "auth" });
+  };
+
+  return (
+    <ClientProvider
+      client={state.client}
+      token={state.token}
+      modelName={state.modelName}
+    >
+      <Shell
+        runtimeSurface={state.runtimeSurface}
+        onModelNameChange={handleModelNameChange}
+        onLogout={handleLogout}
+      />
+    </ClientProvider>
+  );
+}
+
+function Shell({
+  runtimeSurface,
+  onModelNameChange,
+  onLogout,
+}: {
+  runtimeSurface: RuntimeSurface;
+  onModelNameChange: (modelName: string | null) => void;
+  onLogout: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const { client, token } = useClient();
+  const { theme, toggle } = useTheme();
+  const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
+  const { state: sidebarState, update: updateSidebarState } =
+    useSidebarState(sessions, !loading);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [view, setView] = useState<ShellView>("chat");
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>("overview");
+  const [hostSidebarOpen, setHostSidebarOpen] =
+    useState<boolean>(readSidebarOpen);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
+  const [pendingRename, setPendingRename] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
+  const [pendingProjectRename, setPendingProjectRename] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
+  const restartSawDisconnectRef = useRef(false);
+  const [restartToast, setRestartToast] = useState<string | null>(null);
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
+  const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(readCompletedRunChatIds);
+  const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [draftWorkspaceScope, setDraftWorkspaceScope] =
+    useState<WorkspaceScopePayload | null>(null);
+  const [workspaceOverrides, setWorkspaceOverrides] =
+    useState<Record<string, WorkspaceScopePayload>>({});
+  const runningChatIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettings(token)
+      .then((payload) => {
+        if (!cancelled) setSettingsSnapshot(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setSettingsSnapshot(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_STORAGE_KEY,
+        hostSidebarOpen ? "1" : "0",
+      );
+    } catch {
+      // ignore storage errors (private mode, etc.)
+    }
+  }, [hostSidebarOpen]);
+
+  useEffect(() => {
+    writeCompletedRunChatIds(completedChatIds);
+  }, [completedChatIds]);
+
+  const activeSession = useMemo<ChatSummary | null>(() => {
+    if (!activeKey) return null;
+    return sessions.find((s) => s.key === activeKey) ?? null;
+  }, [sessions, activeKey]);
+  const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
+  const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
+  const activeChatId = activeSession?.chatId ?? null;
+  const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
+    if (activeChatId && workspaceOverrides[activeChatId]) {
+      return workspaceOverrides[activeChatId];
+    }
+    if (activeSession?.workspaceScope) {
+      return activeSession.workspaceScope;
+    }
+    return draftWorkspaceScope ?? workspaces?.default_scope ?? null;
+  }, [
+    activeChatId,
+    activeSession?.workspaceScope,
+    draftWorkspaceScope,
+    workspaceOverrides,
+    workspaces?.default_scope,
+  ]);
+  const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
+
+  const refreshWorkspaces = useCallback(async () => {
+    try {
+      const payload = await fetchWorkspaces(token);
+      setWorkspaces(payload);
+    } catch {
+      setWorkspaces(null);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void refreshWorkspaces();
+  }, [refreshWorkspaces]);
+
+  useEffect(() => {
+    if (loading) return;
+    const knownChatIds = new Set(sessions.map((session) => session.chatId));
+    setCompletedChatIds((current) => {
+      const next = new Set(
+        Array.from(current).filter((chatId) => knownChatIds.has(chatId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+    setWorkspaceOverrides((current) => {
+      const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
+      return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
+    });
+  }, [loading, sessions]);
+
+  useEffect(() => {
+    return client.onSessionUpdate((_chatId, _scope, workspaceScope) => {
+      if (!workspaceScope) return;
+      const next = normalizeWorkspaceScope(workspaceScope);
+      setWorkspaceOverrides((current) => ({
+        ...current,
+        [_chatId]: next,
+      }));
+      setDraftWorkspaceScope(next);
+      setWorkspaceError(null);
+      void refreshWorkspaces();
+    });
+  }, [client, refreshWorkspaces]);
+
+  useEffect(() => {
+    return client.onError((error) => {
+      if (error.kind !== "workspace_scope_rejected") return;
+      setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+      void refreshWorkspaces();
+    });
+  }, [client, refreshWorkspaces, t]);
+
+  useEffect(() => {
+    if (loading) return;
+    const activeRunIds = sessions
+      .filter((session) => typeof session.runStartedAt === "number")
+      .map((session) => session.chatId);
+    if (activeRunIds.length === 0) return;
+
+    for (const chatId of activeRunIds) {
+      client.attach(chatId);
+    }
+    setRunningChatIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const chatId of activeRunIds) {
+        if (!next.has(chatId)) changed = true;
+        next.add(chatId);
+      }
+      if (!changed) return current;
+      runningChatIdsRef.current = next;
+      return next;
+    });
+    setCompletedChatIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const chatId of activeRunIds) {
+        if (next.delete(chatId)) changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [client, loading, sessions]);
+
+  const closeHostSidebar = useCallback(() => {
+    setHostSidebarOpen(false);
+  }, []);
+
+  const openHostSidebar = useCallback(() => {
+    setHostSidebarOpen(true);
+  }, []);
+
+  const closeMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    const isNativeHost =
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 1024px)").matches;
+    if (isNativeHost) {
+      setHostSidebarOpen((v) => !v);
+    } else {
+      setMobileSidebarOpen((v) => !v);
+    }
+  }, []);
+
+  const applyWorkspaceScope = useCallback(
+    (scope: WorkspaceScopePayload) => {
+      const next = normalizeWorkspaceScope(scope);
+      setWorkspaceError(null);
+      if (activeChatId) {
+        if (!activeChatRunning) {
+          client.setWorkspaceScope(activeChatId, next);
+        }
+        return;
+      }
+      setDraftWorkspaceScope(next);
+    },
+    [activeChatId, activeChatRunning, client],
+  );
+
+  const onCreateChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null) => {
+    try {
+      const scope = workspaceScope ?? activeWorkspaceScope;
+      const chatId = await createChat(scope);
+      setActiveKey(`websocket:${chatId}`);
+      setView("chat");
+      setMobileSidebarOpen(false);
+      if (scope) {
+        setWorkspaceOverrides((current) => ({
+          ...current,
+          [chatId]: normalizeWorkspaceScope(scope),
+        }));
+      }
+      return chatId;
+    } catch (e) {
+      console.error("Failed to create chat", e);
+      if (e instanceof Error && e.message.startsWith("workspace_scope_rejected:")) {
+        setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+      }
+      return null;
+    }
+  }, [activeWorkspaceScope, createChat, t]);
+
+  const onNewChat = useCallback(() => {
+    setActiveKey(null);
+    setDraftWorkspaceScope(null);
+    setWorkspaceError(null);
+    setView("chat");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onNewChatInProject = useCallback(
+    (projectPath: string, projectName: string) => {
+      const base = workspaces?.default_scope ?? activeWorkspaceScope;
+      const trimmed = projectPath.trim();
+      if (!base || !trimmed) {
+        onNewChat();
+        return;
+      }
+      setActiveKey(null);
+      setDraftWorkspaceScope(normalizeWorkspaceScope({
+        project_path: trimmed,
+        project_name: projectName || projectNameFromPath(trimmed),
+        access_mode: base.access_mode,
+        restrict_to_workspace: base.access_mode === "restricted",
+      }));
+      setWorkspaceError(null);
+      setView("chat");
+      setMobileSidebarOpen(false);
+    },
+    [activeWorkspaceScope, onNewChat, workspaces?.default_scope],
+  );
+
+  const onSelectChat = useCallback(
+    (key: string) => {
+      const selected = sessions.find((session) => session.key === key);
+      const selectedChatId = selected?.chatId;
+      if (selectedChatId) {
+        setCompletedChatIds((current) => {
+          if (!current.has(selectedChatId)) return current;
+          const next = new Set(current);
+          next.delete(selectedChatId);
+          return next;
+        });
+      }
+      if (selected?.workspaceScope) {
+        setDraftWorkspaceScope(normalizeWorkspaceScope(selected.workspaceScope));
+      } else {
+        setDraftWorkspaceScope(null);
+      }
+      setWorkspaceError(null);
+      setActiveKey(key);
+      setView("chat");
+      setMobileSidebarOpen(false);
+    },
+    [sessions],
+  );
+
+  const onTogglePin = useCallback(
+    (key: string) => {
+      void updateSidebarState((current) => {
+        const pinned = new Set(current.pinned_keys);
+        if (pinned.has(key)) {
+          pinned.delete(key);
+        } else {
+          pinned.add(key);
+        }
+        return {
+          ...current,
+          pinned_keys: Array.from(pinned),
+        };
+      });
+    },
+    [updateSidebarState],
+  );
+
+  const onRequestRename = useCallback((key: string, label: string) => {
+    setPendingRename({ key, label });
+  }, []);
+
+  const onConfirmRename = useCallback(
+    (title: string) => {
+      if (!pendingRename) return;
+      const key = pendingRename.key;
+      setPendingRename(null);
+      void updateSidebarState((current) => {
+        const titleOverrides = { ...current.title_overrides };
+        const cleaned = title.trim();
+        if (cleaned) {
+          titleOverrides[key] = cleaned;
+        } else {
+          delete titleOverrides[key];
+        }
+        return {
+          ...current,
+          title_overrides: titleOverrides,
+        };
+      });
+    },
+    [pendingRename, updateSidebarState],
+  );
+
+  const onToggleGroup = useCallback(
+    (groupId: string) => {
+      void updateSidebarState((current) => {
+        const collapsedGroups = { ...current.collapsed_groups };
+        if (groupId === "workspace:chats" || groupId === "date:all") {
+          if (collapsedGroups[groupId] === false) {
+            delete collapsedGroups[groupId];
+          } else {
+            collapsedGroups[groupId] = false;
+          }
+          return {
+            ...current,
+            collapsed_groups: collapsedGroups,
+          };
+        }
+        if (collapsedGroups[groupId]) {
+          delete collapsedGroups[groupId];
+        } else {
+          collapsedGroups[groupId] = true;
+        }
+        return {
+          ...current,
+          collapsed_groups: collapsedGroups,
+        };
+      });
+    },
+    [updateSidebarState],
+  );
+
+  const onRequestRenameProject = useCallback((key: string, label: string) => {
+    setPendingProjectRename({ key, label });
+  }, []);
+
+  const onConfirmProjectRename = useCallback(
+    (title: string) => {
+      if (!pendingProjectRename) return;
+      const key = pendingProjectRename.key;
+      setPendingProjectRename(null);
+      void updateSidebarState((current) => {
+        const projectNameOverrides = { ...current.project_name_overrides };
+        const cleaned = title.trim();
+        if (cleaned) {
+          projectNameOverrides[key] = cleaned;
+        } else {
+          delete projectNameOverrides[key];
+        }
+        return {
+          ...current,
+          project_name_overrides: projectNameOverrides,
+        };
+      });
+    },
+    [pendingProjectRename, updateSidebarState],
+  );
+
+  const onToggleArchive = useCallback(
+    (key: string) => {
+      void updateSidebarState((current) => {
+        const archived = new Set(current.archived_keys);
+        const pinned = current.pinned_keys.filter((item) => item !== key);
+        if (archived.has(key)) {
+          archived.delete(key);
+        } else {
+          archived.add(key);
+        }
+        return {
+          ...current,
+          pinned_keys: pinned,
+          archived_keys: Array.from(archived),
+        };
+      });
+      if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
+        const archived = new Set([...sidebarState.archived_keys, key]);
+        const next = sessions.find((session) => !archived.has(session.key));
+        setActiveKey(next?.key ?? null);
+      }
+    },
+    [activeKey, sessions, sidebarState.archived_keys, updateSidebarState],
+  );
+
+  const onToggleArchived = useCallback(() => {
+    void updateSidebarState((current) => ({
+      ...current,
+      view: {
+        ...current.view,
+        show_archived: !current.view.show_archived,
+      },
+    }));
+  }, [updateSidebarState]);
+
+  const onOpenSessionSearch = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setSessionSearchOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const plainCommandK =
+        (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
+      if (!plainCommandK) return;
+      if (event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      onOpenSessionSearch();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onOpenSessionSearch]);
+
+  const onSelectSearchResult = useCallback(
+    (key: string) => {
+      setSessionSearchOpen(false);
+      onSelectChat(key);
+    },
+    [onSelectChat],
+  );
+
+  const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
+    setSessionSearchOpen(false);
+    setSettingsInitialSection(section);
+    setView("settings");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onOpenApps = useCallback(() => {
+    setSessionSearchOpen(false);
+    setSettingsInitialSection("apps");
+    setView("apps");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onBackToChat = useCallback(() => {
+    setView("chat");
+    setMobileSidebarOpen(false);
+    setActiveKey((current) => {
+      if (!current) return null;
+      if (sessions.some((session) => session.key === current)) return current;
+      return sessions[0]?.key ?? null;
+    });
+  }, [sessions]);
+
+  const onRestart = useCallback(() => {
+    const chatId = activeSession?.chatId ?? client.defaultChatId;
+    if (!chatId) return;
+    restartSawDisconnectRef.current = false;
+    setIsRestarting(true);
+    try {
+      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
+    } catch {
+      // ignore storage errors
+    }
+    client.sendMessage(chatId, "/restart");
+  }, [activeSession?.chatId, client]);
+
+  useEffect(() => {
+    return client.onRuntimeModelUpdate((modelName) => {
+      onModelNameChange(modelName);
+    });
+  }, [client, onModelNameChange]);
+
+  useEffect(() => {
+    return client.onRunStatus((chatId, startedAt) => {
+      if (startedAt != null) {
+        const nextRunning = new Set(runningChatIdsRef.current);
+        nextRunning.add(chatId);
+        runningChatIdsRef.current = nextRunning;
+        setRunningChatIds(nextRunning);
+        setCompletedChatIds((current) => {
+          if (!current.has(chatId)) return current;
+          const next = new Set(current);
+          next.delete(chatId);
+          return next;
+        });
+        return;
+      }
+
+      if (!runningChatIdsRef.current.has(chatId)) return;
+      const nextRunning = new Set(runningChatIdsRef.current);
+      nextRunning.delete(chatId);
+      runningChatIdsRef.current = nextRunning;
+      setRunningChatIds(nextRunning);
+      setCompletedChatIds((current) => {
+        const next = new Set(current);
+        next.add(chatId);
+        return next;
+      });
+    });
+  }, [client]);
+
+  useEffect(() => {
+    return client.onStatus((status) => {
+      const startedAt = (() => {
+        try {
+          return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
+        } catch {
+          return 0;
+        }
+      })();
+      if (!startedAt) return;
+      if (status !== "open") {
+        restartSawDisconnectRef.current = true;
+        return;
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (!restartSawDisconnectRef.current && elapsedMs < 1500) return;
+      try {
+        window.localStorage.removeItem(RESTART_STARTED_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      setIsRestarting(false);
+      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
+      window.setTimeout(() => setRestartToast(null), 3_500);
+    });
+  }, [client, t]);
+
+  const onTurnEnd = useDeferredTitleRefresh(activeSession, refresh);
+
+  const onConfirmDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    const key = pendingDelete.key;
+    const deletingActive = activeKey === key;
+    const currentIndex = sessions.findIndex((s) => s.key === key);
+    const fallbackKey = deletingActive
+      ? (sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null)
+      : activeKey;
+    setPendingDelete(null);
+    if (deletingActive) setActiveKey(fallbackKey);
+    try {
+      await deleteChat(key);
+    } catch (e) {
+      if (deletingActive) setActiveKey(key);
+      console.error("Failed to delete session", e);
+    }
+  }, [pendingDelete, deleteChat, activeKey, sessions]);
+
+  const headerTitle = activeSession
+    ? sidebarState.title_overrides[activeSession.key] ||
+      activeSession.title ||
+      deriveTitle(activeSession.preview, t("chat.newChat"))
+    : t("app.brand");
+
+  useEffect(() => {
+    if (view === "settings") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.sidebar.title"),
+      });
+      return;
+    }
+    if (view === "apps") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.apps", { defaultValue: "Apps" }),
+      });
+      return;
+    }
+    document.title = activeSession
+      ? t("app.documentTitle.chat", { title: headerTitle })
+      : t("app.documentTitle.base");
+  }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
+
+  const sidebarProps = {
+    sessions,
+    activeKey,
+    loading,
+    onNewChat,
+    onSelect: onSelectChat,
+    onRequestDelete: (key: string, label: string) =>
+      setPendingDelete({ key, label }),
+    onTogglePin,
+    onRequestRename,
+    onToggleArchive,
+    onToggleGroup,
+    onRequestRenameProject,
+    onNewChatInProject,
+    onOpenSettings,
+    onOpenApps,
+    onOpenSearch: onOpenSessionSearch,
+    activeUtility: view === "apps" ? "apps" as const : null,
+    onToggleArchived,
+    pinnedKeys: sidebarState.pinned_keys,
+    archivedKeys: sidebarState.archived_keys,
+    titleOverrides: sidebarState.title_overrides,
+    projectNameOverrides: sidebarState.project_name_overrides,
+    collapsedGroups: sidebarState.collapsed_groups,
+    runningChatIds: runningChatIdList,
+    completedChatIds: completedChatIdList,
+    viewState: sidebarState.view,
+    showArchived: sidebarState.view.show_archived,
+    archivedCount: sidebarState.archived_keys.length,
+    defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
+  };
+  const effectiveRuntimeSurface =
+    settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
+  const isNativeHostSetupSurface = effectiveRuntimeSurface === "native";
+  const showHostChrome = isNativeHostSetupSurface;
+  const showMainSidebar = view !== "settings";
+
+  return (
+    <ThemeProvider theme={theme}>
+      <div
+        className={cn(
+          "relative h-full w-full overflow-hidden",
+          showHostChrome && "bg-sidebar",
+        )}
+      >
+        {showHostChrome ? (
+          <HostChrome
+            onToggleSidebar={showMainSidebar ? toggleSidebar : undefined}
+            theme={theme}
+            onToggleTheme={toggle}
+            showThemeButton={view !== "chat"}
+          />
+        ) : null}
+        <div
+          className={cn(
+            "relative flex h-full w-full overflow-hidden",
+          )}
+        >
+          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
+          {showMainSidebar ? (
+            <aside
+              className={cn(
+                "relative z-20 hidden shrink-0 overflow-hidden lg:block",
+                "transition-[width] duration-300 ease-out",
+              )}
+              style={{
+                width: hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH,
+              }}
+            >
+              <div
+                className={cn(
+                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden bg-sidebar",
+                  !showHostChrome && "shadow-inner-right",
+                )}
+              >
+                <Sidebar
+                  {...sidebarProps}
+                  collapsed={!hostSidebarOpen}
+                  hostChromeInset={showHostChrome}
+                  onCollapse={closeHostSidebar}
+                  onExpand={openHostSidebar}
+                />
+              </div>
+            </aside>
+          ) : null}
+
+          {showMainSidebar ? (
+            <Sheet
+              open={mobileSidebarOpen}
+              onOpenChange={(open) => setMobileSidebarOpen(open)}
+            >
+              <SheetContent
+                side="left"
+                showCloseButton={false}
+                aria-describedby={undefined}
+                className="p-0 lg:hidden"
+                style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
+              >
+                <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
+                <Sidebar
+                  {...sidebarProps}
+                  onCollapse={closeMobileSidebar}
+                  containActionMenus
+                />
+              </SheetContent>
+            </Sheet>
+          ) : null}
+
+          <SessionSearchDialog
+            open={sessionSearchOpen}
+            onOpenChange={setSessionSearchOpen}
+            sessions={sessions}
+            activeKey={activeKey}
+            loading={loading}
+            titleOverrides={sidebarState.title_overrides}
+            onSelect={onSelectSearchResult}
+          />
+          <main
+            className={cn(
+              "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
+              showHostChrome &&
+                "rounded-l-[28px] shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.45)] dark:shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.85)]",
+            )}
+          >
+            <div
+              className={cn(
+                "absolute inset-0 flex flex-col",
+                view !== "chat" && "invisible pointer-events-none",
+              )}
+            >
+              <ThreadShell
+                session={activeSession}
+                title={headerTitle}
+                onToggleSidebar={toggleSidebar}
+                onNewChat={onNewChat}
+                onCreateChat={onCreateChat}
+                onTurnEnd={onTurnEnd}
+                theme={theme}
+                onToggleTheme={toggle}
+                hideSidebarToggleForHostChrome
+                hideHeader={false}
+                workspaceScope={activeWorkspaceScope}
+                workspaceDefaultScope={workspaces?.default_scope ?? null}
+                workspaceControls={workspaces?.controls ?? null}
+                workspaceScopeDisabled={activeChatRunning}
+                workspaceError={workspaceError}
+                onWorkspaceScopeChange={applyWorkspaceScope}
+                settingsSnapshot={settingsSnapshot}
+              />
+            </div>
+            {view !== "chat" && (
+              <div className="absolute inset-0 flex flex-col">
+                <SettingsView
+                  theme={theme}
+                  initialSection={settingsInitialSection}
+                  showSidebar={view === "settings"}
+                  onToggleTheme={toggle}
+                  onBackToChat={onBackToChat}
+                  onModelNameChange={onModelNameChange}
+                  onSettingsChange={setSettingsSnapshot}
+                  onWorkspaceSettingsChange={refreshWorkspaces}
+                  onLogout={onLogout}
+                  onRestart={onRestart}
+                  isRestarting={isRestarting}
+                  hostChromeInset={showHostChrome}
+                />
+              </div>
+            )}
+          </main>
+        </div>
+
+        <DeleteConfirm
+          open={!!pendingDelete}
+          title={pendingDelete?.label ?? ""}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={onConfirmDelete}
+        />
+        <RenameChatDialog
+          open={!!pendingRename}
+          title={pendingRename?.label ?? ""}
+          onCancel={() => setPendingRename(null)}
+          onConfirm={onConfirmRename}
+        />
+        <RenameChatDialog
+          open={!!pendingProjectRename}
+          title={pendingProjectRename?.label ?? ""}
+          dialogTitle={t("chat.renameProjectTitle")}
+          description={t("chat.renameProjectDescription")}
+          placeholder={t("chat.renameProjectPlaceholder")}
+          onCancel={() => setPendingProjectRename(null)}
+          onConfirm={onConfirmProjectRename}
+        />
+        {restartToast ? (
+          <div
+            role="status"
+            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
+          >
+            {restartToast}
+          </div>
+        ) : null}
+      </div>
+    </ThemeProvider>
+  );
+}

@@ -5,6 +5,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -67,6 +68,14 @@ class LLMResponse:
         """Check if response contains tool calls."""
         return len(self.tool_calls) > 0
 
+    @property
+    def should_execute_tools(self) -> bool:
+        """Tools execute only when has_tool_calls AND finish_reason is a tool-capable stop.
+        Blocks gateway-injected calls under ``refusal`` / ``content_filter`` / ``error`` (#3220)."""
+        if not self.has_tool_calls:
+            return False
+        return self.finish_reason in ("tool_calls", "function_call", "stop")
+
 
 @dataclass(frozen=True)
 class GenerationSettings:
@@ -77,8 +86,13 @@ class GenerationSettings:
     reasoning_effort: str | None = None
 
 
+_SYNTHETIC_USER_CONTENT = "(conversation continued)"
+
+
 class LLMProvider(ABC):
     """Base class for LLM providers."""
+
+    supports_progress_deltas = False
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _PERSISTENT_MAX_DELAY = 60
@@ -97,6 +111,8 @@ class LLMProvider(ABC):
         "connection",
         "server error",
         "temporarily unavailable",
+        "速率限制",
+        "访问量过大",
     )
     _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
     _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
@@ -143,6 +159,7 @@ class LLMProvider(ABC):
         "temporarily unavailable",
         "overloaded",
         "concurrency limit",
+        "速率限制",
     )
 
     _SENTINEL = object()
@@ -298,6 +315,29 @@ class LLMProvider(ABC):
 
         return cls._is_transient_error(response.content)
 
+    @classmethod
+    def is_arrearage_response(cls, response: LLMResponse) -> bool:
+        """Detect API-key arrearage / quota / billing errors that won't clear on retry.
+
+        These surface as HTTP 402 or as billing semantic tokens (e.g.
+        ``insufficient_quota``, ``payment_required``); reuses the same token and
+        text markers the 429 retry policy treats as non-retryable.
+        """
+        if response.error_status_code is not None and int(response.error_status_code) == 402:
+            return True
+
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        if any(
+            token in cls._NON_RETRYABLE_429_ERROR_TOKENS
+            for token in (type_token, code_token)
+            if token is not None
+        ):
+            return True
+
+        content = (response.content or "").lower()
+        return any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS)
+
     @staticmethod
     def _normalize_error_token(value: Any) -> str | None:
         if value is None:
@@ -354,6 +394,75 @@ class LLMProvider(ABC):
         return True
 
     @staticmethod
+    def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge consecutive same-role messages and drop trailing assistant messages.
+
+        Some providers (OpenAI-compat, Azure, vLLM, Ollama, etc.) reject requests
+        where the last message is 'assistant' (prefill not supported) or two
+        consecutive non-system messages share the same role.
+        """
+        if not messages:
+            return messages
+
+        merged: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            if (
+                merged
+                and role != "system"
+                and role not in ("tool",)
+                and merged[-1].get("role") == role
+                and role in ("user", "assistant")
+            ):
+                prev = merged[-1]
+                if role == "assistant":
+                    prev_has_tools = bool(prev.get("tool_calls"))
+                    curr_has_tools = bool(msg.get("tool_calls"))
+                    if curr_has_tools:
+                        merged[-1] = dict(msg)
+                        continue
+                    if prev_has_tools:
+                        continue
+                prev_content = prev.get("content") or ""
+                curr_content = msg.get("content") or ""
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                else:
+                    merged[-1] = dict(msg)
+            else:
+                merged.append(dict(msg))
+
+        last_popped = None
+        while merged and merged[-1].get("role") == "assistant":
+            last_popped = merged.pop()
+
+        # If removing trailing assistant messages left only system messages,
+        # the request would be invalid for most providers (e.g. Zhipu/GLM
+        # error 1214).  Recover by converting the last popped assistant
+        # message to a user message so the LLM can still see the content.
+        if (
+            merged
+            and last_popped is not None
+            and not any(m.get("role") in ("user", "tool") for m in merged)
+        ):
+            recovered = dict(last_popped)
+            recovered["role"] = "user"
+            merged.append(recovered)
+
+        # Safety net: ensure the first non-system message is not a bare
+        # ``assistant`` message.  Providers like GLM reject system→assistant
+        # with error 1214.  This can happen when upstream truncation (e.g.
+        # _snip_history) drops the only user message.  Insert a synthetic
+        # user message to keep the sequence valid.
+        for i, msg in enumerate(merged):
+            if msg.get("role") != "system":
+                if msg.get("role") == "assistant" and not msg.get("tool_calls"):
+                    merged.insert(i, {"role": "user", "content": _SYNTHETIC_USER_CONTENT})
+                break
+
+        return merged
+
+    @staticmethod
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         """Replace image_url blocks with text placeholder. Returns None if no images found."""
         found = False
@@ -375,6 +484,26 @@ class LLMProvider(ABC):
                 result.append(msg)
         return result if found else None
 
+    @staticmethod
+    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace image_url blocks with text placeholder *in-place*.
+
+        Mutates the content lists of the original message dicts so that
+        callers holding references to those dicts also see the stripped
+        version.
+        """
+        found = False
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for i, b in enumerate(content):
+                    if isinstance(b, dict) and b.get("type") == "image_url":
+                        path = (b.get("_meta") or {}).get("path", "")
+                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        content[i] = {"type": "text", "text": placeholder}
+                        found = True
+        return found
+
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
         try:
@@ -394,14 +523,22 @@ class LLMProvider(ABC):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Stream a chat completion, calling *on_content_delta* for each text chunk.
+
+        *on_thinking_delta* is reserved for providers that expose incremental
+        thinking/reasoning on the wire; the default fallback invokes neither
+        callback for native deltas (only the optional single *on_content_delta*
+        after :meth:`chat`).
 
         Returns the same ``LLMResponse`` as :meth:`chat`.  The default
         implementation falls back to a non-streaming call and delivers the
         full content as a single delta.  Providers that support native
         streaming should override this method.
         """
+        _ = on_thinking_delta, on_tool_call_delta
         response = await self.chat(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
@@ -430,22 +567,35 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
-        if max_tokens is self._SENTINEL:
+        if max_tokens is self._SENTINEL or max_tokens is None:
             max_tokens = self.generation.max_tokens
-        if temperature is self._SENTINEL:
+        if temperature is self._SENTINEL or temperature is None:
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
+
+        has_streamed_content = False
+
+        async def _tracking_delta(text: str) -> None:
+            nonlocal has_streamed_content
+            if text:
+                has_streamed_content = True
+            if on_content_delta:
+                await on_content_delta(text)
 
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
-            on_content_delta=on_content_delta,
+            on_content_delta=_tracking_delta if on_content_delta is not None else None,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
         )
         return await self._run_with_retry(
             self._safe_chat_stream,
@@ -453,6 +603,7 @@ class LLMProvider(ABC):
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            should_retry_guard=lambda: not has_streamed_content,
         )
 
     async def chat_with_retry(
@@ -471,11 +622,14 @@ class LLMProvider(ABC):
 
         Parameters default to ``self.generation`` when not explicitly passed,
         so callers no longer need to thread temperature / max_tokens /
-        reasoning_effort through every layer.
+        reasoning_effort through every layer. Explicit ``None`` is also
+        normalized to the provider's generation defaults so that downstream
+        ``_build_kwargs`` never sees ``None`` for ``max_tokens`` / ``temperature``
+        (which would crash ``max(1, max_tokens)``).
         """
-        if max_tokens is self._SENTINEL:
+        if max_tokens is self._SENTINEL or max_tokens is None:
             max_tokens = self.generation.max_tokens
-        if temperature is self._SENTINEL:
+        if temperature is self._SENTINEL or temperature is None:
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
@@ -536,14 +690,12 @@ class LLMProvider(ABC):
                         return value
             return None
 
-        try:
+        with suppress(TypeError, ValueError):
             retry_ms = _header_value("retry-after-ms")
             if retry_ms is not None:
                 value = float(retry_ms) / 1000.0
                 if value > 0:
                     return value
-        except (TypeError, ValueError):
-            pass
 
         retry_after = _header_value("retry-after")
         if retry_after is None:
@@ -598,6 +750,7 @@ class LLMProvider(ABC):
         *,
         retry_mode: str,
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
+        should_retry_guard: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -611,6 +764,11 @@ class LLMProvider(ABC):
             if response.finish_reason != "error":
                 return response
             last_response = response
+            if should_retry_guard is not None and not should_retry_guard():
+                logger.warning(
+                    "LLM stream failed after content was emitted; skipping retry"
+                )
+                return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
                 identical_error_count += 1
@@ -626,7 +784,12 @@ class LLMProvider(ABC):
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped
-                    return await call(**retry_kw)
+                    result = await call(**retry_kw)
+                    # Permanently strip images from the original messages so
+                    # subsequent iterations do not repeat the error-retry cycle.
+                    if result.finish_reason != "error":
+                        self._strip_image_content_inplace(original_messages)
+                    return result
                 return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
@@ -635,9 +798,22 @@ class LLMProvider(ABC):
                     identical_error_count,
                     (response.content or "")[:120].lower(),
                 )
+                if on_retry_wait:
+                    await on_retry_wait(
+                        f"Persistent retry stopped after {identical_error_count} identical errors."
+                    )
                 return response
 
             if not persistent and attempt > len(delays):
+                logger.warning(
+                    "LLM request failed after {} retries, giving up: {}",
+                    attempt,
+                    (response.content or "")[:120].lower(),
+                )
+                if on_retry_wait:
+                    await on_retry_wait(
+                        f"Model request failed after {attempt} retries, giving up."
+                    )
                 break
 
             base_delay = delays[min(attempt - 1, len(delays) - 1)]

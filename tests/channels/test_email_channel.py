@@ -1,14 +1,13 @@
-from email.message import EmailMessage
-from datetime import date
-from pathlib import Path
 import imaplib
+from datetime import date
+from email.message import EmailMessage
+from pathlib import Path
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.email import EmailChannel
-from nanobot.channels.email import EmailConfig
+from nanobot.channels.email import EmailChannel, EmailConfig
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -24,6 +23,7 @@ def _make_config(**overrides) -> EmailConfig:
         smtp_username="bot@example.com",
         smtp_password="secret",
         mark_seen=True,
+        allow_from=["*"],
         # Disable auth verification by default so existing tests are unaffected
         verify_dkim=False,
         verify_spf=False,
@@ -90,6 +90,109 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     # Same UID should be deduped in-process.
     items_again = channel._fetch_new_messages()
     assert items_again == []
+
+
+def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
+    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(from_address="bot@example.com"), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert items == []
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+
+    # Same UID should still be deduped after being ignored.
+    items_again = channel._fetch_new_messages()
+    assert items_again == []
+
+
+@pytest.mark.parametrize(
+    "config_override,from_header",
+    [
+        # Only smtp_username matches — simulates an SMTP relay where
+        # outbound From gets rewritten to the SMTP login identity.
+        (
+            {"from_address": "", "smtp_username": "bot@example.com", "imap_username": "other@imap.com"},
+            "bot@example.com",
+        ),
+        # Only imap_username matches — simulates mailbox-based identity
+        # with no explicit from_address set.
+        (
+            {"from_address": "", "smtp_username": "other@smtp.com", "imap_username": "bot@example.com"},
+            "bot@example.com",
+        ),
+        # Case-insensitive: inbound From arrives upper-cased.
+        (
+            {"from_address": "bot@example.com", "smtp_username": "other@smtp.com", "imap_username": "other@imap.com"},
+            "BOT@EXAMPLE.COM",
+        ),
+    ],
+    ids=["smtp_username_only", "imap_username_only", "case_insensitive"],
+)
+def test_fetch_new_messages_skips_self_sent_across_identity_sources(
+    monkeypatch, config_override, from_header
+) -> None:
+    """Self-address detection must fire when any of from_address / smtp_username /
+    imap_username matches, and must be case-insensitive."""
+    raw = _make_raw_email(from_addr=from_header, subject="Loop test")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(**config_override), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert items == []
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
 
 
 def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:
@@ -604,8 +707,8 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 def test_check_authentication_results_method() -> None:
     """Unit test for the _check_authentication_results static method."""
-    from email.parser import BytesParser
     from email import policy
+    from email.parser import BytesParser
 
     # No Authentication-Results header
     msg_no_auth = EmailMessage()
@@ -683,6 +786,32 @@ def _make_raw_email_with_attachment(
         filename=attachment_name,
     )
     return msg.as_bytes()
+
+
+def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monkeypatch) -> None:
+    raw = _make_raw_email_with_attachment(from_addr="blocked@example.com")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    called = {"attachments": False}
+
+    def _extract_attachments(*_args, **_kwargs):
+        called["attachments"] = True
+        return []
+
+    monkeypatch.setattr(EmailChannel, "_extract_attachments", _extract_attachments)
+
+    cfg = _make_config(
+        allow_from=["allowed@example.com"],
+        allowed_attachment_types=["application/pdf"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+
+    assert channel._fetch_new_messages() == []
+    assert called["attachments"] is False
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
 
 
 def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:

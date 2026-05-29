@@ -1,12 +1,11 @@
 """Tests for the restructured MemoryStore — pure file I/O layer."""
 
-from datetime import datetime
 import json
-from pathlib import Path
+from datetime import datetime
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import _HISTORY_ENTRY_HARD_CAP, MemoryStore
 
 
 @pytest.fixture
@@ -65,6 +64,34 @@ class TestHistoryWithCursor:
         cursor = store.append_history("event 3")
         assert cursor == 3
 
+    def test_append_history_strips_thinking_content(self, store):
+        """`strip_think` must run before persistence — well-formed thinking
+        blocks shouldn't land in history."""
+        cursor = store.append_history("<think>reasoning</think>final answer")
+        content = store.read_file(store.history_file)
+        data = json.loads(content)
+        assert data["cursor"] == cursor
+        assert data["content"] == "final answer"
+
+    def test_append_history_drops_pure_leak_content(self, store):
+        """Regression: entries that strip down to empty (pure template-token
+        leak) must NOT fall back to the raw leak. Persisting the raw text
+        would re-pollute context via consolidation / replay, undoing the
+        protection `strip_think` provides."""
+        cursor = store.append_history("<think>nothing user-facing</think>")
+        content = store.read_file(store.history_file)
+        data = json.loads(content)
+        assert data["cursor"] == cursor
+        assert data["content"] == ""
+
+    def test_append_history_drops_malformed_leak_prefix(self, store):
+        """Channel-marker / malformed opening leaks should not survive."""
+        cursor = store.append_history("<channel|>")
+        content = store.read_file(store.history_file)
+        data = json.loads(content)
+        assert data["cursor"] == cursor
+        assert data["content"] == ""
+
     def test_read_unprocessed_history(self, store):
         store.append_history("event 1")
         store.append_history("event 2")
@@ -79,6 +106,29 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
 
+    def test_read_unprocessed_skips_entries_without_cursor(self, store):
+        """Regression: entries missing the cursor key should be silently skipped."""
+        store.history_file.write_text(
+            '{"timestamp": "2026-04-01 10:00", "content": "no cursor"}\n'
+            '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "valid"}\n'
+            '{"cursor": 3, "timestamp": "2026-04-01 10:02", "content": "also valid"}\n',
+            encoding="utf-8",
+        )
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [e["cursor"] for e in entries] == [2, 3]
+
+    def test_next_cursor_falls_back_when_last_entry_has_no_cursor(self, store):
+        """Regression: _next_cursor should not KeyError on entries without cursor."""
+        store.history_file.write_text(
+            '{"timestamp": "2026-04-01 10:01", "content": "no cursor"}\n',
+            encoding="utf-8",
+        )
+        # Delete .cursor file so _next_cursor falls back to reading JSONL
+        store._cursor_file.unlink(missing_ok=True)
+        # Last entry has no cursor — should safely return 1, not KeyError
+        cursor = store.append_history("new event")
+        assert cursor == 1
+
     def test_compact_history_drops_oldest(self, tmp_path):
         store = MemoryStore(tmp_path, max_history_entries=2)
         store.append_history("event 1")
@@ -90,6 +140,92 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
+
+    def test_write_entries_uses_atomic_write(self, tmp_path):
+        """_write_entries uses temp file + os.replace for atomicity."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        # Monitor temp file existence
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+        assert not tmp_path_obj.exists()  # Should not exist initially
+
+        # Call _write_entries
+        store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+        # Original file should exist
+        assert store.history_file.exists()
+
+    def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
+        """Exception during _write_entries cleans up the temp file."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+
+        # Mock os.replace to raise an exception
+        def failing_replace(*args, **kwargs):
+            raise RuntimeError("Simulated failure")
+
+        monkeypatch.setattr('os.replace', failing_replace)
+
+        with pytest.raises(RuntimeError):
+            store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+
+        # Original file should still exist (because replace failed)
+        assert store.history_file.exists()
+
+
+class TestAppendHistoryHardCap:
+    """append_history has a defensive cap that catches new callers who forgot
+    to set their own tighter cap. The default is intentionally larger than
+    any current caller's per-call cap, so normal operation never trips it."""
+
+    def test_oversized_entry_is_truncated(self, store):
+        """An entry above _HISTORY_ENTRY_HARD_CAP is truncated before being persisted."""
+        huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 10_000)
+        store.append_history(huge)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
+
+    def test_oversize_warning_is_emitted_once(self, store, caplog):
+        """Repeated oversized writes should warn only on the first occurrence."""
+        from loguru import logger as loguru_logger
+
+        records: list[str] = []
+        handler_id = loguru_logger.add(lambda m: records.append(m), level="WARNING")
+        try:
+            huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
+            store.append_history(huge)
+            store.append_history(huge)
+            store.append_history(huge)
+        finally:
+            loguru_logger.remove(handler_id)
+
+        oversize_warnings = [r for r in records if "exceeds" in r and "chars" in r]
+        assert len(oversize_warnings) == 1
+
+    def test_custom_max_chars_overrides_default(self, store):
+        """Callers that pass max_chars should get their tighter cap applied."""
+        store.append_history("a" * 500, max_chars=100)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert len(entry["content"]) <= 150  # 100 + "\n... (truncated)"
+
+    def test_normal_sized_entries_unaffected(self, store):
+        """The hard cap must not alter entries that fit within it."""
+        msg = "normal short entry"
+        store.append_history(msg)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert entry["content"] == msg
 
 
 class TestDreamCursor:
@@ -105,13 +241,34 @@ class TestDreamCursor:
         store2 = MemoryStore(store.workspace)
         assert store2.get_last_dream_cursor() == 3
 
+    def test_git_restore_rolls_back_dream_cursor(self, tmp_path):
+        store = MemoryStore(tmp_path)
+        store.write_memory("before")
+        store.set_last_dream_cursor(1)
+        assert store.git.init() is True
+
+        store.write_memory("after")
+        store.set_last_dream_cursor(2)
+        dream_sha = store.git.auto_commit("dream: update")
+        assert dream_sha is not None
+
+        store.write_memory("newer")
+        store.set_last_dream_cursor(3)
+
+        restore_sha = store.git.revert(dream_sha)
+
+        assert restore_sha is not None
+        assert store.read_memory() == "before"
+        assert store.get_last_dream_cursor() == 1
+
 
 class TestLegacyHistoryMigration:
     def test_read_unprocessed_history_handles_entries_without_cursor(self, store):
         """JSONL entries with cursor=1 are correctly parsed and returned."""
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-03-30 14:30", "content": "Old event"}\n',
-            encoding="utf-8")
+            encoding="utf-8",
+        )
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert entries[0]["cursor"] == 1
@@ -195,8 +352,7 @@ class TestLegacyHistoryMigration:
         memory_dir.mkdir()
         legacy_file = memory_dir / "HISTORY.md"
         legacy_content = (
-            "[2026-03-25–2026-04-02] Multi-day summary.\n"
-            "[2026-03-26/27] Cross-day summary.\n"
+            "[2026-03-25–2026-04-02] Multi-day summary.\n[2026-03-26/27] Cross-day summary.\n"
         )
         legacy_file.write_text(legacy_content, encoding="utf-8")
 
@@ -254,9 +410,7 @@ class TestLegacyHistoryMigration:
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
         legacy_file = memory_dir / "HISTORY.md"
-        legacy_file.write_bytes(
-            b"[2026-04-01 10:00] Broken \xff data still needs migration.\n\n"
-        )
+        legacy_file.write_bytes(b"[2026-04-01 10:00] Broken \xff data still needs migration.\n\n")
 
         store = MemoryStore(tmp_path)
 

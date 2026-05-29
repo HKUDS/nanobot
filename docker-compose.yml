@@ -113,14 +113,12 @@ services:
 
   nanobot-gateway:
     container_name: nanobot-gateway
-    build:
-      context: .
-      dockerfile: Dockerfile
-    volumes:
-      - nanobot_data:/home/nanobot/.nanobot
-    command:
-      - gateway
-    restart: always
+    <<: *common-config
+    command: ["gateway"]
+    restart: unless-stopped
+    ports:
+      - 18790:18790
+      - 8765:8765
     depends_on:
       init-config:
         condition: service_completed_successfully

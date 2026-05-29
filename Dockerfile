@@ -14,8 +14,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
+# Install Python dependencies first (cached layer). Hatch reads the custom build
+# hook from hatch_build.py even for this metadata-only install.
+COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
     uv pip install --system --no-cache ".[discord,telegram]" && \
     rm -rf nanobot bridge
@@ -23,6 +24,7 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
+COPY webui/ webui/
 RUN uv pip install --system --no-cache ".[discord,telegram]"
 
 # Build the WhatsApp bridge
@@ -38,13 +40,13 @@ RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     chown -R nanobot:nanobot /home/nanobot /app
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
 USER nanobot
 ENV HOME=/home/nanobot
 
-# Gateway default port
-EXPOSE 18790
+# Gateway health endpoint and optional WebUI/WebSocket channel ports
+EXPOSE 18790 8765
 
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["status"]

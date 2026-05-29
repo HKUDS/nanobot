@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import hashlib
+from collections.abc import Callable
+from contextlib import suppress
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -13,9 +17,28 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
+
+
+def _default_webui_dist() -> Path | None:
+    """Return the absolute path to the bundled webui dist directory if it exists."""
+    try:
+        import nanobot.web as web_pkg  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    candidate = Path(web_pkg.__file__).resolve().parent / "dist"
+    return candidate if candidate.is_dir() else None
+
+
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
 
+_BOOL_CAMEL_ALIASES: dict[str, str] = {
+    "send_progress": "sendProgress",
+    "send_tool_hints": "sendToolHints",
+    "show_reasoning": "showReasoning",
+}
 
 class ChannelManager:
     """
@@ -27,36 +50,92 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        *,
+        session_manager: "SessionManager | None" = None,
+        webui_runtime_model_name: Callable[[], str | None] | None = None,
+        webui_static_dist: bool = True,
+        webui_runtime_surface: str = "browser",
+        webui_runtime_capabilities: dict[str, Any] | None = None,
+    ):
         self.config = config
         self.bus = bus
+        self._session_manager = session_manager
+        self._webui_runtime_model_name = webui_runtime_model_name
+        self._webui_static_dist = webui_static_dist
+        self._webui_runtime_surface = webui_runtime_surface
+        self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
 
         self._init_channels()
 
     def _init_channels(self) -> None:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
-        from nanobot.channels.registry import discover_all
+        from nanobot.channels.registry import discover_channel_names, discover_enabled
 
         transcription_provider = self.config.channels.transcription_provider
         transcription_key = self._resolve_transcription_key(transcription_provider)
+        transcription_base = self._resolve_transcription_base(transcription_provider)
+        transcription_language = self.config.channels.transcription_language
 
-        for name, cls in discover_all().items():
+        # Collect enabled module names first, then only import those.
+        # Channel configs live in ChannelsConfig's extra fields (via
+        # extra="allow"), so we enumerate candidates from pkgutil scan
+        # (cheap, no imports) and any plugin keys in __pydantic_extra__.
+        names = discover_channel_names()
+        candidate_names = set(names)
+        extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
+        candidate_names.update(extra.keys())
+
+        enabled_names: set[str] = set()
+        for name in candidate_names:
             section = getattr(self.config.channels, name, None)
             if section is None:
                 continue
-            enabled = (
+            if (
                 section.get("enabled", False)
                 if isinstance(section, dict)
                 else getattr(section, "enabled", False)
-            )
-            if not enabled:
+            ):
+                enabled_names.add(name)
+
+        for name, cls in discover_enabled(enabled_names, _names=names).items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
                 continue
             try:
-                channel = cls(section, self.bus)
+                kwargs: dict[str, Any] = {}
+                if cls.name == "websocket":
+                    if self._session_manager is not None:
+                        kwargs["session_manager"] = self._session_manager
+                        static_path = _default_webui_dist() if self._webui_static_dist else None
+                        if static_path is not None:
+                            kwargs["static_dist_path"] = static_path
+                    kwargs["workspace_path"] = self.config.workspace_path
+                    kwargs["restrict_to_workspace"] = self.config.tools.restrict_to_workspace
+                    if self._webui_runtime_model_name is not None:
+                        kwargs["runtime_model_name"] = self._webui_runtime_model_name
+                    kwargs["runtime_surface"] = self._webui_runtime_surface
+                    kwargs["runtime_capabilities_overrides"] = self._webui_runtime_capabilities
+                channel = cls(section, self.bus, **kwargs)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
+                channel.transcription_api_base = transcription_base
+                channel.transcription_language = transcription_language
+                channel.send_progress = self._resolve_bool_override(
+                    section, "send_progress", self.config.channels.send_progress,
+                )
+                channel.send_tool_hints = self._resolve_bool_override(
+                    section, "send_tool_hints", self.config.channels.send_tool_hints,
+                )
+                channel.show_reasoning = self._resolve_bool_override(
+                    section, "show_reasoning", self.config.channels.show_reasoning,
+                )
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -73,20 +152,64 @@ class ChannelManager:
         except AttributeError:
             return ""
 
+    def _resolve_transcription_base(self, provider: str) -> str:
+        """Pick the API base URL for the configured transcription provider."""
+        try:
+            if provider == "openai":
+                return self.config.providers.openai.api_base or ""
+            return self.config.providers.groq.api_base or ""
+        except AttributeError:
+            return ""
+
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
-                raise SystemExit(
-                    f'Error: "{name}" has empty allowFrom (denies all). '
-                    f'Set ["*"] to allow everyone, or add specific user IDs.'
+            cfg = ch.config
+            if isinstance(cfg, dict):
+                if "allow_from" in cfg:
+                    allow = cfg.get("allow_from")
+                else:
+                    allow = cfg.get("allowFrom")
+            else:
+                allow = getattr(cfg, "allow_from", None)
+            if allow is None:
+                # allowFrom omitted → pairing-only mode.  Unapproved senders
+                # receive a pairing code instead of being silently ignored.
+                logger.info(
+                    '"{}" has no allowFrom; unapproved users will receive a pairing code',
+                    name,
                 )
+
+    def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:
+        """Return whether progress (or tool-hints) may be sent to *channel_name*."""
+        ch = self.channels.get(channel_name)
+        if ch is None:
+            logger.warning("Progress check for unknown channel: {}", channel_name)
+            return False
+        return ch.send_tool_hints if tool_hint else ch.send_progress
+
+    def _resolve_bool_override(self, section: Any, key: str, default: bool) -> bool:
+        """Return *key* from *section* if it is a bool, otherwise *default*.
+
+        For dict configs also checks the camelCase alias (e.g. ``sendProgress``
+        for ``send_progress``) so raw JSON/TOML configs work alongside
+        Pydantic models.
+        """
+        if isinstance(section, dict):
+            value = section.get(key)
+            if value is None:
+                camel = _BOOL_CAMEL_ALIASES.get(key)
+                if camel:
+                    value = section.get(camel)
+            return value if isinstance(value, bool) else default
+        value = getattr(section, key, None)
+        return value if isinstance(value, bool) else default
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
             await channel.start()
-        except Exception as e:
-            logger.error("Failed to start channel {}: {}", name, e)
+        except Exception:
+            logger.exception("Failed to start channel {}", name)
 
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
@@ -122,6 +245,7 @@ class ChannelManager:
                 channel=notice.channel,
                 chat_id=notice.chat_id,
                 content=format_restart_completed_message(notice.started_at_raw),
+                metadata=dict(notice.metadata or {}),
             ),
         ))
 
@@ -132,18 +256,43 @@ class ChannelManager:
         # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._dispatch_task
-            except asyncio.CancelledError:
-                pass
 
         # Stop all channels
         for name, channel in self.channels.items():
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
-            except Exception as e:
-                logger.error("Error stopping {}: {}", name, e)
+            except Exception:
+                logger.exception("Error stopping {}", name)
+
+    @staticmethod
+    def _fingerprint_content(content: str) -> str:
+        normalized = " ".join(content.split())
+        return hashlib.sha1(normalized.encode("utf-8")).hexdigest() if normalized else ""
+
+    def _should_suppress_outbound(self, msg: OutboundMessage) -> bool:
+        metadata = msg.metadata or {}
+        if metadata.get("_progress"):
+            return False
+        fingerprint = self._fingerprint_content(msg.content)
+        if not fingerprint:
+            return False
+
+        origin_message_id = metadata.get("origin_message_id")
+        if isinstance(origin_message_id, str) and origin_message_id:
+            key = (msg.channel, msg.chat_id, origin_message_id)
+            if self._origin_reply_fingerprints.get(key) == fingerprint:
+                return True
+            self._origin_reply_fingerprints[key] = fingerprint
+
+        message_id = metadata.get("message_id")
+        if isinstance(message_id, str) and message_id:
+            key = (msg.channel, msg.chat_id, message_id)
+            self._origin_reply_fingerprints[key] = fingerprint
+
+        return False
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
@@ -164,11 +313,42 @@ class ChannelManager:
                         timeout=1.0
                     )
 
+                if (
+                    msg.metadata.get("_reasoning_delta")
+                    or msg.metadata.get("_reasoning_end")
+                    or msg.metadata.get("_reasoning")
+                ):
+                    # Reasoning rides its own plugin channel: only delivered
+                    # when the destination channel opts in via ``show_reasoning``
+                    # and overrides the streaming primitives. Channels without
+                    # a low-emphasis UI affordance keep the base no-op and the
+                    # content silently drops here. ``_reasoning`` (one-shot)
+                    # is accepted for backward compatibility with hooks that
+                    # haven't migrated to delta/end yet.
+                    channel = self.channels.get(msg.channel)
+                    if channel is not None and channel.show_reasoning:
+                        await self._send_with_retry(channel, msg)
+                    continue
+
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+                    if msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=True,
+                    ):
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                    if not msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=False,
+                    ):
                         continue
+
+                if msg.metadata.get("_retry_wait"):
+                    continue
+
+                if (
+                    msg.metadata.get("_runtime_model_updated")
+                    and msg.channel == "websocket"
+                    and "websocket" not in self.channels
+                ):
+                    continue
 
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency
@@ -178,6 +358,16 @@ class ChannelManager:
 
                 channel = self.channels.get(msg.channel)
                 if channel:
+                    # Duplicate suppression is scoped to a known source message
+                    # so repeated content from separate turns is still delivered.
+                    if (
+                        not msg.metadata.get("_stream_delta")
+                        and not msg.metadata.get("_stream_end")
+                        and not msg.metadata.get("_streamed")
+                    ):
+                        if self._should_suppress_outbound(msg):
+                            logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
+                            continue
                     await self._send_with_retry(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
@@ -190,7 +380,16 @@ class ChannelManager:
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
-        if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
+        if msg.metadata.get("_reasoning_end"):
+            await channel.send_reasoning_end(msg.chat_id, msg.metadata)
+        elif msg.metadata.get("_reasoning_delta"):
+            await channel.send_reasoning_delta(msg.chat_id, msg.content, msg.metadata)
+        elif msg.metadata.get("_reasoning"):
+            # Back-compat: one-shot reasoning. BaseChannel translates this
+            # to a single delta + end pair so plugins only implement the
+            # streaming primitives.
+            await channel.send_reasoning(msg)
+        elif msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
         elif not msg.metadata.get("_streamed"):
             await channel.send(msg)
@@ -260,9 +459,9 @@ class ChannelManager:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
                 if attempt == max_attempts - 1:
-                    logger.error(
-                        "Failed to send to {} after {} attempts: {} - {}",
-                        msg.channel, max_attempts, type(e).__name__, e
+                    logger.exception(
+                        "Failed to send to {} after {} attempts",
+                        msg.channel, max_attempts
                     )
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt, len(_SEND_RETRY_DELAYS) - 1)]

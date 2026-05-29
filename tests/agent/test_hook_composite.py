@@ -14,6 +14,17 @@ def _ctx() -> AgentHookContext:
 
 
 # ---------------------------------------------------------------------------
+# Base AgentHook emit_reasoning: no-op
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_base_hook_emit_reasoning_is_noop():
+    hook = AgentHook()
+    await hook.emit_reasoning("should not raise")
+
+
+# ---------------------------------------------------------------------------
 # Fan-out: every hook is called in order
 # ---------------------------------------------------------------------------
 
@@ -45,6 +56,9 @@ async def test_composite_fans_out_all_async_methods():
         async def before_iteration(self, context: AgentHookContext) -> None:
             events.append("before_iteration")
 
+        async def emit_reasoning(self, reasoning_content: str | None) -> None:
+            events.append(f"emit_reasoning:{reasoning_content}")
+
         async def on_stream(self, context: AgentHookContext, delta: str) -> None:
             events.append(f"on_stream:{delta}")
 
@@ -61,6 +75,7 @@ async def test_composite_fans_out_all_async_methods():
     ctx = _ctx()
 
     await hook.before_iteration(ctx)
+    await hook.emit_reasoning("thinking...")
     await hook.on_stream(ctx, "hi")
     await hook.on_stream_end(ctx, resuming=True)
     await hook.before_execute_tools(ctx)
@@ -68,6 +83,7 @@ async def test_composite_fans_out_all_async_methods():
 
     assert events == [
         "before_iteration", "before_iteration",
+        "emit_reasoning:thinking...", "emit_reasoning:thinking...",
         "on_stream:hi", "on_stream:hi",
         "on_stream_end:True", "on_stream_end:True",
         "before_execute_tools", "before_execute_tools",
@@ -120,6 +136,8 @@ async def test_composite_error_isolation_all_async():
     calls: list[str] = []
 
     class Bad(AgentHook):
+        async def emit_reasoning(self, reasoning_content):
+            raise RuntimeError("err")
         async def on_stream_end(self, context, *, resuming):
             raise RuntimeError("err")
         async def before_execute_tools(self, context):
@@ -128,6 +146,8 @@ async def test_composite_error_isolation_all_async():
             raise RuntimeError("err")
 
     class Good(AgentHook):
+        async def emit_reasoning(self, reasoning_content):
+            calls.append("emit_reasoning")
         async def on_stream_end(self, context, *, resuming):
             calls.append("on_stream_end")
         async def before_execute_tools(self, context):
@@ -137,10 +157,11 @@ async def test_composite_error_isolation_all_async():
 
     hook = CompositeHook([Bad(), Good()])
     ctx = _ctx()
+    await hook.emit_reasoning("test")
     await hook.on_stream_end(ctx, resuming=False)
     await hook.before_execute_tools(ctx)
     await hook.after_iteration(ctx)
-    assert calls == ["on_stream_end", "before_execute_tools", "after_iteration"]
+    assert calls == ["emit_reasoning", "on_stream_end", "before_execute_tools", "after_iteration"]
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +253,35 @@ async def test_composite_empty_hooks_no_ops():
     assert hook.finalize_content(ctx, "test") == "test"
 
 
+@pytest.mark.asyncio
+async def test_composite_supports_legacy_hook_init_without_super():
+    calls: list[str] = []
+
+    class LegacyHook(AgentHook):
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            calls.append(self.label)
+
+    hook = CompositeHook([LegacyHook("legacy")])
+    await hook.before_iteration(_ctx())
+    assert calls == ["legacy"]
+
+
+@pytest.mark.asyncio
+async def test_composite_can_wrap_another_composite():
+    calls: list[str] = []
+
+    class Inner(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            calls.append("inner")
+
+    hook = CompositeHook([CompositeHook([Inner()])])
+    await hook.before_iteration(_ctx())
+    assert calls == ["inner"]
+
+
 # ---------------------------------------------------------------------------
 # Integration: AgentLoop with extra hooks
 # ---------------------------------------------------------------------------
@@ -278,7 +328,7 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    content, tools_used, messages = await loop._run_agent_loop(
+    content, tools_used, messages, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}]
     )
 
@@ -302,7 +352,7 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    content, _, _ = await loop._run_agent_loop(
+    content, _, _, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}]
     )
 
@@ -344,7 +394,7 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    content, tools_used, _ = await loop._run_agent_loop([])
+    content, tools_used, _, _, _ = await loop._run_agent_loop([])
     assert content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."

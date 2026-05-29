@@ -17,7 +17,7 @@ import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { join, basename } from 'path';
+import { join, basename, resolve, sep } from 'path';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
@@ -165,6 +165,10 @@ export class WhatsAppClient {
           fallbackContent = '[Video]';
           const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
+        } else if (unwrapped.audioMessage) {
+          fallbackContent = '[Voice Message]';
+          const path = await this.downloadMedia(msg, unwrapped.audioMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
         }
 
         const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
@@ -196,17 +200,18 @@ export class WhatsAppClient {
 
       let outFilename: string;
       if (fileName) {
-        // Documents have a filename — use it with a unique prefix to avoid collisions
-        const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
-        outFilename = prefix + fileName;
+        const safeName = basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+        outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_${safeName}`;
       } else {
         const mime = mimetype || 'application/octet-stream';
-        // Derive extension from mimetype subtype (e.g. "image/png" → ".png", "application/pdf" → ".pdf")
         const ext = '.' + (mime.split('/').pop()?.split(';')[0] || 'bin');
         outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
       }
 
-      const filepath = join(mediaDir, outFilename);
+      const filepath = resolve(mediaDir, outFilename);
+      if (!filepath.startsWith(resolve(mediaDir) + sep)) {
+        throw new Error(`Path traversal blocked: ${outFilename}`);
+      }
       await writeFile(filepath, buffer);
 
       return filepath;
