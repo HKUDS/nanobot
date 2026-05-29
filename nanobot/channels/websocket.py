@@ -649,14 +649,14 @@ class WebSocketChannel(BaseChannel):
         return True
 
     def _handle_token_issue_http(self, connection: Any, request: Any) -> Any:
-        secret = self.config.token_issue_secret.strip()
+        secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return connection.respond(401, "Unauthorized")
         else:
             self.logger.warning(
-                "token_issue_path is set but token_issue_secret is empty; "
-                "any client can obtain connection tokens — set token_issue_secret for production."
+                "token_issue_path is set but no token_issue_secret or static token is configured; "
+                "any client can obtain connection tokens — set a secret for production."
             )
         self._purge_expired_issued_tokens()
         if len(self._issued_tokens) >= self._MAX_ISSUED_TOKENS:
