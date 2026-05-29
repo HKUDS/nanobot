@@ -126,6 +126,48 @@ class TestDreamRun:
         assert "Successfully wrote" in result
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
 
+    async def test_skill_write_tool_rejects_user_skill_without_dream_marker(self, dream, store):
+        skill = store.workspace / "skills" / "user-skill" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: user-skill\n---\n# User Skill\n", encoding="utf-8")
+        write_tool = dream._tools.get("write_file")
+        edit_tool = dream._tools.get("edit_file")
+        assert write_tool is not None
+        assert edit_tool is not None
+
+        write_result = await write_tool.execute(
+            path="skills/user-skill/SKILL.md",
+            content="overwritten",
+        )
+        edit_result = await edit_tool.execute(
+            path="skills/user-skill/SKILL.md",
+            old_text="# User Skill",
+            new_text="# Dream Skill",
+        )
+
+        assert "dream_managed: true" in write_result
+        assert "dream_managed: true" in edit_result
+        assert skill.read_text(encoding="utf-8").startswith("---\nname: user-skill")
+
+    async def test_skill_write_tool_allows_dream_managed_skill(self, dream, store):
+        skill = store.workspace / "skills" / "dream-skill" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(
+            "---\nname: dream-skill\ndream_managed: true\n---\n# Old\n",
+            encoding="utf-8",
+        )
+        edit_tool = dream._tools.get("edit_file")
+        assert edit_tool is not None
+
+        result = await edit_tool.execute(
+            path="skills/dream-skill/SKILL.md",
+            old_text="# Old",
+            new_text="# New",
+        )
+
+        assert "Successfully edited" in result
+        assert "# New" in skill.read_text(encoding="utf-8")
+
     async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
         """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
         store.append_history("some event")
@@ -306,4 +348,3 @@ class TestDreamPromptCaps:
         user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         history_section = user_msg.split("## Conversation History\n")[1].split("\n\n## Current Date")[0]
         assert len(history_section) < dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS + 500
-

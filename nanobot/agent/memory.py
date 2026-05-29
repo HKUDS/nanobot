@@ -855,6 +855,29 @@ class Consolidator:
 # Keep code and prompt aligned — if you bump this, the LLM's instruction string
 # updates automatically.
 _STALE_THRESHOLD_DAYS = 14
+_DREAM_MANAGED_RE = re.compile(r"(?im)^\s*dream_managed\s*:\s*true\s*$")
+
+
+def _dream_skill_write_allowed(workspace: Path, path: str) -> tuple[bool, str]:
+    """Return whether Dream may write a workspace skill file."""
+    try:
+        resolved = (workspace / path).expanduser().resolve(strict=False)
+        skills_dir = (workspace / "skills").expanduser().resolve(strict=False)
+        resolved.relative_to(skills_dir)
+    except (OSError, RuntimeError, ValueError):
+        return True, ""
+
+    if resolved.name != "SKILL.md":
+        return True, ""
+    if not resolved.exists():
+        return True, ""
+    try:
+        content = resolved.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False, "Dream cannot verify ownership for this existing skill."
+    if _DREAM_MANAGED_RE.search(content):
+        return True, ""
+    return False, "Dream may only overwrite existing skills marked dream_managed: true."
 
 
 class Dream:
@@ -910,6 +933,22 @@ class Dream:
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
+        class DreamWriteFileTool(WriteFileTool):
+            async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
+                if path:
+                    allowed, reason = _dream_skill_write_allowed(workspace, path)
+                    if not allowed:
+                        return f"Error writing file: {reason}"
+                return await super().execute(path=path, content=content, **kwargs)
+
+        class DreamEditFileTool(EditFileTool):
+            async def execute(self, path: str | None = None, *args: Any, **kwargs: Any) -> str:
+                if path:
+                    allowed, reason = _dream_skill_write_allowed(workspace, path)
+                    if not allowed:
+                        return f"Error editing file: {reason}"
+                return await super().execute(path=path, *args, **kwargs)
+
         tools = ToolRegistry()
         workspace = self.store.workspace
         # Allow reading builtin skills for reference during skill creation
@@ -923,12 +962,12 @@ class Dream:
             extra_allowed_dirs=extra_read,
             file_states=file_states,
         ))
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
+        tools.register(DreamEditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
         # write_file resolves relative paths from workspace root, but can only
         # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
+        tools.register(DreamWriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
         return tools
 
     # -- skill listing --------------------------------------------------------
