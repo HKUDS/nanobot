@@ -73,7 +73,7 @@ class _FsTool(Tool):
             return self._explicit_file_states
         return current_file_states(self._fallback_file_states)
 
-    def _resolve(self, path: str) -> Path:
+    def _resolve(self, path: str, *, include_extra_allowed_dirs: bool = True) -> Path:
         access = current_tool_workspace(
             self._workspace,
             restrict_to_workspace=self._restrict_to_workspace,
@@ -83,8 +83,11 @@ class _FsTool(Tool):
             path,
             access.project_path,
             access.allowed_root,
-            self._extra_allowed_dirs,
+            self._extra_allowed_dirs if include_extra_allowed_dirs else None,
         )
+
+    def _resolve_write(self, path: str) -> Path:
+        return self._resolve(path, include_extra_allowed_dirs=False)
 
     def _display_workspace(self) -> Path | None:
         return current_tool_workspace(self._workspace).project_path
@@ -419,7 +422,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            fp = self._resolve(path)
+            fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             self._file_states.record_write(fp)
@@ -769,7 +772,7 @@ class EditFileTool(_FsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return "Error: expected_replacements must be >= 1."
 
-            fp = self._resolve(path)
+            fp = self._resolve_write(path)
 
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():

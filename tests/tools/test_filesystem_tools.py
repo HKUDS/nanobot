@@ -6,6 +6,7 @@ from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,
+    WriteFileTool,
     _find_match,
 )
 
@@ -90,6 +91,40 @@ class TestReadFileTool:
         result = await tool.execute(path=str(f))
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
+
+    @pytest.mark.asyncio
+    async def test_extra_allowed_dirs_are_readable_but_not_writable(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        extra = tmp_path / "extra"
+        extra.mkdir()
+        target = extra / "note.txt"
+        target.write_text("original", encoding="utf-8")
+
+        reader = ReadFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[extra],
+        )
+        writer = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[extra],
+        )
+        editor = EditFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[extra],
+        )
+
+        read_result = await reader.execute(path=str(target))
+        write_result = await writer.execute(path=str(target), content="changed")
+        edit_result = await editor.execute(path=str(target), old_text="original", new_text="changed")
+
+        assert "original" in read_result
+        assert write_result.startswith("Error")
+        assert edit_result.startswith("Error")
+        assert target.read_text(encoding="utf-8") == "original"
 
 
 # ---------------------------------------------------------------------------
