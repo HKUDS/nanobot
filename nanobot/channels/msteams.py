@@ -55,6 +55,9 @@ MSTEAMS_REF_TTL_DAYS = 30
 MSTEAMS_WEBCHAT_HOST = "webchat.botframework.com"
 MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS = [
     "smba.trafficmanager.net",
+    "smba.infra.gcc.teams.microsoft.com",
+    "smba.infra.gov.teams.microsoft.us",
+    "smba.infra.dod.teams.microsoft.us",
     "*.botframework.com",
 ]
 MSTEAMS_REF_META_FILENAME = "msteams_conversations_meta.json"
