@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from contextlib import AsyncExitStack
 from typing import Any
 from unittest.mock import MagicMock
@@ -15,6 +16,10 @@ from nanobot.agent.tools.base import Tool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import MCPServerConfig
+
+
+def _fake_resolve_localhost(hostname, port, family=0, type_=0):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
 
 
 class _FakeMcpTool(Tool):
@@ -69,6 +74,22 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     assert attempts == 2
     assert loop._mcp_connected is False
     assert loop._mcp_stacks == {}
+
+
+@pytest.mark.asyncio
+async def test_mcp_http_probe_rejects_loopback_before_connect(monkeypatch: pytest.MonkeyPatch):
+    attempted = False
+
+    async def _connect(*_args, **_kwargs):
+        nonlocal attempted
+        attempted = True
+        raise AssertionError("loopback probe attempted a socket connection")
+
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost)
+    monkeypatch.setattr("asyncio.open_connection", _connect)
+
+    assert await mcp_runtime._probe_http_url("http://localhost:8765/mcp") is False
+    assert attempted is False
 
 
 @pytest.mark.asyncio

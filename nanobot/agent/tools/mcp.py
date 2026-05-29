@@ -20,6 +20,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
+from nanobot.security.network import validate_url_target
 
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
@@ -61,6 +62,11 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     ``RuntimeError`` / ``ExceptionGroup`` that escape the caller's try/except
     and crash the event loop.
     """
+    ok, err = validate_url_target(url)
+    if not ok:
+        logger.warning("MCP HTTP URL rejected by network policy: {}", err)
+        return False
+
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port
