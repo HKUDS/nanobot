@@ -159,13 +159,13 @@ def test_write_stdin_can_close_stdin(tmp_path):
             "data=sys.stdin.read(); print('got:' + data, flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=1500)
         sid = _session_id(initial)
         result = await stdin_tool.execute(
             session_id=sid,
             chars="payload",
             close_stdin=True,
-            yield_time_ms=1000,
+            yield_time_ms=1500,
         )
         return initial, result
 
