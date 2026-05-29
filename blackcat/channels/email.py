@@ -393,24 +393,11 @@ class EmailChannel(BaseChannel):
         """Fetch messages by arbitrary IMAP search criteria."""
         mailbox = self.config.imap_mailbox or "INBOX"
 
-        if self.config.imap_use_ssl:
-            client = imaplib.IMAP4_SSL(self.config.imap_host, self.config.imap_port)
-        else:
-            client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
+        client = self._open_imap_client(mailbox=mailbox, missing_mailbox_ok=True)
+        if client is None:
+            return messages
 
         try:
-            client.login(self.config.imap_username, self.config.imap_password)
-            try:
-                status, _ = client.select(mailbox)
-            except Exception as exc:
-                if self._is_missing_mailbox_error(exc):
-                    self.logger.warning("Mailbox unavailable, skipping poll for {}: {}", mailbox, exc)
-                    return messages
-                raise
-            if status != "OK":
-                self.logger.warning("Mailbox select returned {}, skipping poll for {}", status, mailbox)
-                return messages
-
             status, data = client.search(None, *search_criteria)
             if status != "OK" or not data:
                 return messages
@@ -523,8 +510,39 @@ class EmailChannel(BaseChannel):
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
         finally:
-            with suppress(Exception):
-                client.logout()
+            self._close_imap_client(client)
+
+    def _open_imap_client(self, mailbox: str, *, missing_mailbox_ok: bool = False) -> Any | None:
+        if self.config.imap_use_ssl:
+            client: Any = imaplib.IMAP4_SSL(self.config.imap_host, self.config.imap_port)
+        else:
+            client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
+
+        try:
+            client.login(self.config.imap_username, self.config.imap_password)
+            try:
+                status, _ = client.select(mailbox)
+            except Exception as exc:
+                if missing_mailbox_ok and self._is_missing_mailbox_error(exc):
+                    self.logger.warning("Mailbox unavailable, skipping poll for {}: {}", mailbox, exc)
+                    self._close_imap_client(client)
+                    return None
+                raise
+
+            if status != "OK":
+                self.logger.warning("Mailbox select returned {}, skipping poll for {}", status, mailbox)
+                self._close_imap_client(client)
+                return None
+        except Exception:
+            self._close_imap_client(client)
+            raise
+
+        return client
+
+    @staticmethod
+    def _close_imap_client(client: Any) -> None:
+        with suppress(Exception):
+            client.logout()
 
     def _collect_self_addresses(self) -> set[str]:
         """Return normalized email addresses owned by this channel instance."""
