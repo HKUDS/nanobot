@@ -1,5 +1,7 @@
 """Session management for conversation history."""
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -129,6 +131,14 @@ class Session:
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
         """
+        if not isinstance(self.last_consolidated, int):
+            self.last_consolidated = 0
+        if self.last_consolidated < 0 or self.last_consolidated > len(self.messages):
+            logger.warning(
+                "Clamping invalid last_consolidated={} for session {} with {} messages",
+                self.last_consolidated, self.key, len(self.messages),
+            )
+            self.last_consolidated = 0 if self.last_consolidated > len(self.messages) else max(self.last_consolidated, 0)
         unconsolidated = self.messages[self.last_consolidated:]
         max_messages = max_messages if max_messages > 0 else 120
         sliced = unconsolidated[-max_messages:]
@@ -345,7 +355,12 @@ class SessionManager:
 
     @staticmethod
     def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
+        """Map an arbitrary session key to a collision-resistant filename stem."""
+        encoded = base64.urlsafe_b64encode(key.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"b64_{encoded or '_'}"
+
+    @staticmethod
+    def _legacy_safe_key(key: str) -> str:
         return safe_filename(key.replace(":", "_"))
 
     def _get_session_path(self, key: str) -> Path:
@@ -355,6 +370,23 @@ class SessionManager:
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def _get_old_session_path(self, key: str) -> Path:
+        """Pre-base64 local session path."""
+        return self.sessions_dir / f"{self._legacy_safe_key(key)}.jsonl"
+
+    def _get_old_legacy_session_path(self, key: str) -> Path:
+        """Pre-base64 global session path."""
+        return self.legacy_sessions_dir / f"{self._legacy_safe_key(key)}.jsonl"
+
+    @staticmethod
+    def _key_from_stem(stem: str) -> str:
+        if stem.startswith("b64_"):
+            raw = stem[4:]
+            padding = "=" * (-len(raw) % 4)
+            with suppress(binascii.Error, UnicodeDecodeError):
+                return base64.urlsafe_b64decode((raw + padding).encode("ascii")).decode("utf-8")
+        return stem.replace("_", ":", 1)
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -380,8 +412,18 @@ class SessionManager:
         """Load a session from disk."""
         path = self._get_session_path(key)
         if not path.exists():
-            legacy_path = self._get_legacy_session_path(key)
-            if legacy_path.exists():
+            for candidate in (
+                self._get_old_session_path(key),
+                self._get_legacy_session_path(key),
+                self._get_old_legacy_session_path(key),
+            ):
+                if not candidate.exists() or candidate == path:
+                    continue
+                legacy_path = candidate
+                break
+            else:
+                legacy_path = None
+            if legacy_path is not None:
                 try:
                     shutil.move(str(legacy_path), str(path))
                     logger.info("Migrated session {} from legacy path", key)
@@ -632,7 +674,7 @@ class SessionManager:
         sessions = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
-            fallback_key = path.stem.replace("_", ":", 1)
+            fallback_key = self._key_from_stem(path.stem)
             try:
                 # Read the metadata line and a small preview for WebUI/session lists.
                 with open(path, encoding="utf-8") as f:
@@ -640,7 +682,7 @@ class SessionManager:
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or path.stem.replace("_", ":", 1)
+                            key = data.get("key") or self._key_from_stem(path.stem)
                             metadata = data.get("metadata", {})
                             title = metadata.get("title") if isinstance(metadata, dict) else None
                             preview = ""

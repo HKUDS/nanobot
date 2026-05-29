@@ -43,6 +43,32 @@ def test_list_sessions_includes_metadata_title(tmp_path):
     assert rows[0]["title"] == "自动生成标题"
 
 
+def test_safe_key_distinguishes_sanitization_collisions() -> None:
+    keys = [
+        "telegram:a_b",
+        "telegram:a:b",
+        "telegram/a:b",
+        "telegram_a:b",
+    ]
+
+    stems = {SessionManager.safe_key(key) for key in keys}
+
+    assert len(stems) == len(keys)
+
+
+def test_get_history_clamps_high_last_consolidated() -> None:
+    session = Session(
+        key="k",
+        messages=[{"role": "user", "content": f"m{i}"} for i in range(10)],
+        last_consolidated=999,
+    )
+
+    history = session.get_history(max_messages=100)
+
+    assert history
+    assert history[-1]["content"] == "m9"
+
+
 def test_list_sessions_includes_user_preview(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-preview")
