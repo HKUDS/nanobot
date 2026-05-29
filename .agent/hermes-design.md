@@ -84,7 +84,7 @@
 |--------|------|------|------|------------|
 | **PostTask Evolver** | turn 结束，tool_calls ≥ N | 单 turn trace | create proposal 或 auto apply | **create only** |
 | **GEPA Runner** | cron / CLI | TraceStore + active skills | update proposal | **update only** |
-| **Dream** | cron / `/dream` | history.jsonl 批量 | MEMORY / SOUL / USER | **none（方案 A）** |
+| **Dream** | cron / `/dream` | history.jsonl 批量 | MEMORY / SOUL | **none（方案 A）**；**USER 由 Layered Memory L3 写**（`layeredMemory.persona.enable` 时 Dream 跳过 USER.md 编辑） |
 | **Skill 检索** | 每 turn | user query | top-k skills 注入 prompt | consume |
 
 ### 3.2 闭环

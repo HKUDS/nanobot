@@ -162,6 +162,17 @@ class LayeredMemoryPipelineConfig(Base):
     extraction_model: str | None = None  # None = 主 agent provider
 
 
+class LayeredMemoryPersonaConfig(Base):
+    """L3 用户画像：L2 后更新 ``workspace/USER.md``（全局 mutex）。"""
+
+    enable: bool = True
+    min_interval_seconds: int = Field(default=900, ge=0)
+    backup_count: int = Field(default=3, ge=0, le=20)
+    max_user_chars: int = Field(default=8000, ge=500, le=20_000)
+    lock_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    model: str | None = None  # None = pipeline.extraction_model / 主 provider
+
+
 class LayeredMemoryRecallConfig(Base):
     """Turn 前记忆召回。"""
 
@@ -200,6 +211,7 @@ class LayeredMemoryConfig(Base):
     offload: LayeredMemoryOffloadConfig = Field(default_factory=LayeredMemoryOffloadConfig)
     capture: LayeredMemoryCaptureConfig = Field(default_factory=LayeredMemoryCaptureConfig)
     pipeline: LayeredMemoryPipelineConfig = Field(default_factory=LayeredMemoryPipelineConfig)
+    persona: LayeredMemoryPersonaConfig = Field(default_factory=LayeredMemoryPersonaConfig)
     recall: LayeredMemoryRecallConfig = Field(default_factory=LayeredMemoryRecallConfig)
     embedding: LayeredMemoryEmbeddingConfig = Field(
         default_factory=LayeredMemoryEmbeddingConfig,
@@ -226,6 +238,16 @@ class LayeredMemoryConfig(Base):
         if not self.enable or not self.recall.enable:
             return False
         if is_subagent and not self.subagent.enable_recall:
+            return False
+        return True
+
+    def persona_enabled(self, *, is_subagent: bool = False) -> bool:
+        """L3 persona job + Dream USER single-writer boundary."""
+        if not self.enable or not self.persona.enable:
+            return False
+        if not self.capture.enable:
+            return False
+        if is_subagent and not self.subagent.enable_capture:
             return False
         return True
 

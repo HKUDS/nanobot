@@ -1,24 +1,47 @@
 # Layered Memory
 
-Layered Memory adds **structured short-term memory** for long agent tasks: tool outputs are indexed as **nodes**, summarized on a **Task canvas**, and recalled on demand with `read_memory_node`.
+Layered Memory adds **structured memory** for agent sessions: short-term **Task Canvas** indexing for large tool results, plus a **long-term pipeline** (L0 → L1 → L2 → L3) inspired by [TencentDB Agent Memory](https://github.com/Tencent/TencentDB-Agent-Memory).
 
-It complements — but does not replace — the existing memory stack described in [Memory](./memory.md):
+It complements — but does not fully replace — the existing memory stack in [Memory](./memory.md):
 
 | Layer | What it is | When it helps |
 |-------|------------|---------------|
 | **Session replay** | Live `session.messages` in the prompt | Recent turns and tool calls |
-| **Consolidator / Dream** | `history.jsonl` → `SOUL.md` / `USER.md` / `MEMORY.md` | Durable facts and voice over days |
-| **Layered Memory (LM1)** | Per-session `nodes.json` + `canvas.mmd` | Long SWE-style tasks with many large tool results |
+| **Layered L0** | Sanitized dialogue in SQLite | Searchable conversation evidence |
+| **Layered L1** | Atomic facts / rules (FTS) | Keyword recall, `memory_search` |
+| **Layered L2** | Scenario Markdown files | Project/topic narratives |
+| **Layered L3** | `USER.md` persona | Stable cross-session preferences |
+| **Consolidator / Dream** | `history.jsonl` → `SOUL.md` / `MEMORY.md` | Batch consolidation over days |
+| **Layered LM1** | `nodes.json` + `canvas.mmd` | Long tasks with many large tool results |
 
-**LM1 (shipped in this branch)** covers short-term offload only: Task Canvas, `node_id` registry, and `read_memory_node`.
+**Shipped in this branch:** LM1 (Task Canvas) + LM2 (L0/L1/capture/pipeline/recall/tools) + LM3 (L2 scenes, L3 persona).
 
-**LM2+** (not yet in user docs scope) will add L0 capture, L1 atoms, recall injection, and search tools. See `.agent/layered-memory/design.md` for the full roadmap.
+---
+
+## Architecture
+
+```text
+Turn内（短期）                    Turn外（长期 pipeline）
+─────────────────                ─────────────────────────
+Tool results → nodes / canvas    L0 capture → L1 extract → L2 scene → L3 USER.md
+read_memory_node                 recall (turn 前) + memory_search / conversation_search
+```
+
+| Tier | Storage | Trigger | Recall |
+|------|---------|---------|--------|
+| **L0** | `{workspace}/.nanobot/memory.sqlite` | After each turn (`capture`) | `conversation_search` |
+| **L1** | Same SQLite (`l1_memories` + FTS5) | Pipeline after N turns or idle | `memory_search`, recall prepend |
+| **L2** | `{workspace}/memory/scenes/*.md` + `scene_index.json` | After L1 (delayed timer) | Scene navigation in recall; `read_file` for body |
+| **L3** | `{workspace}/USER.md` | After L2 (serial, global) | `[User profile note]` in recall; bootstrap identity |
+| **Canvas** | `.nanobot/canvas/{session}/` | Each tool / turn end | `[Task canvas]` runtime lines |
 
 ---
 
 ## Quick start
 
-Layered Memory is **off by default**. Enable both the master switch and offload:
+Layered Memory is **off by default**.
+
+### LM1 only (Task Canvas)
 
 ```json
 {
@@ -26,8 +49,34 @@ Layered Memory is **off by default**. Enable both the master switch and offload:
     "defaults": {
       "layeredMemory": {
         "enable": true,
-        "offload": {
-          "enable": true
+        "offload": { "enable": true }
+      }
+    }
+  }
+}
+```
+
+Requires `layeredMemory.enable` **and** `layeredMemory.offload.enable`.
+
+### Full stack (L0–L3 + recall)
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "layeredMemory": {
+        "enable": true,
+        "offload": { "enable": true },
+        "capture": { "enable": true },
+        "recall": { "enable": true, "strategy": "fts" },
+        "pipeline": {
+          "everyNConversations": 1,
+          "enableWarmup": false,
+          "l2DelayAfterL1Seconds": 15
+        },
+        "persona": {
+          "enable": true,
+          "minIntervalSeconds": 30
         }
       }
     }
@@ -35,17 +84,13 @@ Layered Memory is **off by default**. Enable both the master switch and offload:
 }
 ```
 
-Restart the gateway or CLI session after changing config.
+Restart the gateway or CLI session after changing config. Run `pip install -e .` when testing a development checkout.
 
-Requirements for LM1 behavior:
-
-- `layeredMemory.enable` **and** `layeredMemory.offload.enable` must be `true`.
-- The agent must run tools (`read_file`, `grep`, `exec`, etc.). Pure chat turns do not create nodes.
-- Subagents keep offload **disabled** by default (`layeredMemory.subagent.enableOffload: false`).
+Subagents keep layered memory **disabled** by default (`layeredMemory.subagent.*`).
 
 ---
 
-## What gets stored
+## LM1 — Task Canvas (short-term)
 
 ### On disk
 
@@ -55,95 +100,157 @@ Requirements for LM1 behavior:
   canvas.mmd      # Mermaid task graph (rule-generated)
 
 {workspace}/.nanobot/tool-results/{session_bucket}/{tool_call_id}.txt
-                  # full tool output (only when output exceeds maxToolResultChars)
+                  # full tool output (when output exceeds maxToolResultChars)
 ```
 
-Session keys like `cli:direct` or `websocket:abc123` are sanitized for directory names by replacing `:` with `_` (for example `cli_direct`, `websocket_abc123`).
+Session keys like `cli:direct` → directory `cli_direct`.
 
-### Each node (`nodes.json`)
-
-| Field | Meaning |
-|-------|---------|
-| `node_id` | Same as the tool call id (`tool_call_id`) |
-| `tool` | Tool name (`read_file`, `grep`, …) |
-| `path` | Relative path to spilled output, or `null` if under the persist threshold |
-| `summary` | One-line rule-based summary (truncated; see `maxNodeSummaryChars`) |
-| `chars` | Character count of the original tool output at registration time |
-| `ts` | Unix timestamp of last update |
-
-**Important:** A node is an **index card**, not a full copy of the tool result. The `summary` is capped (default 120 characters). Full text exists only when:
-
-1. The output was spilled to `.nanobot/tool-results/…` (`path` is set), or
-2. The content is still present in session replay (not yet microcompacted).
-
----
-
-## How it works (LM1)
+### Flow
 
 ```text
-Tool executes
-    │
-    ▼
-runner._normalize_tool_result
-    ensure_nonempty → maybe_persist (if > maxToolResultChars)
-    → register_tool_result → nodes.json
-    │
-    ▼
-LayeredMemoryHook.after_tools
-    sync_tool_nodes (batch upsert) + optional canvas refresh
-    │
-    ▼
-Next user message
-    loop injects [Task canvas] + Mermaid + node index into runtime lines
-    │
-    ▼
-Model calls read_memory_node(node_id) when it needs spilled full text
+Tool executes → persist (if large) → register node → hook sync
+Next turn → inject [Task canvas] → read_memory_node(node_id) for spilled bodies
 ```
-
-### Tool result persist (`maybe_persist`)
-
-When a tool returns more characters than `agents.defaults.maxToolResultChars` (default `16000`), nanobot:
-
-1. Writes the full output to `.nanobot/tool-results/…`
-2. Replaces the in-prompt tool message with a short reference that includes `node_id: …`
-3. Registers the node with a non-null `path`
-
-Smaller outputs are still registered (for the canvas index) but `path` stays `null`. `read_memory_node` cannot load them; the model must rely on replay or call the original tool again.
-
-### Task canvas injection
-
-Before each turn, nanobot appends runtime lines similar to:
-
-```text
-[Task canvas]
-```mermaid
-graph TD
-    n0["read_file: import os ..."]
-    n1["grep: loop.py:891 > ..."]
-    n0 --> n1
-```
-Nodes: call_abc (grep), call_xyz (read_file)
-```
-
-The block is truncated to `offload.maxCanvasChars` (default `1500`). The model uses `node_id` values from the `Nodes:` line or from `[tool output persisted]` references.
 
 ### `read_memory_node`
 
-Registered only when `layeredMemory.offload.enable` is true (core agent scope).
+Registered when `layeredMemory.offload.enable` is true.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `node_id` | required | Tool call id from the canvas or persist reference |
-| `offset` | `1` | 1-based start line (same as `read_file`) |
-| `limit` | `2000` | Max lines to return |
+| `node_id` | required | Tool call id from canvas or persist reference |
+| `offset` | `1` | 1-based start line |
+| `limit` | `2000` | Max lines |
 
-Behavior:
+Nodes with `path: null` only have a short summary; full text must still be in replay or re-fetched via tools.
 
-- Looks up `node_id` in the **current session's** `nodes.json`.
-- If `path` is set, reads that file under the workspace (same boundary as `read_file`).
-- If `path` is `null`, returns an error with the stored `summary`.
+See [Relationship to persist](#relationship-to-persist-and-context-budget) below for `maxToolResultChars` tuning.
 
-Direct `read_file` on a persist path and `read_memory_node` for the same spill file return equivalent content.
+---
+
+## LM2 — L0 capture, L1 atoms, recall, search
+
+### L0 — conversation store
+
+After each turn, sanitized messages are appended to SQLite (`l0_messages`). Runtime blocks (`[Task canvas]`, recall injections) are stripped before storage.
+
+- **Retention:** `capture.l0RetentionDays` (default `30`; `0` = no prune)
+- **Not** a verbatim copy of session JSONL — see `sanitize` rules in code
+
+### L1 — atomic memories
+
+A background job reads recent L0 rows and calls the LLM to extract **atoms** (`preference`, `fact`, `event`, `rule`) into `l1_memories` with FTS5 indexing.
+
+**Pipeline triggers:**
+
+| Trigger | Config |
+|---------|--------|
+| Every N turns | `pipeline.everyNConversations` (warmup: 1→2→4→… when `enableWarmup: true`) |
+| Idle timeout | `pipeline.l1IdleTimeoutSeconds` |
+
+### Turn-before recall
+
+When `recall.enable` is true, before each turn nanobot may inject runtime lines:
+
+```text
+[User profile note]
+… excerpt from USER.md …
+
+[Recalled memories]
+- (rule) Only commit when user explicitly says commit
+
+[Scene navigation]
+- Layered Memory dev → memory/scenes/nanobot-layered-memory.md
+(Use read_file to load a scene; navigation only.)
+
+[Memory tools]
+memory_search / conversation_search — ≤3 calls per turn combined
+```
+
+Capped by `recall.maxPrependChars` and `recall.timeoutMs`.
+
+### Search tools
+
+| Tool | Searches | When registered |
+|------|----------|-----------------|
+| `memory_search` | L1 FTS (or hybrid when embedding enabled) | `capture.enable` |
+| `conversation_search` | L0 messages | `capture.enable` |
+
+Budget: `recall.maxSearchCallsPerTurn` (default `3`) shared across both tools per turn.
+
+---
+
+## LM3 — L2 scenarios and L3 persona
+
+### L2 — scenario blocks
+
+After an L1 job completes, a **delayed timer** (`pipeline.l2DelayAfterL1Seconds`, default `90s`) may run an L2 job that synthesizes **scenario Markdown** from L1 atoms.
+
+```text
+{workspace}/memory/
+  scene_index.json           # navigation index (title, path, summary)
+  scenes/
+    nanobot-layered-memory.md
+    git-workflow.md
+```
+
+- **One file per ongoing topic** — related atoms merge into the same scene; new topics get new files
+- **Recall injects navigation only** (title + path), not the full scene body
+- **No TTL** — scenes persist until updated or manually deleted
+- **Cold session:** if no activity for `pipeline.sessionActiveWindowHours`, pending L2 may be skipped
+
+### L3 — user persona (`USER.md`)
+
+After L2 succeeds, an L3 job (global serial queue) may rewrite **`{workspace}/USER.md`**:
+
+- **Inputs:** current `USER.md`, scene index/bodies, recent L1 atoms
+- **Output:** stable cross-session traits — language, communication style, standing rules, work context
+- **Does not duplicate** per-project detail (that stays in L2 scenes) or transient task steps
+
+**Safety:**
+
+| Mechanism | Path / behavior |
+|-----------|-----------------|
+| File lock | `.nanobot/persona.lock` |
+| Backup | `.nanobot/persona_backups/USER.{timestamp}.md` (`persona.backupCount`) |
+| Min interval | `persona.minIntervalSeconds` between L3 runs |
+
+### Pipeline timing (typical)
+
+```text
+Turn ends → L0 (immediate)
+         → L1 (threshold or idle)
+         → wait l2DelayAfterL1Seconds
+         → L2 scene job
+         → L3 USER.md job (if persona enabled + min interval elapsed)
+Next turn → recall injects L1 + USER excerpt + scene navigation
+```
+
+For local testing, lower `l2DelayAfterL1Seconds` and `persona.minIntervalSeconds`.
+
+---
+
+## Layered Memory vs Dream
+
+Both systems can touch long-term user knowledge. Defaults avoid double-writing `USER.md`.
+
+| Aspect | Dream | Layered Memory |
+|--------|-------|----------------|
+| **Trigger** | Cron / `/dream` on `history.jsonl` batch | Per-turn capture + async pipeline |
+| **Writes `MEMORY.md`** | Yes | No |
+| **Writes `SOUL.md`** | Yes | No |
+| **Writes `USER.md`** | Yes, **unless** `persona.enable` | **L3 only** when `persona.enable` |
+| **Writes L0/L1** | No | Yes (`memory.sqlite`) |
+| **Writes scenes** | No | Yes (`memory/scenes/`) |
+| **Turn-before injection** | Via bootstrap / consolidator | `recall` runtime lines + tools |
+| **Search** | Dream analysis, `/dream-log` | `memory_search`, `conversation_search` |
+| **Tool-heavy session map** | No | Task Canvas (`read_memory_node`) |
+
+When `layeredMemory.enable` and `layeredMemory.persona.enable` are both true (with `capture.enable`), Dream sets `skip_user_edits=True` and **does not edit `USER.md`** in Phase 2. Dream still maintains `MEMORY.md` and `SOUL.md`.
+
+Disable `persona.enable` to let Dream own `USER.md` again.
+
+See also: `.agent/gotchas.md` (Layered Memory vs Dream).
 
 ---
 
@@ -151,123 +258,132 @@ Direct `read_file` on a persist path and `read_memory_node` for the same spill f
 
 ### `maxToolResultChars`
 
-Configured under `agents.defaults.maxToolResultChars`. This threshold controls **when** full tool output is written to disk and referenced in the prompt. Layered Memory reuses those spill files; `node_id` always equals `tool_call_id`.
+When tool output exceeds `agents.defaults.maxToolResultChars` (default `16000`), nanobot spills to `.nanobot/tool-results/` and registers a node. Layered Memory reuses those files; `node_id` = `tool_call_id`.
 
-Typical tuning for long coding tasks:
+### Context Budget (CB2)
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "maxToolResultChars": 16000,
-      "layeredMemory": {
-        "enable": true,
-        "offload": {
-          "enable": true,
-          "maxCanvasChars": 2000,
-          "updateCanvasEveryNTools": 5
-        }
-      }
-    }
-  }
-}
-```
-
-### Context Budget / tool-result filtering (CB2)
-
-The layered-memory design reserves this order when tool-result filtering is enabled:
-
-```text
-filter (CB2) → persist → register node
-```
-
-Filtering shrinks what enters session replay; persist keeps oversized bodies on disk; nodes give the model a stable map (`node_id`) back to those bodies. Canvas injection adds **task structure** on top — it does not replace filtering or consolidation.
+Intended order: `filter (CB2) → persist → register node`. Canvas adds task structure; it does not replace filtering or consolidation.
 
 ### Runner microcompact
 
-The runner may replace old tool messages in replay with one-line placeholders such as `[read_file result omitted from context]`. That reduces prompt size but means:
-
-- Nodes registered from compacted replay may carry degraded summaries.
-- `read_memory_node` only helps when the original output was **spilled** (`path` non-null).
-
-For auditability of raw tool trails, see [Auto Compact](./configuration.md#auto-compact) vs token-driven consolidation in `configuration.md`.
+Old tool messages in replay may be replaced with placeholders. `read_memory_node` only recovers bodies that were **spilled** (`path` non-null).
 
 ---
 
-## Configuration reference (LM1)
+## Configuration reference
 
-All keys live under `agents.defaults.layeredMemory` (camelCase in JSON).
+All keys under `agents.defaults.layeredMemory` (camelCase in JSON). See [Configuration — Layered Memory](./configuration.md#layered-memory) for the full table.
 
 ### Master switch
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enable` | `false` | Master switch for layered memory |
+| `enable` | `false` | Master switch |
 
-### Offload (LM1 — Task Canvas)
+### Offload (LM1)
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `offload.enable` | `false` | Node registry, canvas, runtime injection, `read_memory_node` |
-| `offload.maxCanvasChars` | `1500` | Max characters injected for the canvas block |
-| `offload.maxNodeSummaryChars` | `120` | Max characters per node summary in `nodes.json` |
-| `offload.updateCanvasEveryNTools` | `0` | Regenerate `canvas.mmd` every N tools; `0` = only at turn end |
+| `offload.enable` | `false` | Canvas, nodes, `read_memory_node` |
+| `offload.maxCanvasChars` | `1500` | Max `[Task canvas]` injection size |
+| `offload.maxNodeSummaryChars` | `120` | Per-node summary in `nodes.json` |
+| `offload.updateCanvasEveryNTools` | `0` | Refresh `canvas.mmd` every N tools; `0` = turn end |
+
+### Capture (L0)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `capture.enable` | `false` | L0 write + pipeline + search tools |
+| `capture.l0RetentionDays` | `30` | Prune L0 older than N days; `0` = keep |
+
+### Pipeline (L1 → L2 → L3)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `pipeline.everyNConversations` | `5` | L1 trigger every N turns |
+| `pipeline.enableWarmup` | `true` | 1→2→4→… until `everyN` |
+| `pipeline.l1IdleTimeoutSeconds` | `600` | L1 on idle |
+| `pipeline.l2DelayAfterL1Seconds` | `90` | Delay before L2 after L1 |
+| `pipeline.l2MinIntervalSeconds` | `900` | Min gap between L2 runs per session |
+| `pipeline.l2MaxIntervalSeconds` | `3600` | Max gap before L2 must run |
+| `pipeline.sessionActiveWindowHours` | `24` | Skip L2 if session inactive |
+| `pipeline.maxMemoriesPerSession` | `20` | L1 insert cap per session per job |
+| `pipeline.enableL1Dedup` | `true` | Skip near-duplicate L1 atoms |
+| `pipeline.extractionModel` | `null` | L1/L2/L3 LLM; `null` = main provider |
+
+### Persona (L3)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `persona.enable` | `true` | L3 `USER.md` job; Dream skips USER when on |
+| `persona.minIntervalSeconds` | `900` | Min gap between L3 runs |
+| `persona.backupCount` | `3` | Rotating `USER.md` backups; `0` = none |
+| `persona.maxUserChars` | `8000` | Max L3 `USER.md` size |
+| `persona.lockTimeoutSeconds` | `30` | Persona file lock wait |
+| `persona.model` | `null` | L3 LLM override |
+
+### Recall
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `recall.enable` | `false` | Turn-before L1 + USER + scene nav |
+| `recall.strategy` | `hybrid` | `fts` / `embedding` / `hybrid` |
+| `recall.topK` | `8` | Max L1 hits in recall |
+| `recall.timeoutMs` | `5000` | Recall time budget |
+| `recall.maxPrependChars` | `4000` | Max recall injection size |
+| `recall.maxSearchCallsPerTurn` | `3` | `memory_search` + `conversation_search` budget |
 
 ### Subagent defaults
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `subagent.enableOffload` | `false` | Subagents do not pollute the main session canvas |
-| `subagent.enableRecall` | `false` | LM2 recall (placeholder until LM2) |
-| `subagent.enableCapture` | `false` | LM2 L0 capture (placeholder until LM2) |
-
-LM2 keys (`capture`, `pipeline`, `recall`, `embedding`) exist in schema but are no-ops until LM2 is implemented. Do not enable them expecting behavior yet.
-
-Full config tables: [Configuration — Layered Memory](./configuration.md#layered-memory).
+| `subagent.enableOffload` | `false` | No canvas on subagents |
+| `subagent.enableRecall` | `false` | No recall on subagents |
+| `subagent.enableCapture` | `false` | No L0/pipeline on subagents |
 
 ---
 
 ## Inspecting on disk
 
-After a session with several tool calls (CLI example `cli:direct`):
-
 ```bash
-# Canvas directory (session key cli:direct → cli_direct)
+# LM1 canvas
 ls ~/.nanobot/workspace/.nanobot/canvas/cli_direct/
+cat ~/.nanobot/workspace/.nanobot/canvas/cli_direct/nodes.json
 
-# Node index
-cat ~/.nanobot/workspace/.nanobot/canvas/cli_direct/nodes.json | head
+# LM2 L0/L1
+sqlite3 ~/.nanobot/workspace/.nanobot/memory.sqlite \
+  "SELECT memory_type, content FROM l1_memories ORDER BY created_at DESC LIMIT 5;"
 
-# Mermaid graph
-cat ~/.nanobot/workspace/.nanobot/canvas/cli_direct/canvas.mmd
+# LM3 L2 scenes
+ls ~/.nanobot/workspace/memory/scenes/
+cat ~/.nanobot/workspace/memory/scene_index.json
 
-# Spilled tool bodies (only when outputs exceeded maxToolResultChars)
-ls ~/.nanobot/workspace/.nanobot/tool-results/
+# LM3 L3 persona
+cat ~/.nanobot/workspace/USER.md
+ls ~/.nanobot/workspace/.nanobot/persona_backups/
 ```
-
-WebUI / WebSocket sessions use keys like `websocket:{chat_id}` → directory `websocket_{chat_id}`.
 
 ---
 
-## Tuning tips (LM1)
+## Tuning tips
 
-| Scenario | Suggestion |
-|----------|------------|
-| Long repo exploration | `offload.enable: true`, keep `maxToolResultChars` at 8k–16k so large reads spill and `read_memory_node` works |
-| Very chatty tool loops | `updateCanvasEveryNTools: 5` so `canvas.mmd` stays fresh mid-turn |
-| Tight prompt budget | Lower `maxCanvasChars`; rely on `Nodes:` line if Mermaid is truncated |
-| Subagent research tasks | Leave `subagent.enableOffload: false` unless you explicitly want a separate canvas |
+| Goal | Suggestion |
+|------|------------|
+| Long repo exploration | `offload.enable: true`, `maxToolResultChars` 8k–16k |
+| Faster L2/L3 while debugging | `everyNConversations: 1`, low `l2DelayAfterL1Seconds`, low `persona.minIntervalSeconds` |
+| Lower LLM cost | `enableWarmup: true`, higher `l2MinIntervalSeconds`, higher `persona.minIntervalSeconds` |
+| Tight prompt budget | Lower `maxCanvasChars`, `recall.maxPrependChars` |
+| Dream owns USER again | `persona.enable: false` |
 
 ---
 
 ## Boundaries
 
-| Component | Layered Memory (LM1) | Existing memory |
-|-----------|---------------------|-----------------|
-| Writes | `nodes.json`, `canvas.mmd` | `sessions/*.jsonl`, `memory/history.jsonl`, `USER.md`, … |
-| Reads in prompt | Task canvas runtime block | Session replay, bootstrap files, consolidator summaries |
-| Search | `read_memory_node` only | Dream, `/dream-log`, grep on `history.jsonl` |
-| Subagents | Off by default | Same session files unless isolated workspace |
+| Component | Layered Memory | Classic memory |
+|-----------|----------------|----------------|
+| Writes | `memory.sqlite`, `memory/scenes/`, `USER.md` (L3), canvas | `sessions/`, `history.jsonl`, `MEMORY.md`, `SOUL.md` |
+| Reads in prompt | Recall block, canvas, bootstrap `USER.md` | Session replay, consolidator, Dream files |
+| Skills | Never writes `skills/` | Evolution / Dream (no skill create in Dream) |
 
 ---
 

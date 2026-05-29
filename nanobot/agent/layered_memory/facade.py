@@ -14,8 +14,9 @@ from nanobot.agent.layered_memory.l1_extractor import L1Extractor
 from nanobot.agent.layered_memory.l1_store import L1Store
 from nanobot.agent.layered_memory.obs import log_recall_result, log_recall_timeout
 from nanobot.agent.layered_memory.offload.canvas import TaskCanvas, format_canvas_runtime_lines
-from nanobot.agent.layered_memory.pipeline import L1JobHandler, L2JobHandler, MemoryPipelineManager
+from nanobot.agent.layered_memory.pipeline import L1JobHandler, L2JobHandler, L3JobHandler, MemoryPipelineManager
 from nanobot.agent.layered_memory.recall import RecallResult, perform_recall
+from nanobot.agent.layered_memory.persona.generator import PersonaGenerator
 from nanobot.agent.layered_memory.scene.extractor import SceneExtractor
 from nanobot.agent.layered_memory.sanitize import sanitize_turn_messages
 from nanobot.agent.layered_memory.offload.node_registry import (
@@ -44,6 +45,7 @@ class LayeredMemoryFacade:
         provider: LLMProvider | None = None,
         l1_handler: L1JobHandler | None = None,
         l2_handler: L2JobHandler | None = None,
+        l3_handler: L3JobHandler | None = None,
     ) -> None:
         self._workspace = workspace
         self._config = config or LayeredMemoryConfig()
@@ -52,6 +54,7 @@ class LayeredMemoryFacade:
         self._l1_store = L1Store(workspace)
         handler = l1_handler
         scene_handler = l2_handler
+        persona_handler = l3_handler
         if handler is None and provider is not None and self._config.enable:
             handler = L1Extractor(
                 workspace,
@@ -67,10 +70,18 @@ class LayeredMemoryFacade:
                 provider,
                 l1_store=self._l1_store,
             ).run
+        if persona_handler is None and provider is not None and self._config.enable:
+            persona_handler = PersonaGenerator(
+                workspace,
+                self._config,
+                provider,
+                l1_store=self._l1_store,
+            ).run
         self._pipeline = MemoryPipelineManager(
             self._config,
             l1_handler=handler,
             l2_handler=scene_handler,
+            l3_handler=persona_handler,
         )
 
     @property

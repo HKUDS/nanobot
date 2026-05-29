@@ -256,6 +256,21 @@ class TestDreamRun:
         # The template renders with stale_threshold_days=14 → LLM must see "N>14"
         assert "N>14" in system_msg
 
+    async def test_phase2_skips_user_when_layered_persona_enabled(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """When skip_user_edits=True, Phase 2 must not list USER.md as editable."""
+        dream.skip_user_edits = True
+        store.append_history("User prefers concise replies")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        phase2_system = mock_runner.run.call_args[0][0].initial_messages[0]["content"]
+        assert "Do **not** edit USER.md" in phase2_system
+        assert "- USER.md" not in phase2_system.split("memory/MEMORY.md")[0]
+
 
 class TestDreamPromptCaps:
     """Dream's Phase 1/2 prompt must not be poisoned by a legacy oversized

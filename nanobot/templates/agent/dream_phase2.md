@@ -4,8 +4,12 @@ Update memory files based on the analysis below.
 
 ## File paths (relative to workspace root)
 - SOUL.md
-- USER.md
-- memory/MEMORY.md
+{% if not skip_user_edits %}- USER.md
+{% endif %}- memory/MEMORY.md
+
+{% if skip_user_edits %}
+**USER.md** is managed by Layered Memory (L3 persona job). Do **not** edit USER.md in this phase.
+{% endif %}
 
 Do NOT guess paths. Do NOT write to `skills/` — skill creation is handled by the evolution system, not Dream.
 

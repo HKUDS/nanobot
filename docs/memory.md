@@ -19,7 +19,7 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 This keeps the system light in the moment, but reflective over time.
 
-For **long single-session tasks** (many large tool results in one sitting), see also [Layered Memory](./layered-memory.md). It adds a per-session Task Canvas and `node_id` index under `.nanobot/canvas/` so the agent can navigate tool history without replaying every full output. That layer is separate from Consolidator/Dream: it does not write to `history.jsonl` or `MEMORY.md` in LM1.
+For **long single-session tasks** (many large tool results in one sitting), see also [Layered Memory](./layered-memory.md). It adds Task Canvas + optional L0–L3 long-term memory (`memory.sqlite`, `memory/scenes/`, persona `USER.md`). That layer is separate from Consolidator/Dream for `MEMORY.md` / `SOUL.md`; when `layeredMemory.persona.enable` is on, Dream does not edit `USER.md`.
 
 ## The Flow
 

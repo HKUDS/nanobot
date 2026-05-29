@@ -355,6 +355,7 @@ class AgentLoop:
             store=self.context.memory,
             provider=provider,
             model=self.model,
+            skip_user_edits=self._layered_memory.persona_enabled(),
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None

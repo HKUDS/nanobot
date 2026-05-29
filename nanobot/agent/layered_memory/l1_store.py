@@ -161,6 +161,20 @@ class L1Store:
         ).fetchall()
         return [_row_to_memory(row) for row in rows]
 
+    def list_recent(self, limit: int = 40) -> list[L1Memory]:
+        """Most recent atoms across all sessions (L3 persona input)."""
+        if limit <= 0:
+            return []
+        rows = self._connect().execute(
+            """
+            SELECT * FROM l1_memories
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [_row_to_memory(row) for row in rows]
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()

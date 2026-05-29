@@ -15,6 +15,7 @@ from nanobot.config.schema import LayeredMemoryConfig, LayeredMemoryPipelineConf
 
 L1JobHandler = Callable[..., Awaitable[None]]
 L2JobHandler = Callable[..., Awaitable[None]]
+L3JobHandler = Callable[..., Awaitable[None]]
 
 
 class PipelineTriggerReason(str, Enum):
@@ -25,6 +26,11 @@ class PipelineTriggerReason(str, Enum):
 
 class L2TriggerReason(str, Enum):
     AFTER_L1 = "after_l1"
+    SHUTDOWN = "shutdown"
+
+
+class L3TriggerReason(str, Enum):
+    AFTER_L2 = "after_l2"
     SHUTDOWN = "shutdown"
 
 
@@ -77,6 +83,9 @@ class MemoryPipelineManager:
         "_config",
         "_l1_handler",
         "_l2_handler",
+        "_l3_handler",
+        "_last_l3_at",
+        "_l3_pending",
         "_pipeline_cfg",
         "_queue",
         "_sessions",
@@ -88,6 +97,7 @@ class MemoryPipelineManager:
         *,
         l1_handler: L1JobHandler | None = None,
         l2_handler: L2JobHandler | None = None,
+        l3_handler: L3JobHandler | None = None,
     ) -> None:
         self._config = config
         self._pipeline_cfg = config.pipeline
@@ -95,6 +105,9 @@ class MemoryPipelineManager:
         self._queue = SerialQueue()
         self._l1_handler = l1_handler or self._default_l1_handler
         self._l2_handler = l2_handler or self._default_l2_handler
+        self._l3_handler = l3_handler or self._default_l3_handler
+        self._last_l3_at = 0.0
+        self._l3_pending = False
 
     @property
     def pipeline_config(self) -> LayeredMemoryPipelineConfig:
@@ -156,6 +169,11 @@ class MemoryPipelineManager:
                 await self._queue.run(
                     self._run_l2_job(session_key, reason=L2TriggerReason.SHUTDOWN),
                 )
+        if self._l3_pending and self._config.persona_enabled():
+            flush_key = next(iter(self._sessions), "shutdown")
+            await self._queue.run(
+                self._run_l3_job(flush_key, reason=L3TriggerReason.SHUTDOWN),
+            )
         await self.flush_all(reason=PipelineTriggerReason.SHUTDOWN)
         self._sessions.clear()
 
@@ -298,6 +316,37 @@ class MemoryPipelineManager:
             if state is not None:
                 state.last_l2_at = time.monotonic()
                 state.l2_pending = False
+            await self._schedule_l3_after_l2(session_key)
+
+    async def _schedule_l3_after_l2(self, session_key: str) -> None:
+        if not self._config.persona_enabled():
+            return
+        persona_cfg = self._config.persona
+        now = time.monotonic()
+        if persona_cfg.min_interval_seconds > 0 and self._last_l3_at > 0:
+            elapsed = now - self._last_l3_at
+            if elapsed < persona_cfg.min_interval_seconds:
+                self._l3_pending = True
+                logger.debug(
+                    "layered_memory l3_deferred session={} wait_s={:.1f}",
+                    session_key,
+                    persona_cfg.min_interval_seconds - elapsed,
+                )
+                return
+        await self._run_l3_job(session_key, reason=L3TriggerReason.AFTER_L2)
+
+    async def _run_l3_job(self, session_key: str, *, reason: L3TriggerReason) -> None:
+        self._l3_pending = False
+        try:
+            await self._l3_handler(session_key, reason=reason)
+        except Exception:
+            logger.exception(
+                "layered_memory l3_job failed session={} reason={}",
+                session_key,
+                reason.value,
+            )
+        else:
+            self._last_l3_at = time.monotonic()
 
     async def _default_l1_handler(
         self,
@@ -325,6 +374,19 @@ class MemoryPipelineManager:
         """LM3-A replaces this with real L2 scene extraction."""
         logger.debug(
             "layered_memory l2_job_stub session={} reason={}",
+            session_key,
+            reason.value,
+        )
+
+    async def _default_l3_handler(
+        self,
+        session_key: str,
+        *,
+        reason: L3TriggerReason,
+    ) -> None:
+        """LM3-B replaces this with real L3 persona generation."""
+        logger.debug(
+            "layered_memory l3_job_stub session={} reason={}",
             session_key,
             reason.value,
         )

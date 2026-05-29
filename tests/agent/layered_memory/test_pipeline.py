@@ -8,12 +8,17 @@ import pytest
 
 from nanobot.agent.layered_memory.pipeline import (
     L2TriggerReason,
+    L3TriggerReason,
     MemoryPipelineManager,
     PipelineTriggerReason,
     SerialQueue,
     warmup_threshold,
 )
-from nanobot.config.schema import LayeredMemoryCaptureConfig, LayeredMemoryConfig
+from nanobot.config.schema import (
+    LayeredMemoryCaptureConfig,
+    LayeredMemoryConfig,
+    LayeredMemoryPersonaConfig,
+)
 
 
 @pytest.fixture
@@ -230,3 +235,92 @@ async def test_l2_flush_on_shutdown(pipeline_cfg: LayeredMemoryConfig) -> None:
     await mgr.notify_turn("sess", turn_id="t1")
     await mgr.close()
     assert L2TriggerReason.SHUTDOWN in l2_reasons
+
+
+@pytest.mark.asyncio
+async def test_l3_runs_after_l2(pipeline_cfg: LayeredMemoryConfig) -> None:
+    pipeline_cfg.pipeline.every_n_conversations = 1
+    pipeline_cfg.pipeline.enable_warmup = False
+    pipeline_cfg.pipeline.l2_delay_after_l1_seconds = 0
+    pipeline_cfg.pipeline.l2_min_interval_seconds = 0
+    pipeline_cfg.persona = LayeredMemoryPersonaConfig(enable=True, min_interval_seconds=0)
+    l3_reasons: list[L3TriggerReason] = []
+
+    async def l1_handler(
+        session_key: str,
+        *,
+        reason: PipelineTriggerReason,
+        turn_ids: tuple[str, ...],
+        chunk: int,
+    ) -> None:
+        return
+
+    async def l2_handler(
+        session_key: str,
+        *,
+        reason: L2TriggerReason,
+    ) -> None:
+        return
+
+    async def l3_handler(
+        session_key: str,
+        *,
+        reason: L3TriggerReason,
+    ) -> None:
+        l3_reasons.append(reason)
+
+    mgr = MemoryPipelineManager(
+        pipeline_cfg,
+        l1_handler=l1_handler,
+        l2_handler=l2_handler,
+        l3_handler=l3_handler,
+    )
+    await mgr.notify_turn("sess", turn_id="t1")
+    await mgr.close()
+    assert L3TriggerReason.AFTER_L2 in l3_reasons
+
+
+@pytest.mark.asyncio
+async def test_l3_respects_min_interval(pipeline_cfg: LayeredMemoryConfig) -> None:
+    pipeline_cfg.pipeline.every_n_conversations = 1
+    pipeline_cfg.pipeline.enable_warmup = False
+    pipeline_cfg.pipeline.l2_delay_after_l1_seconds = 0
+    pipeline_cfg.pipeline.l2_min_interval_seconds = 0
+    pipeline_cfg.persona = LayeredMemoryPersonaConfig(enable=True, min_interval_seconds=3600)
+    l3_reasons: list[L3TriggerReason] = []
+
+    async def l1_handler(
+        session_key: str,
+        *,
+        reason: PipelineTriggerReason,
+        turn_ids: tuple[str, ...],
+        chunk: int,
+    ) -> None:
+        return
+
+    async def l2_handler(
+        session_key: str,
+        *,
+        reason: L2TriggerReason,
+    ) -> None:
+        return
+
+    async def l3_handler(
+        session_key: str,
+        *,
+        reason: L3TriggerReason,
+    ) -> None:
+        l3_reasons.append(reason)
+
+    mgr = MemoryPipelineManager(
+        pipeline_cfg,
+        l1_handler=l1_handler,
+        l2_handler=l2_handler,
+        l3_handler=l3_handler,
+    )
+    mgr._last_l3_at = __import__("time").monotonic()
+    await mgr.notify_turn("sess", turn_id="t1")
+    await asyncio.sleep(0.05)
+    assert l3_reasons == []
+    await mgr.close()
+    assert L3TriggerReason.SHUTDOWN in l3_reasons

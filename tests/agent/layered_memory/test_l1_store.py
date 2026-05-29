@@ -29,7 +29,18 @@ def test_insert_and_search(store: L1Store) -> None:
     assert hits[0].memory_type == "preference"
 
 
-def test_duplicate_content_hash_skipped(store: L1Store) -> None:
+def test_list_recent_returns_newest_first(store: L1Store) -> None:
+    for i in range(3):
+        store.insert(
+            session_key=f"s{i}",
+            memory_type="fact",
+            content=f"item {i}",
+            source_l0_ids=(i,),
+            source_turn_ids=(f"t{i}",),
+        )
+    recent = store.list_recent(2)
+    assert len(recent) == 2
+    assert "item 2" in recent[0].content
     first = store.insert(
         session_key="cli:direct",
         memory_type="fact",

@@ -167,13 +167,13 @@
 
 ### LM3-B L3
 
-- [ ] `persona/generator.py`：L2 后更新 `USER.md`（mutex）
-- [ ] **Dream 边界**：更新 `hermes-design.md` / `gotchas.md` — USER 单 writer
-- [ ] 可选：file lock `workspace/.nanobot/persona.lock`
+- [x] `persona/generator.py`：L2 后更新 `USER.md`（mutex）
+- [x] **Dream 边界**：更新 `hermes-design.md` / `gotchas.md` — USER 单 writer
+- [x] 可选：file lock `workspace/.nanobot/persona.lock`
 
 ### LM3-C 文档
 
-- [ ] `docs/layered-memory.md` 补 L2/L3、与 Dream 对照表
+- [x] `docs/layered-memory.md` 补 L2/L3、与 Dream 对照表
 
 **验收**：
 

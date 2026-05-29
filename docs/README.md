@@ -29,7 +29,7 @@ Use these when you want deeper customization, integration, or extension details.
 | Topic | Repo docs | What it covers |
 |---|---|---|
 | Memory | [`memory.md`](./memory.md) | How nanobot stores, consolidates, and restores memory |
-| Layered Memory | [`layered-memory.md`](./layered-memory.md) | Task Canvas, tool node index, and `read_memory_node` (LM1) |
+| Layered Memory | [`layered-memory.md`](./layered-memory.md) | Task Canvas (LM1), L0–L3 pipeline, recall, Dream boundaries |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Use nanobot programmatically from Python |
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
