@@ -252,6 +252,86 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_download_dingtalk_file_rejects_traversal_filename(tmp_path, monkeypatch) -> None:
+    """Inbound DingTalk filenames must not escape the per-sender media directory."""
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    async def fake_get_token():
+        return "test-token"
+
+    monkeypatch.setattr(channel, "_get_access_token", fake_get_token)
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(200, {"downloadUrl": "https://example.com/tmpfile"}),
+            _FakeResponse(200, content=b"owned"),
+        ]
+    )
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_media_dir",
+        lambda channel_name=None: tmp_path / channel_name if channel_name else tmp_path,
+    )
+
+    result = await channel._download_dingtalk_file("code123", "../../pwned.txt", "user1")
+
+    assert result is None
+    assert not (tmp_path / "pwned.txt").exists()
+    assert not (tmp_path / "dingtalk" / "pwned.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_file_message_does_not_download(monkeypatch) -> None:
+    """Authorization must happen before writing DingTalk attachments to disk."""
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["allowed-user"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+    downloaded: list[tuple[str, str, str]] = []
+
+    class _FakeFileChatbotMessage:
+        text = None
+        extensions = {}
+        image_content = None
+        rich_text_content = None
+        sender_staff_id = "attacker"
+        sender_id = "fallback-user"
+        sender_nick = "Mallory"
+        message_type = "file"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeFileChatbotMessage()
+
+    async def fake_download(download_code, filename, sender_id):
+        downloaded.append((download_code, filename, sender_id))
+        return "/tmp/should-not-exist"
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeFileChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_download_dingtalk_file", fake_download)
+
+    status, body = await handler.process(
+        SimpleNamespace(
+            data={
+                "conversationType": "1",
+                "content": {"downloadCode": "abc123", "fileName": "../../pwned.txt"},
+                "text": {"content": ""},
+            }
+        )
+    )
+
+    if channel._background_tasks:
+        await asyncio.gather(*list(channel._background_tasks))
+
+    assert (status, body) == ("OK", "OK")
+    assert downloaded == []
+
+
+@pytest.mark.asyncio
 async def test_read_media_bytes_rejects_private_http_target_before_fetch() -> None:
     """Remote media fetches must not reach loopback/private addresses."""
     channel = DingTalkChannel(

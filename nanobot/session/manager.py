@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import base64
 import json
 import os
 import re
@@ -345,7 +346,13 @@ class SessionManager:
 
     @staticmethod
     def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
+        """Map an arbitrary session key to a stable collision-resistant filename stem."""
+        encoded = base64.urlsafe_b64encode(key.encode("utf-8")).decode("ascii").rstrip("=")
+        return encoded or "_"
+
+    @staticmethod
+    def legacy_safe_key(key: str) -> str:
+        """Previous lossy session filename stem, used only for one-way migration."""
         return safe_filename(key.replace(":", "_"))
 
     def _get_session_path(self, key: str) -> Path:
@@ -354,7 +361,11 @@ class SessionManager:
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
-        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+        return self.legacy_sessions_dir / f"{self.legacy_safe_key(key)}.jsonl"
+
+    def _get_workspace_legacy_session_path(self, key: str) -> Path:
+        """Legacy workspace session path from the old lossy filename scheme."""
+        return self.sessions_dir / f"{self.legacy_safe_key(key)}.jsonl"
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -380,11 +391,23 @@ class SessionManager:
         """Load a session from disk."""
         path = self._get_session_path(key)
         if not path.exists():
-            legacy_path = self._get_legacy_session_path(key)
-            if legacy_path.exists():
+            for legacy_path in (
+                self._get_workspace_legacy_session_path(key),
+                self._get_legacy_session_path(key),
+            ):
+                if not legacy_path.exists() or legacy_path == path:
+                    continue
+                if not self._legacy_file_belongs_to_key(legacy_path, key):
+                    logger.warning(
+                        "Skipping legacy session {} for requested key {}; stored key differs",
+                        legacy_path,
+                        key,
+                    )
+                    continue
                 try:
                     shutil.move(str(legacy_path), str(path))
                     logger.info("Migrated session {} from legacy path", key)
+                    break
                 except Exception:
                     logger.exception("Failed to migrate session {}", key)
 
@@ -408,6 +431,15 @@ class SessionManager:
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
+                        stored_key = data.get("key")
+                        if stored_key and stored_key != key:
+                            logger.warning(
+                                "Session file {} stored key {} does not match requested key {}",
+                                path,
+                                stored_key,
+                                key,
+                            )
+                            return None
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
@@ -428,6 +460,24 @@ class SessionManager:
             if repaired is not None:
                 logger.info("Recovered session {} from corrupt file ({} messages)", key, len(repaired.messages))
             return repaired
+
+    @staticmethod
+    def _legacy_file_belongs_to_key(path: Path, key: str) -> bool:
+        """Return True when a legacy file is safe to migrate for *key*."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("_type") != "metadata":
+                        return True
+                    stored_key = data.get("key")
+                    return not stored_key or stored_key == key
+        except Exception:
+            return False
+        return True
 
     def _repair(self, key: str) -> Session | None:
         """Attempt to recover a session from a corrupt JSONL file."""
@@ -456,6 +506,15 @@ class SessionManager:
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
+                        stored_key = data.get("key")
+                        if stored_key and stored_key != key:
+                            logger.warning(
+                                "Session file {} stored key {} does not match requested key {}",
+                                path,
+                                stored_key,
+                                key,
+                            )
+                            return None
                         if data.get("created_at"):
                             with suppress(ValueError, TypeError):
                                 created_at = datetime.fromisoformat(data["created_at"])
@@ -605,6 +664,14 @@ class SessionManager:
                         created_at = data.get("created_at")
                         updated_at = data.get("updated_at")
                         stored_key = data.get("key")
+                        if stored_key and stored_key != key:
+                            logger.warning(
+                                "Session file {} stored key {} does not match requested key {}",
+                                path,
+                                stored_key,
+                                key,
+                            )
+                            return None
                     else:
                         messages.append(data)
             return {

@@ -8,11 +8,16 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from httpcore import ConnectError
 
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import WebFetchConfig
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 _REAL_GETADDRINFO = socket.getaddrinfo
 
@@ -62,6 +67,42 @@ async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path)
         reset_workspace_scope(token)
     data = json.loads(result)
     assert "error" in data
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_does_not_connect_to_rebound_private_address(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    resolutions = iter([
+        "93.184.216.34",  # initial execute validation
+        "93.184.216.34",  # redirect helper validation
+        "127.0.0.1",      # transport connect-time resolution
+        "127.0.0.1",      # readability fallback validation
+    ])
+    connected_hosts: list[str] = []
+
+    def rebind_resolver(hostname, port, family=0, type_=0):
+        if hostname == "rebind.example":
+            address = next(resolutions)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (address, 0))]
+        return _fake_resolve_public(hostname, port, family, type_)
+
+    async def fake_connect_tcp(self, host, port, **kwargs):
+        connected_hosts.append(host)
+        if host == "127.0.0.1":
+            raise AssertionError("transport attempted to connect to rebound private address")
+        raise ConnectError("stop after observing public connect attempt")
+
+    monkeypatch.setattr(
+        "httpcore._backends.anyio.AnyIOBackend.connect_tcp",
+        fake_connect_tcp,
+    )
+
+    with patch("nanobot.security.network.socket.getaddrinfo", rebind_resolver):
+        result = await tool.execute(url="http://rebind.example/")
+
+    data = json.loads(result)
+    assert "error" in data
+    assert connected_hosts == []
 
 
 @pytest.mark.asyncio

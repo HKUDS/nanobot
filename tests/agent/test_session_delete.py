@@ -63,3 +63,32 @@ def test_safe_key_matches_internal_path(tmp_path: Path) -> None:
     key = "telegram:abc/def"
     expected = sm._get_session_path(key).name
     assert SessionManager.safe_key(key) + ".jsonl" == expected
+
+
+def test_safe_key_does_not_collapse_distinct_session_keys() -> None:
+    pairs = [
+        ("api:a:b", "api:a_b"),
+        ("websocket:a:b", "websocket:a_b"),
+        ("foo/bar", "foo_bar"),
+        ("foo\\bar", "foo_bar"),
+    ]
+
+    for left, right in pairs:
+        assert SessionManager.safe_key(left) != SessionManager.safe_key(right)
+
+
+def test_colliding_legacy_session_keys_use_distinct_files(tmp_path: Path) -> None:
+    sm = SessionManager(tmp_path)
+    colon = Session(key="api:a:b")
+    colon.add_message("user", "secret from colon session")
+    underscore = Session(key="api:a_b")
+    underscore.add_message("user", "content from underscore session")
+
+    sm.save(colon)
+    sm.save(underscore)
+
+    assert sm._get_session_path("api:a:b") != sm._get_session_path("api:a_b")
+    assert sm.read_session_file("api:a:b")["messages"][0]["content"] == "secret from colon session"
+    assert sm.read_session_file("api:a_b")["messages"][0]["content"] == (
+        "content from underscore session"
+    )

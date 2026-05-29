@@ -19,6 +19,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_resolved_url, validate_url_target
+from nanobot.utils.helpers import safe_filename
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
@@ -68,26 +69,33 @@ class NanobotDingTalkHandler(CallbackHandler):
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
 
+            sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
+            sender_name = chatbot_msg.sender_nick or "Unknown"
+            sender_uid = sender_id or "unknown"
+            sender_allowed = self.channel.is_allowed(str(sender_id)) if sender_id else False
+
             # Handle file/image messages
             file_paths = []
             if chatbot_msg.message_type == "picture" and chatbot_msg.image_content:
                 download_code = chatbot_msg.image_content.download_code
-                if download_code:
-                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                if download_code and sender_allowed:
                     fp = await self.channel._download_dingtalk_file(download_code, "image.jpg", sender_uid)
                     if fp:
                         file_paths.append(fp)
                         content = content or "[Image]"
+                elif download_code:
+                    content = content or "[Image]"
 
             elif chatbot_msg.message_type == "file":
                 download_code = message.data.get("content", {}).get("downloadCode") or message.data.get("downloadCode")
                 fname = message.data.get("content", {}).get("fileName") or message.data.get("fileName") or "file"
-                if download_code:
-                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                if download_code and sender_allowed:
                     fp = await self.channel._download_dingtalk_file(download_code, fname, sender_uid)
                     if fp:
                         file_paths.append(fp)
                         content = content or "[File]"
+                elif download_code:
+                    content = content or "[File]"
 
             elif chatbot_msg.message_type == "richText" and chatbot_msg.rich_text_content:
                 rich_list = chatbot_msg.rich_text_content.rich_text_list or []
@@ -101,10 +109,12 @@ class NanobotDingTalkHandler(CallbackHandler):
                     elif item.get("downloadCode"):
                         dc = item["downloadCode"]
                         fname = item.get("fileName") or "file"
-                        sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
-                        fp = await self.channel._download_dingtalk_file(dc, fname, sender_uid)
-                        if fp:
-                            file_paths.append(fp)
+                        if sender_allowed:
+                            fp = await self.channel._download_dingtalk_file(dc, fname, sender_uid)
+                            if fp:
+                                file_paths.append(fp)
+                                content = content or "[File]"
+                        else:
                             content = content or "[File]"
 
             if file_paths:
@@ -117,9 +127,6 @@ class NanobotDingTalkHandler(CallbackHandler):
                     chatbot_msg.message_type,
                 )
                 return AckMessage.STATUS_OK, "OK"
-
-            sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
-            sender_name = chatbot_msg.sender_nick or "Unknown"
 
             conversation_type = message.data.get("conversationType")
             conversation_id = (
@@ -745,8 +752,15 @@ class DingTalkChannel(BaseChannel):
             # Save to media directory (accessible under workspace)
             download_dir = get_media_dir("dingtalk") / sender_id
             download_dir.mkdir(parents=True, exist_ok=True)
-            file_path = download_dir / filename
-            await asyncio.to_thread(file_path.write_bytes, file_resp.content)
+            raw_filename = str(filename or "file").replace("\\", "/")
+            if raw_filename.startswith("/") or ".." in Path(raw_filename).parts:
+                self.logger.warning("blocked unsafe dingtalk filename: {}", filename)
+                return None
+            safe_name = safe_filename(Path(raw_filename).name) or "file"
+            base = download_dir.resolve(strict=False)
+            file_path = (base / safe_name).resolve(strict=False)
+            file_path.relative_to(base)
+            file_path.write_bytes(file_resp.content)
             self.logger.info("file saved: {}", file_path)
             return str(file_path)
         except Exception:
