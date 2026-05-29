@@ -43,6 +43,29 @@ def test_list_sessions_includes_metadata_title(tmp_path):
     assert rows[0]["title"] == "自动生成标题"
 
 
+def test_get_history_drops_duplicate_and_malformed_tool_results() -> None:
+    session = Session(
+        key="k",
+        messages=[
+            {"role": "user", "content": "run"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "tc", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "tc", "content": "one"},
+            {"role": "tool", "tool_call_id": "tc", "content": "duplicate"},
+            {"role": "tool", "content": "missing id"},
+            {"role": "tool", "tool_call_id": "unknown", "content": "unknown"},
+        ],
+    )
+
+    history = session.get_history(max_messages=100)
+
+    tool_results = [m for m in history if m.get("role") == "tool"]
+    assert [m["content"] for m in tool_results] == ["one"]
+
+
 def test_list_sessions_includes_user_preview(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-preview")

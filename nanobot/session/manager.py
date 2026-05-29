@@ -18,6 +18,7 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     find_legal_message_start,
     image_placeholder_text,
+    repair_tool_result_protocol,
     safe_filename,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
@@ -143,6 +144,8 @@ class Session:
                 sliced = sliced[start:]
                 break
 
+        # Drop malformed, duplicate, and orphan tool results before legal-start trimming.
+        sliced = repair_tool_result_protocol(sliced)
         # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
         if start:
@@ -248,7 +251,7 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
-        return out
+        return repair_tool_result_protocol(out)
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -518,7 +521,7 @@ class SessionManager:
                     "last_consolidated": session.last_consolidated
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
+                for msg in repair_tool_result_protocol(session.messages):
                     f.write(json.dumps(msg, ensure_ascii=False) + "\n")
                 if fsync:
                     f.flush()
