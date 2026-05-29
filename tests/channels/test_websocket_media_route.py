@@ -227,8 +227,101 @@ async def test_media_route_serves_signed_file(
     assert resp.headers["content-type"].startswith("image/png")
     # Immutable cache header lets the browser skip round-trips on replay.
     assert "immutable" in resp.headers.get("cache-control", "")
+    # Video players rely on byte ranges; images get the header for consistency.
+    assert resp.headers.get("accept-ranges") == "bytes"
     # nosniff keeps the browser from second-guessing our Content-Type.
     assert resp.headers.get("x-content-type-options") == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_media_route_serves_video_byte_ranges(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """MP4 playback needs HTTP Range support for mid-stream reads and seeking."""
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29927)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29927{url_path}",
+                headers={"Range": "bytes=2-5"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 206
+    assert resp.content == b"2345"
+    assert resp.headers["content-type"].startswith("video/mp4")
+    assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.headers.get("content-range") == "bytes 2-5/10"
+    assert resp.headers.get("content-length") == "4"
+
+
+@pytest.mark.asyncio
+async def test_media_route_serves_suffix_video_byte_ranges(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29928)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29928{url_path}",
+                headers={"Range": "bytes=-3"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 206
+    assert resp.content == b"789"
+    assert resp.headers.get("content-range") == "bytes 7-9/10"
+
+
+@pytest.mark.asyncio
+async def test_media_route_rejects_unsatisfiable_byte_range(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "clip.mp4"
+    target.write_bytes(b"0123456789")
+
+    channel = _ch(bus, port=29929)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(
+                f"http://127.0.0.1:29929{url_path}",
+                headers={"Range": "bytes=100-200"},
+            )
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 416
+    assert resp.headers.get("accept-ranges") == "bytes"
+    assert resp.headers.get("content-range") == "bytes */10"
 
 
 @pytest.mark.asyncio
