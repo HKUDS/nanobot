@@ -7,7 +7,6 @@ from loguru import logger
 
 from nanobot.utils.helpers import detect_image_mime
 
-
 # Supported file extensions for text extraction
 SUPPORTED_EXTENSIONS: set[str] = {
     # Document formats
@@ -232,6 +231,46 @@ def _is_text_extension(ext: str) -> bool:
 _MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
+def is_image_file(path: str) -> bool:
+    """Check whether *path* looks like an image file.
+
+    Uses magic-byte detection (reads first 16 bytes) with a ``mimetypes``
+    extension-based fallback.
+    """
+    p = Path(path)
+    mime: str | None = None
+    if p.is_file():
+        try:
+            with p.open("rb") as f:
+                mime = detect_image_mime(f.read(16))
+        except OSError:
+            mime = None
+    if not mime:
+        mime = mimetypes.guess_type(path)[0]
+    return bool(mime and mime.startswith("image/"))
+
+
+def reference_non_image_attachments(
+    content: str, media: list[str],
+) -> tuple[str, list[str]]:
+    """Separate images from non-image attachments without reading file content.
+
+    Image paths are preserved for downstream vision-block construction.
+    Non-image paths are appended as ``[Attachment: path]`` references.
+    """
+    image_paths: list[str] = []
+    attachment_refs: list[str] = []
+    for path in media:
+        if is_image_file(path):
+            image_paths.append(path)
+        else:
+            attachment_refs.append(f"[Attachment: {path}]")
+    if attachment_refs:
+        suffix = "\n".join(attachment_refs)
+        content = f"{content}\n\n{suffix}" if content else suffix
+    return content, image_paths
+
+
 def extract_documents(
     text: str,
     media_paths: list[str],
@@ -267,10 +306,7 @@ def extract_documents(
             )
             continue
 
-        with open(p, "rb") as f:
-            header = f.read(16)
-        mime = detect_image_mime(header) or mimetypes.guess_type(path_str)[0]
-        if mime and mime.startswith("image/"):
+        if is_image_file(path_str):
             image_paths.append(path_str)
         else:
             extracted = extract_text(p)
