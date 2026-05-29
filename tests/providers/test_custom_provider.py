@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import find_by_name
+from nanobot.utils.helpers import resolve_stream_idle_timeout_s
 
 
 def test_custom_provider_parse_handles_empty_choices() -> None:
@@ -83,6 +84,11 @@ def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> N
     assert ids[0] == "call_dup"
     assert len(ids) == 2
     assert len(set(ids)) == 2
+
+
+def test_invalid_stream_idle_timeout_falls_back_to_default() -> None:
+    assert resolve_stream_idle_timeout_s("abc", default=90) == 90
+    assert resolve_stream_idle_timeout_s("-1", default=90) == 90
 
 
 def test_local_provider_502_error_includes_reachability_hint() -> None:

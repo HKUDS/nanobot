@@ -13,6 +13,7 @@ from typing import Any
 import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.utils.helpers import resolve_stream_idle_timeout_s
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -596,7 +597,9 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S"), default=90,
+        )
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta or on_thinking_delta or on_tool_call_delta:

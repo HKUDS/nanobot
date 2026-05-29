@@ -27,6 +27,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.utils.helpers import resolve_stream_idle_timeout_s
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -1357,7 +1358,9 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s(
+            os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S"), default=90,
+        )
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
