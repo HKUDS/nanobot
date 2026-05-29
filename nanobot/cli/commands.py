@@ -1166,7 +1166,7 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
         async with server:
             await server.serve_forever()
-    # Register Dream system job (always-on, idempotent on restart)
+    # Register Dream system job (idempotent on restart)
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
         agent.dream.model = dream_cfg.model_override
