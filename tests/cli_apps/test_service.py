@@ -216,6 +216,8 @@ def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
                     "npm_package": "hyperframes",
                     "install_cmd": "npm install -g hyperframes",
                     "entry_point": "hyperframes",
+                    "logo_url": "https://raw.githubusercontent.com/heygen-com/hyperframes/main/assets/logo.png",
+                    "brand_color": "#111827",
                     "skill_md": "skills/hyperframes/SKILL.md",
                 }
             ],
@@ -228,6 +230,8 @@ def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
     app = payload["apps"][0]
     assert app["name"] == "hyperframes"
     assert app["source"] == "extensions"
+    assert app["logo_url"] == "https://raw.githubusercontent.com/heygen-com/hyperframes/main/assets/logo.png"
+    assert app["brand_color"] == "#111827"
     assert app["install_supported"] is True
     assert app["manifest"]["source"] == "nanobot-extension"
     assert app["manifest"]["trust"]["registry"] == "nanobot-extension"

@@ -302,6 +302,11 @@ def _brand_candidates(app: dict[str, Any]) -> list[str]:
 
 
 def _brand_payload(app: dict[str, Any]) -> tuple[str | None, str | None]:
+    declared_logo = str(app.get("logo_url") or "").strip()
+    if declared_logo.startswith(("https://", "/")):
+        declared_color = str(app.get("brand_color") or "").strip()
+        return declared_logo, declared_color or None
+
     brand = None
     domain_brand = None
     for candidate in _brand_candidates(app):
