@@ -6,7 +6,7 @@ import io
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
@@ -45,9 +45,16 @@ def _compute_line_ages(annotated) -> list[LineAge]:
 class GitStore:
     """Git-backed version control for memory files."""
 
-    def __init__(self, workspace: Path, tracked_files: list[str]):
+    def __init__(
+        self,
+        workspace: Path,
+        tracked_files: list[str],
+        *,
+        allow_nested: bool = False,
+    ):
         self._workspace = workspace
         self._tracked_files = tracked_files
+        self._allow_nested = allow_nested
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
@@ -64,7 +71,7 @@ class GitStore:
         if self.is_initialized():
             return False
 
-        if self._is_inside_git_repo():
+        if not self._allow_nested and self._is_inside_git_repo():
             logger.warning(
                 "Workspace {} is already inside a git repo; "
                 "skipping nested repo initialization",
@@ -196,9 +203,12 @@ class GitStore:
         """Generate .gitignore content from tracked files."""
         dirs: set[str] = set()
         for f in self._tracked_files:
-            parent = str(Path(f).parent)
-            if parent != ".":
-                dirs.add(parent)
+            parent = PurePosixPath(f).parent
+            if str(parent) == ".":
+                continue
+            parts = parent.parts
+            for i in range(1, len(parts) + 1):
+                dirs.add(str(PurePosixPath(*parts[:i])))
         lines = ["/*"]
         for d in sorted(dirs):
             lines.append(f"!{d}/")

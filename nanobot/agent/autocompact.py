@@ -37,6 +37,33 @@ class AutoCompact:
     def _format_summary(text: str, last_active: datetime) -> str:
         return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
 
+    @staticmethod
+    def _metadata_summary(session: Session) -> tuple[str, datetime] | None:
+        meta = session.metadata.get("_last_summary")
+        if not isinstance(meta, dict):
+            return None
+        text = meta.get("text")
+        last_active = meta.get("last_active")
+        if not isinstance(text, str) or not isinstance(last_active, str):
+            return None
+        try:
+            return text, datetime.fromisoformat(last_active)
+        except ValueError:
+            return None
+
+    def _summary_entry(self, session: Session) -> tuple[str, datetime] | None:
+        getter = getattr(self.consolidator, "get_session_summary", None)
+        if callable(getter):
+            entry = getter(session)
+            if (
+                isinstance(entry, tuple)
+                and len(entry) == 2
+                and isinstance(entry[0], str)
+                and isinstance(entry[1], datetime)
+            ):
+                return entry
+        return self._metadata_summary(session)
+
     def check_expired(self, schedule_background: Callable[[Coroutine], None],
                       active_session_keys: Collection[str] = ()) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
@@ -58,11 +85,11 @@ class AutoCompact:
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)
-                meta = session.metadata.get("_last_summary")
-                if isinstance(meta, dict):
+                entry = self._summary_entry(session)
+                if entry:
                     self._summaries[key] = (
-                        meta["text"],
-                        datetime.fromisoformat(meta["last_active"]),
+                        entry[0],
+                        entry[1],
                     )
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
@@ -77,8 +104,8 @@ class AutoCompact:
         entry = self._summaries.pop(key, None)
         if entry:
             return session, self._format_summary(entry[0], entry[1])
-        # Cold path: summary persisted in session metadata (process restarted).
-        meta = session.metadata.get("_last_summary")
-        if isinstance(meta, dict):
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
+        # Cold path: summary persisted by the consolidator (process restarted).
+        entry = self._summary_entry(session)
+        if entry:
+            return session, self._format_summary(entry[0], entry[1])
         return session, None

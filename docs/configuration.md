@@ -1518,6 +1518,24 @@ How it works:
 >
 > This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, leave `idleCompactAfterMinutes` at the default `0` and let only the token-driven path run.
 
+## Manual Memory Mode
+
+Set `agents.defaults.memory.mode` to `"manual"` when ordinary conversation should not automatically become long-term memory material:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "memory": {
+        "mode": "manual"
+      }
+    }
+  }
+}
+```
+
+In manual mode, long-term memory is isolated in `memory/manual/MEMORY.md`; auto mode continues to use `memory/MEMORY.md`. Automatic conversation summaries are not written to `memory/history.jsonl`, and session-continuity summaries stay in session metadata as `_last_summary`. Automatic Dream scheduling is disabled, and `/dream` optimizes only `memory/manual/MEMORY.md` without reading conversation history. Switching modes does not migrate or merge the two memory files; copy facts manually when you want them in both.
+
 ## Timezone
 
 Time is context. Context should be precise.

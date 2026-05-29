@@ -205,7 +205,12 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot:
+    memory_mode = getattr(
+        getattr(getattr(loop, "context", None), "memory", None),
+        "memory_mode",
+        "auto",
+    )
+    if snapshot and memory_mode == "auto":
         loop._schedule_background(loop.consolidator.archive(snapshot))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,

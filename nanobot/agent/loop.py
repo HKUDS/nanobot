@@ -206,6 +206,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        memory_mode: str = "auto",
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -243,6 +244,7 @@ class AgentLoop:
             else defaults.tool_hint_max_length
         )
         self.tools_config = _tc
+        self.memory_mode = memory_mode
         self.web_config = _tc.web
         self.exec_config = _tc.exec
         self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
@@ -261,7 +263,12 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            memory_mode=memory_mode,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -379,6 +386,7 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
+            memory_mode=defaults.memory.mode,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
@@ -611,6 +619,19 @@ class AgentLoop:
             runtime_state=self,
             inbound_message=msg,
         )
+
+    @staticmethod
+    def _merge_session_summaries(
+        existing: str | None,
+        new: str | None,
+    ) -> str | None:
+        parts: list[str] = []
+        for value in (existing, new):
+            if not isinstance(value, str) or not value or value == "(nothing)":
+                continue
+            if value not in parts:
+                parts.append(value)
+        return "\n\n".join(parts) if parts else None
 
     async def _dispatch_command_inline(
         self,
@@ -1109,10 +1130,11 @@ class AgentLoop:
         if pending:
             logger.info("Memory compact triggered for session {}", key)
 
-        await self.consolidator.maybe_consolidate_by_tokens(
+        new_summary = await self.consolidator.maybe_consolidate_by_tokens(
             session,
             replay_max_messages=self._max_messages,
         )
+        pending = self._merge_session_summaries(pending, new_summary)
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
             logger.debug("Subagent result persisted for session {}", key)
@@ -1156,7 +1178,11 @@ class AgentLoop:
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
-        session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+        session.enforce_file_cap(
+            on_archive=self.context.memory.raw_archive
+            if self.context.memory.memory_mode == "auto"
+            else None
+        )
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(
@@ -1372,9 +1398,13 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
-        await self.consolidator.maybe_consolidate_by_tokens(
+        new_summary = await self.consolidator.maybe_consolidate_by_tokens(
             ctx.session,
             replay_max_messages=self._max_messages,
+        )
+        ctx.pending_summary = self._merge_session_summaries(
+            ctx.pending_summary,
+            new_summary,
         )
         self._set_tool_context(
             ctx.msg.channel,
@@ -1471,7 +1501,11 @@ class AgentLoop:
             ctx.session_key,
             ctx.turn_latency_ms,
         )
-        ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+        ctx.session.enforce_file_cap(
+            on_archive=self.context.memory.raw_archive
+            if self.context.memory.memory_mode == "auto"
+            else None
+        )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)

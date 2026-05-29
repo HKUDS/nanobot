@@ -1206,7 +1206,14 @@ def _run_gateway(
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
-    if dream_cfg.enabled:
+
+    if not dream_cfg.enabled:
+        console.print("[yellow]○[/yellow] Dream: disabled")
+    elif config.agents.defaults.memory.mode == "manual":
+        if cron.get_job("dream") is not None:
+            cron.enable_job("dream", False)
+        console.print("[green]✓[/green] Dream: manual mode (/dream only)")
+    else:
         cron.register_system_job(CronJob(
             id="dream",
             name="dream",
@@ -1214,8 +1221,6 @@ def _run_gateway(
             payload=CronPayload(kind="system_event"),
         ))
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
-    else:
-        console.print("[yellow]○[/yellow] Dream: disabled")
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:

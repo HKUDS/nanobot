@@ -75,6 +75,31 @@ class TestConsolidatorSummarize:
         result = await consolidator.archive([])
         assert result is None
 
+    async def test_manual_mode_archive_does_not_write_history(self, tmp_path, mock_provider):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        sessions.get_or_create = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Manual session summary.",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive([{"role": "user", "content": "hello"}])
+
+        assert result == "Manual session summary."
+        assert store.read_unprocessed_history(since_cursor=0) == []
+
 
 class TestConsolidatorArchiveErrorHandling:
     """archive() must fall back to raw_archive when the LLM returns an error
@@ -262,6 +287,209 @@ class TestConsolidatorTokenBudget:
         # so last_consolidated must have moved past it.
         assert session.last_consolidated == 50
 
+    async def test_manual_archive_failure_does_not_advance_last_consolidated(
+        self,
+        tmp_path,
+        mock_provider,
+    ):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        sessions.get_or_create = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {"role": "user" if i in {0, 50} else "assistant", "content": f"m{i}"}
+            for i in range(70)
+        ]
+        session.metadata = {}
+        sessions.get_or_create.return_value = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken")]
+        )
+        consolidator.archive = AsyncMock(return_value=None)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        consolidator.archive.assert_awaited_once()
+        assert session.last_consolidated == 0
+        sessions.save.assert_not_called()
+
+    def test_session_summary_is_mode_independent(self, tmp_path, mock_provider):
+        session = Session(key="cli:switch")
+        session.metadata["_last_summary"] = {
+            "text": "Cross-mode summary.",
+            "last_active": "2026-05-28T12:00:00",
+        }
+        sessions = MagicMock()
+
+        auto = Consolidator(
+            store=MemoryStore(tmp_path, memory_mode="auto"),
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        manual = Consolidator(
+            store=MemoryStore(tmp_path, memory_mode="manual"),
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+
+        assert auto.get_session_summary(session)[0] == "Cross-mode summary."
+        assert manual.get_session_summary(session)[0] == "Cross-mode summary."
+
+    async def test_manual_archive_rolls_existing_summary_into_prompt(self, tmp_path, mock_provider):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="updated rolling context",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive(
+            [{"role": "user", "content": "new raw context"}],
+            existing_summary="older compacted context",
+        )
+
+        assert result == "updated rolling context"
+        messages = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        assert "Update the existing session summary" in messages[0]["content"]
+        assert "older compacted context" in messages[1]["content"]
+        assert "new raw context" in messages[1]["content"]
+
+    def test_manual_summary_persistence_replaces_with_rolling_summary(self, tmp_path, mock_provider):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        session = Session(key="cli:manual")
+        session.metadata["_last_summary"] = {
+            "text": "older compacted context",
+            "last_active": "2026-05-28T10:00:00",
+        }
+
+        consolidator._persist_last_summary(session, "updated rolling context")
+
+        text = session.metadata["_last_summary"]["text"]
+        assert text == "updated rolling context"
+
+    async def test_manual_token_consolidation_rolls_summary_across_rounds(
+        self,
+        tmp_path,
+        mock_provider,
+    ):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        sessions.get_or_create = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {"role": "user" if i in {0, 20, 40} else "assistant", "content": f"m{i}"}
+            for i in range(50)
+        ]
+        session.metadata = {
+            "_last_summary": {
+                "text": "older compacted context",
+                "last_active": "2026-05-28T10:00:00",
+            }
+        }
+        sessions.get_or_create.return_value = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (1200, "tiktoken"), (400, "tiktoken")]
+        )
+        consolidator.pick_consolidation_boundary = MagicMock(
+            side_effect=[(20, 1000), (40, 1000)]
+        )
+        consolidator.archive = AsyncMock(
+            side_effect=["updated context after round one", "updated context after round two"]
+        )
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        assert consolidator.archive.await_count == 2
+        first_call, second_call = consolidator.archive.await_args_list
+        assert first_call.kwargs["existing_summary"] == "older compacted context"
+        assert second_call.kwargs["existing_summary"] == "updated context after round one"
+        assert session.metadata["_last_summary"]["text"] == "updated context after round two"
+
+    def test_auto_summary_persistence_keeps_latest_summary(self, tmp_path, mock_provider):
+        store = MemoryStore(tmp_path, memory_mode="auto")
+        sessions = MagicMock()
+        sessions.save = MagicMock()
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        session = Session(key="cli:auto")
+        session.metadata["_last_summary"] = {
+            "text": "older compacted context",
+            "last_active": "2026-05-28T10:00:00",
+        }
+
+        consolidator._persist_last_summary(session, "new compacted context")
+
+        assert session.metadata["_last_summary"]["text"] == "new compacted context"
+
     async def test_raw_archive_fallback_breaks_round_loop(self, consolidator):
         """A degraded LLM should not trigger more archive() calls within the
         same maybe_consolidate_by_tokens invocation — bail after one fallback."""
@@ -414,6 +642,37 @@ class TestCompactIdleSession:
         # Session should still be truncated
         reloaded = sessions.get_or_create("cli:fail")
         assert len(reloaded.messages) <= 4
+
+    @pytest.mark.asyncio
+    async def test_manual_llm_failure_keeps_session_untrimmed(self, tmp_path, mock_provider):
+        from nanobot.session.manager import SessionManager
+
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        sessions = SessionManager(store.workspace)
+        consolidator = Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+        mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
+        session = sessions.get_or_create("cli:manual-fail")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        sessions.save(session)
+
+        result = await consolidator.compact_idle_session("cli:manual-fail", max_suffix=4)
+
+        assert result is None
+        assert store.read_unprocessed_history(since_cursor=0) == []
+        reloaded = sessions.get_or_create("cli:manual-fail")
+        assert len(reloaded.messages) == 20
+        assert reloaded.last_consolidated == 0
 
     @pytest.mark.asyncio
     async def test_respects_last_consolidated(self, real_consolidator, mock_provider):

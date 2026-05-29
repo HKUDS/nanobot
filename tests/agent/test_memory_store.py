@@ -21,6 +21,20 @@ class TestMemoryStoreBasicIO:
         store.write_memory("hello")
         assert store.read_memory() == "hello"
 
+    def test_manual_memory_uses_isolated_file(self, tmp_path):
+        auto = MemoryStore(tmp_path, memory_mode="auto")
+        manual = MemoryStore(tmp_path, memory_mode="manual")
+
+        auto.write_memory("auto memory")
+        manual.write_memory("manual memory")
+
+        assert auto.read_memory() == "auto memory"
+        assert manual.read_memory() == "manual memory"
+        assert (tmp_path / "memory" / "MEMORY.md").read_text(encoding="utf-8") == "auto memory"
+        assert (
+            tmp_path / "memory" / "manual" / "MEMORY.md"
+        ).read_text(encoding="utf-8") == "manual memory"
+
     def test_read_soul_returns_empty_when_missing(self, store):
         assert store.read_soul() == ""
 
