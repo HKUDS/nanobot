@@ -28,6 +28,12 @@ _INLINE_MARKDOWN_IMAGE_EXTS: frozenset[str] = frozenset({
     ".webp",
     ".gif",
 })
+_INLINE_MARKDOWN_VIDEO_EXTS: frozenset[str] = frozenset({
+    ".mp4",
+    ".mov",
+    ".webm",
+})
+_INLINE_MARKDOWN_MEDIA_EXTS = _INLINE_MARKDOWN_IMAGE_EXTS | _INLINE_MARKDOWN_VIDEO_EXTS
 _FILE_EDIT_TOOL_NAMES: frozenset[str] = frozenset({
     "write_file",
     "edit_file",
@@ -41,7 +47,7 @@ def rewrite_local_markdown_images(
     workspace_path: Path,
     sign_path: Callable[[Path], Mapping[str, Any] | None],
 ) -> str:
-    """Rewrite markdown image paths inside the workspace to signed WebUI media URLs."""
+    """Rewrite markdown media paths inside the workspace to signed WebUI media URLs."""
     if "![" not in text:
         return text
 
@@ -55,7 +61,7 @@ def rewrite_local_markdown_images(
         if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
             return None
         path_text = unquote(url)
-        if Path(path_text).suffix.lower() not in _INLINE_MARKDOWN_IMAGE_EXTS:
+        if Path(path_text).suffix.lower() not in _INLINE_MARKDOWN_MEDIA_EXTS:
             return None
         candidate = Path(path_text).expanduser()
         if not candidate.is_absolute():
@@ -78,6 +84,10 @@ def rewrite_local_markdown_images(
         return f"![{match.group(1)}]({signed_url}{title})"
 
     return _MARKDOWN_LOCAL_IMAGE_RE.sub(replace, text)
+
+
+def _media_kind_from_name(name: str) -> str:
+    return "video" if Path(name).suffix.lower() in _INLINE_MARKDOWN_VIDEO_EXTS else "image"
 
 
 def webui_transcript_path(session_key: str) -> Path:
@@ -821,11 +831,12 @@ def replay_transcript_to_ui_messages(
             if isinstance(media_urls, list):
                 for m in media_urls:
                     if isinstance(m, dict) and m.get("url"):
+                        name = str(m.get("name") or "")
                         media.append(
                             {
-                                "kind": "image",
+                                "kind": _media_kind_from_name(name),
                                 "url": str(m["url"]),
-                                "name": str(m.get("name") or ""),
+                                "name": name,
                             },
                         )
             extra: dict[str, Any] = {"content": content_s}

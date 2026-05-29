@@ -15,4 +15,14 @@ describe("MarkdownTextRenderer", () => {
     );
     expect(screen.getByText("Diagram")).toBeInTheDocument();
   });
+
+  it("renders markdown videos as inline players", () => {
+    render(<MarkdownTextRenderer>![nanobot-intro.mp4](/api/media/sig/video)</MarkdownTextRenderer>);
+
+    const video = screen.getByLabelText("Video attachment: nanobot-intro.mp4");
+    expect(video.tagName).toBe("VIDEO");
+    expect(video).toHaveAttribute("src", "/api/media/sig/video");
+    expect(video).toHaveAttribute("controls");
+    expect(screen.queryByRole("img", { name: "nanobot-intro.mp4" })).not.toBeInTheDocument();
+  });
 });
