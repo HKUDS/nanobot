@@ -13,7 +13,6 @@ from typing import Any
 import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-
 _ALNUM = string.ascii_letters + string.digits
 
 
@@ -192,7 +191,15 @@ class AnthropicProvider(LLMProvider):
             blocks.append({"type": "text", "text": content})
         elif isinstance(content, list):
             for item in content:
-                blocks.append(item if isinstance(item, dict) else {"type": "text", "text": str(item)})
+                if isinstance(item, dict):
+                    if item.get("type"):
+                        blocks.append(item)
+                    elif isinstance(item.get("text"), str):
+                        blocks.append({"type": "text", "text": item["text"]})
+                    else:
+                        blocks.append({"type": "text", "text": str(item)})
+                else:
+                    blocks.append({"type": "text", "text": str(item)})
 
         for tc in msg.get("tool_calls") or []:
             if not isinstance(tc, dict):
