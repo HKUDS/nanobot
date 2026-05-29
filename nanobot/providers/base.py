@@ -315,6 +315,29 @@ class LLMProvider(ABC):
 
         return cls._is_transient_error(response.content)
 
+    @classmethod
+    def is_arrearage_response(cls, response: LLMResponse) -> bool:
+        """Detect API-key arrearage / quota / billing errors that won't clear on retry.
+
+        These surface as HTTP 402 or as billing semantic tokens (e.g.
+        ``insufficient_quota``, ``payment_required``); reuses the same token and
+        text markers the 429 retry policy treats as non-retryable.
+        """
+        if response.error_status_code is not None and int(response.error_status_code) == 402:
+            return True
+
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        if any(
+            token in cls._NON_RETRYABLE_429_ERROR_TOKENS
+            for token in (type_token, code_token)
+            if token is not None
+        ):
+            return True
+
+        content = (response.content or "").lower()
+        return any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS)
+
     @staticmethod
     def _normalize_error_token(value: Any) -> str | None:
         if value is None:
