@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import sys
 from contextlib import suppress
@@ -411,7 +412,7 @@ class ExecTool(Tool):
                 env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
             else:
                 env["NANOBOT_PATH_APPEND"] = self.path_append
-                command = f'export PATH="$PATH{os.pathsep}$NANOBOT_PATH_APPEND"; {command}'
+                command = f'export PATH="$NANOBOT_PATH_APPEND{os.pathsep}$PATH"; {command}'
 
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
@@ -593,6 +594,10 @@ class ExecTool(Tool):
 
             cwd_path = Path(cwd).resolve()
 
+            symlink_error = self._guard_relative_symlink_paths(cmd, cwd_path)
+            if symlink_error:
+                return symlink_error
+
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
@@ -618,6 +623,42 @@ class ExecTool(Tool):
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
 
+        return None
+
+    def _guard_relative_symlink_paths(self, command: str, cwd_path: Path) -> str | None:
+        """Block relative symlink operands that resolve outside the workspace."""
+        try:
+            parts = shlex.split(command, posix=not _IS_WINDOWS)
+        except ValueError:
+            return None
+
+        separators = {"&&", "||", ";", "|", "&"}
+        for raw in parts:
+            token = raw.strip()
+            if (
+                not token
+                or token in separators
+                or token.startswith("-")
+                or "://" in token
+                or "=" in token
+                or any(ch in token for ch in "*?[]{}")
+            ):
+                continue
+            path = Path(os.path.expandvars(token)).expanduser()
+            if path.is_absolute():
+                continue
+            candidate = cwd_path / path
+            try:
+                if not candidate.is_symlink():
+                    continue
+                resolved = candidate.resolve(strict=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if not is_path_within(resolved, cwd_path):
+                return (
+                    "Error: Command blocked by safety guard (relative symlink escapes working dir)"
+                    + _WORKSPACE_BOUNDARY_NOTE
+                )
         return None
 
     @classmethod

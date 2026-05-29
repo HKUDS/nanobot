@@ -238,6 +238,22 @@ async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlink semantics")
+async def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (workspace / "leak.txt").symlink_to(outside)
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
+    result = await tool.execute(command="cat leak.txt")
+
+    assert "relative symlink escapes working dir" in result
+    assert "secret" not in result
+
+
+@pytest.mark.asyncio
 async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     """Without restrict_to_workspace, the LLM may still choose any working_dir."""
     workspace = tmp_path / "workspace"
