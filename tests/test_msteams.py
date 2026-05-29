@@ -186,6 +186,18 @@ def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_p
     assert set(persisted.keys()) == {"conv-valid", "conv-missing-ts"}
 
 
+def test_default_trusted_service_urls_cover_official_teams_clouds(make_channel):
+    ch = make_channel()
+
+    assert ch._is_trusted_service_url("https://smba.trafficmanager.net/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.gcc.teams.microsoft.com/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.gov.teams.microsoft.us/amer/")
+    assert ch._is_trusted_service_url("https://smba.infra.dod.teams.microsoft.us/amer/")
+    assert ch._is_trusted_service_url("https://westus-api.botframework.com/")
+    assert not ch._is_trusted_service_url("http://smba.trafficmanager.net/amer/")
+    assert not ch._is_trusted_service_url("https://smba.trafficmanager.net.evil.example/")
+
+
 def test_save_prunes_unsupported_conversation_refs(make_channel, tmp_path, monkeypatch):
     now = 1_800_000_000.0
     monkeypatch.setattr(msteams_module.time, "time", lambda: now)
