@@ -4,14 +4,16 @@ import base64
 import mimetypes
 import platform
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.rag import create_rag_pipeline, RAGPipeline
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
+from nanobot.config.schema import RAGConfig
 from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
@@ -20,6 +22,9 @@ from nanobot.utils.helpers import (
     truncate_text,
 )
 from nanobot.utils.prompt_templates import render_template
+
+if TYPE_CHECKING:
+    from nanobot.agent.rag import Document
 
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -57,11 +62,28 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        rag_config: RAGConfig | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self.rag_config = rag_config or RAGConfig()
+        self._rag_pipeline: RAGPipeline | None = None
+
+    @property
+    def rag_pipeline(self) -> RAGPipeline | None:
+        """Get or create the RAG pipeline if enabled."""
+        if not self.rag_config.enabled:
+            return None
+        if self._rag_pipeline is None:
+            self._rag_pipeline = create_rag_pipeline(self.rag_config, self.memory)
+        return self._rag_pipeline
 
     def build_system_prompt(
         self,
@@ -69,8 +91,18 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
         workspace: Path | None = None,
+        query: str | None = None,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        Args:
+            skill_names: Optional list of skill names to include.
+            channel: Optional channel name.
+            session_summary: Optional session summary.
+            workspace: Optional workspace path override.
+            query: Optional query for RAG-based retrieval. If provided and RAG is enabled,
+                   relevant memory chunks will be retrieved instead of full memory.
+        """
         root = workspace or self.workspace
         parts = [self._get_identity(channel=channel, workspace=root)]
 
@@ -80,7 +112,8 @@ class ContextBuilder:
 
         parts.append(render_template("agent/tool_contract.md"))
 
-        memory = self.memory.get_memory_context()
+        # Memory context: use RAG if enabled and query provided, otherwise full memory
+        memory = self._get_memory_context(query=query)
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
 
@@ -107,6 +140,18 @@ class ContextBuilder:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
         return "\n\n---\n\n".join(parts)
+
+    def _get_memory_context(self, query: str | None = None) -> str:
+            """Get memory context, using RAG if enabled and query provided."""
+            # If RAG is enabled and we have a query, use semantic retrieval
+            if self.rag_config.enabled and query and self.rag_pipeline:
+                rag_context = self.rag_pipeline.retrieve(query)
+                if rag_context:
+                    return f"## Retrieved Memory (RAG)\n{rag_context}"
+
+            # Fall back to full memory
+            long_term = self.memory.read_memory()
+            return f"## Long-term Memory\n{long_term}" if long_term else ""
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""

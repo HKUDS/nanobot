@@ -110,6 +110,20 @@ class ModelPresetConfig(Base):
         )
 
 
+class RAGConfig(Base):
+    """Retrieval-Augmented Generation configuration for memory context."""
+
+    enabled: bool = False  # Enable RAG-based memory retrieval
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Local embedding model
+    chunk_size: int = 512  # Characters per chunk
+    chunk_overlap: int = 50  # Overlap between chunks
+    top_k: int = 5  # Number of chunks to retrieve
+    min_relevance_score: float = 0.3  # Minimum similarity to include
+    max_context_chars: int = 8000  # Max chars for retrieved context
+    index_on_startup: bool = True  # Index memory on agent startup
+    reindex_interval_hours: int = 24  # Hours between automatic reindexing
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -159,6 +173,7 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    rag: RAGConfig = Field(default_factory=RAGConfig)  # RAG-based memory retrieval
 
 
 class AgentsConfig(Base):

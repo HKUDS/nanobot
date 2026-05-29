@@ -31,7 +31,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig, RAGConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.security.workspace_access import (
@@ -201,6 +201,7 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        rag_config: "RAGConfig | None" = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -255,7 +256,7 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, rag_config=rag_config)
         self.sessions = session_manager or SessionManager(workspace)
         self._webui_turns = WebuiTurnCoordinator(
             bus=self.bus,
@@ -383,6 +384,7 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            rag_config=defaults.rag,
             **extra,
         )
 
