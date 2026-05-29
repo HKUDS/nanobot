@@ -16,21 +16,26 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
+    DEFAULT_EXEC_SESSION_MANAGER,
     DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
-    DEFAULT_EXEC_SESSION_MANAGER,
     MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.sandbox import wrap_command
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -431,16 +436,23 @@ class ExecTool(Tool):
         command: str, cwd: str, env: dict[str, str],
         shell_program: str | None = None,
         login: bool = True,
+        *,
+        stdin: int = asyncio.subprocess.DEVNULL,
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
-            # create_subprocess_exec re-quotes args via list2cmdline, which
-            # breaks commands containing paths with spaces (e.g. "D:\Program
-            # Files\python.exe" "script.py"). create_subprocess_shell passes
-            # the raw command string to COMSPEC without re-quoting.
+            if "\n" in command:
+                return await asyncio.create_subprocess_exec(
+                    "powershell", "-NoProfile", "-Command", command,
+                    stdin=stdin,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
             return await asyncio.create_subprocess_shell(
                 command,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=stdin,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -454,7 +466,7 @@ class ExecTool(Tool):
         args.extend(["-c", command])
         return await asyncio.create_subprocess_exec(
             *args,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=stdin,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
