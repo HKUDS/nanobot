@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-
+from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -289,29 +292,11 @@ class ExecSessionManager:
         shell_program: str | None,
         login: bool,
     ) -> asyncio.subprocess.Process:
-        from nanobot.agent.tools import shell
+        from nanobot.agent.tools.shell import ExecTool
 
-        if shell._IS_WINDOWS:
-            return await asyncio.create_subprocess_shell(
-                command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-        shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args = [shell_program]
-        if login and shell_program.rsplit("/", 1)[-1] in {"bash", "zsh"}:
-            args.append("-l")
-        args.extend(["-c", command])
-        return await asyncio.create_subprocess_exec(
-            *args,
+        return await ExecTool._spawn(
+            command, cwd, env, shell_program, login,
             stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
         )
 
 
