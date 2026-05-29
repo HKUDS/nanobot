@@ -16,7 +16,7 @@ from email.parser import BytesParser
 from email.utils import parseaddr
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
@@ -53,6 +53,9 @@ class EmailConfig(Base):
     auto_reply_enabled: bool = True
     poll_interval_seconds: int = 30
     mark_seen: bool = True
+    post_action: Literal["delete", "move"] | None = None
+    post_action_move_mailbox: str | None = None
+    post_action_ignore_skipped: bool = True
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)
@@ -150,7 +153,9 @@ class EmailChannel(BaseChannel):
         poll_seconds = max(5, int(self.config.poll_interval_seconds))
         while self._running:
             try:
-                inbound_items = await asyncio.to_thread(self._fetch_new_messages)
+                inbound_items, skipped_uids = await asyncio.to_thread(self._fetch_new_messages)
+                should_apply_post_action = self._should_apply_post_action()
+                post_actions_uids: set[str] = set()
                 for item in inbound_items:
                     sender = item["sender"]
                     subject = item.get("subject", "")
@@ -161,13 +166,27 @@ class EmailChannel(BaseChannel):
                     if message_id:
                         self._last_message_id_by_chat[sender] = message_id
 
-                    await self._handle_message(
-                        sender_id=sender,
-                        chat_id=sender,
-                        content=item["content"],
-                        media=item.get("media") or None,
-                        metadata=item.get("metadata", {}),
-                    )
+                    try:
+                        await self._handle_message(
+                            sender_id=sender,
+                            chat_id=sender,
+                            content=item["content"],
+                            media=item.get("media") or None,
+                            metadata=item.get("metadata", {}),
+                        )
+                    except Exception:
+                        self.logger.exception("Error delivering email from {}", sender)
+                        continue
+
+                    uid = str((item.get("metadata") or {}).get("uid") or "")
+                    if uid and should_apply_post_action:
+                        post_actions_uids.add(uid)
+
+                if should_apply_post_action and not self.config.post_action_ignore_skipped:
+                    post_actions_uids.update(skipped_uids)
+
+                if post_actions_uids:
+                    await asyncio.to_thread(self._apply_post_actions_batch, sorted(post_actions_uids))
             except Exception:
                 self.logger.exception("Polling error")
 
@@ -290,6 +309,9 @@ class EmailChannel(BaseChannel):
         if not self.config.smtp_password:
             missing.append("smtp_password")
 
+        if self.config.post_action == "move" and not (self.config.post_action_move_mailbox or "").strip():
+            missing.append("post_action_move_mailbox")
+
         if missing:
             self.logger.error("Channel not configured, missing: {}", ', '.join(missing))
             return False
@@ -313,7 +335,7 @@ class EmailChannel(BaseChannel):
             smtp.login(self.config.smtp_username, self.config.smtp_password)
             smtp.send_message(msg)
 
-    def _fetch_new_messages(self) -> list[dict[str, Any]]:
+    def _fetch_new_messages(self) -> tuple[list[dict[str, Any]], set[str]]:
         """Poll IMAP and return parsed unread messages."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
@@ -336,7 +358,7 @@ class EmailChannel(BaseChannel):
         if end_date <= start_date:
             return []
 
-        return self._fetch_messages(
+        messages, _ = self._fetch_messages(
             search_criteria=(
                 "SINCE",
                 self._format_imap_date(start_date),
@@ -347,6 +369,7 @@ class EmailChannel(BaseChannel):
             dedupe=False,
             limit=max(1, int(limit)),
         )
+        return messages
 
     def _fetch_messages(
         self,
@@ -354,8 +377,9 @@ class EmailChannel(BaseChannel):
         mark_seen: bool,
         dedupe: bool,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], set[str]]:
         messages: list[dict[str, Any]] = []
+        skipped_uids: set[str] = set()
         cycle_uids: set[str] = set()
 
         for attempt in range(2):
@@ -366,15 +390,16 @@ class EmailChannel(BaseChannel):
                     dedupe,
                     limit,
                     messages,
+                    skipped_uids,
                     cycle_uids,
                 )
-                return messages
+                return messages, skipped_uids
             except Exception as exc:
                 if attempt == 1 or not self._is_stale_imap_error(exc):
                     raise
                 self.logger.warning("IMAP connection went stale, retrying once: {}", exc)
 
-        return messages
+        return messages, skipped_uids
 
     def _fetch_messages_once(
         self,
@@ -383,6 +408,7 @@ class EmailChannel(BaseChannel):
         dedupe: bool,
         limit: int,
         messages: list[dict[str, Any]],
+        skipped_uids: set[str],
         cycle_uids: set[str],
     ) -> None:
         """Fetch messages by arbitrary IMAP search criteria."""
@@ -424,6 +450,8 @@ class EmailChannel(BaseChannel):
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
                         client.store(imap_id, "+FLAGS", "\\Seen")
+                    if uid:
+                        skipped_uids.add(uid)
                     continue
 
                 # --- Anti-spoofing: verify Authentication-Results ---
@@ -435,6 +463,8 @@ class EmailChannel(BaseChannel):
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    if uid:
+                        skipped_uids.add(uid)
                     continue
                 if self.config.verify_dkim and not dkim_pass:
                     self.logger.warning(
@@ -443,12 +473,16 @@ class EmailChannel(BaseChannel):
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    if uid:
+                        skipped_uids.add(uid)
                     continue
 
                 if not self.is_allowed(sender):
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
                         client.store(imap_id, "+FLAGS", "\\Seen")
+                    if uid:
+                        skipped_uids.add(uid)
                     continue
 
                 subject = self._decode_header_value(parsed.get("Subject", ""))
@@ -582,6 +616,48 @@ class EmailChannel(BaseChannel):
             if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
                 # Evict a random half to cap memory; mark_seen is the primary dedup
                 self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
+
+    def _should_apply_post_action(self) -> bool:
+        return self.config.post_action in {"delete", "move"}
+
+    def _apply_post_actions_batch(self, post_actions_uids: list[str]) -> None:
+        if not self._should_apply_post_action() or not post_actions_uids:
+            return
+
+        mailbox = self.config.imap_mailbox or "INBOX"
+        client = self._open_imap_client(mailbox=mailbox)
+        if client is None:
+            return
+
+        try:
+            for uid in post_actions_uids:
+                if uid:
+                    self._apply_post_action(client, uid)
+        finally:
+            self._close_imap_client(client)
+
+    def _apply_post_action(self, client: Any, uid: str) -> None:
+        status, data = client.search(None, "UID", uid)
+        if status != "OK" or not data or not data[0]:
+            self.logger.warning("Post-action skipped: UID {} not found", uid)
+            return
+
+        imap_id = data[0].split()[0]
+        action = self.config.post_action
+
+        if action == "delete":
+            client.store(imap_id, "+FLAGS", "\\Deleted")
+            client.expunge()
+            return
+
+        if action == "move":
+            target = (self.config.post_action_move_mailbox or "").strip()
+            status, _ = client.copy(imap_id, target)
+            if status != "OK":
+                self.logger.warning("Post-action move failed for UID {} to mailbox {}", uid, target)
+                return
+            client.store(imap_id, "+FLAGS", "\\Deleted")
+            client.expunge()
 
     @classmethod
     def _is_stale_imap_error(cls, exc: Exception) -> bool:
