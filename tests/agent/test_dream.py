@@ -114,7 +114,7 @@ class TestEphemeralDirect:
 
         loop, store = _make_loop
 
-        with patch.object(store, "raw_archive") as mock_archive:
+        with patch.object(loop.context.memory, "raw_archive") as mock_archive:
             await loop.process_direct(
                 "test", session_key="dream:test", ephemeral=True,
             )
@@ -271,13 +271,12 @@ class TestDreamCommitMessage:
         store.git.auto_commit("initial state")
 
         # Simulate what the cron handler does: produce a resp with content,
-        # build the commit message, then commit a real file change.
+        # build the commit message via the actual function, then commit.
         resp_content = "Identified 2 new facts about project goals"
         resp = MagicMock(content=resp_content)
-        summary = resp.content.strip() if resp and resp.content else ""
-        msg = "dream: periodic memory consolidation"
-        if summary:
-            msg = f"{msg}\n\n{summary}"
+        msg = MemoryStore.build_dream_commit_message(
+            "dream: periodic memory consolidation", resp,
+        )
 
         # Write a change so auto_commit has something to commit
         store.write_memory("# Memory\n- Updated by Dream")

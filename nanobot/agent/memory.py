@@ -453,12 +453,6 @@ class MemoryStore:
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
 
-
-
-# ---------------------------------------------------------------------------
-# Consolidator — lightweight token-budget triggered consolidation
-# ---------------------------------------------------------------------------
-
     # ------------------------------------------------------------------
     # Dream helpers
     # ------------------------------------------------------------------
@@ -497,6 +491,10 @@ class MemoryStore:
             except OSError:
                 logger.warning("Failed to prune dream session {}", path)
 
+
+# ---------------------------------------------------------------------------
+# Consolidator — lightweight token-budget triggered consolidation
+# ---------------------------------------------------------------------------
 
 # Individual history.jsonl writers cap their own payloads tightly; the
 # _HISTORY_ENTRY_HARD_CAP at append_history() is a belt-and-suspenders default
