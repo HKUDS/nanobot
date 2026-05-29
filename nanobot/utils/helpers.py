@@ -255,6 +255,43 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     return start
 
 
+def repair_tool_result_protocol(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop malformed, orphan, or duplicate tool-result messages.
+
+    Provider protocols require each tool result to reference exactly one
+    preceding assistant tool call. Histories can be edited or recovered from
+    partial checkpoints, so validate this invariant before replay.
+    """
+    repaired: list[dict[str, Any]] = []
+    pending: set[str] = set()
+    answered: set[str] = set()
+
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict) and tc.get("id"):
+                    tid = str(tc["id"])
+                    pending.add(tid)
+                    answered.discard(tid)
+            repaired.append(msg)
+            continue
+
+        if role == "tool":
+            tid_raw = msg.get("tool_call_id")
+            tid = str(tid_raw) if isinstance(tid_raw, str) and tid_raw else ""
+            if not tid or tid not in pending or tid in answered:
+                continue
+            answered.add(tid)
+            pending.discard(tid)
+            repaired.append(msg)
+            continue
+
+        repaired.append(msg)
+
+    return repaired
+
+
 def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
     parts: list[str] = []
     for block in content:
