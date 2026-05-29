@@ -63,6 +63,54 @@ def test_blocks_ipv6_loopback():
 
 
 # ---------------------------------------------------------------------------
+# validate_url_target — IPv6-mapped IPv4 bypass prevention
+# ---------------------------------------------------------------------------
+
+def _fake_resolve_v6(host: str, results: list[str]):
+    """Like _fake_resolve but returns AF_INET6 tuples for IPv6 addresses."""
+    def _resolver(hostname, port, family=0, type_=0):
+        if hostname == host:
+            entries = []
+            for ip in results:
+                if ":" in ip:
+                    entries.append((socket.AF_INET6, socket.SOCK_STREAM, 0, "", (ip, 0, 0, 0)))
+                else:
+                    entries.append((socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0)))
+            return entries
+        raise socket.gaierror(f"cannot resolve {hostname}")
+    return _resolver
+
+
+def test_blocks_ipv6_mapped_loopback():
+    """::ffff:127.0.0.1 must be blocked just like 127.0.0.1."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+        assert "blocked" in err.lower()
+
+
+def test_blocks_ipv6_mapped_metadata():
+    """::ffff:169.254.169.254 must be blocked just like 169.254.169.254."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:169.254.169.254"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+
+
+def test_blocks_ipv6_mapped_rfc1918():
+    """::ffff:10.0.0.1 must be blocked just like 10.0.0.1."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:10.0.0.1"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+
+
+def test_allows_public_ipv6():
+    """Public IPv6 addresses must still be allowed."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("example.com", ["2606:4700::6810:84e5"])):
+        ok, err = validate_url_target("http://example.com/")
+        assert ok, f"Should allow public IPv6, got: {err}"
+
+
+# ---------------------------------------------------------------------------
 # validate_url_target — allows public IPs
 # ---------------------------------------------------------------------------
 
