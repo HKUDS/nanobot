@@ -66,6 +66,24 @@ def test_replay_uses_stream_end_final_text() -> None:
     assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
 
 
+def test_replay_infers_video_media_from_attachment_name() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {"event": "user", "chat_id": "t-video", "text": "render"},
+            {
+                "event": "message",
+                "chat_id": "t-video",
+                "text": "video ready",
+                "media_urls": [{"url": "/api/media/sig/payload", "name": "intro.mp4"}],
+            },
+        ],
+    )
+
+    assert msgs[1]["media"] == [
+        {"kind": "video", "url": "/api/media/sig/payload", "name": "intro.mp4"},
+    ]
+
+
 def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file"
