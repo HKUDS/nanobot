@@ -302,6 +302,101 @@ def test_install_dispatches_safe_pip_and_installs_skill(
     assert 'run_cli_app` tool with `name="gimp"' in skill.read_text(encoding="utf-8")
 
 
+def test_install_records_available_cli_without_reinstalling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _seed_catalog(manager)
+    resolved = tmp_path / "bin" / "lark-cli"
+    resolved.parent.mkdir()
+    resolved.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    def fail_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        raise AssertionError(f"unexpected install command: {argv}")
+
+    monkeypatch.setattr(manager, "_run_argv", fail_run)
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda command: str(resolved) if command == "lark-cli" else None,
+    )
+
+    payload = manager.install("feishu")
+
+    assert payload["last_action"]["ok"] is True
+    assert payload["last_action"]["installed"] is True
+    assert "entry_point_available" in payload["last_action"]["verification"]
+    installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+    assert installed["feishu"]["entry_point_path"] == str(resolved)
+    skill = manager.workspace / "skills" / "cli-app-feishu" / "SKILL.md"
+    assert skill.is_file()
+    assert 'run_cli_app` tool with `name="feishu"' in skill.read_text(encoding="utf-8")
+
+
+def test_install_recovers_stale_npm_global_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
+    _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
+    _write_cache(
+        manager._cache_path("extensions"),
+        {
+            "meta": {"updated": "2026-05-29"},
+            "clis": [
+                {
+                    "name": "hyperframes",
+                    "display_name": "HyperFrames",
+                    "package_manager": "npm",
+                    "npm_package": "hyperframes",
+                    "install_cmd": "npm install -g hyperframes",
+                    "entry_point": "hyperframes",
+                    "skill_md": "skills/hyperframes/SKILL.md",
+                }
+            ],
+        },
+    )
+    npm = str(tmp_path / "bin" / "npm")
+    global_root = tmp_path / "global"
+    stale_package = global_root / "hyperframes"
+    stale_temp = global_root / ".hyperframes-broken"
+    stale_package.mkdir(parents=True)
+    stale_temp.mkdir()
+    install_attempts = 0
+
+    def fake_run(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        nonlocal install_attempts
+        if argv == [npm, "root", "-g"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=str(global_root), stderr="")
+        if argv == [npm, "install", "-g", "hyperframes"]:
+            install_attempts += 1
+            if install_attempts == 1:
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout="",
+                    stderr="npm error ENOTEMPTY\nnpm error syscall rename",
+                )
+            return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda command: npm if command == "npm" else None,
+    )
+
+    payload = manager.install("hyperframes")
+
+    assert install_attempts == 2
+    assert not stale_package.exists()
+    assert not stale_temp.exists()
+    assert payload["last_action"]["ok"] is True
+    installed = json.loads(manager.installed_path.read_text(encoding="utf-8"))["apps"]
+    assert installed["hyperframes"]["strategy"] == "npm"
+
+
 def test_install_records_entry_point_path_and_pip_distribution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
