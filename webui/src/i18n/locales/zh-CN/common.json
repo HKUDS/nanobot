@@ -146,7 +146,8 @@
       "cliAppsFilter": "筛选",
       "engine": "引擎",
       "logs": "日志",
-      "diagnostics": "诊断"
+      "diagnostics": "诊断",
+      "contextWindow": "上下文窗口"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
@@ -184,7 +185,8 @@
       "logs": "打开App引擎日志文件夹。",
       "diagnostics": "导出一份用于支持排查的运行时报告。",
       "localServiceAccessNative": "允许完全访问模式下的 shell 命令访问这台 Mac 上的服务。",
-      "webuiDefaultAccessNative": "用于没有单独选择权限的原生 App 对话。"
+      "webuiDefaultAccessNative": "用于没有单独选择权限的原生 App 对话。",
+      "contextWindow": "选择这个模型配置默认使用的上下文预算。"
     },
     "timezone": {
       "select": "选择时区",

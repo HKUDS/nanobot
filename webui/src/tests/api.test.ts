@@ -65,6 +65,7 @@ describe("webui API helpers", () => {
       modelPreset: "default",
       model: "openrouter/test",
       provider: "openrouter",
+      contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
       botName: "nanobot",
       botIcon: "nb",
@@ -72,7 +73,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -100,10 +101,11 @@ describe("webui API helpers", () => {
       label: "Codex",
       provider: "openai_codex",
       model: "openai-codex/gpt-5.5",
+      contextWindowTokens: 65536,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5",
+      "/api/settings/model-configurations/update?name=codex&label=Codex&provider=openai_codex&model=openai-codex%2Fgpt-5.5&context_window_tokens=65536",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
