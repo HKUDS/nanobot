@@ -8,7 +8,6 @@ import re
 import smtplib
 import ssl
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import date
 from email import policy
 from email.header import decode_header, make_header
@@ -56,7 +55,6 @@ class EmailConfig(Base):
     mark_seen: bool = True
     post_action: Literal["delete", "move"] | None = None
     post_action_move_mailbox: str | None = None
-    post_action_expunge: bool = False
     post_action_ignore_skipped: bool = True
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
@@ -70,13 +68,6 @@ class EmailConfig(Base):
     allowed_attachment_types: list[str] = Field(default_factory=list)
     max_attachment_size: int = 2_000_000  # 2MB per attachment
     max_attachments_per_email: int = 5
-
-
-@dataclass
-class _ServerFeatures:
-    move: bool
-    uidplus: bool
-    uid_store: bool | None = None
 
 
 class EmailChannel(BaseChannel):
@@ -205,7 +196,7 @@ class EmailChannel(BaseChannel):
         """Stop polling loop."""
         self._running = False
 
-    async def _send_impl(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
         if not self.config.consent_granted:
             self.logger.warning("Skip email send: consent_granted is false")
@@ -350,7 +341,7 @@ class EmailChannel(BaseChannel):
             smtp.send_message(msg)
 
     def _fetch_new_messages(self) -> tuple[list[dict[str, Any]], set[str]]:
-        """Poll IMAP and return parsed unread messages plus skipped message UIDs."""
+        """Poll IMAP and return parsed unread messages."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
             mark_seen=self.config.mark_seen,
@@ -644,103 +635,33 @@ class EmailChannel(BaseChannel):
             return
 
         try:
-            features = self._server_features(client)
-            # Apply all post-actions in one IMAP session. `features` also carries
-            # session-learned behavior (e.g. UID STORE support) so later UIDs can
-            # skip known-broken paths.
             for uid in post_actions_uids:
                 if uid:
-                    self._apply_post_action(client, uid, features)
+                    self._apply_post_action(client, uid)
         finally:
             self._close_imap_client(client)
 
-    def _apply_post_action(
-        self,
-        client: Any,
-        uid: str,
-        features: _ServerFeatures,
-    ) -> None:
+    def _apply_post_action(self, client: Any, uid: str) -> None:
+        status, data = client.search(None, "UID", uid)
+        if status != "OK" or not data or not data[0]:
+            self.logger.warning("Post-action skipped: UID {} not found", uid)
+            return
+
+        imap_id = data[0].split()[0]
         action = self.config.post_action
 
         if action == "delete":
-            if not self._uid_store_deleted(client, uid, features):
-                return
-            self._uid_expunge_or_fallback(client, uid, features)
+            client.store(imap_id, "+FLAGS", "\\Deleted")
+            client.expunge()
             return
 
         if action == "move":
             target = (self.config.post_action_move_mailbox or "").strip()
-            if features.move:
-                status, _ = client.uid("MOVE", uid, target)
-                if status != "OK":
-                    self.logger.warning("Post-action move failed (UID MOVE) for UID {} to mailbox {}", uid, target)
-                return
-
-            status, _ = client.uid("COPY", uid, target)
+            status, _ = client.copy(imap_id, target)
             if status != "OK":
-                self.logger.warning("Post-action move failed (UID COPY) for UID {} to mailbox {}", uid, target)
+                self.logger.warning("Post-action move failed for UID {} to mailbox {}", uid, target)
                 return
-            if not self._uid_store_deleted(client, uid, features):
-                return
-            self._uid_expunge_or_fallback(client, uid, features)
-
-    @staticmethod
-    def _server_features(client: Any) -> _ServerFeatures:
-        caps: set[str] = set()
-        with suppress(Exception):
-            status, data = client.capability()
-            if status == "OK" and data:
-                for raw in data:
-                    if isinstance(raw, (bytes, bytearray)):
-                        caps.update(token.upper() for token in raw.decode("utf-8", errors="ignore").split())
-                    elif isinstance(raw, str):
-                        caps.update(token.upper() for token in raw.split())
-        return _ServerFeatures(move="MOVE" in caps, uidplus="UIDPLUS" in caps)
-
-    @staticmethod
-    def _lookup_imap_id_by_uid(client: Any, uid: str) -> bytes | None:
-        # IMAP exposes two message identifiers: UID (stable) and sequence number
-        # (session-local). We target by UID first, but some servers may reject
-        # UID STORE. In that case we resolve the current sequence number for the
-        # UID and retry with STORE using that sequence id.
-        status, data = client.search(None, "UID", uid)
-        if status != "OK" or not data or not data[0]:
-            return None
-        return data[0].split()[0]
-
-    def _uid_store_deleted(self, client: Any, uid: str, features: _ServerFeatures) -> bool:
-        # Optimistic path: try UID STORE first because UID is stable and avoids
-        # sequence-number lookup. If this fails once for the session, remember it
-        # and use the sequence STORE fallback directly for remaining UIDs.
-        if features.uid_store is not False:
-            status, _ = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-            if status == "OK":
-                features.uid_store = True
-                return True
-            features.uid_store = False
-
-        # Compatibility fallback for servers where UID STORE is unavailable or
-        # unreliable: resolve the current sequence number from UID and use STORE.
-        imap_id = self._lookup_imap_id_by_uid(client, uid)
-        if not imap_id:
-            self.logger.warning("Post-action skipped: UID {} not found", uid)
-            return False
-
-        status, _ = client.store(imap_id, "+FLAGS", "\\Deleted")
-        if status != "OK":
-            self.logger.warning("Post-action failed: could not mark UID {} as deleted", uid)
-            return False
-        return True
-
-    def _uid_expunge_or_fallback(self, client: Any, uid: str, features: _ServerFeatures) -> None:
-        # Prefer UID-scoped expunge when supported to avoid expunging unrelated
-        # messages already marked \Deleted in the selected mailbox.
-        if features.uidplus:
-            status, _ = client.uid("EXPUNGE", uid)
-            if status == "OK":
-                return
-            self.logger.warning("UID EXPUNGE failed for UID {}, falling back to EXPUNGE", uid)
-        if self.config.post_action_expunge:
+            client.store(imap_id, "+FLAGS", "\\Deleted")
             client.expunge()
 
     @classmethod

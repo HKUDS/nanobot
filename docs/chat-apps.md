@@ -581,7 +581,6 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
 >   This runs only after an accepted email is successfully delivered to the AI pipeline.
 > - `postActionMoveMailbox`: Destination mailbox used when `postAction` is `"move"` (for example `"Processed"` or `"[Gmail]/Trash"`).
 > - `postActionIgnoreSkipped`: If `true` (default), skipped emails are ignored for post-action and not moved/deleted.
-> - `postActionExpunge`: When `true`, the channel allows a full-mailbox `EXPUNGE` fallback if UID-scoped expunge is unavailable or fails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this fallback will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
 > - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
 > - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
 > - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
@@ -605,7 +604,6 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
       "postActionIgnoreSkipped": true,
-      "postActionExpunge": false,
       "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }
@@ -754,7 +752,7 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
 ```
 
 > - `replyInThread: true` replies to the triggering Teams activity when a stored `activity_id` is available.
-> - `mentionOnlyResponse` controls what Blackcat receives when a user sends only a bot mention (`<at>Blackcat</at>`). Set to `""` to ignore mention-only messages.
+> - `mentionOnlyResponse` controls what Nanobot receives when a user sends only a bot mention (`<at>Nanobot</at>`). Set to `""` to ignore mention-only messages.
 > - `validateInboundAuth: true` enables inbound Bot Framework bearer-token validation (signature, issuer, audience, lifetime, `serviceUrl`). This is the safe default for public deployments. Only set it to `false` for local development or tightly controlled testing.
 > - `refTtlDays` (default `30`) controls how old stored conversation refs can be before they are pruned.
 > - `pruneWebChatRefs` (default `true`) drops refs with `webchat.botframework.com` service URLs.
