@@ -40,7 +40,8 @@ async function request<T>(
     credentials: "same-origin",
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `HTTP ${res.status}`);
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    throw new ApiError(res.status, text || `HTTP ${res.status}`);
   }
   const contentType = res.headers?.get?.("content-type") ?? "";
   if (contentType && !contentType.toLowerCase().includes("application/json")) {

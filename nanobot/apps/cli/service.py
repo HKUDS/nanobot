@@ -37,6 +37,7 @@ _MAX_TOOL_OUTPUT_CHARS = 12_000
 _MAX_ARTIFACT_SCAN_PATHS = 4_000
 _MAX_ARTIFACT_REPORT = 12
 _SAFE_NAME_RE = re.compile(r"[^a-z0-9_-]+")
+_SAFE_NPM_DIR_RE = re.compile(r"^[a-z0-9._-]+$", re.IGNORECASE)
 _MENTION_RE = re.compile(r"(^|[\s([{])@([a-z0-9_-]+)\b", re.IGNORECASE)
 _SHELL_META_CHARS = ("|", "&&", "||", ";", "$(", "`", ">", "<")
 _ENDORSEMENT_WORD_RE = re.compile(r"\bofficial\s+", re.IGNORECASE)
@@ -740,6 +741,45 @@ class CliAppManager:
             return [npm, "install", "-g", package + "@latest"]
         return [npm, "uninstall", "-g", package]
 
+    def _cleanup_stale_npm_install(self, app: dict[str, Any]) -> bool:
+        npm = shutil.which("npm")
+        package = str(app.get("npm_package") or "").strip()
+        if not npm or not package or "/" in package or _SAFE_NPM_DIR_RE.match(package) is None:
+            return False
+        result = self._run_argv([npm, "root", "-g"], timeout=min(self.runtime.install_timeout, 30))
+        if result.returncode != 0:
+            return False
+        root = Path(result.stdout.strip()).expanduser()
+        try:
+            root = root.resolve(strict=True)
+        except OSError:
+            return False
+        targets = [root / package, *root.glob(f".{package}-*")]
+        removed = False
+        for target in targets:
+            try:
+                resolved = target.resolve(strict=False)
+                if not is_path_within(resolved, root) or not target.is_dir():
+                    continue
+                shutil.rmtree(target)
+                removed = True
+            except OSError:
+                continue
+        return removed
+
+    def _retry_stale_npm_install(
+        self,
+        app: dict[str, Any],
+        argv: list[str],
+        result: subprocess.CompletedProcess[str],
+    ) -> subprocess.CompletedProcess[str]:
+        output = f"{result.stderr}\n{result.stdout}"
+        if "ENOTEMPTY" not in output or "rename" not in output:
+            return result
+        if not self._cleanup_stale_npm_install(app):
+            return result
+        return self._run_argv(argv, timeout=self.runtime.install_timeout)
+
     def _split_safe_command(self, app: dict[str, Any], key: str, expected: str) -> list[str]:
         command = str(app.get(key) or "")
         if not command:
@@ -893,6 +933,17 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         if not self._install_supported(app):
             raise CliAppError("this CLI app uses an unsupported install strategy")
         strategy = self._strategy(app)
+        entry_point = str(app.get("entry_point") or "")
+        if entry_point and shutil.which(entry_point):
+            self._record_installed(app)
+            return self.payload() | {
+                "last_action": {
+                    "ok": True,
+                    "message": f"CLI for {app['display_name']} is already available.",
+                    "installed": True,
+                    "verification": ["entry_point_available", "state_recorded", "managed_paths_present"],
+                }
+            }
         if strategy == "bundled":
             detect_cmd = str(app.get("detect_cmd") or app.get("entry_point") or "")
             if detect_cmd and _command_exists(detect_cmd):
@@ -910,6 +961,8 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         argv = self._argv_for_action(app, "install")
         assert argv is not None
         result = self._run_argv(argv, timeout=self.runtime.install_timeout)
+        if strategy == "npm" and result.returncode != 0:
+            result = self._retry_stale_npm_install(app, argv, result)
         if result.returncode != 0:
             raise CliAppError(_truncate(result.stderr or result.stdout or "install failed"), status=500)
         self._record_installed(app)

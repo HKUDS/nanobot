@@ -134,6 +134,22 @@ describe("webui API helpers", () => {
     });
   });
 
+  it("surfaces API error response bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "npm error ENOTEMPTY",
+      }),
+    );
+
+    await expect(runCliAppAction("tok", "install", "hyperframes")).rejects.toMatchObject({
+      status: 500,
+      message: "npm error ENOTEMPTY",
+    });
+  });
+
   it("serializes provider settings updates without returning secrets", async () => {
     await updateProviderSettings("tok", {
       provider: "openrouter",
