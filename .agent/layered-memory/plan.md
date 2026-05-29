@@ -130,10 +130,10 @@
 
 ### LM2-D Recall
 
-- [ ] `recall.py`：`perform_recall`（fts / hybrid、timeout、prepend_lines）
-- [ ] `loop.py`：`consolidate` 之后、`get_history` 之前 `await facade.recall`
-- [ ] L3 v2 简化：**只读现有 `USER.md`** 作摘要，不跑 L3 生成 job
-- [ ] 单测：种子 atom + query → prepend 含关键词；超时返回空
+- [x] `recall.py`：`perform_recall`（fts / hybrid、timeout、prepend_lines）
+- [x] `loop.py`：`consolidate` 之后、`get_history` 之前 `await facade.recall`
+- [x] L3 v2 简化：**只读现有 `USER.md`** 作摘要，不跑 L3 生成 job
+- [x] 单测：种子 atom + query → prepend 含关键词；超时返回空
 
 ### LM2-E 搜索 Tools
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +10,10 @@ from loguru import logger
 
 from nanobot.agent.layered_memory.l0_store import L0Store
 from nanobot.agent.layered_memory.l1_extractor import L1Extractor
+from nanobot.agent.layered_memory.l1_store import L1Store
 from nanobot.agent.layered_memory.offload.canvas import TaskCanvas, format_canvas_runtime_lines
 from nanobot.agent.layered_memory.pipeline import L1JobHandler, MemoryPipelineManager
+from nanobot.agent.layered_memory.recall import RecallResult, perform_recall
 from nanobot.agent.layered_memory.sanitize import sanitize_turn_messages
 from nanobot.agent.layered_memory.offload.node_registry import (
     NodeRegistry,
@@ -24,20 +25,13 @@ from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import persist_path_from_tool_content
 
 
-@dataclass(frozen=True)
-class RecallResult:
-    """在运行时/系统提示词中合并 turn 前回忆的载体。"""
-    prepend_lines: list[str] = field(default_factory=list)  # 需要添加在消息前的历史片段
-    append_system: str | None = None  # 附加到系统提示的内容（可选）
-
-
 class LayeredMemoryFacade:
     """负责异步卸载（canvas）、消息捕获（L0）、回忆和流水线钩子的协调。
 
     LM0-C：如果配置未开启则直接空操作。LM1及以上由子模块具体实现。
     """
 
-    __slots__ = ("_config", "_l0_store", "_offload_tool_counts", "_pipeline", "_workspace")
+    __slots__ = ("_config", "_l0_store", "_l1_store", "_offload_tool_counts", "_pipeline", "_workspace")
 
     def __init__(
         self,
@@ -51,6 +45,7 @@ class LayeredMemoryFacade:
         self._config = config or LayeredMemoryConfig()
         self._offload_tool_counts: dict[str, int] = {}
         self._l0_store = L0Store(workspace)
+        self._l1_store = L1Store(workspace)
         handler = l1_handler
         if handler is None and provider is not None and self._config.enable:
             handler = L1Extractor(workspace, self._config, provider, l0_store=self._l0_store).run
@@ -78,16 +73,32 @@ class LayeredMemoryFacade:
         *,
         is_subagent: bool = False,
     ) -> RecallResult:
-        """build_messages 前进行 L1/L2/L3 回忆（LM2）。
-        query: 查询关键词
-        session_key: 会话标识
-        is_subagent: 是否为子代理
-        """
+        """build_messages 前进行 L1/L3 回忆（LM2-D）。"""
         if not self._config.recall_enabled(is_subagent=is_subagent):
-            # 如果未开启回忆功能则直接返回空 RecallResult
             return RecallResult()
-        _ = query, session_key  # 占位，避免未使用变量告警
-        return RecallResult()
+        timeout_s = self._config.recall.timeout_ms / 1000.0
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(
+                    perform_recall,
+                    workspace=self._workspace,
+                    config=self._config.recall,
+                    query=query,
+                    session_key=session_key,
+                    l1_store=self._l1_store,
+                ),
+                timeout=timeout_s,
+            )
+        except TimeoutError:
+            logger.warning(
+                "layered_memory recall timeout session={} timeout_ms={}",
+                session_key,
+                self._config.recall.timeout_ms,
+            )
+            return RecallResult()
+        except Exception:
+            logger.exception("layered_memory recall failed session={}", session_key)
+            return RecallResult()
 
     def canvas_lines(self, session_key: str, *, is_subagent: bool = False) -> list[str]:
         """Runtime lines: ``[Task canvas]`` + Mermaid + node index (≤ ``max_canvas_chars``)."""
