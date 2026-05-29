@@ -10,6 +10,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.utils.document import reference_non_image_attachments
 
 
 def _make_loop(tmp_path: Path, channels_config: ChannelsConfig | None = None) -> AgentLoop:
@@ -159,7 +160,7 @@ def test_document_extraction_disabled_still_preserves_images(tmp_path: Path) -> 
     doc_path = tmp_path / "report.txt"
     doc_path.write_text("manual extraction target", encoding="utf-8")
 
-    content, media = AgentLoop._reference_non_image_attachments(
+    content, media = reference_non_image_attachments(
         "review these",
         [str(image_path), str(doc_path)],
     )
