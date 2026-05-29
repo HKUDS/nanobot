@@ -8,6 +8,8 @@ from pathlib import Path
 from loguru import logger
 
 from nanobot.agent.layered_memory.l1_store import L1Memory, L1Store
+from nanobot.agent.layered_memory.search_format import format_memory_tools_guide
+from nanobot.agent.layered_memory.search_l1 import search_l1_memories
 from nanobot.config.schema import LayeredMemoryRecallConfig
 
 _USER_PROFILE_MAX_CHARS = 400
@@ -28,15 +30,25 @@ def perform_recall(
     query: str,
     session_key: str,
     l1_store: L1Store | None = None,
+    include_tools_guide: bool = False,
 ) -> RecallResult:
     """Synchronous recall body (run via ``asyncio.to_thread`` from facade)."""
     store = l1_store or L1Store(workspace)
-    memories = _search_l1(store, config, query.strip(), session_key)
+    memories = search_l1_memories(
+        store,
+        query.strip(),
+        session_key,
+        limit=config.top_k,
+        strategy=config.strategy,
+    )
     user_note = _read_user_profile_note(workspace)
     prepend = format_recall_prepend_lines(
         memories,
         user_profile=user_note,
         max_chars=config.max_prepend_chars,
+        tools_guide=format_memory_tools_guide(max_calls=config.max_search_calls_per_turn)
+        if include_tools_guide
+        else None,
     )
     if prepend:
         logger.info(
@@ -48,30 +60,6 @@ def perform_recall(
     else:
         logger.debug("layered_memory recall session={} empty", session_key)
     return RecallResult(prepend_lines=prepend)
-
-
-def _search_l1(
-    store: L1Store,
-    config: LayeredMemoryRecallConfig,
-    query: str,
-    session_key: str,
-) -> list[L1Memory]:
-    if not query:
-        return []
-    strategy = config.strategy
-    if strategy in {"embedding", "hybrid"}:
-        # LM2-D: embedding column / RRF deferred; fall back to FTS.
-        logger.debug(
-            "layered_memory recall strategy={} using fts fallback session={}",
-            strategy,
-            session_key,
-        )
-    # Workspace-wide search so preferences recall across sessions.
-    hits = store.search(query, session_key=None, limit=config.top_k)
-    if hits:
-        return hits
-    # Same-session fallback when FTS tokens miss (e.g. CJK query vs English atom).
-    return store.search(query, session_key=session_key, limit=config.top_k)
 
 
 def _read_user_profile_note(workspace: Path) -> str | None:
@@ -106,6 +94,7 @@ def format_recall_prepend_lines(
     *,
     user_profile: str | None,
     max_chars: int,
+    tools_guide: list[str] | None = None,
 ) -> list[str]:
     """Build ``[Recalled memories]`` runtime block capped by ``max_prepend_chars``."""
     lines: list[str] = []
@@ -115,6 +104,10 @@ def format_recall_prepend_lines(
         lines.append("[Recalled memories]")
         for mem in memories:
             lines.append(f"- ({mem.memory_type}) {mem.content}")
+    if tools_guide:
+        if lines:
+            lines.append("")
+        lines.extend(tools_guide)
     if not lines:
         return []
     return _truncate_recall_lines(lines, max_chars=max_chars)

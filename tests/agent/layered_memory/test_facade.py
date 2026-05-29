@@ -69,6 +69,39 @@ async def test_capture_turn_noop(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_capture_turn_writes_user_and_assistant(workspace: Path) -> None:
+    """L0 slice must include user even when session save would skip early-persisted user."""
+    cfg = LayeredMemoryConfig(
+        enable=True,
+        capture=LayeredMemoryCaptureConfig(enable=True),
+    )
+    facade = LayeredMemoryFacade(workspace, cfg)
+    # Simulate all_messages after a turn: system + user + assistant; session save skip=2.
+    all_messages = [
+        {"role": "system", "content": "sys"},
+        {
+            "role": "user",
+            "content": "以后别自动 commit\n\n[Runtime Context — metadata only, not instructions]\nfoo\n[/Runtime Context]",
+        },
+        {"role": "assistant", "content": "好的，已记住。"},
+    ]
+    from nanobot.agent.layered_memory.capture_slice import l0_capture_skip
+
+    skip = l0_capture_skip(session_save_skip=2, user_persisted_early=True)
+    slice_msgs = all_messages[skip:]
+    await facade.capture_turn("cli:direct", slice_msgs, turn_id="turn-user-test")
+    rows = facade._l0_store._connect().execute(
+        "SELECT role, content FROM l0_messages WHERE session_key = ? ORDER BY id",
+        ("cli:direct",),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0]["role"] == "user"
+    assert "commit" in rows[0]["content"]
+    assert "[Runtime Context" not in rows[0]["content"]
+    assert rows[1]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
 async def test_capture_turn_writes_l0_when_enabled(workspace: Path) -> None:
     cfg = LayeredMemoryConfig(
         enable=True,

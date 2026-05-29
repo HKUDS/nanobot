@@ -35,6 +35,7 @@ from nanobot.agent.evolution.models import TurnTrace
 from nanobot.agent.evolution.post_task import PostTaskEvolver, resolve_post_task_provider
 from nanobot.agent.evolution.trace_recorder import TraceRecorder
 from nanobot.agent.layered_memory import LayeredMemoryFacade
+from nanobot.agent.layered_memory.capture_slice import l0_capture_skip
 from nanobot.agent.layered_memory.offload.hook import LayeredMemoryHook
 from nanobot.config.schema import (
     AgentDefaults,
@@ -590,6 +591,11 @@ class AgentLoop:
             session_key=effective_key,
             metadata=dict(metadata or {}),
         )
+
+        if self._layered_memory.capture_enabled():
+            from nanobot.agent.layered_memory.search_budget import reset_memory_search_calls
+
+            reset_memory_search_calls()
 
         for name in self.tools.tool_names:
             tool = self.tools.get(name)
@@ -1776,7 +1782,10 @@ class AgentLoop:
         self._schedule_l0_capture(
             session_key=ctx.session_key,
             all_messages=ctx.all_messages,
-            skip=ctx.save_skip,
+            skip=l0_capture_skip(
+                session_save_skip=ctx.save_skip,
+                user_persisted_early=ctx.user_persisted_early,
+            ),
             turn_id=ctx.turn_id,
             is_subagent=ctx.msg.sender_id == "subagent",
         )

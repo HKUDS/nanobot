@@ -75,6 +75,21 @@ def test_perform_recall_includes_user_md_note(workspace: Path) -> None:
     assert "Communicates in Chinese" in joined
 
 
+def test_perform_recall_includes_tools_guide_when_requested(workspace: Path) -> None:
+    cfg = LayeredMemoryRecallConfig(enable=True)
+    result = perform_recall(
+        workspace=workspace,
+        config=cfg,
+        query="",
+        session_key="cli:direct",
+        include_tools_guide=True,
+    )
+    joined = "\n".join(result.prepend_lines)
+    assert "[Memory tools]" in joined
+    assert "memory_search" in joined
+    assert "conversation_search" in joined
+
+
 def test_perform_recall_empty_query_no_atoms(workspace: Path) -> None:
     cfg = LayeredMemoryRecallConfig(enable=True)
     result = perform_recall(

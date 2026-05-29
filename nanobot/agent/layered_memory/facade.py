@@ -77,6 +77,7 @@ class LayeredMemoryFacade:
         if not self._config.recall_enabled(is_subagent=is_subagent):
             return RecallResult()
         timeout_s = self._config.recall.timeout_ms / 1000.0
+        include_guide = self._config.capture_enabled(is_subagent=is_subagent)
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(
@@ -86,6 +87,7 @@ class LayeredMemoryFacade:
                     query=query,
                     session_key=session_key,
                     l1_store=self._l1_store,
+                    include_tools_guide=include_guide,
                 ),
                 timeout=timeout_s,
             )

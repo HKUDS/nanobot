@@ -137,10 +137,10 @@
 
 ### LM2-E 搜索 Tools
 
-- [ ] `tools/memory_search.py`
-- [ ] `tools/conversation_search.py`
-- [ ] recall 注入 **工具指南**（每轮 search ≤3）
-- [ ] 单测：各 tool 返回格式稳定
+- [x] `tools/memory_search.py`
+- [x] `tools/conversation_search.py`
+- [x] recall 注入 **工具指南**（每轮 search ≤3）
+- [x] 单测：各 tool 返回格式稳定
 
 ### LM2-F 集成
 

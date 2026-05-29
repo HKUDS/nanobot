@@ -158,6 +158,46 @@ class L0Store:
             return []
         return self.fetch_for_turns(session_key, turn_ids)
 
+    def search_messages(
+        self,
+        query: str,
+        *,
+        session_key: str | None = None,
+        limit: int = 8,
+    ) -> list[L0MessageRecord]:
+        """Substring search over L0 content (newest first)."""
+        text = query.strip()
+        if not text or limit <= 0:
+            return []
+        tokens = [t for t in text.split() if t][:8]
+        if not tokens:
+            return []
+        clauses = ["content LIKE ? ESCAPE '\\'"] * len(tokens)
+        params: list[object] = [f"%{_like_escape(token)}%" for token in tokens]
+        where = " AND ".join(clauses)
+        conn = self._connect()
+        if session_key is None:
+            sql = f"""
+                SELECT id, session_key, turn_id, role, name, tool_call_id,
+                       content, timestamp_ms
+                FROM l0_messages
+                WHERE {where}
+                ORDER BY timestamp_ms DESC, id DESC
+                LIMIT ?
+            """
+            rows = conn.execute(sql, (*params, limit)).fetchall()
+        else:
+            sql = f"""
+                SELECT id, session_key, turn_id, role, name, tool_call_id,
+                       content, timestamp_ms
+                FROM l0_messages
+                WHERE session_key = ? AND {where}
+                ORDER BY timestamp_ms DESC, id DESC
+                LIMIT ?
+            """
+            rows = conn.execute(sql, (session_key, *params, limit)).fetchall()
+        return [L0Store._row_to_record(row) for row in rows]
+
     def get_checkpoint(self, session_key: str) -> L0Checkpoint | None:
         row = self._connect().execute(
             """
@@ -278,3 +318,7 @@ class L0Store:
             );
             """
         )
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
