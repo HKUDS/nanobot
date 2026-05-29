@@ -144,9 +144,9 @@
 
 ### LM2-F 集成
 
-- [ ] `facade.py` 接通 capture/recall/canvas
-- [ ] 子 agent：`layered_memory` 默认子集关闭（config 或 loop 判断 `is_subagent`）
-- [ ] 结构化 log：`layered_memory …`（见 design §10）
+- [x] `facade.py` 接通 capture/recall/canvas
+- [x] 子 agent：`layered_memory` 默认子集关闭（config 或 loop 判断 `is_subagent`）
+- [x] 结构化 log：`layered_memory …`（见 design §10）
 
 **验收**：
 

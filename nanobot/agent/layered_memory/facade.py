@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from loguru import logger
 from nanobot.agent.layered_memory.l0_store import L0Store
 from nanobot.agent.layered_memory.l1_extractor import L1Extractor
 from nanobot.agent.layered_memory.l1_store import L1Store
+from nanobot.agent.layered_memory.obs import log_recall_result, log_recall_timeout
 from nanobot.agent.layered_memory.offload.canvas import TaskCanvas, format_canvas_runtime_lines
 from nanobot.agent.layered_memory.pipeline import L1JobHandler, MemoryPipelineManager
 from nanobot.agent.layered_memory.recall import RecallResult, perform_recall
@@ -66,6 +68,19 @@ class LayeredMemoryFacade:
         """主开关（对应 layeredMemory.enable 配置）。"""
         return self._config.enable
 
+    async def runtime_lines(
+        self,
+        query: str,
+        session_key: str,
+        *,
+        is_subagent: bool = False,
+    ) -> list[str]:
+        """Canvas + recall prepend lines for ``current_runtime_lines`` (LM2-F)."""
+        lines = list(self.canvas_lines(session_key, is_subagent=is_subagent))
+        recall = await self.recall(query, session_key, is_subagent=is_subagent)
+        lines.extend(recall.prepend_lines)
+        return lines
+
     async def recall(
         self,
         query: str,
@@ -76,14 +91,16 @@ class LayeredMemoryFacade:
         """build_messages 前进行 L1/L3 回忆（LM2-D）。"""
         if not self._config.recall_enabled(is_subagent=is_subagent):
             return RecallResult()
-        timeout_s = self._config.recall.timeout_ms / 1000.0
+        recall_cfg = self._config.recall
+        timeout_s = recall_cfg.timeout_ms / 1000.0
         include_guide = self._config.capture_enabled(is_subagent=is_subagent)
+        started = time.monotonic()
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 asyncio.to_thread(
                     perform_recall,
                     workspace=self._workspace,
-                    config=self._config.recall,
+                    config=recall_cfg,
                     query=query,
                     session_key=session_key,
                     l1_store=self._l1_store,
@@ -92,15 +109,27 @@ class LayeredMemoryFacade:
                 timeout=timeout_s,
             )
         except TimeoutError:
-            logger.warning(
-                "layered_memory recall timeout session={} timeout_ms={}",
-                session_key,
-                self._config.recall.timeout_ms,
+            log_recall_timeout(
+                session_key=session_key,
+                strategy=recall_cfg.strategy,
+                timeout_ms=recall_cfg.timeout_ms,
             )
             return RecallResult()
         except Exception:
             logger.exception("layered_memory recall failed session={}", session_key)
             return RecallResult()
+        elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+        if result.prepend_lines:
+            hits = sum(1 for line in result.prepend_lines if line.startswith("- ("))
+            chars = sum(len(line) for line in result.prepend_lines)
+            log_recall_result(
+                session_key=session_key,
+                strategy=recall_cfg.strategy,
+                hits=hits,
+                elapsed_ms=elapsed_ms,
+                chars=chars,
+            )
+        return result
 
     def canvas_lines(self, session_key: str, *, is_subagent: bool = False) -> list[str]:
         """Runtime lines: ``[Task canvas]`` + Mermaid + node index (≤ ``max_canvas_chars``)."""
@@ -165,6 +194,12 @@ class LayeredMemoryFacade:
     async def shutdown_pipeline(self) -> None:
         """Flush pending pipeline buffers (gateway shutdown)."""
         await self._pipeline.close()
+
+    async def close(self) -> None:
+        """Shutdown pipeline and release SQLite connections."""
+        await self.shutdown_pipeline()
+        self._l0_store.close()
+        self._l1_store.close()
 
     def register_tool_result(
         self,

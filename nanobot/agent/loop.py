@@ -36,6 +36,7 @@ from nanobot.agent.evolution.post_task import PostTaskEvolver, resolve_post_task
 from nanobot.agent.evolution.trace_recorder import TraceRecorder
 from nanobot.agent.layered_memory import LayeredMemoryFacade
 from nanobot.agent.layered_memory.capture_slice import l0_capture_skip
+from nanobot.agent.layered_memory.obs import log_layered_memory_startup
 from nanobot.agent.layered_memory.offload.hook import LayeredMemoryHook
 from nanobot.config.schema import (
     AgentDefaults,
@@ -268,6 +269,7 @@ class AgentLoop:
             self._layered_memory,
             provider=provider,
         )
+        log_layered_memory_startup(self._layered_memory)
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
@@ -312,6 +314,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            layered_memory=self._layered_memory,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -687,16 +690,12 @@ class AgentLoop:
         *,
         is_subagent: bool = False,
     ) -> list[str]:
-        """Canvas + recall prepend lines for ``current_runtime_lines`` (LM1-C)."""
-        lines: list[str] = []
-        recall = await self._layered_memory_facade.recall(
+        """Delegate to facade runtime_lines (LM2-F)."""
+        return await self._layered_memory_facade.runtime_lines(
             query,
             session_key,
             is_subagent=is_subagent,
         )
-        lines.extend(self._layered_memory_facade.canvas_lines(session_key, is_subagent=is_subagent))
-        lines.extend(recall.prepend_lines)
-        return lines
 
     async def _resolve_turn_skill_entries(
             self,
@@ -1295,11 +1294,11 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        if self._layered_memory.capture_enabled():
+        if self._layered_memory.enable:
             try:
-                await self._layered_memory_facade.shutdown_pipeline()
+                await self._layered_memory_facade.close()
             except Exception:
-                logger.exception("layered_memory pipeline shutdown failed")
+                logger.exception("layered_memory shutdown failed")
         for name, stack in self._mcp_stacks.items():
             try:
                 await stack.aclose()
@@ -1693,6 +1692,7 @@ class AgentLoop:
             await self._layered_memory_runtime_lines(
                 ctx.session_key,
                 ctx.retrieval_query,
+                is_subagent=ctx.msg.sender_id == "subagent",
             ),
         )
         ctx.initial_messages = self._build_initial_messages(

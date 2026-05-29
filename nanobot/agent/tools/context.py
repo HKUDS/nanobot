@@ -34,3 +34,4 @@ class ToolContext:
     image_generation_provider_configs: dict[str, Any] | None = None
     timezone: str = "UTC"
     layered_memory: Any = None
+    is_subagent: bool = False

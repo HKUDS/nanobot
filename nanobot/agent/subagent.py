@@ -18,7 +18,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, LayeredMemoryConfig, ToolsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.utils.prompt_templates import render_template
 
@@ -80,6 +80,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        layered_memory: LayeredMemoryConfig | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -90,6 +91,7 @@ class SubagentManager:
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
+        self._layered_memory = layered_memory or LayeredMemoryConfig()
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
@@ -123,6 +125,8 @@ class SubagentManager:
             config=cfg,
             workspace=str(root.resolve()),
             file_state_store=FileStates(),
+            layered_memory=self._layered_memory,
+            is_subagent=True,
         )
         ToolLoader().load(ctx, registry, scope="subagent")
         return registry

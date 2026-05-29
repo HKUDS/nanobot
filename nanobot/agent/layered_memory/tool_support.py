@@ -13,7 +13,8 @@ def capture_tools_enabled(ctx: Any) -> bool:
     layered = getattr(ctx, "layered_memory", None)
     if layered is None:
         return False
-    return layered.capture_enabled()
+    is_subagent = bool(getattr(ctx, "is_subagent", False))
+    return layered.capture_enabled(is_subagent=is_subagent)
 
 
 def session_key_from_request(ctx: RequestContext | None) -> str | None:

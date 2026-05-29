@@ -57,7 +57,7 @@ class ReadMemoryNodeTool(_FsTool, ContextAware):
         layered = getattr(ctx, "layered_memory", None)
         if layered is None:
             return False
-        return layered.offload_enabled()
+        return layered.offload_enabled(is_subagent=bool(getattr(ctx, "is_subagent", False)))
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:

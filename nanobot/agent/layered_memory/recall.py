@@ -51,7 +51,7 @@ def perform_recall(
         else None,
     )
     if prepend:
-        logger.info(
+        logger.debug(
             "layered_memory recall session={} atoms={} chars={}",
             session_key,
             len(memories),
