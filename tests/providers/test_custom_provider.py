@@ -85,6 +85,48 @@ def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> N
     assert len(set(ids)) == 2
 
 
+def test_parse_non_stream_response_deduplicates_tool_call_ids() -> None:
+    provider = OpenAICompatProvider(api_key="test")
+    response = {
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "message": {
+                "content": None,
+                "tool_calls": [
+                    {"id": "same", "function": {"name": "a", "arguments": "{}"}},
+                    {"id": "same", "function": {"name": "b", "arguments": "{}"}},
+                ],
+            },
+        }],
+    }
+
+    result = provider._parse(response)
+    ids = [tool_call.id for tool_call in result.tool_calls]
+
+    assert ids[0] == "same"
+    assert len(set(ids)) == 2
+
+
+def test_parse_text_format_tool_call_block() -> None:
+    provider = OpenAICompatProvider(api_key="test")
+    response = {
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "content": 'before <tool_call>{"name":"read_file","arguments":{"path":"x"}}</tool_call> after',
+            },
+        }],
+    }
+
+    result = provider._parse(response)
+
+    assert result.finish_reason == "tool_calls"
+    assert result.content == "before  after"
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "read_file"
+    assert result.tool_calls[0].arguments == {"path": "x"}
+
+
 def test_local_provider_502_error_includes_reachability_hint() -> None:
     spec = find_by_name("ollama")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
