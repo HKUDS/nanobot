@@ -810,6 +810,24 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
     assert body["token"].startswith("nbwt_")
 
 
+def test_bootstrap_rejects_remote_without_secret_by_default(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    resp = channel._handle_bootstrap(_REMOTE, _NO_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_bootstrap_accepts_remote_when_localhost_restriction_disabled(bus: MagicMock) -> None:
+    channel = _ch(
+        bus,
+        host="127.0.0.1",
+        bootstrapLocalhostOnly=False,
+    )
+    resp = channel._handle_bootstrap(_REMOTE, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+
+
 def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel._handle_bootstrap(
