@@ -1298,9 +1298,22 @@ class AgentRunner:
         kept.reverse()
 
         if kept:
+            latest_user_idx = next(
+                (i for i in range(len(non_system) - 1, -1, -1)
+                 if non_system[i].get("role") == "user"),
+                None,
+            )
+            if latest_user_idx and non_system[latest_user_idx - 1].get("role") == "assistant":
+                latest_user = non_system[latest_user_idx]
+                previous_assistant = non_system[latest_user_idx - 1]
+                if latest_user in kept and previous_assistant not in kept:
+                    kept.insert(0, previous_assistant)
             for i, message in enumerate(kept):
                 if message.get("role") == "user":
-                    kept = kept[i:]
+                    start = i
+                    if i > 0 and kept[i - 1].get("role") == "assistant":
+                        start = i - 1
+                    kept = kept[start:]
                     break
             else:
                 # Recover nearest user message from outside the kept window;

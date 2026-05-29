@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import image_placeholder_text, repair_tool_result_protocol
 
 
 @dataclass
@@ -262,7 +262,7 @@ class LLMProvider(ABC):
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
             sanitized.append(clean)
-        return sanitized
+        return repair_tool_result_protocol(sanitized)
 
     @abstractmethod
     async def chat(

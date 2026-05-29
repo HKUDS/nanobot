@@ -1926,9 +1926,9 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_goal_state_sync")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
+                return
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
-            return
         if msg.metadata.get("_goal_state_sync"):
             blob = msg.metadata.get("goal_state")
             await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
@@ -2005,6 +2005,8 @@ class WebSocketChannel(BaseChannel):
         transcript_payload = dict(payload)
         transcript_payload["text"] = text
         self._try_append_webui_transcript(msg.chat_id, transcript_payload)
+        if not conns:
+            return
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")

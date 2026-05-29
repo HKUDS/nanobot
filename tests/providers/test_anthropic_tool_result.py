@@ -55,3 +55,12 @@ def test_tool_result_block_preserves_string_content():
     assert block["type"] == "tool_result"
     assert block["tool_use_id"] == "call_2"
     assert block["content"] == "plain tool output"
+
+
+def test_assistant_blocks_adds_missing_text_type():
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": [{"text": "hi"}],
+    })
+
+    assert blocks == [{"type": "text", "text": "hi"}]

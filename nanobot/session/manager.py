@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import base64
 import json
 import os
 import re
@@ -18,6 +19,7 @@ from nanobot.utils.helpers import (
     estimate_message_tokens,
     find_legal_message_start,
     image_placeholder_text,
+    repair_tool_result_protocol,
     safe_filename,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
@@ -129,6 +131,14 @@ class Session:
         History is sliced by message count first (``max_messages``), then by
         token budget from the tail (``max_tokens``) when provided.
         """
+        if not isinstance(self.last_consolidated, int):
+            self.last_consolidated = 0
+        if self.last_consolidated < 0 or self.last_consolidated > len(self.messages):
+            logger.warning(
+                "Clamping invalid last_consolidated={} for session {} with {} messages",
+                self.last_consolidated, self.key, len(self.messages),
+            )
+            self.last_consolidated = 0 if self.last_consolidated > len(self.messages) else max(self.last_consolidated, 0)
         unconsolidated = self.messages[self.last_consolidated:]
         max_messages = max_messages if max_messages > 0 else 120
         sliced = unconsolidated[-max_messages:]
@@ -144,6 +154,7 @@ class Session:
                 break
 
         # Drop orphan tool results at the front.
+        sliced = repair_tool_result_protocol(sliced)
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -248,7 +259,7 @@ class Session:
             if start:
                 kept = kept[start:]
             out = kept
-        return out
+        return repair_tool_result_protocol(out)
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -345,7 +356,12 @@ class SessionManager:
 
     @staticmethod
     def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
+        """Map an arbitrary session key to a collision-resistant filename stem."""
+        encoded = base64.urlsafe_b64encode(key.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"b64_{encoded or '_'}"
+
+    @staticmethod
+    def _legacy_safe_key(key: str) -> str:
         return safe_filename(key.replace(":", "_"))
 
     def _get_session_path(self, key: str) -> Path:
@@ -355,6 +371,14 @@ class SessionManager:
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def _get_old_session_path(self, key: str) -> Path:
+        """Pre-base64 local session path."""
+        return self.sessions_dir / f"{self._legacy_safe_key(key)}.jsonl"
+
+    def _get_old_legacy_session_path(self, key: str) -> Path:
+        """Pre-base64 global session path."""
+        return self.legacy_sessions_dir / f"{self._legacy_safe_key(key)}.jsonl"
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -380,8 +404,18 @@ class SessionManager:
         """Load a session from disk."""
         path = self._get_session_path(key)
         if not path.exists():
-            legacy_path = self._get_legacy_session_path(key)
-            if legacy_path.exists():
+            for candidate in (
+                self._get_old_session_path(key),
+                self._get_legacy_session_path(key),
+                self._get_old_legacy_session_path(key),
+            ):
+                if not candidate.exists() or candidate == path:
+                    continue
+                legacy_path = candidate
+                break
+            else:
+                legacy_path = None
+            if legacy_path is not None:
                 try:
                     shutil.move(str(legacy_path), str(path))
                     logger.info("Migrated session {} from legacy path", key)
@@ -414,6 +448,7 @@ class SessionManager:
                     else:
                         messages.append(data)
 
+            last_consolidated = self._clamp_last_consolidated(key, last_consolidated, len(messages))
             return Session(
                 key=key,
                 messages=messages,
@@ -472,6 +507,7 @@ class SessionManager:
             if not messages and not metadata:
                 return None
 
+            last_consolidated = self._clamp_last_consolidated(key, last_consolidated, len(messages))
             return Session(
                 key=key,
                 messages=messages,
@@ -483,6 +519,19 @@ class SessionManager:
         except Exception as e:
             logger.warning("Repair failed for session {}: {}", key, e)
             return None
+
+    @staticmethod
+    def _clamp_last_consolidated(key: str, value: Any, message_count: int) -> int:
+        if not isinstance(value, int):
+            logger.warning("Ignoring non-integer last_consolidated for session {}: {}", key, value)
+            return 0
+        clamped = 0 if value > message_count else max(value, 0)
+        if clamped != value:
+            logger.warning(
+                "Clamped invalid last_consolidated for session {} from {} to {}",
+                key, value, clamped,
+            )
+        return clamped
 
     @staticmethod
     def _session_payload(session: Session) -> dict[str, Any]:
@@ -518,7 +567,7 @@ class SessionManager:
                     "last_consolidated": session.last_consolidated
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
+                for msg in repair_tool_result_protocol(session.messages):
                     f.write(json.dumps(msg, ensure_ascii=False) + "\n")
                 if fsync:
                     f.flush()
