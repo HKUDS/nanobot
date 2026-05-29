@@ -149,7 +149,7 @@ def _is_allowed_loopback_target(
     hostname: str,
     addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address],
 ) -> bool:
-    if not addrs or not all(addr.is_loopback for addr in addrs):
+    if not addrs or not all(_normalize_addr(addr).is_loopback for addr in addrs):
         return False
     normalized = hostname.rstrip(".").lower()
     if normalized == "localhost":

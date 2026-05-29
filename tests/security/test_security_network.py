@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import configure_ssrf_whitelist, contains_internal_url, validate_url_target
+from nanobot.security.network import (
+    configure_ssrf_whitelist,
+    contains_internal_url,
+    validate_url_target,
+)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -155,6 +159,12 @@ def test_loopback_exception_rejects_metadata():
         assert contains_internal_url("curl http://169.254.169.254/latest/meta-data/", allow_loopback=True)
 
 
+def test_detects_ipv6_mapped_loopback():
+    """contains_internal_url must catch IPv6-mapped loopback in shell commands."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
+        assert contains_internal_url("curl http://evil.com/secret")
+
+
 def test_allows_normal_curl():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["93.184.216.34"])):
         assert not contains_internal_url("curl https://example.com/api/data")
@@ -204,5 +214,16 @@ def test_whitelist_invalid_cidr_ignored():
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
             ok, _ = validate_url_target("http://ts.local/api")
             assert ok
+    finally:
+        configure_ssrf_whitelist([])
+
+
+def test_whitelist_allows_ipv6_mapped_cgnat():
+    """Whitelist must work when DNS returns IPv6-mapped CGNAT address."""
+    configure_ssrf_whitelist(["100.64.0.0/10"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("ts.local", ["::ffff:100.100.1.1"])):
+            ok, err = validate_url_target("http://ts.local/api")
+            assert ok, f"Whitelisted IPv6-mapped CGNAT should be allowed, got: {err}"
     finally:
         configure_ssrf_whitelist([])
