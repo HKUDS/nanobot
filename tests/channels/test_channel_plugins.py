@@ -91,6 +91,13 @@ def test_channels_config_builtin_fields_removed():
     assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is False
+    assert cfg.extract_document_text is True
+
+
+def test_channels_config_extract_document_text_accepts_camel_alias():
+    cfg = ChannelsConfig.model_validate({"extractDocumentText": False})
+
+    assert cfg.extract_document_text is False
 
 
 # ---------------------------------------------------------------------------

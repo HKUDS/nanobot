@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import mimetypes
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
@@ -51,7 +52,7 @@ from nanobot.session.webui_turns import (
     mark_webui_session,
 )
 from nanobot.utils.document import extract_documents
-from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import detect_image_mime, image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -711,7 +712,7 @@ class AgentLoop:
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
-                    content, media = extract_documents(content, media)
+                    content, media = self._prepare_message_media(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
                 return {"role": "user", "content": user_content}
@@ -1271,7 +1272,7 @@ class AgentLoop:
         msg = ctx.msg
 
         if msg.media:
-            new_content, image_only = extract_documents(msg.content, msg.media)
+            new_content, image_only = self._prepare_message_media(msg.content, msg.media)
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_only)
             msg = ctx.msg
 
@@ -1291,6 +1292,49 @@ class AgentLoop:
             self.sessions.save(ctx.session)
 
         return "ok"
+
+    def _prepare_message_media(self, content: str, media: list[str]) -> tuple[str, list[str]]:
+        if self._should_extract_document_text():
+            return extract_documents(content, media)
+        return self._reference_non_image_attachments(content, media)
+
+    def _should_extract_document_text(self) -> bool:
+        cfg = self.channels_config
+        if cfg is None:
+            return True
+        if isinstance(cfg, dict):
+            value = cfg.get("extract_document_text", cfg.get("extractDocumentText", True))
+        else:
+            value = getattr(cfg, "extract_document_text", True)
+        return value is not False
+
+    @staticmethod
+    def _reference_non_image_attachments(content: str, media: list[str]) -> tuple[str, list[str]]:
+        image_paths: list[str] = []
+        attachment_refs: list[str] = []
+        for path in media:
+            if AgentLoop._looks_like_image(path):
+                image_paths.append(path)
+            else:
+                attachment_refs.append(f"[Attachment: {path}]")
+        if attachment_refs:
+            suffix = "\n".join(attachment_refs)
+            content = f"{content}\n\n{suffix}" if content else suffix
+        return content, image_paths
+
+    @staticmethod
+    def _looks_like_image(path: str) -> bool:
+        p = Path(path)
+        mime: str | None = None
+        if p.is_file():
+            try:
+                with p.open("rb") as f:
+                    mime = detect_image_mime(f.read(16))
+            except OSError:
+                mime = None
+        if not mime:
+            mime = mimetypes.guess_type(path)[0]
+        return bool(mime and mime.startswith("image/"))
 
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
