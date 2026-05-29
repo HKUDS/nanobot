@@ -4,6 +4,7 @@ from nanobot.config.schema import DreamConfig
 def test_dream_config_defaults_to_interval_hours() -> None:
     cfg = DreamConfig()
 
+    assert cfg.enabled is True
     assert cfg.interval_h == 2
     assert cfg.cron is None
 
