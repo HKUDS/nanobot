@@ -749,7 +749,7 @@ class MatrixChannel(BaseChannel):
     def _event_declared_size_bytes(self, event: MatrixMediaEvent) -> int | None:
         info = self._event_source_content(event).get("info")
         size = info.get("size") if isinstance(info, dict) else None
-        return size if isinstance(size, int) and size >= 0 else None
+        return size if type(size) is int and size >= 0 else None
 
     def _event_mime(self, event: MatrixMediaEvent) -> str | None:
         info = self._event_source_content(event).get("info")
