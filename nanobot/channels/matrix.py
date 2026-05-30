@@ -28,7 +28,6 @@ try:
         KeyVerificationKey,
         KeyVerificationMac,
         KeyVerificationStart,
-        LocalProtocolError,
         LoginResponse,
         MatrixRoom,
         RoomEncryptedMedia,
@@ -626,26 +625,14 @@ class MatrixChannel(BaseChannel):
             response = await self.client.accept_key_verification(transaction_id)
             if isinstance(response, ToDeviceError):
                 self.logger.warning("Matrix SAS accept failed for {}: {}", sender, response)
-                return
-
-            sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
-            if sas is None:
-                self.logger.warning(
-                    "Matrix SAS state missing after accept for transaction {}",
-                    transaction_id,
-                )
-                return
-
-            response = await self.client.to_device(sas.share_key())
-            if isinstance(response, ToDeviceError):
-                self.logger.warning(
-                    "Matrix SAS key share failed for {}: {}",
-                    sender,
-                    response,
-                )
             return
 
         if isinstance(event, KeyVerificationKey):
+            responses = await self.client.send_to_device_messages()
+            if any(isinstance(response, ToDeviceError) for response in responses):
+                self.logger.warning("Matrix SAS key share failed for {}", sender)
+                return
+
             response = await self.client.confirm_short_auth_string(transaction_id)
             if isinstance(response, ToDeviceError):
                 self.logger.warning("Matrix SAS confirm failed for {}: {}", sender, response)
@@ -653,20 +640,7 @@ class MatrixChannel(BaseChannel):
 
         if isinstance(event, KeyVerificationMac):
             sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
-            if sas is None:
-                self.logger.warning(
-                    "Matrix SAS state missing for MAC transaction {}",
-                    transaction_id,
-                )
-                return
-            try:
-                response = await self.client.to_device(sas.get_mac())
-            except LocalProtocolError as e:
-                self.logger.warning("Matrix SAS MAC failed for {}: {}", sender, e)
-                return
-            if isinstance(response, ToDeviceError):
-                self.logger.warning("Matrix SAS MAC send failed for {}: {}", sender, response)
-            else:
+            if sas is not None and getattr(sas, "verified", False):
                 self.logger.info("Matrix SAS verification completed for {}", sender)
             return
 
