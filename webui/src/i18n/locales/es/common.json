@@ -297,7 +297,19 @@
       "newConfigurationHelp": "Guarda un proveedor y un modelo como una opción de un clic.",
       "configurationName": "Nombre",
       "configurationNameHelp": "Cambia el nombre de esta configuración de modelo guardada.",
-      "configurationNamePlaceholder": "Escritura rápida"
+      "configurationNamePlaceholder": "Escritura rápida",
+      "searchModels": "Busca modelos o escribe un ID personalizado",
+      "availableModels": "Modelos disponibles",
+      "currentCustomModel": "Modelo personalizado actual",
+      "useCustomModel": "Usar modelo personalizado",
+      "loadingModels": "Cargando modelos...",
+      "searchCatalog": "Busca en el catálogo del proveedor para elegir un modelo.",
+      "modelsAvailable": "disponibles",
+      "noModelResults": "No hay modelos coincidentes.",
+      "loadFailed": "Lista de modelos no disponible.",
+      "unsupportedModelList": "Escribe manualmente un ID de modelo.",
+      "providerNotConfigured": "Configura este proveedor antes de cargar modelos.",
+      "autoProviderCustomOnly": "El modo de proveedor automático usa ID de modelo personalizados."
     },
     "timezone": {
       "select": "Seleccionar zona horaria",

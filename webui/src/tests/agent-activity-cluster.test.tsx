@@ -966,8 +966,10 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.getByText("Web")).toBeInTheDocument();
     expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
-    expect(screen.getByText("Homepage screenshot")).toBeInTheDocument();
-    expect(screen.getByRole("img")).toHaveAttribute("src", "/api/media/signed/screenshot.png");
+    expect(screen.getByRole("img", { name: "Homepage screenshot" })).toHaveAttribute(
+      "src",
+      "/api/media/signed/screenshot.png",
+    );
   });
 
   it("shows missing evidence as a file-safe placeholder", () => {

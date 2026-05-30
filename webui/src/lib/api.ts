@@ -6,6 +6,7 @@ import type {
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  ProviderModelsPayload,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
@@ -172,6 +173,19 @@ export async function fetchMcpPresets(
   base: string = "",
 ): Promise<McpPresetsPayload> {
   return request<McpPresetsPayload>(`${base}/api/settings/mcp-presets`, token);
+}
+
+export async function fetchProviderModels(
+  token: string,
+  provider: string,
+  base: string = "",
+): Promise<ProviderModelsPayload> {
+  const query = new URLSearchParams();
+  query.set("provider", provider);
+  return request<ProviderModelsPayload>(
+    `${base}/api/settings/provider-models?${query}`,
+    token,
+  );
 }
 
 export async function runMcpPresetAction(

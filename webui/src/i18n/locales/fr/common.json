@@ -297,7 +297,19 @@
       "newConfigurationHelp": "Enregistrez un fournisseur et un modèle comme option en un clic.",
       "configurationName": "Nom",
       "configurationNameHelp": "Renommez cette configuration de modèle enregistrée.",
-      "configurationNamePlaceholder": "Rédaction rapide"
+      "configurationNamePlaceholder": "Rédaction rapide",
+      "searchModels": "Rechercher des modèles ou saisir un ID personnalisé",
+      "availableModels": "Modèles disponibles",
+      "currentCustomModel": "Modèle personnalisé actuel",
+      "useCustomModel": "Utiliser un modèle personnalisé",
+      "loadingModels": "Chargement des modèles...",
+      "searchCatalog": "Recherchez dans le catalogue du fournisseur pour choisir un modèle.",
+      "modelsAvailable": "disponibles",
+      "noModelResults": "Aucun modèle correspondant.",
+      "loadFailed": "Liste des modèles indisponible.",
+      "unsupportedModelList": "Saisissez manuellement un ID de modèle.",
+      "providerNotConfigured": "Configurez ce fournisseur avant de charger les modèles.",
+      "autoProviderCustomOnly": "Le mode fournisseur automatique utilise des ID de modèle personnalisés."
     },
     "timezone": {
       "select": "Sélectionner un fuseau horaire",

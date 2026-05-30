@@ -297,7 +297,19 @@
       "newConfigurationHelp": "제공자와 모델을 한 번에 선택할 수 있는 옵션으로 저장합니다.",
       "configurationName": "이름",
       "configurationNameHelp": "저장된 모델 구성의 이름을 변경합니다.",
-      "configurationNamePlaceholder": "빠른 글쓰기"
+      "configurationNamePlaceholder": "빠른 글쓰기",
+      "searchModels": "모델을 검색하거나 사용자 지정 ID 입력",
+      "availableModels": "사용 가능한 모델",
+      "currentCustomModel": "현재 사용자 지정 모델",
+      "useCustomModel": "사용자 지정 모델 사용",
+      "loadingModels": "모델을 불러오는 중...",
+      "searchCatalog": "제공자 카탈로그를 검색해 모델을 선택하세요.",
+      "modelsAvailable": "개 사용 가능",
+      "noModelResults": "일치하는 모델이 없습니다.",
+      "loadFailed": "모델 목록을 사용할 수 없습니다.",
+      "unsupportedModelList": "모델 ID를 직접 입력하세요.",
+      "providerNotConfigured": "모델을 불러오기 전에 이 제공자를 설정하세요.",
+      "autoProviderCustomOnly": "자동 제공자 모드는 사용자 지정 모델 ID를 사용합니다."
     },
     "timezone": {
       "select": "시간대 선택",

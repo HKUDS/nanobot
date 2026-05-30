@@ -104,7 +104,19 @@
       "newConfigurationHelp": "把服务商和模型保存为一个可直接切换的选项。",
       "configurationName": "名称",
       "configurationNameHelp": "重命名这个已保存的模型配置。",
-      "configurationNamePlaceholder": "快速写作"
+      "configurationNamePlaceholder": "快速写作",
+      "searchModels": "搜索模型或输入自定义 ID",
+      "availableModels": "可用模型",
+      "currentCustomModel": "当前自定义模型",
+      "useCustomModel": "使用自定义模型",
+      "loadingModels": "正在加载模型...",
+      "searchCatalog": "搜索服务商目录来选择模型。",
+      "modelsAvailable": "个可用",
+      "noModelResults": "没有匹配的模型。",
+      "loadFailed": "模型列表暂不可用。",
+      "unsupportedModelList": "手动输入模型 ID。",
+      "providerNotConfigured": "先配置这个服务商再加载模型。",
+      "autoProviderCustomOnly": "自动服务商模式使用自定义模型 ID。"
     },
     "rows": {
       "theme": "主题",

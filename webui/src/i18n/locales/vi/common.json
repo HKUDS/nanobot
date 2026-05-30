@@ -297,7 +297,19 @@
       "newConfigurationHelp": "Lưu nhà cung cấp và mô hình thành một lựa chọn một lần nhấp.",
       "configurationName": "Tên",
       "configurationNameHelp": "Đổi tên cấu hình mô hình đã lưu này.",
-      "configurationNamePlaceholder": "Viết nhanh"
+      "configurationNamePlaceholder": "Viết nhanh",
+      "searchModels": "Tìm mô hình hoặc nhập ID tùy chỉnh",
+      "availableModels": "Mô hình khả dụng",
+      "currentCustomModel": "Mô hình tùy chỉnh hiện tại",
+      "useCustomModel": "Dùng mô hình tùy chỉnh",
+      "loadingModels": "Đang tải mô hình...",
+      "searchCatalog": "Tìm trong danh mục nhà cung cấp để chọn mô hình.",
+      "modelsAvailable": "khả dụng",
+      "noModelResults": "Không có mô hình phù hợp.",
+      "loadFailed": "Không tải được danh sách mô hình.",
+      "unsupportedModelList": "Nhập ID mô hình thủ công.",
+      "providerNotConfigured": "Cấu hình nhà cung cấp này trước khi tải mô hình.",
+      "autoProviderCustomOnly": "Chế độ nhà cung cấp tự động dùng ID mô hình tùy chỉnh."
     },
     "timezone": {
       "select": "Chọn múi giờ",

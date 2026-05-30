@@ -104,7 +104,19 @@
       "newConfigurationHelp": "Save a provider and model as a one-click option.",
       "configurationName": "Name",
       "configurationNameHelp": "Rename this saved model configuration.",
-      "configurationNamePlaceholder": "Fast writing"
+      "configurationNamePlaceholder": "Fast writing",
+      "searchModels": "Search models or type a custom ID",
+      "availableModels": "Available models",
+      "currentCustomModel": "Current custom model",
+      "useCustomModel": "Use custom model",
+      "loadingModels": "Loading models...",
+      "searchCatalog": "Search provider catalog to choose a model.",
+      "modelsAvailable": "available",
+      "noModelResults": "No matching models.",
+      "loadFailed": "Model list unavailable.",
+      "unsupportedModelList": "Type a model ID manually.",
+      "providerNotConfigured": "Configure this provider before loading models.",
+      "autoProviderCustomOnly": "Auto provider mode uses custom model IDs."
     },
     "rows": {
       "theme": "Theme",

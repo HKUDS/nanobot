@@ -297,7 +297,19 @@
       "newConfigurationHelp": "プロバイダーとモデルをワンクリックの選択肢として保存します。",
       "configurationName": "名前",
       "configurationNameHelp": "保存済みのモデル設定の名前を変更します。",
-      "configurationNamePlaceholder": "高速ライティング"
+      "configurationNamePlaceholder": "高速ライティング",
+      "searchModels": "モデルを検索するかカスタム ID を入力",
+      "availableModels": "利用可能なモデル",
+      "currentCustomModel": "現在のカスタムモデル",
+      "useCustomModel": "カスタムモデルを使用",
+      "loadingModels": "モデルを読み込み中...",
+      "searchCatalog": "プロバイダーのカタログを検索してモデルを選択します。",
+      "modelsAvailable": "件利用可能",
+      "noModelResults": "一致するモデルはありません。",
+      "loadFailed": "モデル一覧を利用できません。",
+      "unsupportedModelList": "モデル ID を手動で入力してください。",
+      "providerNotConfigured": "モデルを読み込む前にこのプロバイダーを設定してください。",
+      "autoProviderCustomOnly": "自動プロバイダーモードではカスタムモデル ID を使用します。"
     },
     "timezone": {
       "select": "タイムゾーンを選択",

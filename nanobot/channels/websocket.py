@@ -51,6 +51,7 @@ from nanobot.webui.settings_api import (
     decorate_settings_payload,
     login_oauth_provider,
     logout_oauth_provider,
+    provider_models_payload,
     runtime_capabilities,
     settings_payload,
     update_agent_settings,
@@ -823,6 +824,9 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/settings/provider/update":
             return self._handle_settings_provider_update(request)
 
+        if got == "/api/settings/provider-models":
+            return await self._handle_settings_provider_models(request)
+
         if got == "/api/settings/provider/oauth-login":
             return await self._handle_settings_provider_oauth(request, "login")
 
@@ -1124,6 +1128,21 @@ class WebSocketChannel(BaseChannel):
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
         return _http_json_response(self._with_settings_restart_state(payload, section="image"))
+
+    async def _handle_settings_provider_models(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            payload = await asyncio.to_thread(
+                provider_models_payload,
+                _parse_query(request.path),
+            )
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        except Exception:
+            self.logger.exception("failed to load provider model list")
+            return _http_error(500, "failed to load provider model list")
+        return _http_json_response(payload)
 
     async def _handle_settings_provider_oauth(self, request: WsRequest, action: str) -> Response:
         if not self._check_api_token(request):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from nanobot.config.loader import load_config, save_config
@@ -10,6 +11,7 @@ from nanobot.webui.settings_api import (
     WebUISettingsError,
     _oauth_provider_status,
     create_model_configuration,
+    provider_models_payload,
     settings_payload,
     update_agent_settings,
     update_model_configuration,
@@ -334,6 +336,55 @@ def test_openai_codex_oauth_status_rejects_unavailable_token(
 
     assert status["configured"] is False
     assert status["account"] is None
+
+
+def test_provider_models_payload_fetches_openai_compatible_models(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.deepseek.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.deepseek.com/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer sk-test"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "deepseek-chat", "owned_by": "deepseek"},
+                    {"id": "deepseek-reasoner", "context_window": 65536},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["deepseek"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "official"
+    assert payload["model_count"] == 2
+    assert payload["models"][0]["id"] == "deepseek-chat"
+    assert payload["models"][1]["context_window"] == 65536
+
+
+def test_provider_models_payload_requires_gateway_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = provider_models_payload({"provider": ["openrouter"]})
+
+    assert payload["status"] == "not_configured"
+    assert payload["models"] == []
 
 
 def test_create_model_configuration_accepts_configured_oauth_provider(

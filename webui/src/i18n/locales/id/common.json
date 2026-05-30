@@ -297,7 +297,19 @@
       "newConfigurationHelp": "Simpan penyedia dan model sebagai opsi sekali klik.",
       "configurationName": "Nama",
       "configurationNameHelp": "Ganti nama konfigurasi model yang tersimpan ini.",
-      "configurationNamePlaceholder": "Penulisan cepat"
+      "configurationNamePlaceholder": "Penulisan cepat",
+      "searchModels": "Cari model atau ketik ID khusus",
+      "availableModels": "Model tersedia",
+      "currentCustomModel": "Model khusus saat ini",
+      "useCustomModel": "Gunakan model khusus",
+      "loadingModels": "Memuat model...",
+      "searchCatalog": "Cari katalog penyedia untuk memilih model.",
+      "modelsAvailable": "tersedia",
+      "noModelResults": "Tidak ada model yang cocok.",
+      "loadFailed": "Daftar model tidak tersedia.",
+      "unsupportedModelList": "Ketik ID model secara manual.",
+      "providerNotConfigured": "Konfigurasikan penyedia ini sebelum memuat model.",
+      "autoProviderCustomOnly": "Mode penyedia otomatis menggunakan ID model khusus."
     },
     "timezone": {
       "select": "Pilih zona waktu",

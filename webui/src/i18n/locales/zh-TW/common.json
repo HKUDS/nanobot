@@ -297,7 +297,19 @@
       "newConfigurationHelp": "把服務商和模型儲存為一個可直接切換的選項。",
       "configurationName": "名稱",
       "configurationNameHelp": "重新命名這個已儲存的模型配置。",
-      "configurationNamePlaceholder": "快速寫作"
+      "configurationNamePlaceholder": "快速寫作",
+      "searchModels": "搜尋模型或輸入自訂 ID",
+      "availableModels": "可用模型",
+      "currentCustomModel": "目前自訂模型",
+      "useCustomModel": "使用自訂模型",
+      "loadingModels": "正在載入模型...",
+      "searchCatalog": "搜尋服務商目錄來選擇模型。",
+      "modelsAvailable": "個可用",
+      "noModelResults": "沒有符合的模型。",
+      "loadFailed": "模型列表暫不可用。",
+      "unsupportedModelList": "手動輸入模型 ID。",
+      "providerNotConfigured": "先設定這個服務商再載入模型。",
+      "autoProviderCustomOnly": "自動服務商模式使用自訂模型 ID。"
     },
     "timezone": {
       "select": "選擇時區",
