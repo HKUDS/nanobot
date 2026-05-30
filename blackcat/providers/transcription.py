@@ -1,14 +1,17 @@
 """Provider-specific voice transcription adapters.
 
-This module only knows how to call external transcription APIs such as Groq
-and OpenAI Whisper. Product-level config fallback, WebUI upload validation,
-and channel integration live in ``nanobot.audio.transcription``.
+This module only knows how to call external transcription APIs such as Groq,
+OpenAI Whisper, and OpenRouter. Product-level config fallback, WebUI upload
+validation, and channel integration live in ``nanobot.audio.transcription``.
 """
 
 import asyncio
+import base64
 import mimetypes
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -22,6 +25,13 @@ _AUDIO_MIME_OVERRIDES = {
     ".wav": "audio/wav",
     ".weba": "audio/webm",
     ".webm": "audio/webm",
+}
+_FORMAT_ALIASES = {
+    "oga": "ogg",
+    "opus": "ogg",
+    "mpga": "mp3",
+    "mpeg": "mp3",
+    "mp4": "m4a",
 }
 
 
@@ -47,6 +57,12 @@ def _audio_mime_type(path: Path) -> str:
         or mimetypes.guess_type(path.name)[0]
         or "application/octet-stream"
     )
+
+
+def _audio_format(path: Path) -> str:
+    """Map an audio file's extension to an OpenRouter ``format`` value."""
+    ext = path.suffix.lstrip(".").lower()
+    return _FORMAT_ALIASES.get(ext, ext)
 
 
 # Up to 3 retries (4 attempts total) with exponential backoff on transient
@@ -91,16 +107,61 @@ async def _post_transcription_with_retry(
         return ""
     headers = {"Authorization": f"Bearer {api_key}"}
 
+    def build_request() -> dict[str, Any]:
+        files = {
+            "file": (path.name, data, _audio_mime_type(path)),
+            "model": (None, model),
+        }
+        if language:
+            files["language"] = (None, language)
+        return {"url": url, "headers": headers, "files": files, "timeout": 60.0}
+
+    return await _post_with_retry(build_request, provider_label)
+
+
+async def _post_json_transcription_with_retry(
+    url: str,
+    *,
+    api_key: str | None,
+    path: Path,
+    model: str,
+    provider_label: str,
+    language: str | None = None,
+) -> str:
+    """POST base64 JSON audio for providers that do not accept multipart uploads."""
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
+        return ""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def build_request() -> dict[str, Any]:
+        body: dict[str, object] = {
+            "model": model,
+            "input_audio": {
+                "data": base64.b64encode(data).decode(),
+                "format": _audio_format(path),
+            },
+        }
+        if language:
+            body["language"] = language
+        return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
+
+    return await _post_with_retry(build_request, provider_label)
+
+
+async def _post_with_retry(
+    build_request: Callable[[], dict[str, Any]],
+    provider_label: str,
+) -> str:
     async with httpx.AsyncClient() as client:
         for attempt in range(_MAX_RETRIES + 1):
-            files = {
-                "file": (path.name, data, _audio_mime_type(path)),
-                "model": (None, model),
-            }
-            if language:
-                files["language"] = (None, language)
             try:
-                response = await client.post(url, headers=headers, files=files, timeout=60.0)
+                response = await client.post(**build_request())
             except _RETRYABLE_EXCEPTIONS as e:
                 if attempt < _MAX_RETRIES:
                     logger.warning(
@@ -167,6 +228,7 @@ async def _post_transcription_with_retry(
                 )
                 return ""
             return payload.get("text", "")
+    return ""
 
 
 class OpenAITranscriptionProvider:
@@ -254,5 +316,44 @@ class GroqTranscriptionProvider:
             path=path,
             model=self.model,
             provider_label="Groq",
+            language=self.language,
+        )
+
+
+class OpenRouterTranscriptionProvider:
+    """Voice transcription provider using OpenRouter's speech-to-text endpoint."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+        model: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+        self.api_url = _resolve_transcription_url(
+            api_base or os.environ.get("OPENROUTER_BASE_URL"),
+            "https://openrouter.ai/api/v1/audio/transcriptions",
+        )
+        self.language = language or None
+        self.model = model or "openai/whisper-1"
+        logger.debug("OpenRouter transcription endpoint: {}", self.api_url)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("OpenRouter API key not configured for transcription")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        return await _post_json_transcription_with_retry(
+            self.api_url,
+            api_key=self.api_key,
+            path=path,
+            model=self.model,
+            provider_label="OpenRouter",
             language=self.language,
         )

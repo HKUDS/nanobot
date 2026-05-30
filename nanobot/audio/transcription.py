@@ -18,12 +18,13 @@ from loguru import logger
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
-TranscriptionProviderName = Literal["groq", "openai"]
+TranscriptionProviderName = Literal["groq", "openai", "openrouter"]
 
 _DEFAULT_PROVIDER: TranscriptionProviderName = "groq"
 _DEFAULT_MODELS: dict[TranscriptionProviderName, str] = {
     "groq": "whisper-large-v3",
     "openai": "whisper-1",
+    "openrouter": "openai/whisper-1",
 }
 _MAX_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
 _AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
@@ -166,6 +167,15 @@ async def transcribe_audio_file(
         from nanobot.providers.transcription import OpenAITranscriptionProvider
 
         provider = OpenAITranscriptionProvider(
+            api_key=config.api_key,
+            api_base=config.api_base or None,
+            language=config.language,
+            model=config.model,
+        )
+    elif config.provider == "openrouter":
+        from nanobot.providers.transcription import OpenRouterTranscriptionProvider
+
+        provider = OpenRouterTranscriptionProvider(
             api_key=config.api_key,
             api_base=config.api_base or None,
             language=config.language,
