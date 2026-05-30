@@ -1,7 +1,6 @@
 """CLI commands for nanobot."""
 
 import asyncio
-import functools
 import os
 import select
 import signal
@@ -106,10 +105,23 @@ _HEARTBEAT_PREAMBLE = (
 )
 
 
-@functools.lru_cache(maxsize=None)
-def _heartbeat_template() -> str | None:
-    from nanobot.utils.helpers import load_bundled_template
-    return load_bundled_template("HEARTBEAT.md")
+def _heartbeat_has_active_tasks(content: str) -> bool:
+    """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments."""
+    in_comment = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("<!--"):
+            if "-->" not in stripped[4:]:
+                in_comment = True
+            continue
+        return True
+    return False
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -982,8 +994,8 @@ def _run_gateway(
             except OSError:
                 logger.debug("Heartbeat: HEARTBEAT.md missing")
                 return None
-            if not content or content == _heartbeat_template():
-                logger.debug("Heartbeat: HEARTBEAT.md empty or identical to template")
+            if not _heartbeat_has_active_tasks(content):
+                logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
             channel, chat_id = _pick_heartbeat_target()
@@ -995,13 +1007,22 @@ def _run_gateway(
                 + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
             )
 
-            resp = await agent.process_direct(
-                prompt,
-                session_key="heartbeat",
-                channel=channel,
-                chat_id=chat_id,
-                on_progress=_silent,
-            )
+            # Internal check: funnel all output through the post-run gate so the
+            # turn can't deliver directly via the message tool and skip it.
+            suppress_token = None
+            if isinstance(message_tool, MessageTool):
+                suppress_token = message_tool.set_suppress_delivery(True)
+            try:
+                resp = await agent.process_direct(
+                    prompt,
+                    session_key="heartbeat",
+                    channel=channel,
+                    chat_id=chat_id,
+                    on_progress=_silent,
+                )
+            finally:
+                if isinstance(message_tool, MessageTool) and suppress_token is not None:
+                    message_tool.reset_suppress_delivery(suppress_token)
             response = resp.content if resp else ""
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
@@ -1012,8 +1033,10 @@ def _run_gateway(
             if not response:
                 return None
 
+            # Fail closed: stay silent on evaluator failure instead of notifying.
             should_notify = await evaluate_response(
                 response, prompt, agent.provider, agent.model,
+                default_notify=False,
             )
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
