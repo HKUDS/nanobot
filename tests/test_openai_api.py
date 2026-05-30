@@ -406,6 +406,7 @@ async def test_process_direct_accepts_media() -> None:
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._connect_mcp = AsyncMock()
+    loop._session_locks = {}
 
     captured_msg = None
 

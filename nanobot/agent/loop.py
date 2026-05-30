@@ -1667,14 +1667,17 @@ class AgentLoop:
             channel=channel, sender_id="user", chat_id=chat_id,
             content=content, media=media or [],
         )
+        # Share the dispatch lock so direct calls serialize with bus turns.
+        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         try:
-            return await self._process_message(
-                msg,
-                session_key=session_key,
-                on_progress=on_progress,
-                on_stream=on_stream,
-                on_stream_end=on_stream_end,
-            )
+            async with lock:
+                return await self._process_message(
+                    msg,
+                    session_key=session_key,
+                    on_progress=on_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                )
         finally:
             if channel == "websocket":
                 await self._webui_turns.publish_run_status(msg, "idle")
