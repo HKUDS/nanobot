@@ -1218,6 +1218,57 @@ def _run_gateway(
                     f"Content-Length: {len(body)}\r\n"
                     f"\r\n{body}"
                 )
+            elif method == "POST" and path == "/hooks/foolish-storefront-order":
+                try:
+                    header_end = data.find(b"\r\n\r\n")
+                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                    order = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+
+                    items = []
+                    try:
+                        items = _json.loads(order.get("itemsJson") or "[]")
+                    except Exception:
+                        pass
+
+                    items_text = "\n".join(
+                        f"  • {i.get('name', '?')} ({i.get('variantLabel', '')}) "
+                        f"× {i.get('qty', 1)} — {float(i.get('price', 0)) * int(i.get('qty', 1)):.2f}€"
+                        for i in items
+                    ) if items else "  (dettagli non disponibili)"
+
+                    telegram_cfg = config.channels.telegram
+                    tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
+                    chat_id = str(tg_allow[0]) if tg_allow else ""
+
+                    if chat_id:
+                        msg_text = (
+                            f"🛒 Nuovo ordine — {order.get('externalRef', 'N/A')}\n\n"
+                            f"Cliente: {order.get('customerName', 'N/A')} "
+                            f"({order.get('customerEmail', 'N/A')})\n"
+                            f"Totale: {order.get('amount', 0):.2f} {order.get('currency', 'EUR')}\n\n"
+                            f"Prodotti:\n{items_text}"
+                        )
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(channel="telegram", chat_id=chat_id, content=msg_text),
+                        ))
+                        logger.info("foolish-storefront-order hook: notified telegram {}", chat_id)
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("foolish-storefront-order hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
             else:
                 body = "Not Found"
                 resp = (
