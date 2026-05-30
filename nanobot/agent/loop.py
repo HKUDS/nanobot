@@ -69,6 +69,7 @@ class AgentLoop:
         web_fetch_config: Any | None = None,
         max_tokens_per_turn: int = 0,
         max_tool_result_chars: int = 0,
+        keep_recent_turn_tool_results: int = -1,
         model_router: Any | None = None,
         sync_config: Any | None = None,
     ):
@@ -91,6 +92,7 @@ class AgentLoop:
         self.web_fetch_config = web_fetch_config
         self.max_tokens_per_turn = max_tokens_per_turn
         self.max_tool_result_chars = max_tool_result_chars
+        self.keep_recent_turn_tool_results = keep_recent_turn_tool_results
         self.model_router = model_router
         self.sync_config = sync_config or SyncConfig()
         self.sync = WorkspaceSync(workspace, self.sync_config)
@@ -235,6 +237,60 @@ class AgentLoop:
             f"or `fields`) to see more.]"
         )
 
+    _STUB_MIN_CHARS = 200  # Don't elide trivially small results
+
+    def _elide_old_tool_results(self, messages: list[dict]) -> list[dict]:
+        """Replace tool_result content from older turns with a small stub, so
+        verbose file/calendar/web returns don't accumulate across many turns of
+        conversation history. Keeps results from the last K user-turns intact.
+
+        K is `self.keep_recent_turn_tool_results`. -1 disables (keep all).
+        """
+        k = self.keep_recent_turn_tool_results
+        if k < 0 or not messages:
+            return messages
+
+        # Walk from the end, counting user messages. The boundary is the index
+        # of the k-th user message from the end (the oldest one we want to
+        # keep). Everything BEFORE that index is "old" and tool results there
+        # are candidates for elision.
+        user_count = 0
+        boundary = 0
+        last_user_idx = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                user_count += 1
+                if user_count > k:
+                    boundary = last_user_idx
+                    break
+                last_user_idx = i
+        if boundary == 0:
+            return messages  # not enough prior turns to elide anything
+
+        out: list[dict] = []
+        elided_count = 0
+        elided_chars = 0
+        for i, m in enumerate(messages):
+            if i < boundary and m.get("role") == "tool" and isinstance(m.get("content"), str):
+                content = m["content"]
+                if len(content) >= self._STUB_MIN_CHARS:
+                    tool_name = m.get("name", "?")
+                    stub = (
+                        f"[Tool result elided to save context — original was "
+                        f"{len(content):,} chars from `{tool_name}`. Re-call the "
+                        f"tool with the same arguments if you need the content.]"
+                    )
+                    elided_count += 1
+                    elided_chars += len(content) - len(stub)
+                    m = {**m, "content": stub}
+            out.append(m)
+        if elided_count:
+            logger.debug(
+                "Elided {} old tool result(s) from context (saved ~{:,} chars)",
+                elided_count, elided_chars,
+            )
+        return out
+
     _DEFAULT_CLASSIFIER_SYSTEM_PROMPT = (
         "Classify the user's message. Call the classify tool. "
         "Default to complex if uncertain."
@@ -363,7 +419,7 @@ class AgentLoop:
             iteration += 1
 
             response = await self.provider.chat(
-                messages=messages,
+                messages=self._elide_old_tool_results(messages),
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,

@@ -300,6 +300,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     max_tokens_per_turn: int = 0  # 0 = unlimited; hard cap on total tokens per message turn
     max_tool_result_chars: int = 20000  # 0 = unlimited; cap on a single tool-call result to prevent context blow-up
+    keep_recent_turn_tool_results: int = 3  # Keep verbatim tool-result content from the last K user-turns; elide older. -1 = disabled (keep all)
     model_router: ModelRouterConfig = Field(default_factory=ModelRouterConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
 
