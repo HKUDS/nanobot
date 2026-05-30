@@ -131,7 +131,7 @@
       "workspacePath": "Workspace mặc định",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "Mô hình hiện tại",
+      "currentModel": "Cấu hình hiện tại",
       "brandLogos": "Logo thương hiệu",
       "cliAppsCatalog": "Danh mục ứng dụng CLI",
       "cliAppsFilter": "Bộ lọc ứng dụng CLI",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "Chọn mô hình nanobot dùng cho các câu trả lời mới.",
+      "currentModel": "Chọn cấu hình mô hình nanobot dùng cho các câu trả lời mới.",
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
       "brandLogos": "Logo được tải từ tên miền thương hiệu, có biểu tượng cục bộ làm dự phòng.",
@@ -295,9 +295,19 @@
       "addConfiguration": "Thêm cấu hình",
       "newConfiguration": "Cấu hình mô hình mới",
       "newConfigurationHelp": "Lưu nhà cung cấp và mô hình thành một lựa chọn một lần nhấp.",
-      "configurationName": "Tên",
+      "configurationName": "Tên cấu hình",
       "configurationNameHelp": "Đổi tên cấu hình mô hình đã lưu này.",
-      "configurationNamePlaceholder": "Viết nhanh"
+      "configurationNamePlaceholder": "Viết nhanh",
+      "searchModels": "Tìm hoặc nhập ID mô hình",
+      "useCustomModel": "Dùng",
+      "loadingModels": "Đang tải mô hình...",
+      "searchCatalog": "Tìm trong danh mục nhà cung cấp để chọn mô hình.",
+      "modelsAvailable": "khả dụng",
+      "noModelResults": "Không có mô hình phù hợp.",
+      "loadFailed": "Không tải được danh sách mô hình.",
+      "unsupportedModelList": "Nhập ID mô hình thủ công.",
+      "providerNotConfigured": "Cấu hình nhà cung cấp này trước khi tải mô hình.",
+      "autoProviderCustomOnly": "Chế độ nhà cung cấp tự động dùng ID mô hình tùy chỉnh."
     },
     "timezone": {
       "select": "Chọn múi giờ",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "Đóng mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "queued": {
+        "label": "Hướng dẫn đang chờ",
+        "guide": "Hướng dẫn",
+        "delete": "Xóa hướng dẫn",
+        "edit": "Sửa hướng dẫn",
+        "drag": "Kéo để sắp xếp"
+      },
       "attachImage": "Đính kèm ảnh",
       "imageMode": {
         "label": "Tạo ảnh",

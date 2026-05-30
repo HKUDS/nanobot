@@ -540,6 +540,58 @@ describe("App layout", () => {
     expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
   });
 
+  it("does not show a completed dot later when the active session finishes", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Active work",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Other chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("button", { name: /^Active work$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Active work$/ }));
+    });
+    await waitFor(() => expect(document.title).toContain("Active work"));
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+    });
+    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", null);
+    });
+    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
+    });
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+  });
+
   it("restores sidebar run indicators after a page reload", async () => {
     mockSessions = [
       {
@@ -590,7 +642,22 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        const href = String(input);
+        if (href === "/api/settings/provider-models?provider=openai") {
+          return jsonResponse({
+            provider: "openai",
+            label: "OpenAI",
+            status: "available",
+            catalog_kind: "official",
+            models: [
+              { id: "openai/gpt-4o", owned_by: "openai", context_window: 128000 },
+              { id: "openai/gpt-4o-mini", owned_by: "openai", context_window: 128000 },
+            ],
+            model_count: 2,
+            fetched_at: 1,
+          });
+        }
+        if (href.includes("/api/settings")) {
           return {
             ok: true,
             status: 200,
@@ -822,9 +889,9 @@ describe("App layout", () => {
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Current model")).toBeInTheDocument();
+    expect(screen.getByText("Current configuration")).toBeInTheDocument();
     expect(screen.queryByText("Presets")).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: /openai\/gpt-4o/ }));
+    fireEvent.pointerDown(screen.getAllByRole("button", { name: /openai\/gpt-4o/ })[0]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Add configuration" }));
     const modelDialog = screen.getByRole("dialog", { name: "New model configuration" });
     expect(within(modelDialog).getByText("Save a provider and model as a one-click option.")).toBeInTheDocument();
@@ -837,33 +904,47 @@ describe("App layout", () => {
     expect(within(modelDialog).getByRole("button", { name: /OpenAI/ })).toBeInTheDocument();
     expect(within(modelDialog).getByRole("button", { name: "Save" })).toBeEnabled();
     fireEvent.click(within(modelDialog).getByRole("button", { name: "Cancel" }));
-    const modelInput = screen.getByDisplayValue("openai/gpt-4o");
-    expect(modelInput).toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
     expect(screen.getAllByTestId("provider-picker-logo-openai").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("menuitem", { name: /Auto/ }));
-    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o-mini" } });
+    const openModelPicker = () => {
+      const modelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o/ });
+      fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    };
+    openModelPicker();
+    await screen.findByText("openai/gpt-4o-mini");
+    fireEvent.click(screen.getAllByText("openai/gpt-4o-mini")[0]);
     expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
       "text-blue-600",
     );
-    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o" } });
+    const updatedModelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o-mini/ });
+    fireEvent.pointerDown(updatedModelButtons[updatedModelButtons.length - 1]);
+    await screen.findByText("openai/gpt-4o");
+    fireEvent.click(screen.getAllByText("openai/gpt-4o")[0]);
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
     expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
     expect(screen.getByText(/Product names, logos, and brands/)).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByText("OpenAI"));
+    const clickProviderRow = (label: string) => {
+      const providerLabel = screen
+        .getAllByText(label)
+        .find((element) => element.className.includes("font-semibold"));
+      expect(providerLabel).toBeTruthy();
+      fireEvent.click(providerLabel!);
+    };
+    clickProviderRow("OpenAI");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
       target: { value: "unsaved-openai-key" },
     });
-    fireEvent.click(screen.getByText("OpenRouter"));
-    fireEvent.click(screen.getByText("OpenAI"));
+    clickProviderRow("OpenRouter");
+    clickProviderRow("OpenAI");
     expect(screen.getByText("open••••-key")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Ant Ling"));
+    clickProviderRow("Ant Ling");
     expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Atomic Chat"));
+    clickProviderRow("Atomic Chat");
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();
 

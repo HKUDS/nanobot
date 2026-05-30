@@ -54,9 +54,10 @@ const LazyHighlightedCode = lazy(async () => {
 function PlainCodeFallback({ code }: { code: string }) {
   return (
     <pre
-      className="m-0 overflow-x-auto whitespace-pre-wrap p-4 font-mono text-sm leading-[1.6]"
+      className="m-0 overflow-x-auto whitespace-pre-wrap bg-background p-4 font-mono text-sm leading-[1.6] text-foreground/90"
+      data-testid="plain-code-fallback"
     >
-      <code>{code}</code>
+      <code className="text-inherit">{code}</code>
     </pre>
   );
 }

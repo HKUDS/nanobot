@@ -1,11 +1,13 @@
-import { Children, isValidElement, useMemo } from "react";
-import type { Components } from "react-markdown";
+import { Children, isValidElement, useMemo, type ReactNode } from "react";
+import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import { Check } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
+import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
 import { FileReferenceChip, isLikelyFilePath } from "@/components/FileReferenceChip";
 import { inferMediaKind } from "@/lib/media";
@@ -19,8 +21,181 @@ interface MarkdownTextRendererProps {
   highlightCode?: boolean;
 }
 
-const remarkPlugins = [remarkBreaks, remarkGfm, remarkMath];
-const rehypePlugins = [rehypeKatex];
+type MarkdownAstNode = {
+  type: string;
+  value?: string;
+  children?: MarkdownAstNode[];
+  data?: {
+    hName?: string;
+  };
+};
+
+const SAFE_INLINE_HTML_TAGS = new Set(["mark", "sub", "sup"]);
+
+function extensionOf(value: string): string {
+  const clean = value.split(/[?#]/, 1)[0]?.trim() ?? "";
+  const slash = clean.lastIndexOf("/");
+  const name = slash >= 0 ? clean.slice(slash + 1) : clean;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+}
+
+function markdownAttachmentKind(source: string, label: string): "image" | "video" | "file" {
+  const inferredKind = inferMediaKind({ url: source, name: label });
+  if (inferredKind !== "file") return inferredKind;
+  return extensionOf(label) || extensionOf(source) ? "file" : "image";
+}
+
+function safeHtmlNode(tagName: string, children: MarkdownAstNode[]): MarkdownAstNode {
+  return {
+    type: `nanobotSafeHtml${tagName}`,
+    data: { hName: tagName },
+    children,
+  };
+}
+
+function safeText(value: string): MarkdownAstNode {
+  return { type: "text", value };
+}
+
+function htmlTag(node: MarkdownAstNode): { tag: string; closing: boolean } | null {
+  if (node.type !== "html" || typeof node.value !== "string") return null;
+  const match = /^<\s*(\/?)\s*(mark|sub|sup)\s*>$/i.exec(node.value.trim());
+  if (!match) return null;
+  return { tag: match[2].toLowerCase(), closing: match[1] === "/" };
+}
+
+function normalizeSafeInlineHtml(children: MarkdownAstNode[]): MarkdownAstNode[] {
+  const next: MarkdownAstNode[] = [];
+  for (let index = 0; index < children.length; index += 1) {
+    const node = children[index];
+    if (node.children) {
+      node.children = normalizeSafeInlineHtml(node.children);
+    }
+
+    const tag = htmlTag(node);
+    if (!tag || tag.closing || !SAFE_INLINE_HTML_TAGS.has(tag.tag)) {
+      next.push(node);
+      continue;
+    }
+
+    let closeIndex = -1;
+    for (let cursor = index + 1; cursor < children.length; cursor += 1) {
+      const closeTag = htmlTag(children[cursor]);
+      if (closeTag?.closing && closeTag.tag === tag.tag) {
+        closeIndex = cursor;
+        break;
+      }
+    }
+
+    if (closeIndex === -1) {
+      next.push(node);
+      continue;
+    }
+
+    next.push(
+      safeHtmlNode(
+        tag.tag,
+        normalizeSafeInlineHtml(children.slice(index + 1, closeIndex)),
+      ),
+    );
+    index = closeIndex;
+  }
+  return next;
+}
+
+function detailsOpen(node: MarkdownAstNode): { summary: string } | null {
+  if (node.type !== "html" || typeof node.value !== "string") return null;
+  const value = node.value.trim();
+  const match = /^<\s*details\s*>\s*<\s*summary\s*>([\s\S]*?)<\s*\/\s*summary\s*>$/i.exec(value);
+  if (match) return { summary: match[1].trim() };
+  if (/^<\s*details\s*>$/i.test(value)) return { summary: "Details" };
+  return null;
+}
+
+function isDetailsClose(node: MarkdownAstNode): boolean {
+  return node.type === "html"
+    && typeof node.value === "string"
+    && /^<\s*\/\s*details\s*>$/i.test(node.value.trim());
+}
+
+function normalizeSafeDetails(children: MarkdownAstNode[]): MarkdownAstNode[] {
+  const next: MarkdownAstNode[] = [];
+  for (let index = 0; index < children.length; index += 1) {
+    const node = children[index];
+    const open = detailsOpen(node);
+    if (!open) {
+      next.push(node);
+      continue;
+    }
+
+    const closeIndex = children.findIndex(
+      (candidate, candidateIndex) => candidateIndex > index && isDetailsClose(candidate),
+    );
+    if (closeIndex === -1) {
+      next.push(node);
+      continue;
+    }
+
+    const body = normalizeSafeInlineHtml(
+      normalizeSafeDetails(children.slice(index + 1, closeIndex)),
+    );
+    next.push({
+      type: "nanobotSafeHtmlDetails",
+      data: { hName: "details" },
+      children: [
+        {
+          type: "nanobotSafeHtmlSummary",
+          data: { hName: "summary" },
+          children: [safeText(open.summary)],
+        },
+        ...body,
+      ],
+    });
+    index = closeIndex;
+  }
+  return next;
+}
+
+function remarkSafeHtmlSubset() {
+  return (tree: MarkdownAstNode) => {
+    if (tree.children) {
+      tree.children = normalizeSafeInlineHtml(normalizeSafeDetails(tree.children));
+    }
+  };
+}
+
+const remarkPlugins: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [
+  remarkBreaks,
+  remarkGfm,
+  [remarkMath, { singleDollarTextMath: false }],
+  remarkSafeHtmlSubset,
+];
+const rehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [rehypeKatex];
+
+function nodeText(value: ReactNode): string {
+  return Children.toArray(value)
+    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
+    .join("");
+}
+
+function isRenderedCodeBlock(value: ReactNode): boolean {
+  if (!isValidElement(value)) return false;
+  const props = value.props as { code?: unknown };
+  return value.type === CodeBlock || typeof props.code === "string";
+}
+
+function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
+  if (!isValidElement(value)) return null;
+  const props = value.props as { className?: unknown; children?: ReactNode };
+  if (!("children" in props)) return null;
+  const className = typeof props.className === "string" ? props.className : "";
+  const language = /language-([^\s]+)/.exec(className)?.[1];
+  return {
+    code: nodeText(props.children).replace(/\n$/, ""),
+    language,
+  };
+}
 
 /**
  * Heavy markdown stack (GFM, math, KaTeX, syntax highlighting) kept in a
@@ -82,8 +257,19 @@ export default function MarkdownTextRenderer({
         const kids = Children.toArray(markdownChildren);
         const lone = kids.length === 1 ? kids[0] : null;
         /** Highlighted fences render ``CodeBlock`` (block shell); skip invalid ``<pre><div>``. */
-        if (lone != null && isValidElement(lone) && lone.type === CodeBlock) {
+        if (isRenderedCodeBlock(lone)) {
           return <>{markdownChildren}</>;
+        }
+        const fence = codeFenceFromPreChild(lone);
+        if (fence) {
+          return (
+            <CodeBlock
+              language={fence.language}
+              code={fence.code}
+              className="my-3"
+              highlight={highlightCode}
+            />
+          );
         }
         return (
           <pre
@@ -110,67 +296,66 @@ export default function MarkdownTextRenderer({
           </a>
         );
       },
+      input({ type, checked }) {
+        if (type !== "checkbox") return null;
+        return (
+          <span
+            aria-hidden
+            data-testid="markdown-task-checkbox"
+            className={cn(
+              "mr-2 inline-grid h-4 w-4 translate-y-[2px] place-items-center rounded-[4px]",
+              "border border-border/70 bg-muted/55 text-background",
+              checked && "border-foreground/55 bg-foreground/65",
+            )}
+          >
+            {checked ? <Check className="h-3 w-3 stroke-[3]" /> : null}
+          </span>
+        );
+      },
+      mark({ children: markdownChildren }) {
+        return (
+          <mark className="rounded-[5px] bg-yellow-200/75 px-1 py-0.5 text-inherit dark:bg-yellow-300/25">
+            {markdownChildren}
+          </mark>
+        );
+      },
+      sub({ children: markdownChildren }) {
+        return <sub className="text-[0.72em] leading-none">{markdownChildren}</sub>;
+      },
+      sup({ children: markdownChildren }) {
+        return <sup className="text-[0.72em] leading-none">{markdownChildren}</sup>;
+      },
+      details({ children: markdownChildren }) {
+        return (
+          <details className="my-3 rounded-xl border border-border/65 bg-muted/25 px-4 py-3 open:pb-4">
+            {markdownChildren}
+          </details>
+        );
+      },
+      summary({ children: markdownChildren }) {
+        return (
+          <summary className="cursor-pointer select-none text-sm font-medium text-foreground/88 marker:text-muted-foreground">
+            {markdownChildren}
+          </summary>
+        );
+      },
       img({ src, alt, node: _node, className: imgClassName, ...props }) {
         void _node;
+        void imgClassName;
+        void props;
         const source = typeof src === "string" ? src : "";
         if (!source) return null;
         const label = typeof alt === "string" ? alt : "";
-        if (inferMediaKind({ url: source, name: label }) === "video") {
-          return (
-            <span
-              className={cn(
-                "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
-                "border border-border/70 bg-background shadow-sm",
-              )}
-            >
-              <video
-                src={source}
-                controls
-                preload="metadata"
-                className="block max-h-[26rem] max-w-full bg-black"
-                aria-label={label ? `Video attachment: ${label}` : "Video attachment"}
-              />
-              {label ? (
-                <span className="block max-w-full truncate px-3 py-2 text-xs text-muted-foreground">
-                  {label}
-                </span>
-              ) : null}
-            </span>
-          );
-        }
+        const kind = markdownAttachmentKind(source, label);
         return (
-          <span
-            className={cn(
-              "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-[14px]",
-              "border border-border/70 bg-background shadow-sm",
-            )}
-          >
-            <a
-              href={source}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="block bg-muted/20"
-              aria-label={label ? `Open ${label}` : "Open image"}
-            >
-              <img
-                src={source}
-                alt={label}
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-                className={cn(
-                  "block h-auto max-h-[34rem] max-w-full bg-background object-contain",
-                  imgClassName,
-                )}
-                {...props}
-              />
-            </a>
-            {label ? (
-              <span className="block max-w-full truncate px-3 py-2 text-xs text-muted-foreground">
-                {label}
-              </span>
-            ) : null}
-          </span>
+          <AttachmentTile
+            attachment={{
+              kind,
+              url: source,
+              name: label,
+            }}
+            inline
+          />
         );
       },
     }),

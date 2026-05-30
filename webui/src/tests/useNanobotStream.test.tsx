@@ -1240,6 +1240,66 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("keeps assistant html media as a file attachment", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-html-media", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-html-media", {
+        event: "message",
+        chat_id: "chat-html-media",
+        text: "file ready",
+        media_urls: [{ url: "/api/media/sig/html", name: "index.html" }],
+      });
+    });
+
+    expect(result.current.messages[0].media).toEqual([
+      { kind: "file", url: "/api/media/sig/html", name: "index.html" },
+    ]);
+  });
+
+  it("infers assistant svg media as an image attachment", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-svg-media", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-svg-media", {
+        event: "message",
+        chat_id: "chat-svg-media",
+        text: "chart ready",
+        media_urls: [{ url: "/api/media/sig/svg", name: "growth.svg" }],
+      });
+    });
+
+    expect(result.current.messages[0].media).toEqual([
+      { kind: "image", url: "/api/media/sig/svg", name: "growth.svg" },
+    ]);
+  });
+
+  it("corrects explicit image media when the name is a non-image file", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-mislabelled-html", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-mislabelled-html", {
+        event: "message",
+        chat_id: "chat-mislabelled-html",
+        text: "file ready",
+        media_urls: [{ kind: "image", url: "/api/media/sig/html", name: "index.html" }],
+      });
+    });
+
+    expect(result.current.messages[0].media).toEqual([
+      { kind: "file", url: "/api/media/sig/html", name: "index.html" },
+    ]);
+  });
+
   it("suppresses redundant stream confirmation after assistant media", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-img-result", EMPTY_MESSAGES), {

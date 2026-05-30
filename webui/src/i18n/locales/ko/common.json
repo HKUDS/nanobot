@@ -131,7 +131,7 @@
       "workspacePath": "기본 작업공간",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "현재 모델",
+      "currentModel": "현재 구성",
       "brandLogos": "브랜드 로고",
       "cliAppsCatalog": "CLI 앱 카탈로그",
       "cliAppsFilter": "CLI 앱 필터",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "nanobot이 새 답변에 사용할 모델을 선택합니다.",
+      "currentModel": "nanobot이 새 답변에 사용할 모델 구성을 선택합니다.",
       "selectedModelProvider": "선택한 모델에서 설정됩니다.",
       "selectedModelValue": "선택한 모델에서 설정됩니다.",
       "brandLogos": "로고는 브랜드 도메인에서 불러오며, 실패하면 로컬 아이콘을 사용합니다.",
@@ -295,9 +295,19 @@
       "addConfiguration": "구성 추가",
       "newConfiguration": "새 모델 구성",
       "newConfigurationHelp": "제공자와 모델을 한 번에 선택할 수 있는 옵션으로 저장합니다.",
-      "configurationName": "이름",
+      "configurationName": "구성 이름",
       "configurationNameHelp": "저장된 모델 구성의 이름을 변경합니다.",
-      "configurationNamePlaceholder": "빠른 글쓰기"
+      "configurationNamePlaceholder": "빠른 글쓰기",
+      "searchModels": "검색하거나 모델 ID 입력",
+      "useCustomModel": "사용",
+      "loadingModels": "모델을 불러오는 중...",
+      "searchCatalog": "제공자 카탈로그를 검색해 모델을 선택하세요.",
+      "modelsAvailable": "개 사용 가능",
+      "noModelResults": "일치하는 모델이 없습니다.",
+      "loadFailed": "모델 목록을 사용할 수 없습니다.",
+      "unsupportedModelList": "모델 ID를 직접 입력하세요.",
+      "providerNotConfigured": "모델을 불러오기 전에 이 제공자를 설정하세요.",
+      "autoProviderCustomOnly": "자동 제공자 모드는 사용자 지정 모델 ID를 사용합니다."
     },
     "timezone": {
       "select": "시간대 선택",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "목표 닫기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
+      "queued": {
+        "label": "대기 중인 안내",
+        "guide": "안내",
+        "delete": "안내 삭제",
+        "edit": "안내 수정",
+        "drag": "드래그하여 순서 변경"
+      },
       "attachImage": "이미지 첨부",
       "imageMode": {
         "label": "이미지 생성",

@@ -131,7 +131,7 @@
       "workspacePath": "デフォルトワークスペース",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "現在のモデル",
+      "currentModel": "現在の設定",
       "brandLogos": "ブランドロゴ",
       "cliAppsCatalog": "CLI アプリカタログ",
       "cliAppsFilter": "CLI アプリフィルター",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "今後の返信で nanobot が使用するモデルを選択します。",
+      "currentModel": "今後の返信で nanobot が使用するモデル設定を選択します。",
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "ロゴはブランドのドメインから読み込まれ、ローカルアイコンにフォールバックします。",
@@ -295,9 +295,19 @@
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",
       "newConfigurationHelp": "プロバイダーとモデルをワンクリックの選択肢として保存します。",
-      "configurationName": "名前",
+      "configurationName": "設定名",
       "configurationNameHelp": "保存済みのモデル設定の名前を変更します。",
-      "configurationNamePlaceholder": "高速ライティング"
+      "configurationNamePlaceholder": "高速ライティング",
+      "searchModels": "検索またはモデル ID を入力",
+      "useCustomModel": "使用",
+      "loadingModels": "モデルを読み込み中...",
+      "searchCatalog": "プロバイダーのカタログを検索してモデルを選択します。",
+      "modelsAvailable": "件利用可能",
+      "noModelResults": "一致するモデルはありません。",
+      "loadFailed": "モデル一覧を利用できません。",
+      "unsupportedModelList": "モデル ID を手動で入力してください。",
+      "providerNotConfigured": "モデルを読み込む前にこのプロバイダーを設定してください。",
+      "autoProviderCustomOnly": "自動プロバイダーモードではカスタムモデル ID を使用します。"
     },
     "timezone": {
       "select": "タイムゾーンを選択",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
+      "queued": {
+        "label": "保留中のガイド",
+        "guide": "ガイド",
+        "delete": "ガイドを削除",
+        "edit": "ガイドを編集",
+        "drag": "ドラッグして並べ替え"
+      },
       "attachImage": "画像を添付",
       "imageMode": {
         "label": "画像生成",

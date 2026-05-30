@@ -4,6 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type { CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
+vi.mock("@/lib/imageEncode", () => ({
+  encodeImage: vi.fn(async (file: File) => ({
+    ok: true,
+    dataUrl: `data:${file.type || "image/png"};base64,aW1hZ2U=`,
+    bytes: Math.max(1, file.size),
+    normalized: false,
+  })),
+}));
+
 const COMMANDS: SlashCommand[] = [
   {
     command: "/stop",
@@ -113,6 +122,17 @@ const MCP_PRESETS: McpPresetInfo[] = [
 ];
 const ORIGINAL_INNER_HEIGHT = window.innerHeight;
 
+function mockBlobUrls() {
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:composer-test"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   Reflect.deleteProperty(window, "nanobotHost");
@@ -160,6 +180,9 @@ describe("ThreadComposer", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
+    expect(input.className).toContain("pt-[27px]");
+    fireEvent.change(input, { target: { value: "1" } });
+    expect(input.className).toContain("pt-[27px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
   });
 
@@ -361,6 +384,8 @@ describe("ThreadComposer", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/Running/);
     expect(status).toHaveTextContent(/2:05/);
+    expect(status.parentElement).toHaveClass("composer-status-strip");
+    expect(status.parentElement).toHaveAttribute("data-state", "enter");
 
     vi.useRealTimers();
   });
@@ -802,7 +827,7 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
-  it("sends image generation mode with automatic aspect ratio", () => {
+  it("keeps image generation mode out of the composer chrome", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -811,18 +836,14 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle image generation mode" }));
-    expect(screen.getByPlaceholderText("Describe or edit an image…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "Draw a friendly robot" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith(
-      "Draw a friendly robot",
-      undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: null } },
-    );
+    expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
   });
 
   it("shows a stop button while streaming", () => {
@@ -842,75 +863,407 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
   });
 
-  it("lets users select a concrete image aspect ratio", () => {
+  it("queues plain guidance while a task is running", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
         onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
         placeholder="Type your message..."
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle image generation mode" }));
-    fireEvent.click(screen.getByRole("button", { name: "Image aspect ratio" }));
-    expect(screen.getByRole("listbox", { name: "Image aspect ratio" }).className).toContain(
-      "bottom-full",
-    );
-    fireEvent.mouseDown(screen.getByRole("option", { name: "Wide 16:9" }));
-
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "Draw a banner" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.change(input, { target: { value: "keep the UI minimal" } });
+    fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith(
-      "Draw a banner",
-      undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "16:9" } },
-    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("");
+    expect(screen.getByText("keep the UI minimal")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+
+    expect(onSend).toHaveBeenCalledWith("keep the UI minimal");
+    expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
 
-  it("opens the hero image aspect menu downward", () => {
-    render(
+  it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
       <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Ask anything..."
-        variant="hero"
-        imageMode
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Image aspect ratio" }));
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "first follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "second follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(screen.getByRole("listbox", { name: "Image aspect ratio" }).className).toContain(
-      "top-full",
+    const queue = screen.getByRole("group", { name: "Queued guidance" });
+    expect(queue).toHaveClass("composer-status-strip");
+    expect(queue).toHaveClass("mx-3");
+    expect(queue.parentElement?.className).toContain("group/composer");
+    expect(within(queue).getByText("first follow-up")).toBeInTheDocument();
+    expect(within(queue).getByText("second follow-up")).toBeInTheDocument();
+    expect(within(queue).getAllByRole("button", { name: "Edit guidance" })).toHaveLength(2);
+    expect(within(queue).getAllByRole("button", { name: "Guide" })).toHaveLength(2);
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
     );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("first follow-up");
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
+    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenLastCalledWith("second follow-up");
+    });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("group", { name: "Queued guidance" })).not.toBeInTheDocument();
   });
 
-  it("dismisses the image aspect menu on outside click, escape, and wheel", () => {
+  it("lets users edit queued guidance before it is sent", async () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "rough follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const editButton = screen.getByRole("button", { name: "Edit guidance" });
+    fireEvent.click(editButton);
+    await waitFor(() => {
+      expect(input).toHaveFocus();
+    });
+    expect(input).toHaveValue("rough follow-up");
+    expect(screen.queryByRole("group", { name: "Queued guidance" })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "polished follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("polished follow-up");
+    });
+  });
+
+  it("requeues edited guidance at the end of the pending list", async () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "first follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "second follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit guidance" })[0]);
+    await waitFor(() => {
+      expect(input).toHaveValue("first follow-up");
+    });
+    fireEvent.change(input, { target: { value: "first follow-up edited" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("second follow-up");
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenLastCalledWith("first follow-up edited");
+    });
+    expect(onSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("queues image guidance while running and restores it for editing", async () => {
+    mockBlobUrls();
+    const onSend = vi.fn();
+    const { container, rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).toBeTruthy();
+    const file = new File(["image"], "draft.png", { type: "image/png" });
+    fireEvent.change(fileInput!, { target: { files: [file] } });
+    await screen.findByText("draft.png");
+
+    fireEvent.change(input, { target: { value: "look at this" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Queued guidance" })).toBeInTheDocument();
+    expect(screen.getByText("look at this")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    expect(input).toHaveValue("look at this");
+    expect(screen.getByTestId("composer-chip")).toHaveTextContent("draft.png");
+    expect(screen.queryByRole("group", { name: "Queued guidance" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        "look at this",
+        [expect.objectContaining({
+          media: expect.objectContaining({
+            data_url: "data:image/png;base64,aW1hZ2U=",
+            name: "draft.png",
+          }),
+        })],
+      );
+    });
+  });
+
+  it("reorders queued guidance while dragging over another row", async () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "first follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "second follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const handles = screen.getAllByLabelText("Drag to reorder");
+    const secondRow = screen
+      .getByText("second follow-up")
+      .closest("[data-queued-prompt-row='true']");
+    expect(secondRow).toBeTruthy();
+
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    fireEvent.dragStart(handles[0], { dataTransfer });
+    fireEvent.dragEnter(secondRow!, { dataTransfer });
+    fireEvent.dragEnd(handles[0], { dataTransfer });
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("second follow-up");
+    });
+  });
+
+  it("moves later queued guidance before an earlier item while dragging", async () => {
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "first follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "second follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const handles = screen.getAllByLabelText("Drag to reorder");
+    const firstRow = screen
+      .getByText("first follow-up")
+      .closest("[data-queued-prompt-row='true']");
+    expect(firstRow).toBeTruthy();
+
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    fireEvent.dragStart(handles[1], { dataTransfer });
+    fireEvent.dragEnter(firstRow!, { dataTransfer });
+    fireEvent.dragEnd(handles[1], { dataTransfer });
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming={false}
+        placeholder="Type your message..."
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("second follow-up");
+    });
+  });
+
+  it("persists queued guidance per chat across remounts", async () => {
+    const onSend = vi.fn();
+    const { rerender, unmount } = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-a"
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "remember this follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    fireEvent.change(input, { target: { value: "remember this edited follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("remember this edited follow-up")).toBeInTheDocument();
+
+    rerender(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-b"
+        placeholder="Type your message..."
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
+    });
+
+    unmount();
+    const remount = render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-a"
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(await screen.findByText("remember this edited follow-up")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Guide" }));
+    expect(onSend).toHaveBeenCalledWith("remember this edited follow-up");
+
+    remount.unmount();
     render(
-      <div>
-        <button type="button">outside</button>
-        <ThreadComposer
-          onSend={vi.fn()}
-          placeholder="Type your message..."
-          imageMode
-        />
-      </div>,
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        pendingQueueKey="chat-a"
+        placeholder="Type your message..."
+      />,
     );
-
-    const aspectButton = screen.getByRole("button", { name: "Image aspect ratio" });
-    fireEvent.click(aspectButton);
-    expect(screen.getByRole("listbox", { name: "Image aspect ratio" })).toBeInTheDocument();
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: "outside" }));
-    expect(screen.queryByRole("listbox", { name: "Image aspect ratio" })).not.toBeInTheDocument();
-
-    fireEvent.click(aspectButton);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("listbox", { name: "Image aspect ratio" })).not.toBeInTheDocument();
-
-    fireEvent.click(aspectButton);
-    fireEvent.wheel(screen.getByRole("listbox", { name: "Image aspect ratio" }), { deltaY: 120 });
-    expect(screen.queryByRole("listbox", { name: "Image aspect ratio" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("remember this edited follow-up")).not.toBeInTheDocument();
+    });
   });
+
 });

@@ -131,7 +131,7 @@
       "workspacePath": "預設工作區",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "目前模型",
+      "currentModel": "目前設定",
       "brandLogos": "品牌標誌",
       "cliAppsCatalog": "CLI 應用目錄",
       "cliAppsFilter": "CLI 應用篩選",
@@ -167,7 +167,7 @@
       "localServiceAccess": "允許完全存取模式下的 shell 命令存取 localhost 服務。",
       "webuiDefaultAccess": "用於沒有單獨選擇權限的網頁端對話。",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "選擇 nanobot 接下來回覆時使用的模型。",
+      "currentModel": "選擇 nanobot 接下來回覆時使用的模型設定。",
       "selectedModelProvider": "由目前模型決定。",
       "selectedModelValue": "由目前模型決定。",
       "brandLogos": "標誌會從品牌網域載入，並提供本地圖示作為備援。",
@@ -295,9 +295,19 @@
       "addConfiguration": "新增設定",
       "newConfiguration": "新增模型設定",
       "newConfigurationHelp": "把服務商和模型儲存為一個可直接切換的選項。",
-      "configurationName": "名稱",
+      "configurationName": "設定名稱",
       "configurationNameHelp": "重新命名這個已儲存的模型配置。",
-      "configurationNamePlaceholder": "快速寫作"
+      "configurationNamePlaceholder": "快速寫作",
+      "searchModels": "搜尋或輸入模型 ID",
+      "useCustomModel": "使用",
+      "loadingModels": "正在載入模型...",
+      "searchCatalog": "搜尋服務商目錄來選擇模型。",
+      "modelsAvailable": "個可用",
+      "noModelResults": "沒有符合的模型。",
+      "loadFailed": "模型列表暫不可用。",
+      "unsupportedModelList": "手動輸入模型 ID。",
+      "providerNotConfigured": "先設定這個服務商再載入模型。",
+      "autoProviderCustomOnly": "自動服務商模式使用自訂模型 ID。"
     },
     "timezone": {
       "select": "選擇時區",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
+      "queued": {
+        "label": "待引導提示",
+        "guide": "引導",
+        "delete": "刪除引導",
+        "edit": "編輯引導",
+        "drag": "拖曳排序"
+      },
       "attachImage": "附加圖片",
       "imageMode": {
         "label": "圖片生成",
