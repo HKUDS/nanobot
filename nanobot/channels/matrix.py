@@ -8,23 +8,23 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
+from urllib.parse import quote, urlparse
 
 from pydantic import Field
 
 from nanobot.security.workspace_policy import is_path_within
 
 try:
+    import aiohttp
     import nh3
     from mistune import create_markdown
     from nio import (
         AsyncClient,
         AsyncClientConfig,
-        DownloadError,
         InviteEvent,
         JoinError,
         LoginResponse,
         MatrixRoom,
-        MemoryDownloadResponse,
         RoomEncryptedMedia,
         RoomMessage,
         RoomMessageMedia,
@@ -63,6 +63,10 @@ _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.f
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
+
+
+class _MediaTooLargeError(Exception):
+    """Raised when an inbound Matrix media download exceeds the configured cap."""
 
 MATRIX_MARKDOWN = create_markdown(
     escape=True,
@@ -192,6 +196,7 @@ class MatrixConfig(Base):
     e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
+    max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -233,6 +238,9 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._started_at_ms: int = 0
+        self._media_download_semaphore = asyncio.Semaphore(
+            max(1, int(self.config.max_concurrent_media_downloads))
+        )
 
 
     async def start(self) -> None:
@@ -770,26 +778,48 @@ class MatrixChannel(BaseChannel):
         event_prefix = (event_id[:24] or "evt").strip("_")
         return self._media_dir() / f"{event_prefix}_{stem}{suffix}"
 
-    async def _download_media_bytes(self, mxc_url: str) -> bytes | None:
-        if not self.client:
+    async def _download_media_bytes(self, mxc_url: str, limit_bytes: int) -> bytes | None:
+        if not self.client or limit_bytes <= 0:
+            raise _MediaTooLargeError
+
+        parsed = urlparse(mxc_url)
+        if parsed.scheme != "mxc" or not parsed.netloc or not parsed.path.strip("/"):
             return None
-        response = await self.client.download(mxc=mxc_url)
-        if isinstance(response, DownloadError):
-            self.logger.warning("download failed for {}: {}", mxc_url, response)
+
+        homeserver = str(getattr(self.client, "homeserver", "") or self.config.homeserver).rstrip("/")
+        media_url = (
+            f"{homeserver}/_matrix/client/v1/media/download/"
+            f"{quote(parsed.netloc, safe='')}/{quote(parsed.path.strip('/'), safe='')}"
+        )
+        token = getattr(self.client, "access_token", None) or self.config.access_token
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        timeout = aiohttp.ClientTimeout(total=None)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.get(media_url, params={"allow_remote": "true"}) as response:
+                    if response.status >= 400:
+                        self.logger.warning("download failed for {}: HTTP {}", mxc_url, response.status)
+                        return None
+                    content_length = response.headers.get("Content-Length")
+                    if content_length is not None:
+                        try:
+                            if int(content_length) > limit_bytes:
+                                raise _MediaTooLargeError
+                        except ValueError:
+                            pass
+
+                    chunks = bytearray()
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        chunks.extend(chunk)
+                        if len(chunks) > limit_bytes:
+                            raise _MediaTooLargeError
+                    return bytes(chunks)
+        except _MediaTooLargeError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            self.logger.warning("download failed for {}", mxc_url, exc_info=True)
             return None
-        body = getattr(response, "body", None)
-        if isinstance(body, (bytes, bytearray)):
-            return bytes(body)
-        if isinstance(response, MemoryDownloadResponse):
-            return bytes(response.body)
-        if isinstance(body, (str, Path)):
-            path = Path(body)
-            if path.is_file():
-                try:
-                    return path.read_bytes()
-                except OSError:
-                    return None
-        return None
 
     def _decrypt_media_bytes(self, event: MatrixMediaEvent, ciphertext: bytes) -> bytes | None:
         key_obj, hashes, iv = getattr(event, "key", None), getattr(event, "hashes", None), getattr(event, "iv", None)
@@ -818,10 +848,14 @@ class MatrixChannel(BaseChannel):
 
         limit_bytes = await self._effective_media_limit_bytes()
         declared = self._event_declared_size_bytes(event)
-        if declared is not None and declared > limit_bytes:
+        if declared is None or declared > limit_bytes:
             return None, _ATTACH_TOO_LARGE.format(filename)
 
-        downloaded = await self._download_media_bytes(mxc_url)
+        try:
+            async with self._media_download_semaphore:
+                downloaded = await self._download_media_bytes(mxc_url, limit_bytes)
+        except _MediaTooLargeError:
+            return None, _ATTACH_TOO_LARGE.format(filename)
         if downloaded is None:
             return None, fail
 
