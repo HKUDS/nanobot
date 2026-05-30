@@ -23,6 +23,12 @@ try:
         AsyncClientConfig,
         InviteEvent,
         JoinError,
+        KeyVerificationCancel,
+        KeyVerificationEvent,
+        KeyVerificationKey,
+        KeyVerificationMac,
+        KeyVerificationStart,
+        LocalProtocolError,
         LoginResponse,
         MatrixRoom,
         RoomEncryptedMedia,
@@ -33,6 +39,7 @@ try:
         RoomSendResponse,
         RoomTypingError,
         SyncError,
+        ToDeviceError,
         UploadError,
     )
     from nio.crypto.attachments import decrypt_attachment
@@ -194,6 +201,7 @@ class MatrixConfig(Base):
     access_token: str = ""
     device_id: str = ""
     e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
+    sas_verification: bool = Field(default=False, alias="sasVerification")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
     max_concurrent_media_downloads: int = 2
@@ -268,6 +276,7 @@ class MatrixChannel(BaseChannel):
         )
 
         self._register_event_callbacks()
+        self._register_to_device_callbacks()
         self._register_response_callbacks()
 
         if not self.config.e2ee_enabled:
@@ -572,10 +581,101 @@ class MatrixChannel(BaseChannel):
         self.client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
         self.client.add_event_callback(self._on_room_invite, InviteEvent)
 
+    def _register_to_device_callbacks(self) -> None:
+        if self.config.e2ee_enabled and self.config.sas_verification:
+            self.client.add_to_device_callback(
+                self._on_key_verification_event,
+                (KeyVerificationEvent,),
+            )
+
     def _register_response_callbacks(self) -> None:
         self.client.add_response_callback(self._on_sync_error, SyncError)
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
+
+    def _is_sas_sender_allowed(self, sender: str) -> bool:
+        return bool(sender and self.is_allowed(sender))
+
+    async def _on_key_verification_event(self, event: KeyVerificationEvent) -> None:
+        try:
+            await self._handle_key_verification_event(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.exception("Matrix SAS verification handling failed")
+
+    async def _handle_key_verification_event(self, event: KeyVerificationEvent) -> None:
+        if not (self.config.e2ee_enabled and self.config.sas_verification):
+            return
+        if not self.client:
+            return
+
+        sender = str(getattr(event, "sender", "") or "")
+        transaction_id = str(getattr(event, "transaction_id", "") or "")
+        if not transaction_id or not self._is_sas_sender_allowed(sender):
+            return
+
+        if isinstance(event, KeyVerificationStart):
+            if "emoji" not in (getattr(event, "short_authentication_string", None) or []):
+                self.logger.info(
+                    "Ignoring Matrix SAS verification from {} without emoji support",
+                    sender,
+                )
+                return
+
+            response = await self.client.accept_key_verification(transaction_id)
+            if isinstance(response, ToDeviceError):
+                self.logger.warning("Matrix SAS accept failed for {}: {}", sender, response)
+                return
+
+            sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
+            if sas is None:
+                self.logger.warning(
+                    "Matrix SAS state missing after accept for transaction {}",
+                    transaction_id,
+                )
+                return
+
+            response = await self.client.to_device(sas.share_key())
+            if isinstance(response, ToDeviceError):
+                self.logger.warning(
+                    "Matrix SAS key share failed for {}: {}",
+                    sender,
+                    response,
+                )
+            return
+
+        if isinstance(event, KeyVerificationKey):
+            response = await self.client.confirm_short_auth_string(transaction_id)
+            if isinstance(response, ToDeviceError):
+                self.logger.warning("Matrix SAS confirm failed for {}: {}", sender, response)
+            return
+
+        if isinstance(event, KeyVerificationMac):
+            sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
+            if sas is None:
+                self.logger.warning(
+                    "Matrix SAS state missing for MAC transaction {}",
+                    transaction_id,
+                )
+                return
+            try:
+                response = await self.client.to_device(sas.get_mac())
+            except LocalProtocolError as e:
+                self.logger.warning("Matrix SAS MAC failed for {}: {}", sender, e)
+                return
+            if isinstance(response, ToDeviceError):
+                self.logger.warning("Matrix SAS MAC send failed for {}: {}", sender, response)
+            else:
+                self.logger.info("Matrix SAS verification completed for {}", sender)
+            return
+
+        if isinstance(event, KeyVerificationCancel):
+            self.logger.info(
+                "Matrix SAS verification cancelled by {}: {}",
+                sender,
+                getattr(event, "reason", ""),
+            )
 
     def _is_fatal_auth_response(self, response: Any) -> bool:
         code = getattr(response, "status_code", None)

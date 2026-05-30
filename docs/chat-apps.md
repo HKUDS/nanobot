@@ -244,6 +244,7 @@ for reliable encryption, password login is recommended instead. If the
       "userId": "@nanobot:matrix.org",
       "password": "mypasswordhere",
       "e2eeEnabled": true,
+      "sasVerification": true,
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
@@ -263,6 +264,7 @@ for reliable encryption, password login is recommended instead. If the
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
+| `sasVerification` | Auto-complete SAS device verification requests from allowed users (default `false`). Useful for Element X, which does not expose manual trust for third-party devices. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
 
 
