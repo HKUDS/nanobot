@@ -204,7 +204,9 @@ describe("ChatList", () => {
       />,
     );
 
-    expect(screen.getAllByLabelText("Agent finished")).toHaveLength(1);
+    const finished = screen.getAllByLabelText("Agent finished");
+    expect(finished).toHaveLength(1);
+    expect(finished[0].firstElementChild).toHaveClass("h-2", "w-2");
   });
 
   it("folds long default workspace chats and can show all", () => {

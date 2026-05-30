@@ -555,6 +555,13 @@
       "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
+      "queued": {
+        "label": "待引導提示",
+        "guide": "引導",
+        "delete": "刪除引導",
+        "edit": "編輯引導",
+        "drag": "拖曳排序"
+      },
       "attachImage": "附加圖片",
       "imageMode": {
         "label": "圖片生成",

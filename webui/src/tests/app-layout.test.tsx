@@ -540,6 +540,58 @@ describe("App layout", () => {
     expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
   });
 
+  it("does not show a completed dot later when the active session finishes", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Active work",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Other chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("button", { name: /^Active work$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Active work$/ }));
+    });
+    await waitFor(() => expect(document.title).toContain("Active work"));
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+    });
+    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", null);
+    });
+    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
+    });
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+  });
+
   it("restores sidebar run indicators after a page reload", async () => {
     mockSessions = [
       {

@@ -555,6 +555,13 @@
       "goalStateCloseAria": "Đóng mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "queued": {
+        "label": "Hướng dẫn đang chờ",
+        "guide": "Hướng dẫn",
+        "delete": "Xóa hướng dẫn",
+        "edit": "Sửa hướng dẫn",
+        "drag": "Kéo để sắp xếp"
+      },
       "attachImage": "Đính kèm ảnh",
       "imageMode": {
         "label": "Tạo ảnh",

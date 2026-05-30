@@ -555,6 +555,13 @@
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
+      "queued": {
+        "label": "Queued guidance",
+        "guide": "Guide",
+        "delete": "Delete guidance",
+        "edit": "Edit guidance",
+        "drag": "Drag to reorder"
+      },
       "attachImage": "Attach image",
       "imageMode": {
         "label": "Image Generation",

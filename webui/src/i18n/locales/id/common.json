@@ -555,6 +555,13 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "queued": {
+        "label": "Panduan antrean",
+        "guide": "Pandu",
+        "delete": "Hapus panduan",
+        "edit": "Edit panduan",
+        "drag": "Seret untuk mengurutkan"
+      },
       "attachImage": "Lampirkan gambar",
       "imageMode": {
         "label": "Buat gambar",

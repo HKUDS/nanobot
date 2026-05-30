@@ -555,6 +555,13 @@
       "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "queued": {
+        "label": "Guidage en attente",
+        "guide": "Guider",
+        "delete": "Supprimer le guidage",
+        "edit": "Modifier le guidage",
+        "drag": "Faire glisser pour réordonner"
+      },
       "attachImage": "Joindre une image",
       "imageMode": {
         "label": "Génération d’image",

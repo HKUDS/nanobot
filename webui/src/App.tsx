@@ -450,6 +450,7 @@ function Shell({
   const [workspaceOverrides, setWorkspaceOverrides] =
     useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
+  const activeChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -487,6 +488,16 @@ function Shell({
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+    if (!activeChatId) return;
+    setCompletedChatIds((current) => {
+      if (!current.has(activeChatId)) return current;
+      const next = new Set(current);
+      next.delete(activeChatId);
+      return next;
+    });
+  }, [activeChatId]);
   const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
     if (activeChatId && workspaceOverrides[activeChatId]) {
       return workspaceOverrides[activeChatId];
@@ -929,7 +940,11 @@ function Shell({
       setRunningChatIds(nextRunning);
       setCompletedChatIds((current) => {
         const next = new Set(current);
-        next.add(chatId);
+        if (activeChatIdRef.current === chatId) {
+          next.delete(chatId);
+        } else {
+          next.add(chatId);
+        }
         return next;
       });
     });

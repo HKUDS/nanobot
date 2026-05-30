@@ -555,6 +555,13 @@
       "goalStateCloseAria": "목표 닫기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
+      "queued": {
+        "label": "대기 중인 안내",
+        "guide": "안내",
+        "delete": "안내 삭제",
+        "edit": "안내 수정",
+        "drag": "드래그하여 순서 변경"
+      },
       "attachImage": "이미지 첨부",
       "imageMode": {
         "label": "이미지 생성",

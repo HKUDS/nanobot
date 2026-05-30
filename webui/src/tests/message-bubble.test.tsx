@@ -236,7 +236,10 @@ describe("MessageBubble", () => {
     const video = screen.getByLabelText(/video attachment/i);
     expect(video.tagName).toBe("VIDEO");
     expect(video).toHaveAttribute("src", "/api/media/sig/payload");
+    expect(video).toHaveAttribute("preload", "auto");
     expect(container.querySelector("video[controls]")).toBeInTheDocument();
+    expect(screen.queryByText("Preview")).not.toBeInTheDocument();
+    expect(screen.queryByText("Code")).not.toBeInTheDocument();
   });
 
   it("auto-expands the reasoning trace while streaming with a shimmer header", () => {
@@ -365,5 +368,48 @@ describe("MessageBubble", () => {
     expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
     expect(imageButton).not.toHaveAttribute("title");
     expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
+  });
+
+  it("renders mislabeled html assistant media as a file attachment", () => {
+    const message: UIMessage = {
+      id: "a-html",
+      role: "assistant",
+      content: "file ready",
+      createdAt: Date.now(),
+      media: [
+        {
+          kind: "image",
+          url: "/api/media/sig/html",
+          name: "index.html",
+        },
+      ],
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByLabelText("File attachment")).toHaveTextContent("index.html");
+    expect(container.querySelector("img")).not.toBeInTheDocument();
+  });
+
+  it("renders assistant svg media as an image preview", () => {
+    const message: UIMessage = {
+      id: "a-svg",
+      role: "assistant",
+      content: "chart ready",
+      createdAt: Date.now(),
+      media: [
+        {
+          kind: "file",
+          url: "/api/media/sig/svg",
+          name: "growth.svg",
+        },
+      ],
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByRole("button", { name: /view image: growth.svg/i })).toBeInTheDocument();
+    expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
+    expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
 });

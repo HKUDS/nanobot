@@ -453,6 +453,35 @@ async def test_media_route_degrades_non_image_to_octet_stream(
     assert resp.headers.get("x-content-type-options") == "nosniff"
 
 
+@pytest.mark.asyncio
+async def test_media_route_serves_svg_with_strict_csp(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """Generated SVG can preview as an image without becoming executable HTML."""
+    media = tmp_path / "media"
+    media.mkdir()
+    target = media / "chart.svg"
+    target.write_text("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
+
+    channel = _ch(bus, port=29928)
+    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+        url_path = channel._sign_media_path(target)
+        assert url_path is not None
+        server_task = asyncio.create_task(channel.start())
+        await asyncio.sleep(0.3)
+        try:
+            resp = await _http_get(f"http://127.0.0.1:29928{url_path}")
+        finally:
+            await channel.stop()
+            await server_task
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/svg+xml")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert "default-src 'none'" in resp.headers.get("content-security-policy", "")
+    assert "sandbox" in resp.headers.get("content-security-policy", "")
+
+
 # ---------------------------------------------------------------------------
 # /api/sessions/<key>/messages: media_urls hydration on session read
 # ---------------------------------------------------------------------------

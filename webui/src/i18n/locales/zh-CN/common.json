@@ -554,6 +554,13 @@
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
+      "queued": {
+        "label": "待引导提示",
+        "guide": "引导",
+        "delete": "删除引导",
+        "edit": "编辑引导",
+        "drag": "拖动排序"
+      },
       "attachImage": "添加图片",
       "imageMode": {
         "label": "图片生成",

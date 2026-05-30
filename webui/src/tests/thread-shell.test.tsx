@@ -270,7 +270,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
   });
 
-  it("only shows image generation controls when the setting is enabled", async () => {
+  it("keeps image generation controls out of the composer", async () => {
     const client = makeClient();
     const disabledSettings = modelSettings("deepseek-v4-pro", "deepseek");
     const enabledSettings: SettingsPayload = {
@@ -313,7 +313,7 @@ describe("ThreadShell", () => {
       );
     });
 
-    expect(screen.getByRole("button", { name: "Toggle image generation mode" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
   });
 
   it("restores in-memory messages when switching away and back to a session", async () => {
@@ -1091,8 +1091,6 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("Design an app icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Toggle image generation mode" }));
 
     expect(screen.queryByText("Design an app icon")).not.toBeInTheDocument();
     expect(screen.queryByText("Write code")).not.toBeInTheDocument();

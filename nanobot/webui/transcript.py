@@ -27,6 +27,7 @@ _INLINE_MARKDOWN_IMAGE_EXTS: frozenset[str] = frozenset({
     ".jpeg",
     ".webp",
     ".gif",
+    ".svg",
 })
 _INLINE_MARKDOWN_VIDEO_EXTS: frozenset[str] = frozenset({
     ".mp4",
@@ -87,7 +88,12 @@ def rewrite_local_markdown_images(
 
 
 def _media_kind_from_name(name: str) -> str:
-    return "video" if Path(name).suffix.lower() in _INLINE_MARKDOWN_VIDEO_EXTS else "image"
+    ext = Path(name).suffix.lower()
+    if ext in _INLINE_MARKDOWN_IMAGE_EXTS:
+        return "image"
+    if ext in _INLINE_MARKDOWN_VIDEO_EXTS:
+        return "video"
+    return "file"
 
 
 def webui_transcript_path(session_key: str) -> Path:

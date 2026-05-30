@@ -555,6 +555,13 @@
       "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
+      "queued": {
+        "label": "保留中のガイド",
+        "guide": "ガイド",
+        "delete": "ガイドを削除",
+        "edit": "ガイドを編集",
+        "drag": "ドラッグして並べ替え"
+      },
       "attachImage": "画像を添付",
       "imageMode": {
         "label": "画像生成",

@@ -555,6 +555,13 @@
       "goalStateCloseAria": "Cerrar objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
+      "queued": {
+        "label": "Guía en cola",
+        "guide": "Guiar",
+        "delete": "Eliminar guía",
+        "edit": "Editar guía",
+        "drag": "Arrastrar para reordenar"
+      },
       "attachImage": "Adjuntar imagen",
       "imageMode": {
         "label": "Generar imagen",

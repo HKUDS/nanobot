@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
-  Check,
   CheckCircle2,
   ChevronRight,
-  CircleDashed,
+  FileImage,
   Layers,
   Search,
   Server,
@@ -16,8 +15,20 @@ import { useTranslation } from "react-i18next";
 
 import { cliAppInitials, mcpPresetInitials } from "@/components/CliAppMentionText";
 import { FileReferenceChip } from "@/components/FileReferenceChip";
-import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { StreamingLabelSheen } from "@/components/MessageBubble";
+import { ActivityEvidencePreview } from "@/components/thread/activity/ActivityEvidencePreview";
+import { ActivityGroup } from "@/components/thread/activity/ActivityGroup";
+import { ActivityStep } from "@/components/thread/activity/ActivityStep";
+import { DiffPair } from "@/components/thread/activity/DiffPair";
+import { FileEditGroup, hasVisibleDiffStats, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
+import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import {
+  activityEvidenceFromMessageMedia,
+  activityEvidenceFromToolEvent,
+  isAgentActivityMember,
+  isReasoningOnlyAssistant,
+  type ActivityEvidence,
+} from "@/lib/activity-timeline";
 import { faviconUrls, logoFallbackUrls } from "@/lib/provider-brand";
 import { formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
@@ -27,15 +38,7 @@ import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessag
 const CLUSTER_SCROLL_MAX_CLASS = "max-h-52";
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 
-export function isReasoningOnlyAssistant(m: UIMessage): boolean {
-  if (m.role !== "assistant" || m.kind === "trace") return false;
-  if (m.content.trim().length > 0) return false;
-  return !!(m.reasoning?.length || m.reasoningStreaming || m.isStreaming);
-}
-
-export function isAgentActivityMember(m: UIMessage): boolean {
-  return isReasoningOnlyAssistant(m) || m.kind === "trace";
-}
+export { isAgentActivityMember, isReasoningOnlyAssistant };
 
 interface ActivityCounts {
   reasoningSteps: number;
@@ -56,20 +59,6 @@ interface ActivityCounts {
   primaryMcpName?: string;
   primaryMcpDisplayName?: string;
   primaryMcpStatus?: McpRunStatus;
-}
-
-interface FileEditSummary {
-  key: string;
-  path: string;
-  absolute_path?: string;
-  added: number;
-  deleted: number;
-  approximate: boolean;
-  binary: boolean;
-  status: UIFileEdit["status"];
-  operation?: UIFileEdit["operation"];
-  pending: boolean;
-  error?: string;
 }
 
 interface CliRunSummary {
@@ -485,7 +474,7 @@ export function AgentActivityCluster({
       {outerExpanded && (
         <div
           className={cn(
-            "ml-2 mt-1 overflow-hidden border-l border-muted-foreground/14 pl-4",
+            "ml-1 mt-1 overflow-hidden pl-1",
           )}
         >
           <div
@@ -497,11 +486,11 @@ export function AgentActivityCluster({
               "overflow-y-auto py-1 pr-1 scrollbar-thin scrollbar-track-transparent",
             )}
           >
-            <div ref={activityContentRef} className="flex flex-col gap-1.5">
+            <div ref={activityContentRef} className="flex flex-col gap-0.5">
               {messages.map((m) => {
                 if (isReasoningOnlyAssistant(m)) {
                   return (
-                    <ActivityReasoningRow
+                    <ReasoningRow
                       key={m.id}
                       text={m.reasoning ?? ""}
                       streaming={isTurnStreaming && !!m.reasoningStreaming}
@@ -638,101 +627,14 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityReasoningRow({
-  text,
-  streaming,
-}: {
-  text: string;
-  streaming: boolean;
-}) {
-  const { t } = useTranslation();
-  useEffect(() => {
-    if (text.length > 0) preloadMarkdownText();
-  }, [text.length]);
-  return (
-    <div className="min-w-0 py-0.5">
-      <div className="flex min-w-0 items-center gap-2 text-[13px] leading-5 text-muted-foreground/78">
-        <ReasoningMarker streaming={streaming} />
-        <StreamingLabelSheen active={streaming} className="min-w-0 font-medium">
-          {streaming
-            ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
-            : t("message.reasoning", { defaultValue: "Thinking" })}
-        </StreamingLabelSheen>
-      </div>
-      {text.trim() ? (
-        <MarkdownText
-          streaming={streaming}
-          className={cn(
-            "mt-1 min-w-0 pl-5 text-[12.5px] italic text-muted-foreground/78",
-            "prose-p:my-1 prose-li:my-0.5",
-            "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
-            "prose-headings:text-muted-foreground/88 prose-strong:text-muted-foreground",
-            "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-            "prose-a:text-muted-foreground/95 prose-a:underline hover:prose-a:opacity-90",
-            "prose-code:text-[0.92em]",
-          )}
-        >
-          {text}
-        </MarkdownText>
-      ) : null}
-    </div>
-  );
-}
-
-function ReasoningMarker({ streaming }: { streaming: boolean }) {
-  const wasStreamingRef = useRef(streaming);
-  const [justCompleted, setJustCompleted] = useState(false);
-
-  useEffect(() => {
-    if (wasStreamingRef.current && !streaming) {
-      setJustCompleted(true);
-      const timeout = window.setTimeout(() => setJustCompleted(false), 650);
-      wasStreamingRef.current = streaming;
-      return () => window.clearTimeout(timeout);
-    }
-    wasStreamingRef.current = streaming;
-    return undefined;
-  }, [streaming]);
-
-  if (streaming) {
-    return (
-      <CircleDashed
-        data-testid="activity-reasoning-marker"
-        data-state="thinking"
-        className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/55"
-        strokeWidth={1.8}
-        aria-hidden
-      />
-    );
-  }
-  return (
-    <span
-      data-testid="activity-reasoning-marker"
-      data-state="done"
-      className={cn(
-        "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-emerald-500/28 text-emerald-500/78",
-        "bg-emerald-500/[0.035] transition-[border-color,background-color,box-shadow,transform] duration-300 ease-out",
-        justCompleted
-          && "animate-in fade-in-0 zoom-in-75 shadow-[0_0_0_3px_rgba(16,185,129,0.10)] motion-reduce:animate-none",
-      )}
-      aria-hidden
-    >
-      <Check
-        className={cn(
-          "h-2.5 w-2.5 stroke-[2.4]",
-          justCompleted && "animate-in fade-in-0 zoom-in-50 duration-300 motion-reduce:animate-none",
-        )}
-      />
-    </span>
-  );
-}
-
 function ActivityTraceList({
   lines,
   active,
+  evidenceByLine,
 }: {
   lines: string[];
   active: boolean;
+  evidenceByLine?: Map<string, ActivityEvidence[]>;
 }) {
   return (
     <ul className="space-y-1">
@@ -741,6 +643,7 @@ function ActivityTraceList({
           key={`${line}-${index}`}
           line={line}
           active={active && index === lines.length - 1}
+          evidence={evidenceByLine?.get(line) ?? []}
         />
       ))}
     </ul>
@@ -761,6 +664,8 @@ function ActivityTraceTimeline({
   const lines = traceLines(message);
   const cliRunsByLine = cliRunMapByTraceLine(message);
   const mcpRunsByLine = mcpRunMapByTraceLine(message);
+  const evidenceByLine = toolEvidenceByTraceLine(message);
+  const trailingEvidence = activityEvidenceFromMessageMedia(message);
   const renderedRunKeys = new Set<string>();
   const items: ReactNode[] = [];
   let normalLines: string[] = [];
@@ -772,6 +677,7 @@ function ActivityTraceTimeline({
         key={`${message.id}:trace:${suffix}`}
         lines={normalLines}
         active={active}
+        evidenceByLine={evidenceByLine}
       />,
     );
     normalLines = [];
@@ -790,6 +696,15 @@ function ActivityTraceTimeline({
           cliAppsByName={cliAppsByName}
         />,
       );
+      const evidence = evidenceByLine.get(line) ?? [];
+      if (evidence.length) {
+        items.push(
+          <ActivityEvidenceList
+            key={`${message.id}:cli-evidence:${cliRun.key}:${index}`}
+            evidence={evidence}
+          />,
+        );
+      }
       return;
     }
 
@@ -805,6 +720,15 @@ function ActivityTraceTimeline({
           mcpPresetsByName={mcpPresetsByName}
         />,
       );
+      const evidence = evidenceByLine.get(line) ?? [];
+      if (evidence.length) {
+        items.push(
+          <ActivityEvidenceList
+            key={`${message.id}:mcp-evidence:${mcpRun.key}:${index}`}
+            evidence={evidence}
+          />,
+        );
+      }
       return;
     }
 
@@ -836,10 +760,25 @@ function ActivityTraceTimeline({
     );
   }
 
-  return items.length ? <>{items}</> : null;
+  if (trailingEvidence.length) {
+    items.push(
+      <ActivityEvidenceList
+        key={`${message.id}:media-evidence`}
+        evidence={trailingEvidence}
+      />,
+    );
+  }
+
+  if (!items.length) return null;
+  const group = describeActivityGroup(message, evidenceByLine, trailingEvidence);
+  return (
+    <ActivityGroup title={group.title} icon={group.icon}>
+      {items}
+    </ActivityGroup>
+  );
 }
 
-function ActivityTraceRow({ line, active }: { line: string; active: boolean }) {
+function ActivityTraceRow({ line, active, evidence = [] }: { line: string; active: boolean; evidence?: ActivityEvidence[] }) {
   const trace = describeTraceLine(line);
   const Icon = trace.kind === "search"
     ? Search
@@ -849,19 +788,88 @@ function ActivityTraceRow({ line, active }: { line: string; active: boolean }) {
         ? Wrench
         : Layers;
   return (
-    <li className="flex min-w-0 items-start gap-2 py-0.5 text-[13px] leading-5">
-      <TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />
-      <span className="min-w-0 flex-1">
-        <span className="font-medium text-muted-foreground/85">{trace.label}</span>
-        {trace.detail ? (
-          <>
-            <span className="text-muted-foreground/55"> </span>
-            <span className="break-words text-foreground/82">{trace.detail}</span>
-          </>
-        ) : null}
-      </span>
-    </li>
+    <ActivityStep
+      as="li"
+      marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={active} />}
+      active={active && trace.kind !== "done"}
+      tone={trace.kind === "done" ? "success" : active ? "active" : "neutral"}
+      label={trace.label}
+      detail={trace.detail}
+      title={`${trace.label}${trace.detail ? ` ${trace.detail}` : ""}`}
+    >
+      <ActivityEvidencePreview evidence={evidence} />
+    </ActivityStep>
   );
+}
+
+function ActivityEvidenceList({ evidence }: { evidence: ActivityEvidence[] }) {
+  return (
+    <ul className="space-y-1">
+      <ActivityStep
+        as="li"
+        icon={FileImage}
+        tone="success"
+        label={evidenceLabel(evidence)}
+      >
+        <ActivityEvidencePreview evidence={evidence} />
+      </ActivityStep>
+    </ul>
+  );
+}
+
+function evidenceLabel(evidence: ActivityEvidence[]): string {
+  const first = evidence[0]?.attachment.kind;
+  if (first === "image") return evidence.length > 1 ? "Found images" : "Found image";
+  if (first === "video") return evidence.length > 1 ? "Found videos" : "Found video";
+  return evidence.length > 1 ? "Found files" : "Found file";
+}
+
+function toolEvidenceByTraceLine(message: UIMessage): Map<string, ActivityEvidence[]> {
+  const map = new Map<string, ActivityEvidence[]>();
+  for (const event of message.toolEvents ?? []) {
+    const evidence = activityEvidenceFromToolEvent(event);
+    if (!evidence.length) continue;
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    const existing = map.get(line) ?? [];
+    map.set(line, [...existing, ...evidence]);
+  }
+  return map;
+}
+
+function allToolEvidence(evidenceByLine: Map<string, ActivityEvidence[]>): ActivityEvidence[] {
+  return [...evidenceByLine.values()].flat();
+}
+
+function describeActivityGroup(
+  message: UIMessage,
+  evidenceByLine: Map<string, ActivityEvidence[]>,
+  mediaEvidence: ActivityEvidence[],
+): { title: string; icon: LucideIcon } {
+  const names = [
+    ...traceLines(message).map((line) => /^([a-zA-Z0-9_.-]+)\(/.exec(line.trim())?.[1] ?? line),
+    ...(message.toolEvents ?? []).map(toolEventDisplayName),
+  ].map((name) => name.toLowerCase());
+  const evidence = [...allToolEvidence(evidenceByLine), ...mediaEvidence];
+  const hasVisualEvidence = evidence.some((item) => item.attachment.kind === "image" || item.attachment.kind === "video");
+  if (hasVisualEvidence && names.some((name) => /browser|screenshot|vision|image|video/.test(name))) {
+    return { title: "Vision", icon: FileImage };
+  }
+  if (names.some((name) => /browser|screenshot/.test(name))) return { title: "Browser", icon: FileImage };
+  if (names.some((name) => /web|search|fetch|read|open/.test(name))) return { title: "Web", icon: Search };
+  if (names.some((name) => /exec|shell|terminal|bash|run_cli_app|cli_anything/.test(name))) return { title: "Shell", icon: Terminal };
+  if (names.some((name) => /^mcp_|mcp/.test(name))) return { title: "MCP", icon: Server };
+  if (message.fileEdits?.length) return { title: "Files", icon: Layers };
+  if (evidence.length) return { title: "Media", icon: FileImage };
+  return { title: "Working", icon: Layers };
+}
+
+function toolEventDisplayName(event: ToolProgressEvent): string {
+  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
+    ? String((event as { function?: { name?: unknown } }).function?.name)
+    : typeof event.name === "string"
+      ? event.name
+      : "";
 }
 
 interface TraceDescription {
@@ -891,7 +899,7 @@ function TraceIconMark({
       <span
         data-testid={`activity-web-favicon-${trace.host}`}
         className={cn(
-          "mt-0.5 grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]",
+          "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]",
           active && "animate-pulse",
         )}
         aria-hidden
@@ -909,7 +917,7 @@ function TraceIconMark({
   return (
     <FallbackIcon
       className={cn(
-        "mt-0.5 h-3.5 w-3.5 shrink-0",
+        "h-3.5 w-3.5 shrink-0",
         trace.kind === "done"
           ? "text-emerald-500/75"
           : active
@@ -945,7 +953,7 @@ function describeTraceLine(line: string): TraceDescription {
   if (isShellTraceName(name)) {
     return {
       kind: "tool",
-      label: "Shell",
+      label: "Command",
       detail: previewShellTraceDetail(args, trimmed),
     };
   }
@@ -1633,27 +1641,6 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
   });
 }
 
-function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
-  return edit.added > 0 || edit.deleted > 0;
-}
-
-function formatFileEditError(error?: string): string {
-  const firstLine = (error || "").replace(/\s+/g, " ").trim();
-  if (!firstLine) return "";
-  const cleaned = firstLine
-    .replace(/^Error applying patch:\s*/i, "")
-    .replace(/^Error writing file:\s*/i, "")
-    .replace(/^Error editing file:\s*/i, "")
-    .replace(/^Error:\s*/i, "");
-
-  return cleaned
-    .replace(/^old_text not found in (.+)$/i, "Target text was not found in $1.")
-    .replace(/^old_text appears multiple times in (.+)$/i, "Target text matched multiple places in $1.")
-    .replace(/^file to (?:update|delete) does not exist: (.+)$/i, "File does not exist: $1.")
-    .replace(/^path to (?:update|delete) is not a file: (.+)$/i, "Path is not a file: $1.")
-    .slice(0, 180);
-}
-
 function CliRunGroup({
   runs,
   active,
@@ -1694,40 +1681,42 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   useEffect(() => setLogoIndex(0), [app?.logo_url]);
 
   return (
-    <li
-      className="flex min-w-0 items-center gap-2 py-0.5 text-[13px] leading-5"
+    <ActivityStep
+      as="li"
+      active={rowActive}
+      tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       title={`${label} @${run.name}${args ? ` ${args}` : ""}${run.error ? ` ${run.error}` : ""}`}
+      label={label}
+      marker={(
+        <span
+          data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
+          className={cn(
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            rowActive && "animate-pulse",
+          )}
+          style={{
+            borderColor: alphaColor(color, 22),
+            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
+            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
+          }}
+          aria-hidden
+        >
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              className="h-[78%] w-[78%] object-contain"
+              onError={() => setLogoIndex((index) => index + 1)}
+            />
+          ) : app ? (
+            cliAppInitials(app).slice(0, 2)
+          ) : (
+            <Terminal className="h-3 w-3" aria-hidden />
+          )}
+        </span>
+      )}
     >
-      <span
-        data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
-        className={cn(
-          "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
-          rowActive && "animate-pulse",
-        )}
-        style={{
-          borderColor: alphaColor(color, 22),
-          backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-          boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-        }}
-        aria-hidden
-      >
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            className="h-[78%] w-[78%] object-contain"
-            onError={() => setLogoIndex((index) => index + 1)}
-          />
-        ) : app ? (
-          cliAppInitials(app).slice(0, 2)
-        ) : (
-          <Terminal className="h-3 w-3" aria-hidden />
-        )}
-      </span>
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <StreamingLabelSheen active={rowActive} className="shrink-0 font-medium text-muted-foreground/85">
-          {label}
-        </StreamingLabelSheen>
+      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
         <span className="max-w-[11rem] shrink-0 truncate font-mono text-[12.5px] font-semibold text-foreground/90">
           @{run.name}
         </span>
@@ -1758,8 +1747,8 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
             </span>
           </>
         ) : null}
-      </span>
-    </li>
+      </div>
+    </ActivityStep>
   );
 }
 
@@ -1803,40 +1792,42 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
   useEffect(() => setLogoIndex(0), [preset?.logo_url]);
 
   return (
-    <li
-      className="flex min-w-0 items-center gap-2 py-0.5 text-[13px] leading-5"
+    <ActivityStep
+      as="li"
+      active={rowActive}
+      tone={failed ? "error" : rowActive ? "active" : run.status === "done" ? "success" : "neutral"}
       title={`${label} ${displayName} ${run.toolName}${run.argsPreview ? ` ${run.argsPreview}` : ""}${run.error ? ` ${run.error}` : ""}`}
+      label={label}
+      marker={(
+        <span
+          data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
+          className={cn(
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
+            rowActive && "animate-pulse",
+          )}
+          style={{
+            borderColor: alphaColor(color, 22),
+            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
+            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
+          }}
+          aria-hidden
+        >
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt=""
+              className="h-[78%] w-[78%] object-contain"
+              onError={() => setLogoIndex((index) => index + 1)}
+            />
+          ) : preset ? (
+            mcpPresetInitials(preset).slice(0, 2)
+          ) : (
+            <Server className="h-3 w-3" aria-hidden />
+          )}
+        </span>
+      )}
     >
-      <span
-        data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
-        className={cn(
-          "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border text-[6.5px] font-semibold text-white",
-          rowActive && "animate-pulse",
-        )}
-        style={{
-          borderColor: alphaColor(color, 22),
-          backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-          boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-        }}
-        aria-hidden
-      >
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            className="h-[78%] w-[78%] object-contain"
-            onError={() => setLogoIndex((index) => index + 1)}
-          />
-        ) : preset ? (
-          mcpPresetInitials(preset).slice(0, 2)
-        ) : (
-          <Server className="h-3 w-3" aria-hidden />
-        )}
-      </span>
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <StreamingLabelSheen active={rowActive} className="shrink-0 font-medium text-muted-foreground/85">
-          {label}
-        </StreamingLabelSheen>
+      <div className="-mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
         <span className="max-w-[12rem] shrink-0 truncate text-[12.5px] font-semibold text-foreground/90">
           {displayName}
         </span>
@@ -1856,8 +1847,8 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
             </span>
           </>
         ) : null}
-      </span>
-    </li>
+      </div>
+    </ActivityStep>
   );
 }
 
@@ -1869,181 +1860,4 @@ function alphaColor(color: string, percent: number): string {
     return `${color}${alpha}`;
   }
   return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
-}
-
-function FileEditGroup({ edits }: { edits: FileEditSummary[] }) {
-  if (edits.length === 0) return null;
-  return (
-    <ul className="space-y-1">
-      {edits.map((edit) => (
-        <FileEditRow key={edit.key} edit={edit} />
-      ))}
-    </ul>
-  );
-}
-
-function FileEditRow({ edit }: { edit: FileEditSummary }) {
-  const { t } = useTranslation();
-  const editing = edit.status === "editing";
-  const failed = edit.status === "error";
-  const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
-  const failureDetail = failed
-    ? formatFileEditError(edit.error)
-      || t("message.fileEditFailedFallback", { defaultValue: "File change was not applied." })
-    : "";
-  return (
-    <li
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-0.5 text-xs"
-      title={failureDetail || edit.absolute_path || edit.path}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground/50">
-          {failed ? (
-            <AlertCircle className="h-3.5 w-3.5 text-destructive/75" aria-hidden />
-          ) : editing ? (
-            <CircleDashed className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500/75" aria-hidden />
-          )}
-        </span>
-        {edit.pending && !edit.path ? (
-          <StreamingLabelSheen
-            active={editing}
-            className="min-w-0 text-[12px] font-medium text-muted-foreground"
-          >
-            {t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })}
-          </StreamingLabelSheen>
-        ) : (
-          <FileReferenceChip
-            path={edit.path}
-            tooltipPath={edit.absolute_path}
-            display="path"
-            active={editing}
-            className="min-w-0"
-            textClassName="text-[12px]"
-            testId="activity-file-reference"
-          />
-        )}
-        {failed ? (
-          <span className="min-w-0 truncate text-[11px] leading-4 text-destructive/75">
-            {failureDetail}
-          </span>
-        ) : null}
-      </div>
-      {hasCountedDiff ? (
-        <DiffPair added={edit.added} deleted={edit.deleted} />
-      ) : null}
-    </li>
-  );
-}
-
-function DiffPair({ added, deleted }: { added: number; deleted: number }) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-baseline gap-1.5 leading-[inherit] tabular-nums"
-      data-testid="activity-diff-pair"
-    >
-      <DiffValue
-        sign="+"
-        value={added}
-        className="text-emerald-600/75 dark:text-emerald-300/75"
-      />
-      <DiffValue
-        sign="-"
-        value={deleted}
-        className="text-rose-600/70 dark:text-rose-300/75"
-      />
-    </span>
-  );
-}
-
-function DiffValue({ sign, value, className }: { sign: string; value: number; className: string }) {
-  const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
-  return (
-    <span
-      className={cn("inline-flex items-baseline leading-[inherit]", className)}
-      aria-label={`${sign}${safeValue}`}
-    >
-      <span className="inline-flex items-baseline leading-none" aria-hidden>
-        {sign}
-        <AnimatedNumber value={safeValue} />
-      </span>
-      <span className="sr-only">{sign}{safeValue}</span>
-    </span>
-  );
-}
-
-function AnimatedNumber({ value }: { value: number }) {
-  const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
-  const [display, setDisplay] = useState(0);
-  const displayRef = useRef(0);
-
-  const setAnimatedDisplay = useCallback((next: number) => {
-    displayRef.current = next;
-    setDisplay(next);
-  }, []);
-
-  useEffect(() => {
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) {
-      setAnimatedDisplay(safeValue);
-      return;
-    }
-    const start = displayRef.current;
-    const delta = safeValue - start;
-    if (delta === 0) {
-      setAnimatedDisplay(safeValue);
-      return;
-    }
-    const duration = 260;
-    const startedAt = performance.now();
-    let frame = 0;
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setAnimatedDisplay(Math.round(start + delta * eased));
-      if (progress < 1) {
-        frame = window.requestAnimationFrame(tick);
-        return;
-      }
-      displayRef.current = safeValue;
-    };
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
-  }, [safeValue, setAnimatedDisplay]);
-
-  return <RollingNumber value={display} />;
-}
-
-function RollingNumber({ value }: { value: number }) {
-  const digits = String(value).split("");
-  return (
-    <span className="inline-flex items-baseline leading-none" aria-hidden>
-      {digits.map((digit, index) => (
-        <RollingDigit
-          key={`${digits.length}-${index}`}
-          digit={Number(digit)}
-        />
-      ))}
-    </span>
-  );
-}
-
-function RollingDigit({ digit }: { digit: number }) {
-  const safeDigit = Number.isFinite(digit) ? Math.min(9, Math.max(0, digit)) : 0;
-  return (
-    <span className="relative inline-block h-[1em] w-[0.62em] overflow-hidden align-baseline leading-none">
-      <span className="invisible block h-[1em] leading-none">0</span>
-      <span
-        className="absolute inset-x-0 top-0 flex flex-col transition-transform duration-200 ease-out will-change-transform"
-        style={{ transform: `translateY(-${safeDigit}em)` }}
-      >
-        {Array.from({ length: 10 }, (_, n) => (
-          <span key={n} className="block h-[1em] leading-none">
-            {n}
-          </span>
-        ))}
-      </span>
-    </span>
-  );
 }
