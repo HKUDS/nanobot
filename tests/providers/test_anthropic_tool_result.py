@@ -5,6 +5,9 @@ Regression for: tool results containing OpenAI-format image_url blocks
 were passed to Anthropic unconverted, causing silent image drops with a
 "Non-transient LLM error with image content, retrying without images"
 warning.
+
+Also tests that bare dicts without a "type" field are coerced to text
+blocks, fixing Anthropic "content.0.type: Field required" rejections (#3993).
 """
 
 from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -55,3 +58,25 @@ def test_tool_result_block_preserves_string_content():
     assert block["type"] == "tool_result"
     assert block["tool_use_id"] == "call_2"
     assert block["content"] == "plain tool output"
+
+
+def test_convert_user_content_coerces_typeless_dict():
+    """Bare dicts without a "type" field must be coerced to text blocks.
+    Regression for #3993: tools returning plain dicts caused Anthropic to
+    reject the request with "content.0.type: Field required"."""
+    result = AnthropicProvider._convert_user_content([
+        {"foo": "bar"},
+        {"type": "text", "text": "ok"},
+    ])
+    assert result[0] == {"type": "text", "text": str({"foo": "bar"})}
+    assert result[1] == {"type": "text", "text": "ok"}
+
+
+def test_convert_user_content_coerces_mixed_typeless():
+    """Multiple typeless items and non-dict items are all handled."""
+    result = AnthropicProvider._convert_user_content([
+        42,
+        {"key": "val"},
+    ])
+    assert result[0] == {"type": "text", "text": "42"}
+    assert result[1] == {"type": "text", "text": str({"key": "val"})}

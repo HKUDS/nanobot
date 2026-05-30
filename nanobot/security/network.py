@@ -36,10 +36,26 @@ def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     _allowed_networks = nets
 
 
+def _normalize_addr(
+    addr: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Normalize IPv6-mapped IPv4 addresses to their IPv4 form.
+
+    ``::ffff:127.0.0.1`` is semantically identical to ``127.0.0.1`` but
+    Python's ipaddress treats it as an IPv6Address that matches neither
+    ``127.0.0.0/8`` nor ``::1/128``.  Converting it to IPv4 ensures
+    blocklist/allowlist checks work correctly.
+    """
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    return addr
+
+
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if _allowed_networks and any(addr in net for net in _allowed_networks):
+    normalized = _normalize_addr(addr)
+    if _allowed_networks and any(normalized in net for net in _allowed_networks):
         return False
-    return any(addr in net for net in _BLOCKED_NETWORKS)
+    return any(normalized in net for net in _BLOCKED_NETWORKS)
 
 
 def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
@@ -133,7 +149,7 @@ def _is_allowed_loopback_target(
     hostname: str,
     addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address],
 ) -> bool:
-    if not addrs or not all(addr.is_loopback for addr in addrs):
+    if not addrs or not all(_normalize_addr(addr).is_loopback for addr in addrs):
         return False
     normalized = hostname.rstrip(".").lower()
     if normalized == "localhost":
