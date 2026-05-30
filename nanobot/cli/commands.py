@@ -1193,6 +1193,167 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
+    async def _customer_bot_send(chat_id: str, text: str) -> None:
+        """Send a message to a customer via @the_foolish_butcher_bot."""
+        import os as _os
+        import urllib.request as _req
+        import urllib.parse as _up
+        token = _os.environ.get("FOOLISH_CUSTOMER_BOT_TOKEN", "")
+        if not token:
+            logger.warning("FOOLISH_CUSTOMER_BOT_TOKEN not set — cannot send to customer")
+            return
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = _up.urlencode({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode()
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: _req.urlopen(url, payload, timeout=10))
+        except Exception as e:
+            logger.error("customer_bot_send failed: {}", e)
+
+    async def _cms_get_order_by_ref(order_ref: str) -> dict | None:
+        """Fetch a Foolish order from Payload CMS by orderNumber."""
+        import os as _os
+        import urllib.request as _req
+        cms_url = _os.environ.get("FOOLISH_PAYLOAD_URL", "https://cms-production-1dda.up.railway.app")
+        secret = _os.environ.get("FOOLISH_PAYLOAD_SECRET", "")
+        url = f"{cms_url}/api/orders?where[orderNumber][equals]={order_ref}&limit=1"
+        try:
+            loop = asyncio.get_event_loop()
+            req = _req.Request(url, headers={"x-storefront-secret": secret})
+            res = await loop.run_in_executor(None, lambda: _req.urlopen(req, timeout=10))
+            import json as _j
+            data = _j.loads(res.read())
+            docs = data.get("docs", [])
+            return docs[0] if docs else None
+        except Exception as e:
+            logger.error("cms_get_order_by_ref failed: {}", e)
+            return None
+
+    async def _cms_patch_order(order_id: str, fields: dict) -> bool:
+        """PATCH an order in Payload CMS."""
+        import os as _os, json as _j, urllib.request as _req
+        cms_url = _os.environ.get("FOOLISH_PAYLOAD_URL", "https://cms-production-1dda.up.railway.app")
+        secret = _os.environ.get("FOOLISH_PAYLOAD_SECRET", "")
+        # Need admin login for PATCH — use stored credentials
+        email = _os.environ.get("FOOLISH_PAYLOAD_EMAIL", "")
+        password = _os.environ.get("FOOLISH_PAYLOAD_PASSWORD", "")
+        try:
+            loop = asyncio.get_event_loop()
+            # Login
+            login_data = _j.dumps({"email": email, "password": password}).encode()
+            login_req = _req.Request(
+                f"{cms_url}/api/users/login",
+                data=login_data,
+                headers={"Content-Type": "application/json"},
+            )
+            login_res = await loop.run_in_executor(None, lambda: _req.urlopen(login_req, timeout=10))
+            token = _j.loads(login_res.read()).get("token", "")
+            # PATCH
+            patch_data = _j.dumps(fields).encode()
+            patch_req = _req.Request(
+                f"{cms_url}/api/orders/{order_id}",
+                data=patch_data,
+                method="PATCH",
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            )
+            await loop.run_in_executor(None, lambda: _req.urlopen(patch_req, timeout=10))
+            return True
+        except Exception as e:
+            logger.error("cms_patch_order failed: {}", e)
+            return False
+
+    async def _handle_customer_bot_update(update: dict) -> None:
+        """Route incoming Telegram updates from @the_foolish_butcher_bot."""
+        import os as _os
+        message = update.get("message") or update.get("callback_query", {}).get("message")
+        if not message:
+            return
+        chat_id = str(message["chat"]["id"])
+        text = message.get("text", "")
+        customer_name = message["chat"].get("first_name", "")
+
+        # --- /start order_XXXXX  →  link customer to order ---
+        if text.startswith("/start"):
+            parts = text.split()
+            payload_param = parts[1] if len(parts) > 1 else ""
+            if payload_param.startswith("order_"):
+                order_ref = payload_param[6:]  # strip "order_"
+                order = await _cms_get_order_by_ref(order_ref)
+                if order:
+                    await _cms_patch_order(str(order["id"]), {"customerTelegramId": chat_id})
+                    await _customer_bot_send(
+                        chat_id,
+                        f"Ciao {customer_name} 👋\n\n"
+                        f"Sei collegato all'ordine <b>{order_ref}</b>.\n"
+                        f"Ti aggiornerò qui su produzione e spedizione.\n\n"
+                        f"— Alessandro, The Foolish Butcher",
+                    )
+                    # Notify Alessandro
+                    tg_allow = (config.channels.telegram.get("allowFrom") or []) if isinstance(config.channels.telegram, dict) else []
+                    alessandros_chat = str(tg_allow[0]) if tg_allow else ""
+                    if alessandros_chat:
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(
+                                channel="telegram",
+                                chat_id=alessandros_chat,
+                                content=f"✅ Cliente collegato — {customer_name} è ora su Telegram per l'ordine {order_ref}",
+                            )
+                        ))
+                else:
+                    await _customer_bot_send(
+                        chat_id,
+                        "Non ho trovato un ordine con questo riferimento. Scrivi direttamente qui se hai bisogno.",
+                    )
+            else:
+                await _customer_bot_send(
+                    chat_id,
+                    f"Ciao {customer_name}! Sono il canale diretto di The Foolish Butcher.\n"
+                    "Se hai acquistato, usa il link nell'email di conferma per collegarti al tuo ordine.",
+                )
+            return
+
+        # --- Free message → route through Frank as Foolish Butcher ---
+        alessandros_chat = ""
+        tg_allow = (config.channels.telegram.get("allowFrom") or []) if isinstance(config.channels.telegram, dict) else []
+        if tg_allow:
+            alessandros_chat = str(tg_allow[0])
+
+        system_context = (
+            "[Contesto: sei il canale clienti di The Foolish Butcher — Alessandro Boscarato, "
+            "artigiano di tattoo practice skin a Chieri, Torino. "
+            "Rispondi in italiano, tono diretto e artigianale, senza fronzoli corporate. "
+            "Se il cliente chiede dello stato dell'ordine o spedizione, "
+            "di' che Alessandro lo aggiornerà a breve. "
+            "Firma sempre come 'Alessandro — The Foolish Butcher'.]\n\n"
+            f"Messaggio cliente: {text}"
+        )
+        session_key = f"foolish_customer:{chat_id}"
+        try:
+            response = await asyncio.wait_for(
+                agent.process_direct(
+                    system_context,
+                    session_key=session_key,
+                    channel="api",
+                    chat_id=chat_id,
+                ),
+                timeout=30.0,
+            )
+            reply = response.content if response else "Messaggio ricevuto, ti rispondo presto."
+        except Exception:
+            reply = "Messaggio ricevuto. Alessandro ti risponde appena possibile."
+
+        await _customer_bot_send(chat_id, reply)
+
+        # Forward to Alessandro with context
+        if alessandros_chat:
+            asyncio.create_task(_deliver_to_channel(
+                OutboundMessage(
+                    channel="telegram",
+                    chat_id=alessandros_chat,
+                    content=f"💬 Messaggio cliente (Telegram {chat_id}):\n\"{text}\"\n\nRisposto: {reply[:200]}",
+                )
+            ))
+
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
@@ -1269,6 +1430,41 @@ def _run_gateway(
                         f"Content-Length: {len(body)}\r\n"
                         f"\r\n{body}"
                     )
+            elif method == "POST" and path == "/hooks/customer-telegram":
+                import os as _os
+                wh_secret = _os.environ.get("FOOLISH_CUSTOMER_WH_SECRET", "")
+                # Verify secret from header
+                raw_headers = data.split(b"\r\n\r\n", 1)[0].decode("utf-8", errors="replace")
+                incoming_secret = ""
+                for hline in raw_headers.splitlines()[1:]:
+                    if hline.lower().startswith("x-telegram-bot-api-secret-token:"):
+                        incoming_secret = hline.split(":", 1)[1].strip()
+                        break
+                if wh_secret and incoming_secret != wh_secret:
+                    body = "Unauthorized"
+                    resp = f"HTTP/1.0 401 Unauthorized\r\nContent-Length: {len(body)}\r\n\r\n{body}"
+                else:
+                    try:
+                        header_end = data.find(b"\r\n\r\n")
+                        body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                        update = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+                        asyncio.create_task(_handle_customer_bot_update(update))
+                        body = _json.dumps({"ok": True})
+                        resp = (
+                            f"HTTP/1.0 200 OK\r\n"
+                            f"Content-Type: application/json\r\n"
+                            f"Content-Length: {len(body)}\r\n"
+                            f"\r\n{body}"
+                        )
+                    except Exception as _exc:
+                        logger.exception("customer-telegram hook error")
+                        body = _json.dumps({"error": str(_exc)})
+                        resp = (
+                            f"HTTP/1.0 500 Internal Server Error\r\n"
+                            f"Content-Type: application/json\r\n"
+                            f"Content-Length: {len(body)}\r\n"
+                            f"\r\n{body}"
+                        )
             else:
                 body = "Not Found"
                 resp = (
