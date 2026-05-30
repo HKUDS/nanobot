@@ -321,7 +321,7 @@ describe("SettingsView Apps catalog", () => {
 
     const modelButtons = await screen.findAllByRole("button", { name: /deepseek-chat/i });
     fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
-    await screen.findByText("Available models");
+    await screen.findByText("deepseek-reasoner");
     fireEvent.click(screen.getAllByText("deepseek-reasoner")[0]);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

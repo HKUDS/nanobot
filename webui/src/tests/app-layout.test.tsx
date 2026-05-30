@@ -889,7 +889,7 @@ describe("App layout", () => {
     expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Current model")).toBeInTheDocument();
+    expect(screen.getByText("Current configuration")).toBeInTheDocument();
     expect(screen.queryByText("Presets")).not.toBeInTheDocument();
     fireEvent.pointerDown(screen.getAllByRole("button", { name: /openai\/gpt-4o/ })[0]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Add configuration" }));
@@ -912,14 +912,14 @@ describe("App layout", () => {
       fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
     };
     openModelPicker();
-    await screen.findByText("Available models");
+    await screen.findByText("openai/gpt-4o-mini");
     fireEvent.click(screen.getAllByText("openai/gpt-4o-mini")[0]);
     expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
       "text-blue-600",
     );
     const updatedModelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o-mini/ });
     fireEvent.pointerDown(updatedModelButtons[updatedModelButtons.length - 1]);
-    await screen.findByText("Available models");
+    await screen.findByText("openai/gpt-4o");
     fireEvent.click(screen.getAllByText("openai/gpt-4o")[0]);
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();

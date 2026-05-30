@@ -59,6 +59,29 @@ async def test_message_tool_marks_channel_delivery_only_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_can_suppress_internal_delivery() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    token = tool.set_suppress_delivery(True)
+    try:
+        result = await tool.execute(content="internal", channel="feishu", chat_id="1")
+    finally:
+        tool.reset_suppress_delivery(token)
+
+    assert result.startswith("Message delivery suppressed")
+    assert sent == []
+
+    result = await tool.execute(content="normal", channel="feishu", chat_id="1")
+    assert result == "Message sent to feishu:1"
+    assert sent[0].content == "normal"
+
+
+@pytest.mark.asyncio
 async def test_message_tool_records_media_deliveries() -> None:
     sent: list[OutboundMessage] = []
 

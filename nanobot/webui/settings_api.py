@@ -120,6 +120,7 @@ _MODEL_LIST_OFFICIAL_PROVIDERS = {
     "groq",
     "longcat",
     "minimax",
+    "minimax_anthropic",
     "mistral",
     "moonshot",
     "nvidia",
@@ -416,12 +417,15 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         "message": None,
         "fetched_at": time.time(),
     }
-    if spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS or spec.is_oauth:
+    if (
+        spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
+        and spec.name != "minimax_anthropic"
+    ) or spec.is_oauth:
         return {
             **base_payload,
             "status": "unsupported",
             "catalog_kind": "unsupported",
-            "message": "This provider does not expose an OpenAI-compatible model list.",
+            "message": "Model list is not available for this provider. Type a model ID manually.",
         }
 
     config = load_config()
@@ -449,7 +453,10 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
 
     headers = {"Accept": "application/json"}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        if spec.name == "minimax_anthropic":
+            headers["X-Api-Key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         response = httpx.get(

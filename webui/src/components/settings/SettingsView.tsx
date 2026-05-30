@@ -57,7 +57,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -1776,7 +1775,7 @@ function NewModelConfigurationDialog({
           <div className="space-y-4 px-5 py-5">
             <label className="block">
               <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-                {tx("settings.models.configurationName", "Name")}
+                {tx("settings.models.configurationName", "Configuration name")}
               </span>
               <Input
                 autoFocus
@@ -1900,8 +1899,8 @@ function ModelsSettings({
       <section>
         <SettingsGroup>
           <SettingsRow
-            title={tx("settings.rows.currentModel", "Current model")}
-            description={tx("settings.help.currentModel", "Choose the model nanobot uses for new replies.")}
+            title={tx("settings.rows.currentModel", "Current configuration")}
+            description={tx("settings.help.currentModel", "Choose the model configuration nanobot uses for new replies.")}
           >
             <ModelPresetPicker
               presets={settings.model_presets}
@@ -1930,7 +1929,7 @@ function ModelsSettings({
           </SettingsRow>
           {selectedPreset && !selectedPreset.is_default ? (
             <SettingsRow
-              title={tx("settings.models.configurationName", "Name")}
+              title={tx("settings.models.configurationName", "Configuration name")}
               description={tx("settings.models.configurationNameHelp", "Rename this saved model configuration.")}
             >
               <Input
@@ -1951,7 +1950,13 @@ function ModelsSettings({
               value={providerValue}
               emptyLabel={t("settings.byok.noConfiguredProviders")}
               showProviderLogos={showBrandLogos}
-              onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
+              onChange={(provider) =>
+                setForm((prev) => ({
+                  ...prev,
+                  provider,
+                  model: provider === prev.provider ? prev.model : "",
+                }))
+              }
             />
           </SettingsRow>
           {selectedProviderNeedsSignIn ? (
@@ -4352,10 +4357,8 @@ function ModelIdPicker({
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const canFetchModels = Boolean(effectiveProvider && effectiveProvider !== "auto");
-  const providerLabel = providerDisplayLabel(settings.providers, effectiveProvider);
   const normalizedQuery = query.trim().toLowerCase();
   const providerModels = payload?.models ?? [];
-  const knownValue = providerModels.some((model) => model.id === value);
   const visibleModels = providerModels
     .filter((model) => {
       if (!normalizedQuery) return true;
@@ -4371,9 +4374,11 @@ function ModelIdPicker({
     canFetchModels && (!defersModelList || hasDeferredSearchQuery);
   const waitingForModelSearch =
     open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
-  const showModels = Boolean(payload && (!isCatalog || normalizedQuery));
+  const hasModelList = payload?.status === "available";
+  const showModels = Boolean(hasModelList && payload && (!isCatalog || normalizedQuery));
   const customCandidate = query.trim();
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
+  const providerModelCount = payload?.model_count ?? providerModels.length;
 
   useEffect(() => {
     if (!open) return;
@@ -4413,30 +4418,27 @@ function ModelIdPicker({
 
   const renderModelRow = (
     model: ProviderModelsPayload["models"][number],
-    options: { selected?: boolean; caption?: string } = {},
+    options: { selected?: boolean } = {},
   ) => (
     <DropdownMenuItem
       key={model.id}
       onSelect={() => selectModel(model.id)}
       className={cn(
-        "flex cursor-default items-center justify-between gap-3 rounded-[14px] px-2.5 py-2.5 text-[13px]",
+        "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2 py-1.5 text-[12px]",
         "focus:bg-muted/85 focus:text-foreground",
         options.selected && "bg-muted/80 text-foreground focus:bg-muted",
       )}
     >
-      <span className="flex min-w-0 items-center gap-2.5">
+      <span className="flex min-w-0 items-center gap-2">
         <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
-        <span className="min-w-0 text-left leading-tight">
-          <span className="block truncate font-medium text-foreground">
-            {model.label ?? model.id}
-          </span>
-          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-            {options.caption ?? model.id}
-            {model.context_window ? ` · ${formatContextWindow(model.context_window)}` : ""}
-          </span>
+        <span className="min-w-0 truncate font-medium text-foreground">
+          {model.label ?? model.id}
         </span>
       </span>
-      {options.selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
+      <span className="ml-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+        {model.context_window ? <span>{formatContextWindow(model.context_window)}</span> : null}
+        {options.selected ? <Check className="h-3.5 w-3.5 text-foreground" aria-hidden /> : null}
+      </span>
     </DropdownMenuItem>
   );
 
@@ -4447,19 +4449,19 @@ function ModelIdPicker({
           type="button"
           variant="outline"
           className={cn(
-            "h-11 w-[min(430px,72vw)] justify-between rounded-full border-input bg-background px-3.5 text-[13px] font-normal shadow-none",
+            "h-9 w-[min(360px,70vw)] justify-between rounded-full border-input bg-background px-3 text-[12px] font-normal shadow-none",
             "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
-          <span className="flex min-w-0 items-center gap-2.5">
+          <span className="flex min-w-0 items-center gap-2">
             <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
-            <span className="min-w-0 text-left leading-tight">
-              <span className="block truncate font-medium text-foreground">
-                {value || tx("settings.models.selectModel", "Select model")}
-              </span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                {providerLabel}
-              </span>
+            <span
+              className={cn(
+                "min-w-0 truncate font-medium",
+                value ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {value || tx("settings.models.selectModel", "Select model")}
             </span>
           </span>
           <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -4467,9 +4469,9 @@ function ModelIdPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="w-[430px] max-w-[calc(100vw-2rem)] p-2"
+        className="w-[360px] max-w-[calc(100vw-2rem)] p-1.5"
       >
-        <div className="p-1">
+        <div className="p-1 pb-1.5">
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -4479,85 +4481,69 @@ function ModelIdPicker({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.stopPropagation()}
-              placeholder={tx("settings.models.searchModels", "Search models or type a custom ID")}
-              className="h-9 rounded-full pl-8 pr-3 text-[13px]"
+              placeholder={tx("settings.models.searchModels", "Search or type model ID")}
+              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
             />
           </div>
         </div>
-        <DropdownMenuSeparator />
 
         {!canFetchModels ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.autoProviderCustomOnly", "Auto provider mode uses custom model IDs.")}
           </div>
         ) : waitingForModelSearch ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
           </div>
         ) : loading ? (
-          <div className="flex items-center gap-2 px-3 py-3 text-[12px] text-muted-foreground">
+          <div className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
             {tx("settings.models.loadingModels", "Loading models...")}
           </div>
         ) : error || payload?.status === "error" ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {payload?.message || error || tx("settings.models.loadFailed", "Model list unavailable.")}
           </div>
         ) : payload?.status === "not_configured" ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
           </div>
         ) : payload?.status === "unsupported" || payload?.status === "missing_api_base" ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {payload.message || tx("settings.models.unsupportedModelList", "Type a model ID manually.")}
           </div>
         ) : isCatalog && !normalizedQuery ? (
-          <div className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
-            {payload.model_count ? ` ${payload.model_count} ${tx("settings.models.modelsAvailable", "available")}.` : ""}
+            {providerModelCount ? ` ${providerModelCount} ${tx("settings.models.modelsAvailable", "available")}.` : ""}
           </div>
         ) : null}
 
-        {!knownValue && value ? (
-          <>
-            <DropdownMenuLabel>
-              {tx("settings.models.currentCustomModel", "Current custom model")}
-            </DropdownMenuLabel>
-            {renderModelRow({ id: value }, { selected: true, caption: providerLabel })}
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-
         {showModels && visibleModels.length ? (
-          <>
-            <DropdownMenuLabel>
-              {tx("settings.models.availableModels", "Available models")}
-            </DropdownMenuLabel>
-            <div className="max-h-[18rem] overflow-y-auto pr-0.5">
-              {visibleModels.map((model) =>
-                renderModelRow(model, { selected: model.id === value }),
-              )}
-            </div>
-          </>
+          <div className="max-h-[16rem] overflow-y-auto pr-0.5">
+            {visibleModels.map((model) =>
+              renderModelRow(model, { selected: model.id === value }),
+            )}
+          </div>
         ) : showModels ? (
-          <div className="px-3 py-3 text-[12px] text-muted-foreground">
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
             {tx("settings.models.noModelResults", "No matching models.")}
           </div>
         ) : null}
 
         {customCandidate && !exactQueryMatch && customCandidate !== value ? (
           <>
-            <DropdownMenuSeparator />
+            {showModels ? <DropdownMenuSeparator /> : null}
             <DropdownMenuItem
               onSelect={() => selectModel(customCandidate)}
-              className="flex cursor-default items-center gap-2 rounded-[14px] px-2.5 py-2.5 text-[13px] focus:bg-muted/85"
+              className="flex cursor-default items-center gap-2 rounded-[12px] px-2 py-1.5 text-[12px] focus:bg-muted/85"
             >
-              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                <Pencil className="h-3.5 w-3.5" aria-hidden />
+              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted/80 text-muted-foreground">
+                <Pencil className="h-3 w-3" aria-hidden />
               </span>
               <span className="min-w-0 truncate">
-                {tx("settings.models.useCustomModel", "Use custom model")}{" "}
-                <span className="font-medium text-foreground">{customCandidate}</span>
+                {tx("settings.models.useCustomModel", "Use")}{" "}
+                <span className="font-medium text-foreground">“{customCandidate}”</span>
               </span>
             </DropdownMenuItem>
           </>

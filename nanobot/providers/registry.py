@@ -378,7 +378,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="MINIMAX_API_KEY",
         display_name="MiniMax (Anthropic)",
         backend="anthropic",
-        default_api_base="https://api.minimax.io/anthropic",
+        default_api_base="https://api.minimax.io/anthropic/v1",
     ),
     # Mistral AI: OpenAI-compatible API
     ProviderSpec(

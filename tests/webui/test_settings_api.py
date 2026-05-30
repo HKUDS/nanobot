@@ -373,6 +373,43 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
+def test_provider_models_payload_fetches_minimax_anthropic_models(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.minimax_anthropic.api_key = "sk-test"
+    config.providers.minimax_anthropic.api_base = "https://api.minimaxi.com/anthropic/v1"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.minimaxi.com/anthropic/v1/models"
+        assert kwargs["headers"]["X-Api-Key"] == "sk-test"
+        assert "Authorization" not in kwargs["headers"]
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "MiniMax-M2.7-highspeed"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["minimax_anthropic"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "official"
+    assert payload["models"] == [
+        {
+            "id": "MiniMax-M2.7-highspeed",
+            "label": None,
+            "owned_by": None,
+            "context_window": None,
+        }
+    ]
+
+
 def test_provider_models_payload_requires_gateway_key(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

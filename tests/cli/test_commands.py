@@ -9,7 +9,11 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import app
+from nanobot.cli.commands import (
+    app,
+    _is_heartbeat_clear_response,
+    _suppress_proactive_message_delivery,
+)
 from nanobot.providers.factory import make_provider
 from nanobot.config.schema import Config
 from nanobot.cron.types import CronJob, CronPayload
@@ -467,6 +471,28 @@ def test_config_auto_detects_xiaomi_mimo_from_model_keyword():
 
     assert config.get_provider_name() == "xiaomi_mimo"
     assert config.get_api_base() == "https://api.xiaomimimo.com/v1"
+
+
+def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "minimax_anthropic",
+                    "model": "MiniMax-M2.7-highspeed",
+                }
+            },
+            "providers": {
+                "minimaxAnthropic": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "minimax_anthropic"
+    assert config.get_api_key() == "test-key"
+    assert config.get_api_base() == "https://api.minimax.io/anthropic/v1"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():
@@ -930,6 +956,37 @@ def test_heartbeat_retains_recent_messages_by_default():
     assert config.gateway.heartbeat.keep_recent_messages == 8
 
 
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ("__NANOBOT_HEARTBEAT_CLEAR__", True),
+        ("`__NANOBOT_HEARTBEAT_CLEAR__`", True),
+        ("All clear.", True),
+        ("All clear。", True),
+        ("The reminder is due.", False),
+    ],
+)
+def test_heartbeat_clear_response_is_internal(response: str, expected: bool) -> None:
+    assert _is_heartbeat_clear_response(response) is expected
+
+
+def test_suppress_proactive_message_delivery_restores_state() -> None:
+    calls: list[tuple[str, object | None]] = []
+
+    class _Tool:
+        def set_suppress_delivery(self, active: bool):
+            calls.append(("set", active))
+            return "token"
+
+        def reset_suppress_delivery(self, token) -> None:
+            calls.append(("reset", token))
+
+    with _suppress_proactive_message_delivery(_Tool()):
+        calls.append(("inside", None))
+
+    assert calls == [("set", True), ("inside", None), ("reset", "token")]
+
+
 def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -1369,6 +1426,168 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     # Verify it actually swallows calls (no side effects)
     asyncio.run(seen["on_progress"]("tool_hint", "🔧 $ echo test"))
     # Nothing published to bus since evaluator rejected
+    bus.publish_outbound.assert_not_awaited()
+
+
+def test_gateway_heartbeat_uses_internal_context_and_suppresses_message_tool(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "HEARTBEAT.md").write_text("Check whether anything needs attention.\n")
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, object]] = []
+
+        def retain_recent_legal_suffix(self, count: int) -> None:
+            seen["retained"] = count
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            self.session = _FakeSession()
+            seen["session_manager"] = self
+
+        def list_sessions(self) -> list[dict[str, str]]:
+            return [{"key": "feishu:chat-1"}]
+
+        def get_or_create(self, key: str) -> _FakeSession:
+            seen["session_key"] = key
+            return self.session
+
+        def save(self, session: _FakeSession) -> None:
+            seen["saved_session"] = session
+
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def register_system_job(self, job: CronJob) -> CronJob:
+            return job
+
+        async def start(self) -> None:
+            raise _StopGatewayError("stop")
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeDream:
+        max_batch_size = 0
+        max_iterations = 0
+        annotate_line_ages = False
+        model = ""
+
+        async def run(self) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            from nanobot.agent.tools.message import MessageTool
+
+            self.model = "test-model"
+            self.provider = object()
+            self.sessions = kwargs["session_manager"]
+            self.tools = {"message": MessageTool(send_callback=bus.publish_outbound)}
+            self.dream = _FakeDream()
+
+        async def process_direct(
+            self,
+            _prompt,
+            *,
+            session_key,
+            channel,
+            chat_id,
+            on_progress=None,
+            **_kwargs,
+        ):
+            seen["process_session_key"] = session_key
+            seen["process_channel"] = channel
+            seen["process_chat_id"] = chat_id
+            seen["on_progress"] = on_progress
+            seen["tool_result"] = await self.tools["message"].execute(
+                content="leaked",
+                channel="feishu",
+                chat_id="chat-1",
+            )
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content="__NANOBOT_HEARTBEAT_CLEAR__",
+            )
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannels:
+        enabled_channels = ["feishu"]
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def start_all(self) -> None:
+            return None
+
+        async def stop_all(self) -> None:
+            return None
+
+    async def _fail_evaluate(*_args, **_kwargs) -> bool:
+        raise AssertionError("clear heartbeat responses must not reach evaluator")
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: bus,
+        session_manager=_FakeSessionManager,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
+    monkeypatch.setattr("nanobot.cli.commands.evaluate_response", _fail_evaluate)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    assert result.exit_code == 0
+
+    cron = seen["cron"]
+    response = asyncio.run(
+        cron.on_job(
+            CronJob(
+                id="heartbeat",
+                name="heartbeat",
+                payload=CronPayload(kind="system_event"),
+            )
+        )
+    )
+
+    assert response is None
+    assert seen["process_session_key"] == "heartbeat"
+    assert seen["process_channel"] == "system"
+    assert seen["process_chat_id"] == "heartbeat"
+    assert str(seen["tool_result"]).startswith("Message delivery suppressed")
+    assert seen["session_key"] == "heartbeat"
     bus.publish_outbound.assert_not_awaited()
 
 
