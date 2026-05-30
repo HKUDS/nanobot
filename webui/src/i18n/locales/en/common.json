@@ -594,6 +594,16 @@
         "deepResearch": "Deep research",
         "voice": "Voice input"
       },
+      "recording": {
+        "error": "Failed to start recording. Please check microphone permissions.",
+        "startRecording": "Start recording",
+        "stopRecording": "Stop recording",
+        "sendRecording": "Send recording"
+      },
+      "transcription": {
+        "error": "Failed to transcribe audio. Please try again.",
+        "empty": "Recording is empty, cannot send."
+      },
       "slash": {
         "ariaLabel": "Slash commands",
         "label": "commands",

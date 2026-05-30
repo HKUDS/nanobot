@@ -686,7 +686,13 @@ export type InboundEvent =
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
     }
-  | { event: "error"; chat_id?: string; detail?: string; reason?: string };
+  | { event: "error"; chat_id?: string; detail?: string; reason?: string }
+  | {
+      event: "transcribe_result";
+      request_id: string;
+      text?: string;
+      error?: string;
+    };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
  *
@@ -751,4 +757,10 @@ export type Outbound =
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;
+    }
+  | {
+      type: "transcribe_audio";
+      data_url: string;
+      name?: string;
+      request_id: string;
     };

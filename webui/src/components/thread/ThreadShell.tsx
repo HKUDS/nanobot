@@ -194,6 +194,7 @@ export function ThreadShell({
     send,
     stop,
     setMessages,
+    transcribeAudio,
     streamError,
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
@@ -515,6 +516,8 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={chatId}
+          token={token}
+          onTranscribe={transcribeAudio}
         />
       ) : (
         <ThreadComposer
@@ -541,6 +544,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
+          onTranscribe={transcribeAudio}
         />
       )}
     </>

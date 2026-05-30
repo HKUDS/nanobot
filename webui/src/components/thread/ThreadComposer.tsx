@@ -31,6 +31,7 @@ import {
   History,
   ImageIcon,
   Loader2,
+  Mic,
   Plus,
   RotateCw,
   Shield,
@@ -110,6 +111,10 @@ interface ThreadComposerProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  /** API token for authentication */
+  token?: string;
+  /** Transcribe audio from base64 data URL via WebSocket */
+  onTranscribe?: (dataUrl: string, name?: string) => Promise<string>;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -652,6 +657,8 @@ export function ThreadComposer({
   workspaceError = null,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  token,
+  onTranscribe,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -663,6 +670,14 @@ export function ThreadComposer({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [audioLevels, setAudioLevels] = useState<number[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const audioBlobRef = useRef<Blob | null>(null);
+  const audioNameRef = useRef<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -672,6 +687,8 @@ export function ThreadComposer({
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const isHero = variant === "hero";
   const queuedPromptStorageKey = useMemo(
     () => queuedPromptsStorageKey(pendingQueueKey),
@@ -1171,50 +1188,6 @@ export function ThreadComposer({
     onStop?.();
   }, [onStop, queuedPrompts.length]);
 
-  const submit = useCallback(() => {
-    if (!canSend) return;
-    const trimmed = value.trim();
-    const content = trimmed;
-    // Share the same normalized ``data:`` URL with both the wire payload and
-    // the optimistic bubble preview: data URLs are self-contained (no blob
-    // lifetime, safe under React StrictMode double-mount) and keep the
-    // bubble in sync with whatever the backend actually sees.
-    const payload: SendImage[] | undefined =
-      readyImages.length > 0
-        ? readyImages.map((img) => ({
-            media: {
-              data_url: img.dataUrl,
-              name: img.file.name,
-            },
-            preview: { url: img.dataUrl, name: img.file.name },
-          }))
-        : undefined;
-    const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
-    const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
-    const options: SendOptions | undefined =
-      attachedCliApps.length > 0 || attachedMcpPresets.length > 0
-        ? {
-            ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
-            ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
-          }
-        : undefined;
-    onSend(content, payload, options);
-    setQueuedPrompts([]);
-    // Bubble owns the data URL copy; safe to revoke every staged blob
-    // preview here without affecting the rendered message.
-    clear();
-    clearComposerText();
-  }, [
-    activeCliMentionApps,
-    activeMcpPresetMentions,
-    canSend,
-    clear,
-    clearComposerText,
-    onSend,
-    readyImages,
-    value,
-  ]);
-
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showCliAppMenu) {
       if (e.key === "ArrowDown") {
@@ -1301,6 +1274,246 @@ export function ThreadComposer({
     },
     [remove],
   );
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      setRecordingDuration(0);
+      setAudioLevels(new Array(40).fill(0));
+
+      // Setup audio analyser for visualization
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      // Start visualization update loop
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVisualization = () => {
+        analyser.getByteFrequencyData(dataArray);
+        // Normalize and downsample to 40 bars
+        const normalizedLevels = [];
+        for (let i = 0; i < 40; i++) {
+          const index = Math.floor(i * dataArray.length / 40);
+          normalizedLevels.push(dataArray[index] / 255);
+        }
+        setAudioLevels(normalizedLevels);
+        animationFrameRef.current = requestAnimationFrame(updateVisualization);
+      };
+      updateVisualization();
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        audioBlobRef.current = audioBlob;
+        const recordingName = `recording_${Date.now()}.webm`;
+        audioNameRef.current = recordingName;
+        
+        // Stop visualization
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        if (analyserRef.current) {
+          analyserRef.current.disconnect();
+          analyserRef.current = null;
+        }
+        
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      
+      // Start recording timer
+      const startTime = Date.now();
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+    } catch (error) {
+      console.error("Failed to start recording:", error);
+      setInlineError(t("thread.composer.recording.error"));
+    }
+  }, [t]);
+
+  const stopRecording = useCallback(async () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      
+      // Wait for onstop to complete and audio processing
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Transcribe the audio
+      if (audioBlobRef.current && audioNameRef.current && onTranscribe) {
+        try {
+          const reader = new FileReader();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(audioBlobRef.current!);
+          });
+          
+          // Call transcription via WebSocket
+          const text = await onTranscribe(dataUrl, audioNameRef.current);
+          
+          if (text && text.trim()) {
+            // Fill transcribed text into input box
+            setValue(text.trim());
+            setInlineError(null);
+            // Focus textarea after setting value
+            requestAnimationFrame(() => {
+              textareaRef.current?.focus();
+              resizeTextarea();
+            });
+          }
+        } catch (error) {
+          console.error("Failed to transcribe audio:", error);
+          setInlineError(t("thread.composer.transcription.error"));
+        }
+      }
+      
+      // Clear refs
+      audioBlobRef.current = null;
+      audioNameRef.current = "";
+    }
+  }, [isRecording, onTranscribe, resizeTextarea, t]);
+
+  const submit = useCallback(async () => {
+    let textToSend: string | null = null;
+    
+    // If recording, stop and transcribe first
+    if (isRecording && onTranscribe) {
+      try {
+        // Stop recording
+        mediaRecorderRef.current?.stop();
+        setIsRecording(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        
+        // Wait for onstop to complete and blob to be created
+        await new Promise<void>((resolve) => {
+          const checkBlob = () => {
+            if (audioBlobRef.current && audioNameRef.current) {
+              resolve();
+            } else {
+              setTimeout(checkBlob, 50);
+            }
+          };
+          checkBlob();
+        });
+        
+        // Transcribe the audio
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(audioBlobRef.current!);
+        });
+        
+        const text = await onTranscribe(dataUrl, audioNameRef.current);
+        
+        // Clear refs immediately after transcription
+        audioBlobRef.current = null;
+        audioNameRef.current = "";
+        
+        if (text && text.trim()) {
+          textToSend = text.trim();
+          // Also update value for UI consistency
+          setValue(textToSend);
+        } else {
+          setInlineError(t("thread.composer.transcription.empty"));
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to transcribe audio:", error);
+        setInlineError(t("thread.composer.transcription.error"));
+        return;
+      }
+    }
+    
+    // Normal send flow - use transcribed text if available, otherwise use value
+    const trimmed = textToSend || value.trim();
+    
+    // Check if we can send: either has transcribed text OR normal conditions met
+    const canProceed = !!textToSend || canSend;
+    if (!canProceed) {
+      return;
+    }
+    // Share the same normalized ``data:`` URL with both the wire payload and
+    // the optimistic bubble preview: data URLs are self-contained (no blob
+    // lifetime, safe under React StrictMode double-mount) and keep the
+    // bubble in sync with whatever the backend actually sees.
+    const payload: SendImage[] | undefined =
+      readyImages.length > 0
+        ? readyImages.map((img) => ({
+            media: {
+              data_url: img.dataUrl,
+              name: img.file.name,
+            },
+            preview: { url: img.dataUrl, name: img.file.name },
+          }))
+        : undefined;
+    const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
+    const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
+    const options: SendOptions | undefined =
+      imageMode || attachedCliApps.length > 0 || attachedMcpPresets.length > 0
+        ? {
+            ...(imageMode
+              ? {
+                  imageGeneration: {
+                    enabled: true,
+                    aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
+                  },
+                }
+              : {}),
+            ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
+            ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
+          }
+        : undefined;
+    onSend(trimmed, payload, options);
+    setValue("");
+    setInlineError(null);
+    // Bubble owns the data URL copy; safe to revoke every staged blob
+    // preview here without affecting the rendered message.
+    clear();
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
+    resizeTextarea();
+  }, [
+    activeCliMentionApps,
+    activeMcpPresetMentions,
+    canSend,
+    clear,
+    imageAspectRatio,
+    imageMode,
+    isRecording,
+    onSend,
+    onTranscribe,
+    readyImages,
+    resizeTextarea,
+    t,
+    value,
+  ]);
 
   const onChipKey = useCallback(
     (id: string) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -1508,7 +1721,34 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            {workspaceScope ? (
+            {isRecording ? (
+              <div className="flex flex-1 items-center gap-3 px-2">
+                {/* Audio visualization waveform */}
+                <div className="relative flex flex-1 items-end justify-center gap-[3px] h-10 overflow-hidden">
+                  {audioLevels.map((level, index) => {
+                    // Create a more dynamic waveform with varying heights
+                    const height = Math.max(4, level * 32);
+                    const opacity = 0.4 + level * 0.6;
+                    return (
+                      <div
+                        key={index}
+                        className="w-[3px] rounded-full bg-gradient-to-t from-primary to-primary/60 transition-all duration-75 ease-out"
+                        style={{
+                          height: `${height}px`,
+                          opacity,
+                          transform: `scaleY(${0.8 + level * 0.2})`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                {/* Duration timer */}
+                <span className="text-sm font-semibold text-muted-foreground tabular-nums ml-2 min-w-[48px]">
+                  {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, "0")}
+                </span>
+              </div>
+            ) : null}
+            {workspaceScope && !isRecording ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
                 disabled={disabled || workspaceScopeDisabled}
@@ -1517,9 +1757,64 @@ export function ThreadComposer({
                 onChange={onWorkspaceScopeChange}
               />
             ) : null}
+            {imageGenerationEnabled && !isRecording ? (
+              <div ref={aspectControlRef} className="relative flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-pressed={imageMode}
+                  aria-label={t("thread.composer.imageMode.toggle")}
+                  onClick={() => {
+                    setImageMode(!imageMode);
+                    setAspectMenuOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                  className={cn(
+                    "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
+                    imageMode
+                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
+                      : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                  )}
+                >
+                  <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
+                  <span className="truncate">{t("thread.composer.imageMode.label")}</span>
+                </Button>
+                {imageMode ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-haspopup="listbox"
+                  aria-expanded={aspectMenuOpen}
+                  aria-label={t("thread.composer.imageMode.aspectAria")}
+                  onClick={() => setAspectMenuOpen((open) => !open)}
+                  className={cn(
+                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
+                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
+                  )}
+                >
+                  <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
+                  <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
+                </Button>
+                ) : null}
+                {imageMode && aspectMenuOpen ? (
+                  <ImageAspectMenu
+                    selected={imageAspectRatio}
+                    isHero={isHero}
+                    onSelect={(ratio) => {
+                      setImageAspectRatio(ratio);
+                      setAspectMenuOpen(false);
+                      textareaRef.current?.focus();
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
-            {modelLabel ? (
+            {!isRecording && modelLabel ? (
               <ComposerModelBadge
                 label={modelLabel}
                 provider={modelProvider}
@@ -1528,11 +1823,43 @@ export function ThreadComposer({
               />
             ) : null}
             <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              disabled={disabled || isStreaming}
+              aria-label={isRecording ? t("thread.composer.stopRecording") : t("thread.composer.startRecording")}
+              onClick={isRecording ? stopRecording : startRecording}
+              className={cn(
+                "rounded-full text-muted-foreground hover:text-foreground transition-all",
+                isRecording && "bg-red-500/10 text-red-500 hover:bg-red-500/15 hover:text-red-600 dark:bg-red-500/15 dark:hover:bg-red-500/20",
+                isHero
+                  ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                  : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+              )}
+            >
+              {isRecording ? (
+                <div className="flex items-center justify-center">
+                  {/* Stop button icon - square with rounded corners */}
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="transition-transform"
+                  >
+                    <rect x="6" y="6" width="12" height="12" rx="2" ry="2" />
+                  </svg>
+                </div>
+              ) : (
+                <Mic className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+              )}
+            </Button>
+            <Button
               type={showStopButton ? "button" : "submit"}
               size="icon"
-              disabled={showStopButton ? disabled : !canSend}
-              aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
-              onClick={showStopButton ? handleStop : undefined}
+              disabled={showStopButton ? disabled : !canSend && !isRecording}
+              aria-label={showStopButton ? t("thread.composer.stop") : isRecording ? t("thread.composer.sendRecording") : t("thread.composer.send")}
+              onClick={showStopButton ? onStop : undefined}
               className={cn(
                 "rounded-full transition-transform",
                 showStopButton
@@ -1541,7 +1868,7 @@ export function ThreadComposer({
                     ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
                     : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
                 isHero ? "h-8 w-8" : "h-9 w-9",
-                (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
+                (canSend || showStopButton || isRecording) && "hover:scale-[1.03] active:scale-95",
               )}
             >
               {showStopButton ? (

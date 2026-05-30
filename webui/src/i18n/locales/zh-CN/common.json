@@ -593,6 +593,16 @@
         "deepResearch": "深度研究",
         "voice": "语音输入"
       },
+      "recording": {
+        "error": "无法开始录音。请检查麦克风权限。",
+        "startRecording": "开始录音",
+        "stopRecording": "停止录音",
+        "sendRecording": "发送录音"
+      },
+      "transcription": {
+        "error": "音频转文字失败。请重试。",
+        "empty": "录音内容为空，无法发送。"
+      },
       "slash": {
         "ariaLabel": "斜杠命令",
         "label": "命令",

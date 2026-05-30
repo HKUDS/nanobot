@@ -27,16 +27,16 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.security.workspace_access import (
-    WORKSPACE_SCOPE_METADATA_KEY,
-    WorkspaceScopeError,
-)
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.config.schema import Base
+from nanobot.security.workspace_access import (
+    WORKSPACE_SCOPE_METADATA_KEY,
+    WorkspaceScopeError,
+)
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
@@ -44,14 +44,14 @@ from nanobot.utils.media_decode import (
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_media_path,
     sign_or_stage_media_path,
 )
-from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.settings_routes import WebUISettingsRouter
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
@@ -228,16 +228,18 @@ def publish_runtime_model_update(
     model_preset: str | None,
 ) -> None:
     """Enqueue a runtime model snapshot for websocket subscribers (fan-out in-channel)."""
-    bus.outbound.put_nowait(OutboundMessage(
-        channel="websocket",
-        chat_id="*",
-        content="",
-        metadata={
-            "_runtime_model_updated": True,
-            "model": model,
-            "model_preset": model_preset,
-        },
-    ))
+    bus.outbound.put_nowait(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="*",
+            content="",
+            metadata={
+                "_runtime_model_updated": True,
+                "model": model,
+                "model_preset": model_preset,
+            },
+        )
+    )
 
 
 def _default_model_name_from_config() -> str | None:
@@ -350,23 +352,41 @@ _MAX_IMAGES_PER_MESSAGE = 4
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _MAX_VIDEOS_PER_MESSAGE = 1
 _MAX_VIDEO_BYTES = 20 * 1024 * 1024
+_MAX_AUDIOS_PER_MESSAGE = 1
+_MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 # Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
 # explicitly excluded to avoid the XSS surface inside embedded scripts.
-_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-})
+_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+    }
+)
 
-_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
-    "video/mp4",
-    "video/webm",
-    "video/quicktime",
-})
+_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+    }
+)
 
-_UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
+_AUDIO_MIME_ALLOWED: frozenset[str] = frozenset(
+    {
+        "audio/webm",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/wav",
+        "audio/ogg",
+    }
+)
+
+_UPLOAD_MIME_ALLOWED: frozenset[str] = (
+    _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED | _AUDIO_MIME_ALLOWED
+)
 
 _DATA_URL_MIME_RE = re.compile(r"^data:([^;]+);base64,", re.DOTALL)
 
@@ -518,9 +538,7 @@ class WebSocketChannel(BaseChannel):
             default_restrict_to_workspace=self._default_restrict_to_workspace,
         )
         self._runtime_model_name = runtime_model_name
-        self._runtime_surface = (
-            "native" if runtime_surface in {"native", "desktop"} else "browser"
-        )
+        self._runtime_surface = "native" if runtime_surface in {"native", "desktop"} else "browser"
         self._runtime_capabilities = runtime_capabilities(
             self._runtime_surface,
             runtime_capabilities_overrides,
@@ -668,9 +686,7 @@ class WebSocketChannel(BaseChannel):
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         self._issued_tokens[token_value] = time.monotonic() + float(self.config.token_ttl_s)
 
-        return _http_json_response(
-            {"token": token_value, "expires_in": self.config.token_ttl_s}
-        )
+        return _http_json_response({"token": token_value, "expires_in": self.config.token_ttl_s})
 
     # -- HTTP dispatch ------------------------------------------------------
 
@@ -690,9 +706,7 @@ class WebSocketChannel(BaseChannel):
         if api_response is not None:
             return api_response
 
-        ws_matched, ws_response = self._dispatch_websocket_upgrade(
-            connection, request, got, query
-        )
+        ws_matched, ws_response = self._dispatch_websocket_upgrade(connection, request, got, query)
         if ws_matched:
             return ws_response
 
@@ -813,9 +827,7 @@ class WebSocketChannel(BaseChannel):
     def _check_api_token(self, request: WsRequest) -> bool:
         """Validate a request against the API token pool (multi-use, TTL-bound)."""
         self._purge_expired_api_tokens()
-        token = _bearer_token(request.headers) or _query_first(
-            _parse_query(request.path), "token"
-        )
+        token = _bearer_token(request.headers) or _query_first(_parse_query(request.path), "token")
         if not token:
             return False
         expiry = self._api_tokens.get(token)
@@ -919,6 +931,52 @@ class WebSocketChannel(BaseChannel):
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response({"commands": builtin_command_palette()})
+
+    async def _handle_transcribe_audio(self, connection: Any, envelope: dict[str, Any]) -> None:
+        """Handle audio transcription request via WebSocket."""
+        try:
+            data_url = envelope.get("data_url")
+            request_id = envelope.get("request_id", "")
+
+            if not data_url:
+                await self._send_event(
+                    connection,
+                    "transcribe_result",
+                    chat_id="__transcription__",
+                    request_id=request_id,
+                    error="missing data_url",
+                )
+                return
+
+            # Save the audio file using the same logic as message media
+            paths, error_reason = self._save_envelope_media([{"data_url": data_url}])
+            if error_reason or not paths:
+                await self._send_event(
+                    connection,
+                    "transcribe_result",
+                    chat_id="__transcription__",
+                    request_id=request_id,
+                    error=f"invalid audio data: {error_reason}",
+                )
+                return
+
+            # Transcribe the audio
+            transcription = await self.transcribe_audio(paths[0])
+            await self._send_event(
+                connection,
+                "transcribe_result",
+                chat_id="__transcription__",
+                request_id=request_id,
+                text=transcription or "",
+            )
+        except Exception as e:
+            await self._send_event(
+                connection,
+                "transcribe_result",
+                chat_id="__transcription__",
+                request_id=envelope.get("request_id", ""),
+                error=f"transcription failed: {str(e)}",
+            )
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -1193,7 +1251,10 @@ class WebSocketChannel(BaseChannel):
         ctype, _ = mimetypes.guess_type(candidate.name)
         if ctype is None:
             ctype = "application/octet-stream"
-        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+        if ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+        }:
             ctype = f"{ctype}; charset=utf-8"
         # Hash-named build assets are cache-friendly; index.html must stay fresh.
         if candidate.name == "index.html":
@@ -1391,16 +1452,23 @@ class WebSocketChannel(BaseChannel):
         """
         image_count = 0
         video_count = 0
+        audio_count = 0
         for item in media:
-            mime = _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
+            mime = (
+                _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
+            )
             if mime in _VIDEO_MIME_ALLOWED:
                 video_count += 1
             elif mime in _IMAGE_MIME_ALLOWED:
                 image_count += 1
+            elif mime in _AUDIO_MIME_ALLOWED:
+                audio_count += 1
         if image_count > _MAX_IMAGES_PER_MESSAGE:
             return [], "too_many_images"
         if video_count > _MAX_VIDEOS_PER_MESSAGE:
             return [], "too_many_videos"
+        if audio_count > _MAX_AUDIOS_PER_MESSAGE:
+            return [], "too_many_audios"
 
         media_dir = get_media_dir("websocket")
         paths: list[str] = []
@@ -1410,9 +1478,7 @@ class WebSocketChannel(BaseChannel):
                 try:
                     Path(p).unlink(missing_ok=True)
                 except OSError as exc:
-                    self.logger.warning(
-                        "failed to unlink partial media {}: {}", p, exc
-                    )
+                    self.logger.warning("failed to unlink partial media {}: {}", p, exc)
             return [], reason
 
         for item in media:
@@ -1426,12 +1492,14 @@ class WebSocketChannel(BaseChannel):
                 return _abort("decode")
             if mime not in _UPLOAD_MIME_ALLOWED:
                 return _abort("mime")
-            is_video = mime in _VIDEO_MIME_ALLOWED
-            max_bytes = _MAX_VIDEO_BYTES if is_video else _MAX_IMAGE_BYTES
+            if mime in _VIDEO_MIME_ALLOWED:
+                max_bytes = _MAX_VIDEO_BYTES
+            elif mime in _AUDIO_MIME_ALLOWED:
+                max_bytes = _MAX_AUDIO_BYTES
+            else:
+                max_bytes = _MAX_IMAGE_BYTES
             try:
-                saved = save_base64_data_url(
-                    data_url, media_dir, max_bytes=max_bytes,
-                )
+                saved = save_base64_data_url(data_url, media_dir, max_bytes=max_bytes)
             except FileSizeExceeded:
                 return _abort("size")
             except Exception as exc:
@@ -1448,8 +1516,11 @@ class WebSocketChannel(BaseChannel):
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
-        """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
+        """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message`` / ``transcribe_audio``)."""
         t = envelope.get("type")
+        if t == "transcribe_audio":
+            await self._handle_transcribe_audio(connection, envelope)
+            return
         if t == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
@@ -1523,15 +1594,19 @@ class WebSocketChannel(BaseChannel):
             if raw_media is not None:
                 if not isinstance(raw_media, list):
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason="malformed",
+                        connection,
+                        "error",
+                        detail="image_rejected",
+                        reason="malformed",
                     )
                     return
                 media_paths, reason = self._save_envelope_media(raw_media)
                 if reason is not None:
                     await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason=reason,
+                        connection,
+                        "error",
+                        detail="image_rejected",
+                        reason=reason,
                     )
                     return
 
@@ -1571,7 +1646,7 @@ class WebSocketChannel(BaseChannel):
                 aspect_ratio = image_generation.get("aspect_ratio")
                 metadata["image_generation"] = {
                     "enabled": True,
-                    "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
+                    "aspect_ratio": (aspect_ratio if isinstance(aspect_ratio, str) else None),
                 }
             await self._handle_message(
                 sender_id=client_id,
@@ -1659,7 +1734,9 @@ class WebSocketChannel(BaseChannel):
             return
         if msg.metadata.get("_goal_state_sync"):
             blob = msg.metadata.get("goal_state")
-            await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+            await self.send_goal_state(
+                msg.chat_id, blob if isinstance(blob, dict) else {"active": False}
+            )
             return
         if msg.metadata.get("_goal_status"):
             status = msg.metadata.get("goal_status")
@@ -1668,7 +1745,9 @@ class WebSocketChannel(BaseChannel):
                 await self.send_goal_status(
                     msg.chat_id,
                     status,
-                    started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
+                    started_at=(
+                        float(started_raw) if isinstance(started_raw, int | float) else None
+                    ),
                 )
             return
         # Signal that the agent has fully finished processing the current turn.

@@ -342,6 +342,42 @@ export class NanobotClient {
     this.queueSend(frame);
   }
 
+  /** Request audio transcription via WebSocket. Returns a promise that resolves with the transcribed text. */
+  transcribeAudio(dataUrl: string, name: string = "audio.webm"): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const requestId = `transcribe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      
+      // Set up one-time handler for the response
+      const handler = (event: InboundEvent) => {
+        if (event.event === "transcribe_result" && event.request_id === requestId) {
+          unsubscribe();
+          if (event.error) {
+            reject(new Error(event.error));
+          } else {
+            resolve(event.text || "");
+          }
+        }
+      };
+      
+      // Listen on a special internal chat ID for transcription results
+      const unsubscribe = this.onChat("__transcription__", handler);
+      
+      // Send the transcription request
+      this.queueSend({
+        type: "transcribe_audio",
+        data_url: dataUrl,
+        name,
+        request_id: requestId,
+      });
+      
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        unsubscribe();
+        reject(new Error("Transcription timeout"));
+      }, 30000);
+    });
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({

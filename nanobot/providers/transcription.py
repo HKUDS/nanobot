@@ -1,11 +1,15 @@
-"""Voice transcription providers (Groq and OpenAI Whisper)."""
+"""Voice transcription providers (Groq, OpenAI Whisper, and FunASR)."""
 
 import asyncio
+import io
 import os
+import shutil
 from pathlib import Path
 
 import httpx
 from loguru import logger
+
+from nanobot.utils.media_decode import webm_to_wav
 
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
 
@@ -219,3 +223,123 @@ class GroqTranscriptionProvider:
             provider_label="Groq",
             language=self.language,
         )
+
+
+class FunAsrProvider:
+    """
+    Voice transcription provider using local FunASR model.
+
+    FunASR provides offline speech recognition with support for multiple languages.
+    Requires: pip install funasr psutil torch torchaudio
+    """
+
+    def __init__(
+        self,
+        model: str | None = None,
+        language: str | None = None,
+    ):
+        """
+        Initialize FunASR transcription provider.
+
+        Args:
+            model: Path to FunASR model directory or model name (default: "paraformer-zh")
+            language: Language hint for transcription (default: "auto")
+        """
+        self.model = model or "paraformer-zh"
+        self.language = language or "auto"
+        self._model_instance = None
+
+        try:
+            import psutil
+            import torch
+            import torchaudio
+            from funasr import AutoModel
+        except ImportError:
+            logger.error(
+                "FunAsrProvider initialization failed. Install with: pip install funasr psutil torch torchaudio"
+            )
+            return
+
+        # Memory check - require at least 2GB
+        min_mem_bytes = 2 * 1024 * 1024 * 1024
+        total_mem = psutil.virtual_memory().total
+        if total_mem < min_mem_bytes:
+            logger.error(
+                f"Insufficient memory (less than 2GB), only {total_mem / (1024 * 1024):.2f} MB available, FunASR may fail to start"
+            )
+
+        # Handle local model path
+        model_path, local_dir = Path(self.model).expanduser(), None
+        if model_path.is_dir():
+            model_str = str(model_path)
+            # FunASR bug: model path should start with "models"
+            if model_str.startswith("models"):
+                logger.debug(f"Load local ASR model {model_str}")
+            else:
+                local_dir = Path("models")
+                local_dir.mkdir(parents=True, exist_ok=True)
+                dst_model = local_dir / model_path.name
+                logger.debug(f"Copy local ASR model to {dst_model} from {model_path}")
+                if model_path.is_dir() and not dst_model.exists():
+                    shutil.copytree(model_path, dst_model)
+                model_str = str(dst_model)
+        else:
+            logger.debug(f"Load remote ASR model {self.model}")
+            model_str = self.model
+
+        # Load FunASR model
+        try:
+            self._model_instance = AutoModel(
+                model=model_str,
+                vad_model="fsmn-vad",
+                vad_kwargs={"max_single_segment_time": 30000},
+                hub="hf",
+                disable_update=True,
+            )
+            logger.debug("FunASR model loaded successfully")
+        except Exception as e:
+            logger.exception("Failed to load FunASR model: {}", e)
+
+        # Clean up temporary directory
+        if local_dir and local_dir.exists():
+            shutil.rmtree(local_dir)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        """
+        Transcribe an audio file using FunASR.
+
+        Args:
+            file_path: Path to the audio file.
+
+        Returns:
+            Transcribed text.
+        """
+        if self._model_instance is None:
+            logger.error("FunASR model not initialized")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        # Convert webm to wav if needed
+        if path.suffix.lower() == ".webm":
+            audio_bytes = webm_to_wav(input_file=path)
+        else:
+            audio_bytes = path.read_bytes()
+
+        # Perform transcription
+        result = self._model_instance.generate(
+            input=audio_bytes,
+            cache={},
+            language=self.language,
+            use_itn=True,
+            batch_size_s=60,
+        )
+        if result and len(result) > 0:
+            text = result[0].get("text", "")
+            logger.debug("FunASR transcription result: {}", text)
+            return text
+        logger.warning("FunASR returned empty result")
+        return ""
