@@ -265,6 +265,23 @@ def test_settings_payload_includes_effective_transcription_config(
     assert payload["transcription"]["language"] == "en"
 
 
+def test_settings_payload_exposes_openrouter_transcription_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter.api_key = "sk-or-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    providers = {provider["name"]: provider for provider in payload["transcription"]["providers"]}
+    assert providers["openrouter"]["label"] == "OpenRouter"
+    assert providers["openrouter"]["configured"] is True
+
+
 def test_update_transcription_settings_writes_top_level_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -298,6 +315,30 @@ def test_update_transcription_settings_writes_top_level_only(
     assert saved.transcription.max_duration_sec == 90
     assert saved.transcription.max_upload_mb == 20
     assert payload["transcription"]["provider"] == "groq"
+    assert payload["transcription"]["provider_configured"] is True
+
+
+def test_update_transcription_settings_accepts_openrouter(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openrouter.api_key = "sk-or-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_transcription_settings(
+        {
+            "provider": ["openrouter"],
+            "model": ["nvidia/parakeet-tdt-0.6b-v3"],
+        }
+    )
+
+    saved = load_config(config_path)
+    assert saved.transcription.provider == "openrouter"
+    assert saved.transcription.model == "nvidia/parakeet-tdt-0.6b-v3"
+    assert payload["transcription"]["provider"] == "openrouter"
     assert payload["transcription"]["provider_configured"] is True
 
 
