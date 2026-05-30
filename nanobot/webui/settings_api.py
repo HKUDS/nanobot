@@ -91,7 +91,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_TRANSCRIPTION_PROVIDERS = ("groq", "openai")
+_TRANSCRIPTION_PROVIDERS = ("groq", "openai", "openrouter")
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")

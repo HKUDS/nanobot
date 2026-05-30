@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from nanobot.audio.transcription import resolve_transcription_config
+from nanobot.audio.transcription import (
+    EffectiveTranscriptionConfig,
+    resolve_transcription_config,
+    transcribe_audio_file,
+)
 from nanobot.config.schema import Config
 from nanobot.providers.transcription import (
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
+    OpenRouterTranscriptionProvider,
+    _audio_format,
     _resolve_transcription_url,
 )
 
@@ -69,6 +76,59 @@ def test_resolver_prefers_top_level_transcription_over_legacy_channels() -> None
     assert resolved.language == "ko"
     assert resolved.api_key == "gsk-test"
     assert resolved.api_base == "https://groq.example/openai/v1"
+
+
+def test_resolver_supports_openrouter_transcription_provider() -> None:
+    config = Config()
+    config.transcription.provider = "openrouter"
+    config.transcription.model = "nvidia/parakeet-tdt-0.6b-v3"
+    config.transcription.language = "en"
+    config.providers.openrouter.api_key = "sk-or-test"
+    config.providers.openrouter.api_base = "https://openrouter.ai/api/v1"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "openrouter"
+    assert resolved.model == "nvidia/parakeet-tdt-0.6b-v3"
+    assert resolved.language == "en"
+    assert resolved.api_key == "sk-or-test"
+    assert resolved.api_base == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_file_routes_openrouter_provider(audio_file: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class StubOpenRouter:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def transcribe(self, file_path: str | Path) -> str:
+            captured["file_path"] = Path(file_path)
+            return "openrouter ok"
+
+    config = EffectiveTranscriptionConfig(
+        enabled=True,
+        provider="openrouter",
+        model="nvidia/parakeet-tdt-0.6b-v3",
+        language="en",
+        api_key="sk-or-test",
+        api_base="https://openrouter.ai/api/v1",
+        max_duration_sec=120,
+        max_upload_mb=25,
+    )
+
+    with patch("nanobot.providers.transcription.OpenRouterTranscriptionProvider", StubOpenRouter):
+        result = await transcribe_audio_file(audio_file, config)
+
+    assert result == "openrouter ok"
+    assert captured == {
+        "api_key": "sk-or-test",
+        "api_base": "https://openrouter.ai/api/v1",
+        "language": "en",
+        "model": "nvidia/parakeet-tdt-0.6b-v3",
+        "file_path": audio_file,
+    }
 
 
 def test_resolved_transcription_repr_hides_api_key() -> None:
@@ -345,6 +405,95 @@ async def test_returns_empty_on_non_dict_json_body(audio_file: Path) -> None:
 # ---------------------------------------------------------------------------
 # Pin the full advertised retry contract: all retryable statuses + exceptions
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Configurable model: forwarded to the multipart "model" field on all providers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "provider_cls,default_model",
+    [(OpenAITranscriptionProvider, "whisper-1"), (GroqTranscriptionProvider, "whisper-large-v3")],
+    ids=["openai", "groq"],
+)
+def test_multipart_provider_model_defaults_and_override(provider_cls, default_model):
+    assert provider_cls(api_key="k").model == default_model
+    assert provider_cls(api_key="k", model="custom-stt").model == "custom-stt"
+
+
+@pytest.mark.parametrize(
+    "provider_cls",
+    [OpenAITranscriptionProvider, GroqTranscriptionProvider],
+    ids=["openai", "groq"],
+)
+@pytest.mark.asyncio
+async def test_multipart_provider_sends_configured_model(audio_file: Path, provider_cls) -> None:
+    provider = provider_cls(api_key="k", model="my-stt-model")
+    post = AsyncMock(return_value=_response(200, {"text": "ok"}))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "ok"
+    assert post.await_args_list[0].kwargs["files"]["model"] == (None, "my-stt-model")
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter provider — JSON body with base64 audio + configurable STT model
+# ---------------------------------------------------------------------------
+
+
+def test_audio_format_maps_known_extensions() -> None:
+    assert _audio_format(Path("v.oga")) == "ogg"  # Telegram voice notes
+    assert _audio_format(Path("v.opus")) == "ogg"
+    assert _audio_format(Path("v.mp4")) == "m4a"
+    assert _audio_format(Path("v.mp3")) == "mp3"
+    assert _audio_format(Path("v.wav")) == "wav"  # passthrough for unknown
+
+
+def test_openrouter_defaults_and_chat_base_normalization() -> None:
+    default = OpenRouterTranscriptionProvider(api_key="k")
+    assert default.api_url == "https://openrouter.ai/api/v1/audio/transcriptions"
+    assert default.model == "openai/whisper-1"
+
+    # A chat-style base (what users copy from provider config) gets the path appended.
+    chat_base = OpenRouterTranscriptionProvider(api_key="k", api_base="https://openrouter.ai/api/v1")
+    assert chat_base.api_url == "https://openrouter.ai/api/v1/audio/transcriptions"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_sends_json_base64_body(audio_file: Path) -> None:
+    """OpenRouter gets a JSON body with base64 audio + format — never multipart."""
+    provider = OpenRouterTranscriptionProvider(
+        api_key="k", model="nvidia/parakeet-tdt-0.6b-v3", language="en"
+    )
+    post = AsyncMock(return_value=_response(200, {"text": "hi"}))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "hi"
+    call = post.await_args_list[0].kwargs
+    assert "files" not in call  # not multipart
+    body = call["json"]
+    assert body["model"] == "nvidia/parakeet-tdt-0.6b-v3"
+    assert body["language"] == "en"
+    assert body["input_audio"]["format"] == "ogg"  # .ogg fixture
+    assert base64.b64decode(body["input_audio"]["data"]) == audio_file.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_openrouter_omits_language_when_unset(audio_file: Path) -> None:
+    provider = OpenRouterTranscriptionProvider(api_key="k", model="openai/whisper-1")
+    post = AsyncMock(return_value=_response(200, {"text": "ok"}))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "ok"
+    assert "language" not in post.await_args_list[0].kwargs["json"]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_shares_retry_contract(audio_file: Path) -> None:
+    """OpenRouter goes through the same retry helper: 503 retried, then 200."""
+    provider = OpenRouterTranscriptionProvider(api_key="k", model="openai/whisper-1")
+    post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "recovered"})])
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "recovered"
+    assert post.await_count == 2
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
