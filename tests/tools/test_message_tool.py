@@ -39,6 +39,28 @@ async def test_message_tool_rejects_malformed_buttons(bad) -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_suppresses_delivery_when_active() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    token = tool.set_suppress_delivery(True)
+    try:
+        result = await tool.execute(content="all clear", channel="telegram", chat_id="1")
+    finally:
+        tool.reset_suppress_delivery(token)
+    assert sent == []
+    assert "not delivered" in result
+
+    await tool.execute(content="real", channel="telegram", chat_id="1")
+    assert len(sent) == 1
+    assert sent[0].content == "real"
+
+
+@pytest.mark.asyncio
 async def test_message_tool_marks_channel_delivery_only_when_enabled() -> None:
     sent: list[OutboundMessage] = []
 
