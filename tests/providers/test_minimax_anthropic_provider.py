@@ -18,4 +18,4 @@ def test_minimax_anthropic_provider_in_registry():
     minimax_anthropic = specs["minimax_anthropic"]
     assert minimax_anthropic.env_key == "MINIMAX_API_KEY"
     assert minimax_anthropic.backend == "anthropic"
-    assert minimax_anthropic.default_api_base == "https://api.minimax.io/anthropic/v1"
+    assert minimax_anthropic.default_api_base == "https://api.minimax.io/anthropic"

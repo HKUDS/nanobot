@@ -488,7 +488,7 @@ def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
 
     assert config.get_provider_name() == "minimax_anthropic"
     assert config.get_api_key() == "test-key"
-    assert config.get_api_base() == "https://api.minimax.io/anthropic/v1"
+    assert config.get_api_base() == "https://api.minimax.io/anthropic"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():

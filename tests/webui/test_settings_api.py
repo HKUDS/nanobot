@@ -373,19 +373,28 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
+@pytest.mark.parametrize(
+    ("api_base", "expected_url"),
+    [
+        ("https://api.minimaxi.com/anthropic", "https://api.minimaxi.com/anthropic/v1/models"),
+        ("https://api.minimaxi.com/anthropic/v1", "https://api.minimaxi.com/anthropic/v1/models"),
+    ],
+)
 def test_provider_models_payload_fetches_minimax_anthropic_models(
+    api_base: str,
+    expected_url: str,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.minimax_anthropic.api_key = "sk-test"
-    config.providers.minimax_anthropic.api_base = "https://api.minimaxi.com/anthropic/v1"
+    config.providers.minimax_anthropic.api_base = api_base
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     def fake_get(url: str, **kwargs):
-        assert url == "https://api.minimaxi.com/anthropic/v1/models"
+        assert url == expected_url
         assert kwargs["headers"]["X-Api-Key"] == "sk-test"
         assert "Authorization" not in kwargs["headers"]
         return httpx.Response(

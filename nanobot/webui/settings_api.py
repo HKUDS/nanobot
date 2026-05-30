@@ -458,9 +458,13 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         else:
             headers["Authorization"] = f"Bearer {api_key}"
 
+    models_url = f"{api_base.rstrip('/')}/models"
+    if spec.name == "minimax_anthropic" and not api_base.rstrip("/").endswith("/v1"):
+        models_url = f"{api_base.rstrip('/')}/v1/models"
+
     try:
         response = httpx.get(
-            f"{api_base.rstrip('/')}/models",
+            models_url,
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
