@@ -1829,6 +1829,34 @@ async def test_fetch_media_rejects_missing_declared_size(monkeypatch, tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_fetch_media_rejects_bool_declared_size(monkeypatch, tmp_path) -> None:
+    channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
+    client = _FakeAsyncClient("https://matrix.org", "", "", None)
+    channel.client = client
+    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+
+    async def _download_should_not_run(*_args, **_kwargs):
+        raise AssertionError("bool size should be rejected before fetching bytes")
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_should_not_run)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        event_id="$event1",
+        body="payload.bin",
+        url="mxc://example.org/media",
+        source={"content": {"msgtype": "m.file", "info": {"size": True}}},
+    )
+
+    attachment, marker = await channel._fetch_media_attachment(
+        SimpleNamespace(room_id="!room:matrix.org"),
+        event,
+    )
+
+    assert attachment is None
+    assert marker == "[attachment: payload.bin - too large]"
+
+
+@pytest.mark.asyncio
 async def test_fetch_media_rejects_declared_oversized_before_download(monkeypatch, tmp_path) -> None:
     channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
     client = _FakeAsyncClient("https://matrix.org", "", "", None)
