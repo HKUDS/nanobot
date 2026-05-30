@@ -12,7 +12,7 @@ const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 const menuContentClassName =
-  "z-50 max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[18px] border border-border/65 bg-popover/96 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]";
+  "z-50 max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[18px] border border-border/65 bg-popover/96 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl scrollbar-thin scrollbar-track-transparent dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]";
 
 const menuItemClassName =
   "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-[12px] px-2.5 py-2 text-[13px] outline-none transition-colors focus:bg-foreground/[0.055] focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:focus:bg-white/[0.08]";

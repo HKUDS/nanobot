@@ -1900,7 +1900,7 @@ function ModelsSettings({
         <SettingsGroup>
           <SettingsRow
             title={tx("settings.rows.currentModel", "Current configuration")}
-            description={tx("settings.help.currentModel", "Choose the model configuration nanobot uses for new replies.")}
+            description={tx("settings.help.currentModel", "Used for new replies.")}
           >
             <ModelPresetPicker
               presets={settings.model_presets}
@@ -4222,7 +4222,10 @@ function TimezonePicker({
             />
           </div>
         </div>
-        <div className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5" data-testid="timezone-picker-list">
+        <div
+          className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+          data-testid="timezone-picker-list"
+        >
           {filteredOptions.length ? (
             filteredOptions.map((option) => {
               const selected = option.name === value;
@@ -4300,7 +4303,7 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto"
+        className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;
@@ -4520,7 +4523,7 @@ function ModelIdPicker({
         ) : null}
 
         {showModels && visibleModels.length ? (
-          <div className="max-h-[16rem] overflow-y-auto pr-0.5">
+          <div className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent">
             {visibleModels.map((model) =>
               renderModelRow(model, { selected: model.id === value }),
             )}
@@ -5125,7 +5128,7 @@ function ModelPresetPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto"
+        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {presets.map((preset) => {
           const selected = preset.name === value;

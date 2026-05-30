@@ -17,6 +17,7 @@ from nanobot.session.webui_turns import (
     WEBUI_SESSION_METADATA_KEY,
     WEBUI_TITLE_METADATA_KEY,
     WebuiTurnCoordinator,
+    clean_generated_title,
     maybe_generate_webui_title,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -51,6 +52,11 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
 
     assert runtime.provider is next_provider
     assert runtime.model == "next-model"
+
+
+def test_clean_generated_title_strips_reasoning_tags() -> None:
+    assert clean_generated_title("<think>reasoning</think> WebUI polish") == "WebUI polish"
+    assert clean_generated_title("Title: <think> The user said hello") == ""
 
 
 @pytest.mark.asyncio

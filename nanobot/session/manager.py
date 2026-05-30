@@ -19,6 +19,7 @@ from nanobot.utils.helpers import (
     find_legal_message_start,
     image_placeholder_text,
     safe_filename,
+    strip_think,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
@@ -74,6 +75,17 @@ def _message_preview_text(message: dict[str, Any]) -> str:
     if message.get("injected_event") == "subagent_result" and isinstance(content, str):
         content = scrub_subagent_announce_body(content)
     return _text_preview(content)
+
+
+def _metadata_title(metadata: Any) -> str:
+    if not isinstance(metadata, dict):
+        return ""
+    title = metadata.get("title")
+    if not isinstance(title, str):
+        return ""
+    if metadata.get("title_user_edited") is True:
+        return title
+    return strip_think(title)
 
 
 @dataclass
@@ -642,7 +654,7 @@ class SessionManager:
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
                             metadata = data.get("metadata", {})
-                            title = metadata.get("title") if isinstance(metadata, dict) else None
+                            title = _metadata_title(metadata)
                             preview = ""
                             fallback_preview = ""
                             scanned_records = 0
@@ -673,7 +685,7 @@ class SessionManager:
                                 "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
-                                "title": title if isinstance(title, str) else "",
+                                "title": title,
                                 "preview": preview,
                                 "path": str(path)
                             })
@@ -684,11 +696,7 @@ class SessionManager:
                         "key": repaired.key,
                         "created_at": repaired.created_at.isoformat(),
                         "updated_at": repaired.updated_at.isoformat(),
-                        "title": (
-                            repaired.metadata.get("title")
-                            if isinstance(repaired.metadata.get("title"), str)
-                            else ""
-                        ),
+                        "title": _metadata_title(repaired.metadata),
                         "preview": next(
                             (
                                 text

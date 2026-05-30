@@ -148,7 +148,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nanobot.channels.websocket.cli_apps_payload",
+        "nanobot.webui.settings_routes.cli_apps_payload",
         lambda: {
             "apps": [
                 {
@@ -173,7 +173,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         },
     )
     monkeypatch.setattr(
-        "nanobot.channels.websocket.cli_apps_action",
+        "nanobot.webui.settings_routes.cli_apps_action",
         lambda action, query: {
             "apps": [],
             "installed_count": 1,
@@ -280,7 +280,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}
 
     monkeypatch.setattr(
-        "nanobot.channels.websocket.request_mcp_reload",
+        "nanobot.webui.settings_routes.request_mcp_reload",
         _hot_reload,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)

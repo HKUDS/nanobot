@@ -165,7 +165,7 @@
       "provider": "Select the provider that should serve new model requests.",
       "model": "Set the default model name used by nanobot.",
       "configPath": "The gateway configuration file currently in use.",
-      "currentModel": "Choose the model configuration nanobot uses for new replies.",
+      "currentModel": "Used for new replies.",
       "selectedModelProvider": "Set by the selected model.",
       "selectedModelValue": "Set by the selected model.",
       "selectedPreset": "Named presets are read-only here; edit them in config.json.",
