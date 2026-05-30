@@ -22,6 +22,18 @@ def test_anthropic_disables_sdk_retries_by_default() -> None:
     assert kwargs["max_retries"] == 0
 
 
+def test_anthropic_normalizes_versioned_base_url() -> None:
+    with patch("anthropic.AsyncAnthropic") as mock_client:
+        AnthropicProvider(
+            api_key="sk-test",
+            api_base="https://api.minimax.io/anthropic/v1",
+            default_model="MiniMax-M2.7-highspeed",
+        )
+
+    kwargs = mock_client.call_args.kwargs
+    assert kwargs["base_url"] == "https://api.minimax.io/anthropic"
+
+
 def test_azure_openai_disables_sdk_retries_by_default() -> None:
     with patch("nanobot.providers.azure_openai_provider.AsyncOpenAI") as mock_client:
         AzureOpenAIProvider(
