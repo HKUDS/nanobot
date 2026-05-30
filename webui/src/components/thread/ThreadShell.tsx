@@ -167,7 +167,6 @@ export function ThreadShell({
   const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
   const [mcpPresets, setMcpPresets] = useState<McpPresetInfo[]>([]);
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
-  const [heroImageMode, setHeroImageMode] = useState(false);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
@@ -211,8 +210,6 @@ export function ThreadShell({
     () => toModelBadgeInfo(modelName, settings),
     [modelName, settings],
   );
-  const imageGenerationEnabled = settings?.image_generation.enabled === true;
-
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -508,9 +505,6 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
-          imageGenerationEnabled={imageGenerationEnabled}
-          imageMode={showHeroComposer ? heroImageMode : undefined}
-          onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
           runStartedAt={runStartedAt}
           goalState={goalState}
@@ -520,6 +514,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
+          pendingQueueKey={chatId}
         />
       ) : (
         <ThreadComposer
@@ -538,9 +533,6 @@ export function ThreadShell({
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
-          imageGenerationEnabled={imageGenerationEnabled}
-          imageMode={heroImageMode}
-          onImageModeChange={setHeroImageMode}
           runStartedAt={runStartedAt}
           goalState={goalState}
           workspaceScope={workspaceScope}

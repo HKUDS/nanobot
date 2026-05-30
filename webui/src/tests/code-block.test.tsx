@@ -45,6 +45,7 @@ describe("CodeBlock", () => {
     expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
     expect(screen.getByText("ts")).toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
   });
 
   it("reads theme from context without creating per-block observers", async () => {

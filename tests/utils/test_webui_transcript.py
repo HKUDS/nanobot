@@ -84,6 +84,42 @@ def test_replay_infers_video_media_from_attachment_name() -> None:
     ]
 
 
+def test_replay_infers_svg_media_from_attachment_name() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {"event": "user", "chat_id": "t-svg", "text": "send svg"},
+            {
+                "event": "message",
+                "chat_id": "t-svg",
+                "text": "chart ready",
+                "media_urls": [{"url": "/api/media/sig/payload", "name": "chart.svg"}],
+            },
+        ],
+    )
+
+    assert msgs[1]["media"] == [
+        {"kind": "image", "url": "/api/media/sig/payload", "name": "chart.svg"},
+    ]
+
+
+def test_replay_infers_file_media_from_attachment_name() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {"event": "user", "chat_id": "t-file-media", "text": "send html"},
+            {
+                "event": "message",
+                "chat_id": "t-file-media",
+                "text": "file ready",
+                "media_urls": [{"url": "/api/media/sig/payload", "name": "index.html"}],
+            },
+        ],
+    )
+
+    assert msgs[1]["media"] == [
+        {"kind": "file", "url": "/api/media/sig/payload", "name": "index.html"},
+    ]
+
+
 def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file"

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
@@ -22,10 +23,11 @@ import {
   ArrowUp,
   BookOpen,
   Brain,
-  Check,
   ChevronDown,
   ChevronUp,
   CircleHelp,
+  CornerDownRight,
+  GripVertical,
   History,
   ImageIcon,
   Loader2,
@@ -36,6 +38,7 @@ import {
   Square,
   SquarePen,
   Target,
+  Trash2,
   Undo2,
   X,
   type LucideIcon,
@@ -52,6 +55,7 @@ import {
   type AttachedImage,
   type AttachmentError,
   MAX_IMAGES_PER_MESSAGE,
+  type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
@@ -94,9 +98,6 @@ interface ThreadComposerProps {
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
-  imageGenerationEnabled?: boolean;
-  imageMode?: boolean;
-  onImageModeChange?: (enabled: boolean) => void;
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
@@ -108,6 +109,7 @@ interface ThreadComposerProps {
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
+  pendingQueueKey?: string | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -124,21 +126,32 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
   "undo-2": Undo2,
 };
 
-type ImageAspectRatio = "auto" | "1:1" | "3:4" | "9:16" | "4:3" | "16:9";
-
-const IMAGE_ASPECT_RATIOS: ImageAspectRatio[] = ["auto", "1:1", "3:4", "9:16", "4:3", "16:9"];
 const SLASH_PALETTE_GAP_PX = 8;
 const SLASH_PALETTE_MAX_HEIGHT_PX = 288;
 const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
+const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
+const QUEUED_PROMPTS_LIMIT = 20;
+const QUEUED_PROMPT_MAX_CHARS = 4000;
 
 type SlashPalettePlacement = "above" | "below";
 
 interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
   maxHeight: number;
+}
+
+interface QueuedPrompt {
+  id: string;
+  text: string;
+  images?: QueuedPromptImage[];
+}
+
+interface QueuedPromptImage {
+  dataUrl: string;
+  name?: string;
 }
 
 interface CliAppMentionQuery {
@@ -186,18 +199,123 @@ function storeSlashRecents(commands: string[]): void {
   }
 }
 
-function scrollNearestOverflowParent(target: EventTarget | null, deltaY: number) {
-  if (!(target instanceof Element) || deltaY === 0) return;
-  let el: HTMLElement | null = target.parentElement;
-  while (el) {
-    const style = window.getComputedStyle(el);
-    const canScroll = /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
-    if (canScroll) {
-      el.scrollTop += deltaY;
+function queuedPromptsStorageKey(key?: string | null): string | null {
+  const clean = key?.trim();
+  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
+}
+
+function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as Partial<QueuedPrompt>;
+  if (typeof record.text !== "string") return null;
+  const text = record.text.trim().slice(0, QUEUED_PROMPT_MAX_CHARS);
+  const images = Array.isArray(record.images)
+    ? record.images.flatMap((image) => {
+        if (!image || typeof image !== "object") return [];
+        const candidate = image as Partial<QueuedPromptImage>;
+        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:image/")) {
+          return [];
+        }
+        return [{
+          dataUrl: candidate.dataUrl,
+          ...(typeof candidate.name === "string" && candidate.name.trim()
+            ? { name: candidate.name.trim() }
+            : {}),
+        }];
+      }).slice(0, MAX_IMAGES_PER_MESSAGE)
+    : [];
+  if (!text && images.length === 0) return null;
+  const id = typeof record.id === "string" && record.id.trim()
+    ? record.id
+    : `queued-prompt-restored-${index}`;
+  return { id, text, ...(images.length > 0 ? { images } : {}) };
+}
+
+function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index) => normalizeQueuedPrompt(item, index))
+      .filter((item): item is QueuedPrompt => item != null)
+      .slice(0, QUEUED_PROMPTS_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (prompts.length === 0) {
+      window.localStorage.removeItem(storageKey);
       return;
     }
-    el = el.parentElement;
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify(
+        prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
+          id: prompt.id,
+          text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
+          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_IMAGES_PER_MESSAGE) } : {}),
+        })),
+      ),
+    );
+  } catch {
+    // localStorage persistence is a convenience; the in-memory queue still works.
   }
+}
+
+function readyImagesToQueuedImages(
+  images: Array<AttachedImage & { dataUrl: string }>,
+): QueuedPromptImage[] {
+  return images.map((img) => ({
+    dataUrl: img.dataUrl,
+    name: img.file.name,
+  }));
+}
+
+function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map((img) => ({
+    media: {
+      data_url: img.dataUrl,
+      ...(img.name ? { name: img.name } : {}),
+    },
+    preview: {
+      url: img.dataUrl,
+      ...(img.name ? { name: img.name } : {}),
+    },
+  }));
+}
+
+function queuedPromptLabel(prompt: QueuedPrompt): string {
+  const text = prompt.text.trim();
+  if (text) return text;
+  return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "Image attachment";
+}
+
+function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
+  if (typeof document === "undefined" || typeof dataTransfer.setDragImage !== "function") {
+    return;
+  }
+  const ghost = document.createElement("div");
+  ghost.style.position = "fixed";
+  ghost.style.left = "-9999px";
+  ghost.style.top = "-9999px";
+  ghost.style.width = "1px";
+  ghost.style.height = "1px";
+  ghost.style.opacity = "0";
+  document.body.appendChild(ghost);
+  try {
+    dataTransfer.setDragImage(ghost, 0, 0);
+  } catch {
+    ghost.remove();
+    return;
+  }
+  window.setTimeout(() => ghost.remove(), 0);
 }
 
 function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
@@ -284,11 +402,42 @@ function RunElapsedStrip({
 }) {
   const { t } = useTranslation();
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
+  const showTimer = startedAt != null;
+  const stripLabel = goalStateStripPreview(goalState, t);
+  const showGoal = !!stripLabel?.trim();
+  const active = showTimer || showGoal;
+  const [renderStrip, setRenderStrip] = useState(active);
+  const [leaving, setLeaving] = useState(false);
   const [, setTick] = useState(0);
   const stripWrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const expandToggleRef = useRef<HTMLButtonElement>(null);
+  const stripSnapshotRef = useRef<{
+    startedAt: number | null;
+    goalState?: GoalStateWsPayload;
+    stripLabel: string | null;
+  } | null>(null);
   const [panelMaxPx, setPanelMaxPx] = useState(280);
+
+  if (active) {
+    stripSnapshotRef.current = { startedAt, goalState, stripLabel };
+  }
+
+  useEffect(() => {
+    if (active) {
+      setRenderStrip(true);
+      setLeaving(false);
+      return;
+    }
+    setGoalPanelOpen(false);
+    if (!renderStrip) return;
+    setLeaving(true);
+    const id = window.setTimeout(() => {
+      setRenderStrip(false);
+      setLeaving(false);
+    }, 180);
+    return () => window.clearTimeout(id);
+  }, [active, renderStrip]);
 
   useEffect(() => {
     if (startedAt == null) return;
@@ -296,13 +445,18 @@ function RunElapsedStrip({
     return () => window.clearInterval(id);
   }, [startedAt]);
 
-  const showTimer = startedAt != null;
-  const stripLabel = goalStateStripPreview(goalState, t);
-  const showGoal = !!stripLabel?.trim();
+  const display = active
+    ? { startedAt, goalState, stripLabel }
+    : stripSnapshotRef.current;
+  const displayStartedAt = display?.startedAt ?? null;
+  const displayGoalState = display?.goalState;
+  const displayStripLabel = display?.stripLabel ?? null;
+  const displayShowTimer = displayStartedAt != null;
+  const displayShowGoal = !!displayStripLabel?.trim();
 
-  const objectiveFull = goalState?.objective?.trim() ?? "";
-  const summaryFull = goalState?.ui_summary?.trim() ?? "";
-  const canExpandGoal = !!(goalState?.active && (objectiveFull || summaryFull));
+  const objectiveFull = displayGoalState?.objective?.trim() ?? "";
+  const summaryFull = displayGoalState?.ui_summary?.trim() ?? "";
+  const canExpandGoal = !!(active && displayGoalState?.active && (objectiveFull || summaryFull));
 
   const markdownBody =
     objectiveFull || summaryFull
@@ -361,22 +515,26 @@ function RunElapsedStrip({
     };
   }, [goalPanelOpen]);
 
-  if (!showTimer && !showGoal) return null;
+  if (!renderStrip || !display) return null;
 
   const elapsed =
-    startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
+    displayStartedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - displayStartedAt)) : 0;
   const m = Math.floor(elapsed / 60);
   const sec = elapsed % 60;
   const shortElapsed = m > 0 ? `${m}:${sec.toString().padStart(2, "0")}` : `${sec}s`;
-  const timerTitle = showTimer
+  const timerTitle = displayShowTimer
     ? t("thread.composer.runRuntimeTitle", { elapsed: shortElapsed })
     : null;
 
-  const ariaParts = [timerTitle, showGoal ? stripLabel : null].filter(Boolean);
+  const ariaParts = [timerTitle, displayShowGoal ? displayStripLabel : null].filter(Boolean);
   const ariaLabel = ariaParts.join(" · ");
 
   return (
-    <div ref={stripWrapperRef} className="relative z-30">
+    <div
+      ref={stripWrapperRef}
+      className="composer-status-strip relative z-30"
+      data-state={leaving ? "exit" : "enter"}
+    >
       {goalPanelOpen && canExpandGoal && markdownBody ? (
         <div
           ref={panelRef}
@@ -427,21 +585,21 @@ function RunElapsedStrip({
         role="status"
         aria-label={ariaLabel}
       >
-        {showTimer ? (
+        {displayShowTimer ? (
           <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
         ) : (
           <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
         )}
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
           {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
-          {timerTitle && showGoal ? (
+          {timerTitle && displayShowGoal ? (
             <span className="shrink-0 text-muted-foreground/45" aria-hidden>
               ·
             </span>
           ) : null}
-          {showGoal ? (
+          {displayShowGoal ? (
             <span className="truncate">
-              {t("thread.composer.goalStateStrip", { label: stripLabel })}
+              {t("thread.composer.goalStateStrip", { label: displayStripLabel })}
             </span>
           ) : null}
         </span>
@@ -484,9 +642,6 @@ export function ThreadComposer({
   slashCommands = [],
   cliApps = [],
   mcpPresets = [],
-  imageGenerationEnabled = true,
-  imageMode: controlledImageMode,
-  onImageModeChange,
   onStop,
   runStartedAt = null,
   goalState,
@@ -496,6 +651,7 @@ export function ThreadComposer({
   workspaceScopeDisabled = false,
   workspaceError = null,
   onWorkspaceScopeChange,
+  pendingQueueKey = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -505,46 +661,47 @@ export function ThreadComposer({
   const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
   const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
-  const [uncontrolledImageMode, setUncontrolledImageMode] = useState(false);
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("auto");
-  const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const queuedPromptCounterRef = useRef(0);
+  const draggedQueuedPromptIdRef = useRef<string | null>(null);
+  const wasStreamingRef = useRef(isStreaming);
+  const skipNextQueuedFlushRef = useRef(false);
+  const skipQueuedPromptPersistRef = useRef(false);
   const isHero = variant === "hero";
+  const queuedPromptStorageKey = useMemo(
+    () => queuedPromptsStorageKey(pendingQueueKey),
+    [pendingQueueKey],
+  );
   const showProjectPicker =
     isHero
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && workspaceControls?.can_change_project !== false;
-  const requestedImageMode = controlledImageMode ?? uncontrolledImageMode;
-  const imageMode = imageGenerationEnabled && requestedImageMode;
-  const setImageMode = useCallback(
-    (enabled: boolean) => {
-      if (controlledImageMode === undefined) {
-        setUncontrolledImageMode(enabled);
-      }
-      onImageModeChange?.(enabled);
-    },
-    [controlledImageMode, onImageModeChange],
-  );
 
   useEffect(() => {
-    if (imageGenerationEnabled || !requestedImageMode) return;
-    setImageMode(false);
-    setAspectMenuOpen(false);
-  }, [imageGenerationEnabled, requestedImageMode, setImageMode]);
+    skipQueuedPromptPersistRef.current = true;
+    setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
+  }, [queuedPromptStorageKey]);
+
+  useEffect(() => {
+    if (!queuedPromptStorageKey) return;
+    if (skipQueuedPromptPersistRef.current) {
+      skipQueuedPromptPersistRef.current = false;
+      return;
+    }
+    storeQueuedPrompts(queuedPromptStorageKey, queuedPrompts);
+  }, [queuedPromptStorageKey, queuedPrompts]);
 
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
-    : imageMode
-      ? t("thread.composer.imageMode.placeholder")
-      : placeholder ?? t("thread.composer.placeholderThread");
+    : placeholder ?? t("thread.composer.placeholderThread");
 
-  const { images, enqueue, remove, clear, encoding, full } =
+  const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages();
 
   const formatRejection = useCallback(
@@ -598,6 +755,13 @@ export function ThreadComposer({
     && !encoding
     && !hasErrors
     && (value.trim().length > 0 || readyImages.length > 0);
+  const canQueueGuidance =
+    isStreaming
+    && !disabled
+    && !encoding
+    && !hasErrors
+    && (value.trim().length > 0 || readyImages.length > 0)
+    && !value.trimStart().startsWith("/");
 
   const slashQuery = useMemo(() => {
     if (disabled || slashMenuDismissed || !value.startsWith("/")) return null;
@@ -835,38 +999,6 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  useEffect(() => {
-    if (!aspectMenuOpen) return;
-
-    const closeOnPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && aspectControlRef.current?.contains(target)) return;
-      setAspectMenuOpen(false);
-    };
-    const closeOnKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setAspectMenuOpen(false);
-        textareaRef.current?.focus();
-      }
-    };
-    const closeOnScroll = () => setAspectMenuOpen(false);
-    const closeOnWheel = (event: WheelEvent) => {
-      setAspectMenuOpen(false);
-      scrollNearestOverflowParent(event.target, event.deltaY);
-    };
-
-    document.addEventListener("pointerdown", closeOnPointerDown, true);
-    document.addEventListener("keydown", closeOnKeyDown);
-    document.addEventListener("scroll", closeOnScroll, true);
-    document.addEventListener("wheel", closeOnWheel, { capture: true, passive: true });
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown, true);
-      document.removeEventListener("keydown", closeOnKeyDown);
-      document.removeEventListener("scroll", closeOnScroll, true);
-      document.removeEventListener("wheel", closeOnWheel, true);
-    };
-  }, [aspectMenuOpen]);
-
   const resizeTextarea = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -928,9 +1060,121 @@ export function ThreadComposer({
     [cliAppMention, resizeTextarea, value],
   );
 
+  const clearComposerText = useCallback(() => {
+    setValue("");
+    setInlineError(null);
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
+    resizeTextarea();
+  }, [resizeTextarea]);
+
+  const queueGuidancePrompt = useCallback(() => {
+    const text = value.trim();
+    if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
+    const queuedImages = readyImagesToQueuedImages(readyImages);
+    queuedPromptCounterRef.current += 1;
+    setQueuedPrompts((items) => [
+      ...items,
+      {
+        id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
+        text,
+        ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
+      },
+    ]);
+    clear();
+    clearComposerText();
+  }, [canQueueGuidance, clear, clearComposerText, readyImages, value]);
+
+  const removeQueuedPrompt = useCallback((id: string) => {
+    setQueuedPrompts((items) => items.filter((item) => item.id !== id));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
+    setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
+    setValue(prompt.text);
+    setInlineError(null);
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(prompt.text.length);
+    if (prompt.images?.length) {
+      restoreReadyImages(prompt.images as RestoredReadyImage[]);
+    } else {
+      clear();
+    }
+    resizeTextarea();
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(prompt.text.length, prompt.text.length);
+    });
+  }, [clear, resizeTextarea, restoreReadyImages]);
+
+  const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
+    if (dragId === targetId) return;
+    setQueuedPrompts((items) => {
+      const from = items.findIndex((item) => item.id === dragId);
+      const to = items.findIndex((item) => item.id === targetId);
+      if (from === -1 || to === -1) return items;
+      const next = [...items];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const sendQueuedPrompt = useCallback(
+    (prompt: QueuedPrompt) => {
+      const text = prompt.text.trim();
+      const queuedImages = queuedImagesToSendImages(prompt.images);
+      setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
+      if (text || queuedImages?.length) {
+        if (queuedImages?.length) onSend(text, queuedImages);
+        else onSend(text);
+      }
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    [onSend],
+  );
+
+  const sendNextQueuedPrompt = useCallback(() => {
+    if (queuedPrompts.length === 0) return;
+    const nextPrompt = queuedPrompts.find((prompt) => prompt.text.trim());
+    if (!nextPrompt) {
+      setQueuedPrompts([]);
+      return;
+    }
+    setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id));
+    const queuedImages = queuedImagesToSendImages(nextPrompt.images);
+    if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
+    else onSend(nextPrompt.text.trim());
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [onSend, queuedPrompts]);
+
+  useEffect(() => {
+    const wasStreaming = wasStreamingRef.current;
+    wasStreamingRef.current = isStreaming;
+    if (!wasStreaming || isStreaming || queuedPrompts.length === 0) return;
+    if (skipNextQueuedFlushRef.current) {
+      skipNextQueuedFlushRef.current = false;
+      return;
+    }
+    sendNextQueuedPrompt();
+  }, [sendNextQueuedPrompt, isStreaming, queuedPrompts.length]);
+
+  const handleStop = useCallback(() => {
+    if (queuedPrompts.length > 0) {
+      skipNextQueuedFlushRef.current = true;
+    }
+    onStop?.();
+  }, [onStop, queuedPrompts.length]);
+
   const submit = useCallback(() => {
     if (!canSend) return;
     const trimmed = value.trim();
+    const content = trimmed;
     // Share the same normalized ``data:`` URL with both the wire payload and
     // the optimistic bubble preview: data URLs are self-contained (no blob
     // lifetime, safe under React StrictMode double-mount) and keep the
@@ -948,40 +1192,26 @@ export function ThreadComposer({
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
-      imageMode || attachedCliApps.length > 0 || attachedMcpPresets.length > 0
+      attachedCliApps.length > 0 || attachedMcpPresets.length > 0
         ? {
-            ...(imageMode
-              ? {
-                  imageGeneration: {
-                    enabled: true,
-                    aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
-                  },
-                }
-              : {}),
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    onSend(trimmed, payload, options);
-    setValue("");
-    setInlineError(null);
+    onSend(content, payload, options);
+    setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
-    setSlashMenuDismissed(false);
-    setCliAppMenuDismissed(false);
-    setCursorPosition(0);
-    resizeTextarea();
+    clearComposerText();
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
     canSend,
     clear,
-    imageAspectRatio,
-    imageMode,
+    clearComposerText,
     onSend,
     readyImages,
-    resizeTextarea,
     value,
   ]);
 
@@ -1036,6 +1266,10 @@ export function ThreadComposer({
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      if (canQueueGuidance) {
+        queueGuidancePrompt();
+        return;
+      }
       submit();
     }
   };
@@ -1085,14 +1319,13 @@ export function ThreadComposer({
 
   const attachButtonDisabled = disabled || full;
   const showStopButton = isStreaming && !!onStop;
-  const centerHeroPlaceholder =
-    isHero && value.length === 0 && images.length === 0 && !isStreaming;
+  const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
       ? cn(
           "min-h-[78px] px-5 text-[15px] leading-6",
-          centerHeroPlaceholder ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
+          relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
         )
       : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
   );
@@ -1144,6 +1377,30 @@ export function ThreadComposer({
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
+        {queuedPrompts.length > 0 ? (
+          <QueuedPromptStack
+            prompts={queuedPrompts}
+            isHero={isHero}
+            label={t("thread.composer.queued.label")}
+            guideLabel={t("thread.composer.queued.guide")}
+            deleteLabel={t("thread.composer.queued.delete")}
+            dragLabel={t("thread.composer.queued.drag")}
+            editLabel={t("thread.composer.queued.edit")}
+            onGuide={sendQueuedPrompt}
+            onDelete={removeQueuedPrompt}
+            onEdit={editQueuedPrompt}
+            onDragStart={(id) => {
+              draggedQueuedPromptIdRef.current = id;
+            }}
+            onDragEnd={() => {
+              draggedQueuedPromptIdRef.current = null;
+            }}
+            onDrop={(targetId) => {
+              const dragId = draggedQueuedPromptIdRef.current;
+              if (dragId) moveQueuedPrompt(dragId, targetId);
+            }}
+          />
+        ) : null}
         {images.length > 0 ? (
           <div
             className="flex flex-wrap gap-2 px-3 pt-3"
@@ -1172,9 +1429,7 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null || goalState?.active ? (
-          <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
-        ) : null}
+        <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         <div className="relative">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
@@ -1262,61 +1517,6 @@ export function ThreadComposer({
                 onChange={onWorkspaceScopeChange}
               />
             ) : null}
-            {imageGenerationEnabled ? (
-              <div ref={aspectControlRef} className="relative flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={disabled}
-                  aria-pressed={imageMode}
-                  aria-label={t("thread.composer.imageMode.toggle")}
-                  onClick={() => {
-                    setImageMode(!imageMode);
-                    setAspectMenuOpen(false);
-                    textareaRef.current?.focus();
-                  }}
-                  className={cn(
-                    "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
-                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
-                    imageMode
-                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
-                      : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
-                  )}
-                >
-                  <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-                  <span className="truncate">{t("thread.composer.imageMode.label")}</span>
-                </Button>
-                {imageMode ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={disabled}
-                  aria-haspopup="listbox"
-                  aria-expanded={aspectMenuOpen}
-                  aria-label={t("thread.composer.imageMode.aspectAria")}
-                  onClick={() => setAspectMenuOpen((open) => !open)}
-                  className={cn(
-                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
-                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
-                  )}
-                >
-                  <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
-                  <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
-                </Button>
-                ) : null}
-                {imageMode && aspectMenuOpen ? (
-                  <ImageAspectMenu
-                    selected={imageAspectRatio}
-                    isHero={isHero}
-                    onSelect={(ratio) => {
-                      setImageAspectRatio(ratio);
-                      setAspectMenuOpen(false);
-                      textareaRef.current?.focus();
-                    }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {modelLabel ? (
@@ -1332,7 +1532,7 @@ export function ThreadComposer({
               size="icon"
               disabled={showStopButton ? disabled : !canSend}
               aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
-              onClick={showStopButton ? onStop : undefined}
+              onClick={showStopButton ? handleStop : undefined}
               className={cn(
                 "rounded-full transition-transform",
                 showStopButton
@@ -1365,6 +1565,191 @@ export function ThreadComposer({
         />
       </div>
     </form>
+  );
+}
+
+function QueuedPromptStack({
+  prompts,
+  isHero,
+  label,
+  guideLabel,
+  deleteLabel,
+  dragLabel,
+  editLabel,
+  onGuide,
+  onDelete,
+  onEdit,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+}: {
+  prompts: QueuedPrompt[];
+  isHero: boolean;
+  label: string;
+  guideLabel: string;
+  deleteLabel: string;
+  dragLabel: string;
+  editLabel: string;
+  onGuide: (prompt: QueuedPrompt) => void;
+  onDelete: (id: string) => void;
+  onEdit: (prompt: QueuedPrompt) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  onDrop: (targetId: string) => void;
+}) {
+  const stripMaxHeight = Math.min(240, 14 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4);
+
+  return (
+    <div
+      role="group"
+      data-state="enter"
+      className={cn(
+        "composer-status-strip relative z-20 mx-3 mt-3 overflow-hidden rounded-[18px]",
+        "border border-black/[0.05] bg-popover/90 p-1.5",
+        "shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md",
+        "dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_14px_34px_rgba(0,0,0,0.30)]",
+        isHero ? "max-w-none" : "max-w-none",
+      )}
+      style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
+      aria-label={label}
+    >
+      <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
+        {prompts.map((prompt) => (
+          <QueuedPromptRow
+            key={prompt.id}
+            prompt={prompt}
+            isHero={isHero}
+            guideLabel={guideLabel}
+            deleteLabel={deleteLabel}
+            dragLabel={dragLabel}
+            editLabel={editLabel}
+            onGuide={onGuide}
+            onDelete={onDelete}
+            onEdit={onEdit}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDrop={onDrop}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QueuedPromptRow({
+  prompt,
+  isHero,
+  guideLabel,
+  deleteLabel,
+  dragLabel,
+  editLabel,
+  onGuide,
+  onDelete,
+  onEdit,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+}: {
+  prompt: QueuedPrompt;
+  isHero: boolean;
+  guideLabel: string;
+  deleteLabel: string;
+  dragLabel: string;
+  editLabel: string;
+  onGuide: (prompt: QueuedPrompt) => void;
+  onDelete: (id: string) => void;
+  onEdit: (prompt: QueuedPrompt) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  onDrop: (targetId: string) => void;
+}) {
+  const displayLabel = queuedPromptLabel(prompt);
+
+  return (
+    <div
+      data-queued-prompt-row="true"
+      onDragEnter={(event) => {
+        event.preventDefault();
+        onDrop(prompt.id);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop(prompt.id);
+      }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        "queued-prompt-row group/queued flex min-h-8 items-center gap-1.5 rounded-[12px] px-2 py-0.5",
+        "text-[13px] transition-colors hover:bg-muted/55 dark:hover:bg-white/[0.055]",
+        isHero && "text-[13.5px]",
+      )}
+    >
+      <span
+        draggable
+        role="button"
+        tabIndex={0}
+        aria-label={dragLabel}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", prompt.id);
+          suppressNativeDragPreview(event.dataTransfer);
+          onDragStart(prompt.id);
+        }}
+        onDragEnd={onDragEnd}
+        className={cn(
+          "inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
+          "text-muted-foreground/45 transition-colors hover:bg-background/80 hover:text-muted-foreground",
+          "active:cursor-grabbing dark:hover:bg-white/[0.06]",
+        )}
+      >
+        <GripVertical className="pointer-events-none h-3.5 w-3.5" aria-hidden />
+      </span>
+      <div className="flex min-h-7 min-w-0 flex-1 items-center">
+        <p
+          title={displayLabel}
+          className={cn(
+            "line-clamp-3 whitespace-pre-wrap break-words font-medium leading-[1.28] text-foreground/88",
+            isHero && "text-[13.5px]",
+          )}
+        >
+          {displayLabel}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
+        onClick={() => onGuide(prompt)}
+      >
+        <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
+        {guideLabel}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={editLabel}
+        title={editLabel}
+        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-foreground dark:hover:bg-white/[0.07]"
+        onClick={() => onEdit(prompt)}
+      >
+        <SquarePen className="h-3.5 w-3.5" aria-hidden />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={deleteLabel}
+        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:bg-background/85 hover:text-destructive dark:hover:bg-white/[0.07]"
+        onClick={() => onDelete(prompt.id)}
+      >
+        <Trash2 className="h-3 w-3" aria-hidden />
+      </Button>
+    </div>
   );
 }
 
@@ -1511,59 +1896,6 @@ function useSelectedOptionScroll(selectedIndex: number) {
   }, [selectedIndex]);
 
   return containerRef;
-}
-
-function ImageAspectMenu({
-  selected,
-  isHero,
-  onSelect,
-}: {
-  selected: ImageAspectRatio;
-  isHero: boolean;
-  onSelect: (ratio: ImageAspectRatio) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      role="listbox"
-      aria-label={t("thread.composer.imageMode.aspectAria")}
-      className={cn(
-        "absolute left-0 z-30 w-44 overflow-hidden rounded-[16px] border",
-        isHero ? "top-full mt-2" : "bottom-full mb-2",
-        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_16px_45px_rgba(15,23,42,0.16)]",
-        "dark:border-white/10 dark:shadow-[0_18px_45px_rgba(0,0,0,0.42)]",
-        isHero ? "text-[12px]" : "text-[11.5px]",
-      )}
-    >
-      <div className="px-2 pb-1 pt-1 font-medium text-muted-foreground/70">
-        {t("thread.composer.imageMode.aspectLabel")}
-      </div>
-      {IMAGE_ASPECT_RATIOS.map((ratio) => {
-        const label = t(`thread.composer.imageMode.aspect.${ratio.replace(":", "_")}`);
-        return (
-          <button
-            key={ratio}
-            type="button"
-            role="option"
-            aria-selected={selected === ratio}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onSelect(ratio);
-            }}
-            className={cn(
-              "flex w-full items-center justify-between rounded-[11px] px-2.5 py-2 text-left transition-colors",
-              selected === ratio
-                ? "bg-primary/10 text-foreground"
-                : "text-foreground/86 hover:bg-accent/55",
-            )}
-          >
-            <span>{label}</span>
-            {selected === ratio ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function CliAppMentionPalette({

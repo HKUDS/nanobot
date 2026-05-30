@@ -146,7 +146,9 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   searxng: brand("searxng.org", "#3050FF", "SX"),
   siliconflow: brand("siliconflow.cn", "#111827", "SF"),
   skywork: brand("skywork.ai", "#5B5BF6", "SW"),
-  stepfun: brand("stepfun.com", "#2F6BFF", "SF"),
+  stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
+    "https://www.stepfun.com/step_favicon.svg",
+  ]),
   tavily: brand("tavily.com", "#111827", "T"),
   volcengine: brand("volcengine.com", "#1664FF", "VE"),
   vllm: brand("vllm.ai", "#2563EB", "VL"),

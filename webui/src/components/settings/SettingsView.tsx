@@ -57,6 +57,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -74,6 +75,7 @@ import {
   fetchSettings,
   fetchCliApps,
   fetchMcpPresets,
+  fetchProviderModels,
   importMcpConfig,
   loginProviderOAuth,
   logoutProviderOAuth,
@@ -105,6 +107,7 @@ import type {
   McpPresetInfo,
   McpPresetsPayload,
   NetworkSafetySettingsUpdate,
+  ProviderModelsPayload,
   SettingsPayload,
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
@@ -166,6 +169,23 @@ type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
 const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
+const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
+  "aihubmix",
+  "atomic_chat",
+  "byteplus",
+  "byteplus_coding_plan",
+  "huggingface",
+  "lm_studio",
+  "novita",
+  "ollama",
+  "openrouter",
+  "ovms",
+  "siliconflow",
+  "vllm",
+  "volcengine",
+  "volcengine_coding_plan",
+]);
+const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
 
 const FALLBACK_TIMEZONES = [
   "UTC",
@@ -1124,6 +1144,7 @@ export function SettingsView({
         return (
           <div className="space-y-8">
             <ModelsSettings
+              token={token}
               form={form}
               setForm={setForm}
               settings={settings}
@@ -1754,7 +1775,7 @@ function NewModelConfigurationDialog({
           <div className="space-y-4 px-5 py-5">
             <label className="block">
               <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
-                {tx("settings.models.configurationName", "Name")}
+                {tx("settings.models.configurationName", "Configuration name")}
               </span>
               <Input
                 autoFocus
@@ -1827,6 +1848,7 @@ function NewModelConfigurationDialog({
 }
 
 function ModelsSettings({
+  token,
   form,
   setForm,
   settings,
@@ -1838,6 +1860,7 @@ function ModelsSettings({
   onSave,
   onCreateConfiguration,
 }: {
+  token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   settings: SettingsPayload;
@@ -1876,8 +1899,8 @@ function ModelsSettings({
       <section>
         <SettingsGroup>
           <SettingsRow
-            title={tx("settings.rows.currentModel", "Current model")}
-            description={tx("settings.help.currentModel", "Choose the model nanobot uses for new replies.")}
+            title={tx("settings.rows.currentModel", "Current configuration")}
+            description={tx("settings.help.currentModel", "Used for new replies.")}
           >
             <ModelPresetPicker
               presets={settings.model_presets}
@@ -1906,7 +1929,7 @@ function ModelsSettings({
           </SettingsRow>
           {selectedPreset && !selectedPreset.is_default ? (
             <SettingsRow
-              title={tx("settings.models.configurationName", "Name")}
+              title={tx("settings.models.configurationName", "Configuration name")}
               description={tx("settings.models.configurationNameHelp", "Rename this saved model configuration.")}
             >
               <Input
@@ -1927,7 +1950,13 @@ function ModelsSettings({
               value={providerValue}
               emptyLabel={t("settings.byok.noConfiguredProviders")}
               showProviderLogos={showBrandLogos}
-              onChange={(provider) => setForm((prev) => ({ ...prev, provider }))}
+              onChange={(provider) =>
+                setForm((prev) => ({
+                  ...prev,
+                  provider,
+                  model: provider === prev.provider ? prev.model : "",
+                }))
+              }
             />
           </SettingsRow>
           {selectedProviderNeedsSignIn ? (
@@ -1958,10 +1987,13 @@ function ModelsSettings({
             title={t("settings.rows.model")}
             description={t("settings.help.model")}
           >
-            <Input
+            <ModelIdPicker
+              token={token}
+              settings={settings}
+              provider={form.provider}
               value={form.model}
-              onChange={(event) => setForm((prev) => ({ ...prev, model: event.target.value }))}
-              className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
+              showProviderLogos={showBrandLogos}
+              onChange={(model) => setForm((prev) => ({ ...prev, model }))}
             />
           </SettingsRow>
           <SettingsRow
@@ -4190,7 +4222,10 @@ function TimezonePicker({
             />
           </div>
         </div>
-        <div className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5" data-testid="timezone-picker-list">
+        <div
+          className="mt-1 max-h-[18rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+          data-testid="timezone-picker-list"
+        >
           {filteredOptions.length ? (
             filteredOptions.map((option) => {
               const selected = option.name === value;
@@ -4268,7 +4303,7 @@ function ProviderPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[18rem] w-[240px] overflow-y-auto"
+        className="max-h-[18rem] w-[240px] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {providers.map((provider) => {
           const selected = provider.name === value;
@@ -4298,6 +4333,239 @@ function ProviderPicker({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function ModelIdPicker({
+  token,
+  settings,
+  provider,
+  value,
+  showProviderLogos,
+  onChange,
+}: {
+  token: string;
+  settings: SettingsPayload;
+  provider: string;
+  value: string;
+  showProviderLogos: boolean;
+  onChange: (model: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const effectiveProvider =
+    provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
+  const canFetchModels = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const normalizedQuery = query.trim().toLowerCase();
+  const providerModels = payload?.models ?? [];
+  const visibleModels = providerModels
+    .filter((model) => {
+      if (!normalizedQuery) return true;
+      return [model.id, model.label ?? "", model.owned_by ?? ""]
+        .some((field) => field.toLowerCase().includes(normalizedQuery));
+    })
+    .slice(0, 80);
+  const isCatalog = payload?.catalog_kind === "catalog";
+  const defersModelList = DEFERRED_MODEL_LIST_PROVIDERS.has(effectiveProvider);
+  const hasDeferredSearchQuery =
+    normalizedQuery.length >= DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH;
+  const shouldFetchModels =
+    canFetchModels && (!defersModelList || hasDeferredSearchQuery);
+  const waitingForModelSearch =
+    open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
+  const hasModelList = payload?.status === "available";
+  const showModels = Boolean(hasModelList && payload && (!isCatalog || normalizedQuery));
+  const customCandidate = query.trim();
+  const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
+  const providerModelCount = payload?.model_count ?? providerModels.length;
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+  }, [open, effectiveProvider]);
+
+  useEffect(() => {
+    if (!open || !shouldFetchModels) {
+      setPayload(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPayload(null);
+    setError(null);
+    setLoading(true);
+    fetchProviderModels(token, effectiveProvider)
+      .then((nextPayload) => {
+        if (!cancelled) setPayload(nextPayload);
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveProvider, open, shouldFetchModels, token]);
+
+  const selectModel = (model: string) => {
+    onChange(model);
+    setOpen(false);
+  };
+
+  const renderModelRow = (
+    model: ProviderModelsPayload["models"][number],
+    options: { selected?: boolean } = {},
+  ) => (
+    <DropdownMenuItem
+      key={model.id}
+      onSelect={() => selectModel(model.id)}
+      className={cn(
+        "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2 py-1.5 text-[12px]",
+        "focus:bg-muted/85 focus:text-foreground",
+        options.selected && "bg-muted/80 text-foreground focus:bg-muted",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+        <span className="min-w-0 truncate font-medium text-foreground">
+          {model.label ?? model.id}
+        </span>
+      </span>
+      <span className="ml-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+        {model.context_window ? <span>{formatContextWindow(model.context_window)}</span> : null}
+        {options.selected ? <Check className="h-3.5 w-3.5 text-foreground" aria-hidden /> : null}
+      </span>
+    </DropdownMenuItem>
+  );
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-9 w-[min(360px,70vw)] justify-between rounded-full border-input bg-background px-3 text-[12px] font-normal shadow-none",
+            "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+            <span
+              className={cn(
+                "min-w-0 truncate font-medium",
+                value ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {value || tx("settings.models.selectModel", "Select model")}
+            </span>
+          </span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-[360px] max-w-[calc(100vw-2rem)] p-1.5"
+      >
+        <div className="p-1 pb-1.5">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder={tx("settings.models.searchModels", "Search or type model ID")}
+              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
+            />
+          </div>
+        </div>
+
+        {!canFetchModels ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.autoProviderCustomOnly", "Auto provider mode uses custom model IDs.")}
+          </div>
+        ) : waitingForModelSearch ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
+          </div>
+        ) : loading ? (
+          <div className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            {tx("settings.models.loadingModels", "Loading models...")}
+          </div>
+        ) : error || payload?.status === "error" ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {payload?.message || error || tx("settings.models.loadFailed", "Model list unavailable.")}
+          </div>
+        ) : payload?.status === "not_configured" ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
+          </div>
+        ) : payload?.status === "unsupported" || payload?.status === "missing_api_base" ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {payload.message || tx("settings.models.unsupportedModelList", "Type a model ID manually.")}
+          </div>
+        ) : isCatalog && !normalizedQuery ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.searchCatalog", "Search provider catalog to choose a model.")}
+            {providerModelCount ? ` ${providerModelCount} ${tx("settings.models.modelsAvailable", "available")}.` : ""}
+          </div>
+        ) : null}
+
+        {showModels && visibleModels.length ? (
+          <div className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent">
+            {visibleModels.map((model) =>
+              renderModelRow(model, { selected: model.id === value }),
+            )}
+          </div>
+        ) : showModels ? (
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+            {tx("settings.models.noModelResults", "No matching models.")}
+          </div>
+        ) : null}
+
+        {customCandidate && !exactQueryMatch && customCandidate !== value ? (
+          <>
+            {showModels ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem
+              onSelect={() => selectModel(customCandidate)}
+              className="flex cursor-default items-center gap-2 rounded-[12px] px-2 py-1.5 text-[12px] focus:bg-muted/85"
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted/80 text-muted-foreground">
+                <Pencil className="h-3 w-3" aria-hidden />
+              </span>
+              <span className="min-w-0 truncate">
+                {tx("settings.models.useCustomModel", "Use")}{" "}
+                <span className="font-medium text-foreground">“{customCandidate}”</span>
+              </span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const value = tokens / 1_000_000;
+    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}M`;
+  }
+  if (tokens >= 1_000) {
+    const value = tokens / 1_000;
+    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}K`;
+  }
+  return String(tokens);
 }
 
 function ProviderPickerIcon({
@@ -4860,7 +5128,7 @@ function ModelPresetPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto"
+        className="max-h-[20rem] w-[430px] max-w-[calc(100vw-2rem)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
       >
         {presets.map((preset) => {
           const selected = preset.name === value;

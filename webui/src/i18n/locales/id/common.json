@@ -131,7 +131,7 @@
       "workspacePath": "Workspace default",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "Model saat ini",
+      "currentModel": "Konfigurasi saat ini",
       "brandLogos": "Logo merek",
       "cliAppsCatalog": "Katalog aplikasi CLI",
       "cliAppsFilter": "Filter aplikasi CLI",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "Pilih model yang digunakan nanobot untuk balasan berikutnya.",
+      "currentModel": "Pilih konfigurasi model yang digunakan nanobot untuk balasan berikutnya.",
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
       "brandLogos": "Logo dimuat dari domain merek dengan ikon lokal sebagai cadangan.",
@@ -295,9 +295,19 @@
       "addConfiguration": "Tambah konfigurasi",
       "newConfiguration": "Konfigurasi model baru",
       "newConfigurationHelp": "Simpan penyedia dan model sebagai opsi sekali klik.",
-      "configurationName": "Nama",
+      "configurationName": "Nama konfigurasi",
       "configurationNameHelp": "Ganti nama konfigurasi model yang tersimpan ini.",
-      "configurationNamePlaceholder": "Penulisan cepat"
+      "configurationNamePlaceholder": "Penulisan cepat",
+      "searchModels": "Cari atau ketik ID model",
+      "useCustomModel": "Gunakan",
+      "loadingModels": "Memuat model...",
+      "searchCatalog": "Cari katalog penyedia untuk memilih model.",
+      "modelsAvailable": "tersedia",
+      "noModelResults": "Tidak ada model yang cocok.",
+      "loadFailed": "Daftar model tidak tersedia.",
+      "unsupportedModelList": "Ketik ID model secara manual.",
+      "providerNotConfigured": "Konfigurasikan penyedia ini sebelum memuat model.",
+      "autoProviderCustomOnly": "Mode penyedia otomatis menggunakan ID model khusus."
     },
     "timezone": {
       "select": "Pilih zona waktu",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "queued": {
+        "label": "Panduan antrean",
+        "guide": "Pandu",
+        "delete": "Hapus panduan",
+        "edit": "Edit panduan",
+        "drag": "Seret untuk mengurutkan"
+      },
       "attachImage": "Lampirkan gambar",
       "imageMode": {
         "label": "Buat gambar",

@@ -131,7 +131,7 @@
       "workspacePath": "Workspace predeterminado",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "Modelo actual",
+      "currentModel": "Configuración actual",
       "brandLogos": "Logotipos de marca",
       "cliAppsCatalog": "Catálogo de apps CLI",
       "cliAppsFilter": "Filtro de apps CLI",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "Elige el modelo que nanobot usará para las próximas respuestas.",
+      "currentModel": "Elige la configuración de modelo que nanobot usará para las próximas respuestas.",
       "selectedModelProvider": "Lo define el modelo seleccionado.",
       "selectedModelValue": "Lo define el modelo seleccionado.",
       "brandLogos": "Los logotipos se cargan desde los dominios de las marcas con una reserva de icono local.",
@@ -295,9 +295,19 @@
       "addConfiguration": "Añadir configuración",
       "newConfiguration": "Nueva configuración de modelo",
       "newConfigurationHelp": "Guarda un proveedor y un modelo como una opción de un clic.",
-      "configurationName": "Nombre",
+      "configurationName": "Nombre de configuración",
       "configurationNameHelp": "Cambia el nombre de esta configuración de modelo guardada.",
-      "configurationNamePlaceholder": "Escritura rápida"
+      "configurationNamePlaceholder": "Escritura rápida",
+      "searchModels": "Buscar o escribir ID de modelo",
+      "useCustomModel": "Usar",
+      "loadingModels": "Cargando modelos...",
+      "searchCatalog": "Busca en el catálogo del proveedor para elegir un modelo.",
+      "modelsAvailable": "disponibles",
+      "noModelResults": "No hay modelos coincidentes.",
+      "loadFailed": "Lista de modelos no disponible.",
+      "unsupportedModelList": "Escribe manualmente un ID de modelo.",
+      "providerNotConfigured": "Configura este proveedor antes de cargar modelos.",
+      "autoProviderCustomOnly": "El modo de proveedor automático usa ID de modelo personalizados."
     },
     "timezone": {
       "select": "Seleccionar zona horaria",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "Cerrar objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
+      "queued": {
+        "label": "Guía en cola",
+        "guide": "Guiar",
+        "delete": "Eliminar guía",
+        "edit": "Editar guía",
+        "drag": "Arrastrar para reordenar"
+      },
       "attachImage": "Adjuntar imagen",
       "imageMode": {
         "label": "Generar imagen",

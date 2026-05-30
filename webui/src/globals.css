@@ -110,6 +110,14 @@
     --tw-prose-lead: hsl(var(--foreground));
   }
 
+  .markdown-content .contains-task-list {
+    @apply list-none pl-0;
+  }
+
+  .markdown-content .task-list-item {
+    @apply list-none pl-0;
+  }
+
   /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
      tight for Chinese/Japanese/Korean characters. Bump to 1.8 for better
      readability when the browser detects a CJK primary font. */
@@ -182,6 +190,70 @@
     .streaming-text-sheen::after {
       animation: none;
       content: "";
+    }
+  }
+
+  @keyframes composer-status-strip-enter {
+    0% {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    72% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(-1px) scale(1.004);
+    }
+    100% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes composer-status-strip-exit {
+    0% {
+      max-height: var(--composer-strip-max-height, 46px);
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(8px) scale(0.99);
+    }
+  }
+  .composer-status-strip {
+    transform-origin: bottom center;
+    will-change: max-height, opacity, transform;
+  }
+  .composer-status-strip[data-state="enter"] {
+    animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .composer-status-strip[data-state="exit"] {
+    animation: composer-status-strip-exit 180ms ease-in both;
+  }
+  @keyframes queued-prompt-row-enter {
+    0% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .queued-prompt-row {
+    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-status-strip {
+      will-change: auto;
+    }
+    .composer-status-strip[data-state] {
+      animation: none;
+    }
+    .queued-prompt-row {
+      animation: none;
     }
   }
 

@@ -131,7 +131,7 @@
       "workspacePath": "Espace de travail par défaut",
       "localServiceAccess": "Local services",
       "webuiDefaultAccess": "Default access",
-      "currentModel": "Modèle actuel",
+      "currentModel": "Configuration actuelle",
       "brandLogos": "Logos de marque",
       "cliAppsCatalog": "Catalogue d'apps CLI",
       "cliAppsFilter": "Filtre des apps CLI",
@@ -167,7 +167,7 @@
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
       "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-      "currentModel": "Choisissez le modèle que nanobot utilisera pour les prochaines réponses.",
+      "currentModel": "Choisissez la configuration de modèle que nanobot utilisera pour les prochaines réponses.",
       "selectedModelProvider": "Défini par le modèle sélectionné.",
       "selectedModelValue": "Défini par le modèle sélectionné.",
       "brandLogos": "Les logos sont chargés depuis les domaines des marques avec une icône locale en secours.",
@@ -295,9 +295,19 @@
       "addConfiguration": "Ajouter une configuration",
       "newConfiguration": "Nouvelle configuration de modèle",
       "newConfigurationHelp": "Enregistrez un fournisseur et un modèle comme option en un clic.",
-      "configurationName": "Nom",
+      "configurationName": "Nom de la configuration",
       "configurationNameHelp": "Renommez cette configuration de modèle enregistrée.",
-      "configurationNamePlaceholder": "Rédaction rapide"
+      "configurationNamePlaceholder": "Rédaction rapide",
+      "searchModels": "Rechercher ou saisir l’ID du modèle",
+      "useCustomModel": "Utiliser",
+      "loadingModels": "Chargement des modèles...",
+      "searchCatalog": "Recherchez dans le catalogue du fournisseur pour choisir un modèle.",
+      "modelsAvailable": "disponibles",
+      "noModelResults": "Aucun modèle correspondant.",
+      "loadFailed": "Liste des modèles indisponible.",
+      "unsupportedModelList": "Saisissez manuellement un ID de modèle.",
+      "providerNotConfigured": "Configurez ce fournisseur avant de charger les modèles.",
+      "autoProviderCustomOnly": "Le mode fournisseur automatique utilise des ID de modèle personnalisés."
     },
     "timezone": {
       "select": "Sélectionner un fuseau horaire",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "queued": {
+        "label": "Guidage en attente",
+        "guide": "Guider",
+        "delete": "Supprimer le guidage",
+        "edit": "Modifier le guidage",
+        "drag": "Faire glisser pour réordonner"
+      },
       "attachImage": "Joindre une image",
       "imageMode": {
         "label": "Génération d’image",

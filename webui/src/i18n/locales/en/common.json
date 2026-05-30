@@ -102,9 +102,19 @@
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
       "newConfigurationHelp": "Save a provider and model as a one-click option.",
-      "configurationName": "Name",
+      "configurationName": "Configuration name",
       "configurationNameHelp": "Rename this saved model configuration.",
-      "configurationNamePlaceholder": "Fast writing"
+      "configurationNamePlaceholder": "Fast writing",
+      "searchModels": "Search or type model ID",
+      "useCustomModel": "Use",
+      "loadingModels": "Loading models...",
+      "searchCatalog": "Search provider catalog to choose a model.",
+      "modelsAvailable": "available",
+      "noModelResults": "No matching models.",
+      "loadFailed": "Model list unavailable.",
+      "unsupportedModelList": "Type a model ID manually.",
+      "providerNotConfigured": "Configure this provider before loading models.",
+      "autoProviderCustomOnly": "Auto provider mode uses custom model IDs."
     },
     "rows": {
       "theme": "Theme",
@@ -117,7 +127,7 @@
       "gateway": "Gateway",
       "restartState": "Restart state",
       "pendingChanges": "Pending changes",
-      "currentModel": "Current model",
+      "currentModel": "Current configuration",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -155,7 +165,7 @@
       "provider": "Select the provider that should serve new model requests.",
       "model": "Set the default model name used by nanobot.",
       "configPath": "The gateway configuration file currently in use.",
-      "currentModel": "Choose the model nanobot uses for new replies.",
+      "currentModel": "Used for new replies.",
       "selectedModelProvider": "Set by the selected model.",
       "selectedModelValue": "Set by the selected model.",
       "selectedPreset": "Named presets are read-only here; edit them in config.json.",
@@ -555,6 +565,13 @@
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
+      "queued": {
+        "label": "Queued guidance",
+        "guide": "Guide",
+        "delete": "Delete guidance",
+        "edit": "Edit guidance",
+        "drag": "Drag to reorder"
+      },
       "attachImage": "Attach image",
       "imageMode": {
         "label": "Image Generation",

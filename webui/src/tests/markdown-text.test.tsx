@@ -42,7 +42,7 @@ describe("MarkdownText", () => {
       expect(screen.getByTestId("markdown-renderer")).toHaveTextContent("hello");
       expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
         "data-highlight-code",
-        "false",
+        "true",
       );
       expect(rendererSpy).toHaveBeenCalledTimes(1);
 
@@ -78,5 +78,31 @@ describe("MarkdownText", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps very large streaming snippets plain until the final render", async () => {
+    rendererSpy.mockClear();
+    const largeCode = `\`\`\`ts\n${"const value = 1;\n".repeat(1_100)}\`\`\``;
+
+    const { rerender } = render(
+      <MarkdownText streaming>{largeCode}</MarkdownText>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-highlight-code",
+      "false",
+    );
+
+    rerender(<MarkdownText>{largeCode}</MarkdownText>);
+
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
+      "data-highlight-code",
+      "true",
+    );
   });
 });

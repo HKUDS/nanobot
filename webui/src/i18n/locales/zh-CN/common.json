@@ -102,9 +102,19 @@
       "addConfiguration": "添加配置",
       "newConfiguration": "新建模型配置",
       "newConfigurationHelp": "把服务商和模型保存为一个可直接切换的选项。",
-      "configurationName": "名称",
+      "configurationName": "配置名称",
       "configurationNameHelp": "重命名这个已保存的模型配置。",
-      "configurationNamePlaceholder": "快速写作"
+      "configurationNamePlaceholder": "快速写作",
+      "searchModels": "搜索或输入模型 ID",
+      "useCustomModel": "使用",
+      "loadingModels": "正在加载模型...",
+      "searchCatalog": "搜索服务商目录来选择模型。",
+      "modelsAvailable": "个可用",
+      "noModelResults": "没有匹配的模型。",
+      "loadFailed": "模型列表暂不可用。",
+      "unsupportedModelList": "手动输入模型 ID。",
+      "providerNotConfigured": "先配置这个服务商再加载模型。",
+      "autoProviderCustomOnly": "自动服务商模式使用自定义模型 ID。"
     },
     "rows": {
       "theme": "主题",
@@ -117,7 +127,7 @@
       "gateway": "网关",
       "restartState": "重启状态",
       "pendingChanges": "待处理更改",
-      "currentModel": "当前模型",
+      "currentModel": "当前配置",
       "selectedPreset": "选中的预设",
       "presetModel": "预设模型",
       "density": "密度",
@@ -155,7 +165,7 @@
       "provider": "选择新模型请求使用的服务商。",
       "model": "设置 nanobot 默认使用的模型名称。",
       "configPath": "当前网关正在使用的配置文件。",
-      "currentModel": "选择 nanobot 接下来回复时使用的模型。",
+      "currentModel": "选择 nanobot 接下来回复时使用的模型配置。",
       "selectedModelProvider": "由当前模型决定。",
       "selectedModelValue": "由当前模型决定。",
       "selectedPreset": "命名预设在这里只读；需要编辑时请改 config.json。",
@@ -554,6 +564,13 @@
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
+      "queued": {
+        "label": "待引导提示",
+        "guide": "引导",
+        "delete": "删除引导",
+        "edit": "编辑引导",
+        "drag": "拖动排序"
+      },
       "attachImage": "添加图片",
       "imageMode": {
         "label": "图片生成",
