@@ -7,7 +7,7 @@ import select
 import signal
 import sys
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -97,39 +97,12 @@ _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
 
 _HEARTBEAT_PREAMBLE = (
-    "[Your response may be delivered directly to the user's messaging app "
-    "after an internal review. Do not call tools to send messages. Output "
-    "ONLY the final user-facing message. Never reference internal "
+    "[Your response will be delivered directly to the user's messaging app. "
+    "Output ONLY the final user-facing message. Never reference internal "
     "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
-    "decision process. If nothing needs reporting, respond with exactly "
-    "'__NANOBOT_HEARTBEAT_CLEAR__' and nothing else.]\n\n"
+    "decision process. If nothing needs reporting, respond with just "
+    "'All clear.' and nothing else.]\n\n"
 )
-_HEARTBEAT_CLEAR_RESPONSES = {
-    "__nanobot_heartbeat_clear__",
-    "all clear",
-    "all clear.",
-    "all clear。",
-}
-
-
-def _is_heartbeat_clear_response(response: str) -> bool:
-    normalized = response.strip().strip("`").strip().lower()
-    return normalized in _HEARTBEAT_CLEAR_RESPONSES
-
-
-@contextmanager
-def _suppress_proactive_message_delivery(message_tool: Any):
-    set_suppress = getattr(message_tool, "set_suppress_delivery", None)
-    reset_suppress = getattr(message_tool, "reset_suppress_delivery", None)
-    if not callable(set_suppress) or not callable(reset_suppress):
-        yield
-        return
-
-    token = set_suppress(True)
-    try:
-        yield
-    finally:
-        reset_suppress(token)
 
 
 @functools.lru_cache(maxsize=None)
@@ -1018,14 +991,13 @@ def _run_gateway(
                 + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
             )
 
-            with _suppress_proactive_message_delivery(message_tool):
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key="heartbeat",
-                    channel="system",
-                    chat_id="heartbeat",
-                    on_progress=_silent,
-                )
+            resp = await agent.process_direct(
+                prompt,
+                session_key="heartbeat",
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
+            )
             response = resp.content if resp else ""
 
             # Keep a small tail of heartbeat history so the loop stays bounded.
@@ -1034,10 +1006,6 @@ def _run_gateway(
             agent.sessions.save(session)
 
             if not response:
-                return None
-
-            if _is_heartbeat_clear_response(response):
-                logger.info("Heartbeat: no active user-visible update")
                 return None
 
             should_notify = await evaluate_response(
