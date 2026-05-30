@@ -9,8 +9,6 @@ pytest.importorskip("nh3")
 pytest.importorskip("mistune")
 from nio import RoomSendResponse, SyncError
 
-from nanobot.channels.matrix import _build_matrix_text_content
-
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -18,8 +16,9 @@ from nanobot.channels.matrix import (
     MATRIX_HTML_FORMAT,
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
+    MatrixConfig,
+    _build_matrix_text_content,
 )
-from nanobot.channels.matrix import MatrixConfig
 
 _ROOM_SEND_UNSET = object()
 
@@ -693,6 +692,13 @@ async def test_on_media_message_downloads_attachment_and_sets_metadata(
     client.download_bytes = b"image"
     channel.client = client
 
+    async def _download_media_bytes(mxc_url: str, limit_bytes: int) -> bytes:
+        client.download_calls.append(mxc_url)
+        assert limit_bytes >= len(client.download_bytes)
+        return client.download_bytes
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
+
     handled: list[dict[str, object]] = []
 
     async def _fake_handle_message(**kwargs) -> None:
@@ -857,8 +863,13 @@ async def test_on_media_message_handles_download_error(monkeypatch, tmp_path) ->
 
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
-    client.download_response = matrix_module.DownloadError("download failed")
     channel.client = client
+
+    async def _download_media_bytes(mxc_url: str, _limit_bytes: int):
+        client.download_calls.append(mxc_url)
+        return None
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
 
     handled: list[dict[str, object]] = []
 
@@ -873,7 +884,7 @@ async def test_on_media_message_handles_download_error(monkeypatch, tmp_path) ->
         body="photo.png",
         url="mxc://example.org/mediaid",
         event_id="$event3",
-        source={"content": {"msgtype": "m.image"}},
+        source={"content": {"msgtype": "m.image", "info": {"size": 5}}},
     )
 
     await channel._on_media_message(room, event)
@@ -898,6 +909,13 @@ async def test_on_media_message_decrypts_encrypted_media(monkeypatch, tmp_path) 
     client = _FakeAsyncClient("", "", "", None)
     client.download_bytes = b"cipher"
     channel.client = client
+
+    async def _download_media_bytes(mxc_url: str, limit_bytes: int) -> bytes:
+        client.download_calls.append(mxc_url)
+        assert limit_bytes >= len(client.download_bytes)
+        return client.download_bytes
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
 
     handled: list[dict[str, object]] = []
 
@@ -942,6 +960,13 @@ async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> 
     client.download_bytes = b"cipher"
     channel.client = client
 
+    async def _download_media_bytes(mxc_url: str, limit_bytes: int) -> bytes:
+        client.download_calls.append(mxc_url)
+        assert limit_bytes >= len(client.download_bytes)
+        return client.download_bytes
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
+
     handled: list[dict[str, object]] = []
 
     async def _fake_handle_message(**kwargs) -> None:
@@ -958,7 +983,7 @@ async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> 
         key={"k": "key"},
         hashes={"sha256": "hash"},
         iv="iv",
-        source={"content": {"msgtype": "m.file"}},
+        source={"content": {"msgtype": "m.file", "info": {"size": 6}}},
     )
 
     await channel._on_media_message(room, event)
@@ -1756,7 +1781,7 @@ async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
     assert "!room:matrix.org" in channel._stream_bufs
     assert channel._stream_bufs["!room:matrix.org"].text == "Hello"
     assert len(client.room_send_calls) == 1
-    
+
     assert len(client.typing_calls) == 1
 
 
@@ -1773,4 +1798,88 @@ async def test_send_delta_ignores_whitespace_only_delta(monkeypatch) -> None:
 
     assert "!room:matrix.org" in channel._stream_bufs
     assert channel._stream_bufs["!room:matrix.org"].text == "   "
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_rejects_missing_declared_size(monkeypatch, tmp_path) -> None:
+    channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
+    client = _FakeAsyncClient("https://matrix.org", "", "", None)
+    channel.client = client
+    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+
+    async def _download_should_not_run(*_args, **_kwargs):
+        raise AssertionError("download should be rejected before fetching bytes")
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_should_not_run)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        event_id="$event1",
+        body="payload.bin",
+        url="mxc://example.org/media",
+        source={"content": {"msgtype": "m.file"}},
+    )
+
+    attachment, marker = await channel._fetch_media_attachment(
+        SimpleNamespace(room_id="!room:matrix.org"),
+        event,
+    )
+
+    assert attachment is None
+    assert marker == "[attachment: payload.bin - too large]"
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_rejects_declared_oversized_before_download(monkeypatch, tmp_path) -> None:
+    channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
+    client = _FakeAsyncClient("https://matrix.org", "", "", None)
+    channel.client = client
+    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+
+    async def _download_should_not_run(*_args, **_kwargs):
+        raise AssertionError("download should be rejected before fetching bytes")
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_should_not_run)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        event_id="$event1",
+        body="payload.bin",
+        url="mxc://example.org/media",
+        source={"content": {"msgtype": "m.file", "info": {"size": 9}}},
+    )
+
+    attachment, marker = await channel._fetch_media_attachment(
+        SimpleNamespace(room_id="!room:matrix.org"),
+        event,
+    )
+
+    assert attachment is None
+    assert marker == "[attachment: payload.bin - too large]"
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_maps_streaming_cap_to_too_large(monkeypatch, tmp_path) -> None:
+    channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
+    client = _FakeAsyncClient("https://matrix.org", "", "", None)
+    channel.client = client
+    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+
+    async def _download_too_large(_mxc_url: str, _limit_bytes: int):
+        raise matrix_module._MediaTooLargeError
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_too_large)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        event_id="$event1",
+        body="payload.bin",
+        url="mxc://example.org/media",
+        source={"content": {"msgtype": "m.file", "info": {"size": 8}}},
+    )
+
+    attachment, marker = await channel._fetch_media_attachment(
+        SimpleNamespace(room_id="!room:matrix.org"),
+        event,
+    )
+
+    assert attachment is None
+    assert marker == "[attachment: payload.bin - too large]"
     assert client.room_send_calls == []
