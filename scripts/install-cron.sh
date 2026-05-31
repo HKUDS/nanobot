@@ -62,6 +62,22 @@ job_reminders_archive() {
 }
 
 install_block() {
+  if [[ $EUID -eq 0 ]]; then
+    cat >&2 <<EOF
+Refusing to install: this script is running as root (EUID 0).
+
+Crontab is per-user. If invoked under \`sudo\`, the block would land in
+root's crontab — but the nanobot jobs need to run as the user that owns
+\`~/.nanobot/workspace\` so they can read & rewrite the reminder files.
+
+Re-run WITHOUT sudo:
+    make install-cron
+
+If you previously installed as root by mistake:
+    sudo make uninstall-cron   # remove the root block
+EOF
+    return 2
+  fi
   local rest new
   rest="$(current_crontab | strip_existing_block)"
   new="$rest"$'\n'"$(nanobot_block_content)"
