@@ -218,7 +218,7 @@ function HostChrome({
           )}
         </Button>
       ) : (
-        <div aria-hidden className="h-8 w-8" />
+        <div aria-hidden className="host-no-drag pointer-events-none h-8 w-8" />
       )}
     </header>
   );
@@ -252,7 +252,19 @@ export default function App() {
                   refreshed.token,
                   refreshed.ws_url,
                 );
+                const refreshedSurface = refreshed.runtime_surface
+                  ? toRuntimeSurface(refreshed.runtime_surface)
+                  : runtimeSurface;
+                const refreshedHost = createRuntimeHost(
+                  refreshedSurface,
+                  refreshed.runtime_capabilities,
+                );
                 const tokenExpiresAt = bootstrapTokenExpiresAt(refreshed.expires_in);
+                if (refreshedHost.socketFactory) {
+                  client.updateUrl(refreshedUrl, refreshedHost.socketFactory);
+                } else {
+                  client.updateUrl(refreshedUrl);
+                }
                 setState((current) =>
                   current.status === "ready" && current.client === client
                     ? {
@@ -260,10 +272,7 @@ export default function App() {
                         token: refreshed.token,
                         tokenExpiresAt,
                         modelName: refreshed.model_name ?? current.modelName,
-                        runtimeSurface:
-                          refreshed.runtime_surface
-                            ? toRuntimeSurface(refreshed.runtime_surface)
-                            : current.runtimeSurface,
+                        runtimeSurface: refreshedSurface,
                       }
                     : current,
                 );
@@ -307,8 +316,16 @@ export default function App() {
       try {
         const boot = await fetchBootstrap("", bootstrapSecretRef.current);
         const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+        const runtimeSurface = boot.runtime_surface
+          ? toRuntimeSurface(boot.runtime_surface)
+          : state.runtimeSurface;
+        const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
         const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
-        client.updateUrl(url);
+        if (runtimeHost.socketFactory) {
+          client.updateUrl(url, runtimeHost.socketFactory);
+        } else {
+          client.updateUrl(url);
+        }
         setState((current) =>
           current.status === "ready" && current.client === client
             ? {
@@ -316,9 +333,7 @@ export default function App() {
                 token: boot.token,
                 tokenExpiresAt,
                 modelName: boot.model_name ?? current.modelName,
-                runtimeSurface: boot.runtime_surface
-                  ? toRuntimeSurface(boot.runtime_surface)
-                  : current.runtimeSurface,
+                runtimeSurface,
               }
             : current,
         );
@@ -1058,12 +1073,19 @@ function Shell({
   const showHostChrome = isNativeHostSetupSurface;
   const showMainSidebar = view !== "settings";
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("native-host", showHostChrome);
+    return () => {
+      document.documentElement.classList.remove("native-host");
+    };
+  }, [showHostChrome]);
+
   return (
     <ThemeProvider theme={theme}>
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",
-          showHostChrome && "bg-sidebar",
+          showHostChrome && "host-window-shell",
         )}
       >
         {showHostChrome ? (
@@ -1071,7 +1093,6 @@ function Shell({
             onToggleSidebar={showMainSidebar ? toggleSidebar : undefined}
             theme={theme}
             onToggleTheme={toggle}
-            showThemeButton={view !== "chat"}
           />
         ) : null}
         <div
@@ -1092,8 +1113,10 @@ function Shell({
             >
               <div
                 className={cn(
-                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden bg-sidebar",
-                  !showHostChrome && "shadow-inner-right",
+                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
+                  showHostChrome
+                    ? "host-sidebar-glass"
+                    : "bg-sidebar shadow-inner-right",
                 )}
               >
                 <Sidebar
@@ -1138,13 +1161,12 @@ function Shell({
             titleOverrides={sidebarState.title_overrides}
             onSelect={onSelectSearchResult}
           />
-          <main
-            className={cn(
-              "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
-              showHostChrome &&
-                "rounded-l-[28px] shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.45)] dark:shadow-[-18px_0_32px_-30px_rgb(0_0_0/0.85)]",
-            )}
-          >
+        <main
+          className={cn(
+            "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
+            showHostChrome && "border-l border-border/55",
+          )}
+        >
             <div
               className={cn(
                 "absolute inset-0 flex flex-col",
@@ -1161,6 +1183,7 @@ function Shell({
                 theme={theme}
                 onToggleTheme={toggle}
                 hideSidebarToggleForHostChrome
+                hideThemeButton={showHostChrome}
                 hideHeader={false}
                 workspaceScope={activeWorkspaceScope}
                 workspaceDefaultScope={workspaces?.default_scope ?? null}

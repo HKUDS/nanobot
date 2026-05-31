@@ -891,9 +891,9 @@ describe("App layout", () => {
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.getByText("Current configuration")).toBeInTheDocument();
     expect(screen.queryByText("Presets")).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getAllByRole("button", { name: /openai\/gpt-4o/ })[0]);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Current configuration" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Add configuration" }));
-    const modelDialog = screen.getByRole("dialog", { name: "New model configuration" });
+    const modelDialog = await screen.findByRole("dialog", { name: "New model configuration" });
     expect(within(modelDialog).getByText("Save a provider and model as a one-click option.")).toBeInTheDocument();
     fireEvent.change(within(modelDialog).getByPlaceholderText("Fast writing"), {
       target: { value: "Fast writing" },

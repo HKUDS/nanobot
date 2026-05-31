@@ -10,6 +10,7 @@ interface ThreadHeaderProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hideThemeButton?: boolean;
   minimal?: boolean;
 }
 
@@ -19,6 +20,7 @@ export function ThreadHeader({
   theme,
   onToggleTheme,
   hideSidebarToggleForHostChrome = false,
+  hideThemeButton = false,
   minimal = false,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
@@ -37,12 +39,14 @@ export function ThreadHeader({
         >
           <Menu className="h-3.5 w-3.5" />
         </Button>
-        <ThemeButton
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-          label={t("thread.header.toggleTheme")}
-          className="ml-auto"
-        />
+        {!hideThemeButton ? (
+          <ThemeButton
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            label={t("thread.header.toggleTheme")}
+            className="ml-auto"
+          />
+        ) : null}
       </div>
     );
   }
@@ -67,12 +71,14 @@ export function ThreadHeader({
         </div>
       </div>
 
-      <ThemeButton
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        label={t("thread.header.toggleTheme")}
-        className="ml-auto shrink-0"
-      />
+      {!hideThemeButton ? (
+        <ThemeButton
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          label={t("thread.header.toggleTheme")}
+          className="ml-auto shrink-0"
+        />
+      ) : null}
 
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
     </div>
@@ -97,7 +103,7 @@ function ThemeButton({
       aria-label={label}
       onClick={onToggleTheme}
       className={cn(
-        "h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
+        "host-no-drag h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
         className,
       )}
     >

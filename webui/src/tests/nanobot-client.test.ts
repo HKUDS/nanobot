@@ -65,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Reflect.deleteProperty(window, "nanobotHost");
   vi.useRealTimers();
 });
 
@@ -87,6 +88,61 @@ describe("NanobotClient", () => {
       chat_id: "chat-a",
       text: "hi",
     });
+  });
+
+  it("can swap the socket factory when the runtime URL changes", () => {
+    const browserFactory = vi.fn(
+      (url: string) => new FakeSocket(`browser:${url}`) as unknown as WebSocket,
+    );
+    const hostFactory = vi.fn(
+      (url: string) => new FakeSocket(`host:${url}`) as unknown as WebSocket,
+    );
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: browserFactory,
+    });
+
+    client.connect();
+    expect(lastSocket().url).toBe("browser:ws://test");
+    client.close();
+    client.updateUrl("nanobot-host://engine/", hostFactory);
+    client.connect();
+
+    expect(hostFactory).toHaveBeenCalledWith("nanobot-host://engine/");
+    expect(lastSocket().url).toBe("host:nanobot-host://engine/");
+  });
+
+  it("uses the host socket bridge for native host URLs", async () => {
+    let socketEventHandler:
+      | ((event: { id: string; type: "open" | "close" | "error"; message?: string }) => void)
+      | null = null;
+    const openSocket = vi.fn(async () => "host-socket-1");
+    Object.defineProperty(window, "nanobotHost", {
+      configurable: true,
+      value: {
+        openSocket,
+        sendSocket: vi.fn(async () => undefined),
+        closeSocket: vi.fn(async () => undefined),
+        onSocketEvent: vi.fn((handler) => {
+          socketEventHandler = handler;
+          return vi.fn();
+        }),
+      },
+    });
+    const client = new NanobotClient({
+      url: "nanobot-host://engine/",
+      reconnect: false,
+    });
+    const status = vi.fn();
+    client.onStatus(status);
+
+    client.connect();
+    await Promise.resolve();
+    socketEventHandler?.({ id: "host-socket-1", type: "open" });
+
+    expect(openSocket).toHaveBeenCalledWith("nanobot-host://engine/");
+    expect(status).toHaveBeenLastCalledWith("open");
   });
 
   it("buffers chat events while no chat handler is registered and replays on subscribe", () => {

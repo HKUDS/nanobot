@@ -62,6 +62,7 @@ interface ThreadShellProps {
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hideThemeButton?: boolean;
   hideHeader?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
   workspaceDefaultScope?: WorkspaceScopePayload | null;
@@ -142,6 +143,7 @@ export function ThreadShell({
   theme = "light",
   onToggleTheme = () => {},
   hideSidebarToggleForHostChrome = false,
+  hideThemeButton = false,
   hideHeader = false,
   workspaceScope = null,
   workspaceDefaultScope = null,
@@ -567,6 +569,7 @@ export function ThreadShell({
           theme={theme}
           onToggleTheme={onToggleTheme}
           hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
+          hideThemeButton={hideThemeButton}
           minimal={!session && !loading}
         />
       ) : null}

@@ -869,6 +869,39 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Target text was not found in angry-birds.html.")).toBeInTheDocument();
   });
 
+  it("keeps permission errors readable for failed file edits", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "write_file()",
+          traces: ["write_file()"],
+          fileEdits: [{
+            call_id: "call-write",
+            tool: "write_file",
+            path: "/Users/renxubin/.nanobot/workspace/agent-research-video/composition.html",
+            phase: "error",
+            added: 0,
+            deleted: 0,
+            approximate: false,
+            status: "error",
+            error: "Error writing file: [Errno 13] Permission denied: '/Users/renxubin'",
+          }],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /failed composition\.html/i }));
+
+    expect(screen.getByText("No permission to change this location.")).toBeInTheDocument();
+    expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
+  });
+
   it("merges repeated edits for the same path and lets successful edits win over failures", async () => {
     const restoreMotion = installReducedMotion();
     try {
