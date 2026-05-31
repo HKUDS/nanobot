@@ -160,12 +160,13 @@
 </details>
 
 
-## 💡 Key Features of nanobot
+## 💡 Why nanobot
 
-- **Ultra-lightweight**: stable long-running agent behavior with a small, readable core.
-- **Research-ready**: the codebase is intentionally simple enough to study, modify, and extend.
-- **Practical**: chat channels, API, memory, MCP, and deployment paths are already built in.
-- **Hackable**: you can start fast, then go deeper through repo docs instead of a monolithic landing page.
+- **Long-running by design**: goals, memory, tools, and channel context stay alive across real workflows.
+- **Meet users where they chat**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, and more from one agent loop.
+- **Bring your own model stack**: OpenAI-compatible providers, local LLMs, image generation, search, and fallback routing.
+- **Small core, serious surface area**: readable agent internals with MCP, memory, deployment, and automation built in.
+- **Built to be owned**: easy to inspect, customize, self-host, and extend without adopting a giant platform.
 
 ## 📦 Install
 
