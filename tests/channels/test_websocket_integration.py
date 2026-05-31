@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import websockets
 
-from nanobot.channels.websocket import WebSocketChannel
+from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.bus.events import OutboundMessage
+from nanobot.webui.ws_http import GatewayHTTPHandler
 from ws_test_client import WsTestClient, issue_token, issue_token_ok
 
 
@@ -29,7 +31,18 @@ def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:
         "websocketRequiresToken": False,
     }
     cfg.update(kw)
-    return WebSocketChannel(cfg, bus)
+    parsed = WebSocketConfig.model_validate(cfg)
+    handler = GatewayHTTPHandler(
+        config=parsed,
+        session_manager=None,
+        static_dist_path=None,
+        workspace_path=Path.cwd(),
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+        bus=bus,
+    )
+    return WebSocketChannel(cfg, bus, http_handler=handler)
 
 
 @pytest.fixture()

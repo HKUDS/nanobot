@@ -28,7 +28,6 @@ from websockets.http11 import Response
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.webui.ws_http import GatewayHTTPHandler
 from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.config.schema import Base
 from nanobot.security.workspace_access import (
@@ -457,12 +456,10 @@ class WebSocketChannel(BaseChannel):
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
-        static_dist_path: Path | None = None,
+        http_handler: Any | None = None,
         workspace_path: Path | None = None,
         restrict_to_workspace: bool = False,
-        runtime_model_name: Callable[[], str | None] | None = None,
         runtime_surface: str = "browser",
-        runtime_capabilities_overrides: dict[str, Any] | None = None,
     ):
         if isinstance(config, dict):
             config = WebSocketConfig.model_validate(config)
@@ -476,32 +473,16 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[Any, str] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
-        _resolved_workspace = (
-            Path(workspace_path).expanduser()
-            if workspace_path is not None
-            else get_workspace_path()
-        ).resolve(strict=False)
         self._default_restrict_to_workspace = restrict_to_workspace
         self._runtime_surface = (
             "native" if runtime_surface in {"native", "desktop"} else "browser"
         )
 
-        # HTTP API handler — owns tokens, sessions, media, settings, static serving
-        self._http = GatewayHTTPHandler(
-            config=self.config,
-            session_manager=session_manager,
-            static_dist_path=(
-                static_dist_path.resolve() if static_dist_path is not None else None
-            ),
-            workspace_path=_resolved_workspace,
-            runtime_model_name=runtime_model_name,
-            runtime_surface=self._runtime_surface,
-            runtime_capabilities_overrides=runtime_capabilities_overrides,
-            bus=self.bus,
-            log=self.logger,
-        )
-        # Backwards-compat aliases for workspace controller used in envelope dispatch
-        self._webui_workspaces = self._http.workspaces
+        # HTTP handler injected from outside (ChannelManager / gateway startup).
+        # Owns tokens, sessions, media, settings, static serving.
+        self._http = http_handler
+        # Backwards-compat: workspace controller used in envelope dispatch
+        self._webui_workspaces = http_handler.workspaces if http_handler else None
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
 
@@ -613,8 +594,6 @@ class WebSocketChannel(BaseChannel):
 
     def _handle_bootstrap(self, connection, request):
         return self._http._handle_bootstrap(connection, request)
-
-    _MAX_ISSUED_TOKENS = GatewayHTTPHandler._MAX_ISSUED_TOKENS
 
     def _handle_sessions_list(self, request):
         return self._http._handle_sessions_list(request)
