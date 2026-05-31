@@ -380,7 +380,7 @@ class GatewayHTTPHandler:
     # -- Token issue --------------------------------------------------------
 
     def _handle_token_issue(self, connection: Any, request: Any) -> Any:
-        secret = self.config.token_issue_secret.strip()
+        secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return connection.respond(401, "Unauthorized")
