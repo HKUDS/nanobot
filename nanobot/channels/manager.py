@@ -229,8 +229,17 @@ class ChannelManager:
                         await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)
+                        if msg.delivery_future and not msg.delivery_future.done():
+                            msg.delivery_future.set_exception(e)
+                    else:
+                        if msg.delivery_future and not msg.delivery_future.done():
+                            msg.delivery_future.set_result(None)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
+                    if msg.delivery_future and not msg.delivery_future.done():
+                        msg.delivery_future.set_exception(
+                            RuntimeError(f"Unknown channel: {msg.channel}")
+                        )
                     
             except asyncio.TimeoutError:
                 continue

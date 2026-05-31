@@ -476,8 +476,16 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    # `clean` here is the LLM exception text (e.g. provider
+                    # billing errors). Never relay it verbatim: external users
+                    # don't need to see "litellm.BadRequestError: ..." and it
+                    # leaks internal state. Log the full error, send a generic
+                    # response.
+                    logger.error("LLM returned error: {}", (clean or "")[:500])
+                    final_content = (
+                        "Sorry, I had trouble processing that just now. "
+                        "Please try again in a moment."
+                    )
                     break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,

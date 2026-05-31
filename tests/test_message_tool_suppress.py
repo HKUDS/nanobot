@@ -19,6 +19,16 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10)
 
 
+def _make_resolving_send(sent):
+    """Replicate the dispatcher: append the OutboundMessage AND resolve
+    its delivery_future so MessageTool.execute does not stall on the wait."""
+    async def _cb(msg):
+        sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
+    return _cb
+
+
 class TestMessageToolSuppressLogic:
     """Final reply suppressed only when message tool sends to the same target."""
 
@@ -39,7 +49,7 @@ class TestMessageToolSuppressLogic:
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
-            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+            mt.set_send_callback(AsyncMock(side_effect=_make_resolving_send(sent)))
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send")
         result = await loop._process_message(msg)
@@ -64,7 +74,7 @@ class TestMessageToolSuppressLogic:
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
-            mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+            mt.set_send_callback(AsyncMock(side_effect=_make_resolving_send(sent)))
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Send email")
         result = await loop._process_message(msg)

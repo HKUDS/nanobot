@@ -16,6 +16,8 @@ async def test_explicit_channel_without_chat_id_is_rejected() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,
@@ -37,6 +39,8 @@ async def test_unknown_fs_peer_is_rejected() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,
@@ -57,6 +61,8 @@ async def test_known_fs_peer_is_sent() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,
@@ -80,6 +86,8 @@ async def test_message_tool_stamps_force_send() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,
@@ -108,6 +116,8 @@ async def test_fs_rate_limit_blocks_rapid_resends() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,
@@ -130,6 +140,8 @@ async def test_fs_rate_limit_is_per_peer() -> None:
 
     async def cb(msg):
         sent.append(msg)
+        if msg.delivery_future and not msg.delivery_future.done():
+            msg.delivery_future.set_result(None)
 
     tool = MessageTool(
         send_callback=cb,

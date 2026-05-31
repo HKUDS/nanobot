@@ -286,7 +286,11 @@ class TelegramChannel(BaseChannel):
                             reply_parameters=reply_params
                         )
                     except Exception as e2:
+                        # Re-raise so the outbound dispatcher can surface the
+                        # failure back to the caller (e.g. MessageTool sets
+                        # an error result instead of falsely reporting "sent").
                         logger.error("Error sending Telegram message: {}", e2)
+                        raise
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

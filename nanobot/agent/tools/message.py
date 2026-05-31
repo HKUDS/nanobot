@@ -1,10 +1,18 @@
 """Message tool for sending messages to users."""
 
+import asyncio
 import time
 from typing import Any, Awaitable, Callable
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
+
+# Hard cap on how long MessageTool waits for delivery confirmation from
+# the outbound dispatcher. Long enough for Telegram round-trips + retries;
+# short enough that the agent doesn't stall.
+_DELIVERY_TIMEOUT_S = 8.0
 
 
 class MessageTool(Tool):
@@ -137,6 +145,10 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        # Attach a delivery future so the outbound dispatcher can tell us
+        # whether the send actually succeeded — instead of fire-and-forget.
+        loop = asyncio.get_running_loop()
+        delivery_future: asyncio.Future = loop.create_future()
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
@@ -147,17 +159,37 @@ class MessageTool(Tool):
                 # Mark this as a proactive/intentional send so channels with
                 # auto_reply_enabled=False (e.g. fs) still deliver it.
                 "force_send": True,
-            }
+            },
+            delivery_future=delivery_future,
         )
 
         try:
             await self._send_callback(msg)
-            if channel == self._default_channel and chat_id == self._default_chat_id:
-                self._sent_in_turn = True
-            if channel == "fs":
-                self._fs_last_send_at[chat_id] = time.monotonic()
-            media_info = f" with {len(media)} attachments" if media else ""
-            preview = content[:200] + "..." if len(content) > 200 else content
-            return f"Message sent to {channel}:{chat_id}{media_info}: \"{preview}\""
         except Exception as e:
             return f"Error sending message: {str(e)}"
+
+        # Wait for the dispatcher to report actual delivery (or failure).
+        try:
+            await asyncio.wait_for(delivery_future, timeout=_DELIVERY_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Message delivery to {}:{} not confirmed within {}s",
+                channel, chat_id, _DELIVERY_TIMEOUT_S,
+            )
+            return (
+                f"Delivery to {channel}:{chat_id} not confirmed within "
+                f"{_DELIVERY_TIMEOUT_S:.0f}s. The send may still complete, but "
+                f"don't tell the user it was delivered — re-check or ask them "
+                f"if they received it."
+            )
+        except Exception as e:
+            # Channel reported a real send failure (e.g. 'Chat not found').
+            return f"Error sending message: {str(e)}"
+
+        if channel == self._default_channel and chat_id == self._default_chat_id:
+            self._sent_in_turn = True
+        if channel == "fs":
+            self._fs_last_send_at[chat_id] = time.monotonic()
+        media_info = f" with {len(media)} attachments" if media else ""
+        preview = content[:200] + "..." if len(content) > 200 else content
+        return f"Message sent to {channel}:{chat_id}{media_info}: \"{preview}\""

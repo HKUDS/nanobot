@@ -1,5 +1,6 @@
 """Event types for the message bus."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -27,12 +28,17 @@ class InboundMessage:
 @dataclass
 class OutboundMessage:
     """Message to send to a chat channel."""
-    
+
     channel: str
     chat_id: str
     content: str
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Optional future the outbound dispatcher resolves after attempting delivery.
+    # Set by the publisher (e.g. MessageTool) when it wants to confirm or
+    # surface a delivery error rather than fire-and-forget. The dispatcher
+    # calls set_result(None) on success or set_exception(err) on failure.
+    delivery_future: asyncio.Future | None = field(default=None, repr=False, compare=False)
 
 
