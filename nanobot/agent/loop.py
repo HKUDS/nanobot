@@ -224,6 +224,12 @@ class AgentLoop:
             if context_window_tokens is not None
             else defaults.context_window_tokens
         )
+        logger.info(
+            "Context window: {} tokens (max_output={}, budget={})",
+            self.context_window_tokens,
+            getattr(getattr(provider, "generation", None), "max_tokens", "?"),
+            self._replay_token_budget(),
+        )
         self.context_block_limit = context_block_limit
         self.max_tool_result_chars = (
             max_tool_result_chars
@@ -405,6 +411,12 @@ class AgentLoop:
         self.provider = provider
         self.model = model
         self.context_window_tokens = context_window_tokens
+        logger.info(
+            "Provider switched: model={} context_window={} tokens budget={}",
+            model,
+            context_window_tokens,
+            self._replay_token_budget(),
+        )
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
