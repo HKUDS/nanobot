@@ -264,7 +264,7 @@ export default function MarkdownTextRenderer({
         if (fence) {
           return (
             <CodeBlock
-              language={fence.language}
+              language={fence.language || "text"}
               code={fence.code}
               className="my-3"
               highlight={highlightCode}

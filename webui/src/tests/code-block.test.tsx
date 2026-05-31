@@ -48,6 +48,22 @@ describe("CodeBlock", () => {
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
   });
 
+  it("falls back to 'text' language when language is undefined", async () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock language={undefined} code="const value = 1;" />
+      </ThemeProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("highlighted-code")).toBeInTheDocument();
+    expect(screen.getByText("const value = 1;")).toBeInTheDocument();
+  });
+
   it("reads theme from context without creating per-block observers", async () => {
     const originalMutationObserver = globalThis.MutationObserver;
     const observer = vi.fn();
