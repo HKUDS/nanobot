@@ -3,6 +3,7 @@
 import asyncio
 import html
 import imaplib
+import mimetypes
 import re
 import smtplib
 import ssl
@@ -212,6 +213,28 @@ class EmailChannel(BaseChannel):
         email_msg["To"] = to_addr
         email_msg["Subject"] = subject
         email_msg.set_content(msg.content or "")
+
+        # Attach media files
+        for media_path in msg.media or []:
+            path = Path(media_path)
+            if not path.is_file():
+                self.logger.warning("Attachment not found, skipping: {}", media_path)
+                continue
+            try:
+                data = path.read_bytes()
+                ctype, encoding = mimetypes.guess_type(str(path))
+                if ctype is None:
+                    ctype = "application/octet-stream"
+                maintype, subtype = ctype.split("/", 1)
+                email_msg.add_attachment(
+                    data,
+                    maintype=maintype,
+                    subtype=subtype,
+                    filename=path.name,
+                )
+                self.logger.info("Attached file: {}", path.name)
+            except Exception:
+                self.logger.exception("Failed to attach file {}", media_path)
 
         in_reply_to = self._last_message_id_by_chat.get(to_addr)
         if in_reply_to:
