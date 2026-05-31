@@ -194,7 +194,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    expect(screen.getByLabelText(/editing foo\.txt/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/edited foo\.txt/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/editing foo\.txt/i)).not.toBeInTheDocument();
   });
 
   it("folds final answer reasoning into the preceding activity timeline", () => {

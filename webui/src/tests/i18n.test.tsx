@@ -34,6 +34,60 @@ const SETTINGS_NAV_KEYS = [
   "runtime",
   "advanced",
 ];
+const LOCALIZED_SETTINGS_COPY_KEYS = [
+  "settings.backToChat",
+  "settings.sidebar.title",
+  "settings.sidebar.ariaLabel",
+  "settings.nav.overview",
+  "settings.nav.appearance",
+  "settings.nav.models",
+  "settings.nav.providers",
+  "settings.nav.apps",
+  "settings.nav.runtime",
+  "settings.nav.advanced",
+  "settings.sections.interface",
+  "settings.sections.localPreferences",
+  "settings.sections.webSearch",
+  "settings.sections.webBehavior",
+  "settings.sections.webuiSafety",
+  "settings.sections.capabilities",
+  "settings.sections.apps",
+  "settings.rows.theme",
+  "settings.rows.language",
+  "settings.rows.density",
+  "settings.rows.activityMode",
+  "settings.rows.codeWrap",
+  "settings.rows.brandLogos",
+  "settings.rows.currentModel",
+  "settings.rows.localServiceAccess",
+  "settings.rows.webuiDefaultAccess",
+  "settings.rows.contextWindow",
+  "settings.help.theme",
+  "settings.help.language",
+  "settings.help.density",
+  "settings.help.activityMode",
+  "settings.help.codeWrap",
+  "settings.help.brandLogos",
+  "settings.help.currentModel",
+  "settings.help.localServiceAccess",
+  "settings.help.webuiDefaultAccess",
+  "settings.values.light",
+  "settings.values.dark",
+  "settings.values.comfortable",
+  "settings.values.compact",
+  "settings.values.expanded",
+  "settings.values.enabled",
+  "settings.values.disabled",
+  "settings.values.defaultPermission",
+  "settings.values.fullAccess",
+  "settings.values.configured",
+  "settings.values.notConfigured",
+  "settings.status.loading",
+  "settings.status.unsaved",
+  "settings.status.upToDate",
+  "settings.actions.save",
+  "settings.actions.saving",
+];
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -187,6 +241,20 @@ describe("webui i18n", () => {
       expect(common.settings.byok.showApiKey).toBeTruthy();
       expect(common.settings.byok.hideApiKey).toBeTruthy();
       expect(common.settings.byok.configuredKeyHint).toBeTruthy();
+    }
+  });
+
+  it("does not leak English settings chrome into localized locales", () => {
+    const english = flattenResource(resources.en.common);
+
+    for (const [locale, resource] of Object.entries(resources)) {
+      if (locale === "en") continue;
+      const current = flattenResource(resource.common);
+      const leaked = LOCALIZED_SETTINGS_COPY_KEYS.filter(
+        (key) => current.get(key) === english.get(key),
+      );
+
+      expect({ locale, leaked }).toEqual({ locale, leaked: [] });
     }
   });
 
