@@ -45,6 +45,7 @@ from nanobot.session.goal_state import (
     sustained_goal_active,
 )
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session import turn_continuation
 from nanobot.session.webui_turns import (
     WebuiTurnCoordinator,
     build_bus_progress_callback,
@@ -112,6 +113,7 @@ class TurnContext:
     save_skip: int = 0
 
     outbound: OutboundMessage | None = None
+    suppress_response: bool = False
 
     on_progress: Callable[..., Awaitable[None]] | None = None
     on_stream: Callable[[str], Awaitable[None]] | None = None
@@ -121,6 +123,7 @@ class TurnContext:
     pending_queue: asyncio.Queue | None = None
     pending_summary: str | None = None
     turn_wall_started_at: float = field(default_factory=time.time)
+    visible_run_started_at: float | None = None
     turn_latency_ms: int | None = None
 
     trace: list[StateTraceEntry] = field(default_factory=list)
@@ -565,6 +568,8 @@ class AgentLoop:
 
         Returns True if the message was persisted.
         """
+        if not turn_continuation.should_persist_user_message(msg.metadata):
+            return False
         media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
         has_text = isinstance(msg.content, str) and msg.content.strip()
         if has_text or media_paths:
@@ -771,6 +776,7 @@ class AgentLoop:
             + "\n\nPlease continue working toward the objective using your tools, "
             "or call complete_goal if the work is truly finished."
         ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
+        session_metadata = session.metadata if session is not None else None
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -796,7 +802,8 @@ class AgentLoop:
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
                     session.key if session is not None else session_key,
-                    metadata=(session.metadata if session is not None else None),
+                    metadata=session_metadata,
+                    message_metadata=metadata,
                 ),
                 goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
                 goal_continue_message=_goal_continue,
@@ -808,9 +815,15 @@ class AgentLoop:
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
+            should_stream = turn_continuation.should_stream_budget_response(
+                stop_reason=result.stop_reason,
+                pending_queue_available=pending_queue is not None and session is not None,
+                session_metadata=session_metadata,
+                message_metadata=metadata,
+            )
             # Push final content through stream so streaming channels (e.g. Feishu)
             # update the card instead of leaving it empty.
-            if on_stream and on_stream_end:
+            if on_stream and on_stream_end and should_stream:
                 await on_stream(result.final_content or "")
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
@@ -953,7 +966,8 @@ class AgentLoop:
                             channel=msg.channel, chat_id=msg.chat_id,
                             content="", metadata=msg.metadata or {},
                         ))
-                    if msg.channel == "websocket":
+                    continuing = turn_continuation.internal_continuation_pending(msg.metadata)
+                    if msg.channel == "websocket" and not continuing:
                         turn_lat = self._pending_turn_latency_ms.pop(session_key, None)
                         await self._webui_turns.handle_turn_end(
                             msg,
@@ -1017,9 +1031,10 @@ class AgentLoop:
                                 "Re-published {} leftover message(s) to bus for session {}",
                                 leftover, session_key,
                             )
-                    await self._webui_turns.publish_run_status(msg, "idle")
-                    self._pending_turn_latency_ms.pop(session_key, None)
-                    self._webui_turns.discard(session_key)
+                    if not turn_continuation.internal_continuation_pending(msg.metadata):
+                        await self._webui_turns.publish_run_status(msg, "idle")
+                        self._pending_turn_latency_ms.pop(session_key, None)
+                        self._webui_turns.discard(session_key)
         finally:
             if pending is None:
                 await self._webui_turns.publish_run_status(msg, "idle")
@@ -1167,12 +1182,17 @@ class AgentLoop:
             )
 
         key = session_key or msg.session_key
+        t0 = time.time()
         ctx = TurnContext(
             msg=msg,
             session=None,
             session_key=key,
             state=TurnState.RESTORE,
             turn_id=f"{key}:{time.time_ns()}",
+            turn_wall_started_at=t0,
+            visible_run_started_at=turn_continuation.internal_continuation_run_started_at(
+                msg.metadata,
+            ),
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
@@ -1378,7 +1398,13 @@ class AgentLoop:
         return "ok"
 
     async def _state_run(self, ctx: TurnContext) -> str:
-        await self._webui_turns.publish_run_status(ctx.msg, "running")
+        if ctx.visible_run_started_at is None:
+            ctx.visible_run_started_at = time.time()
+        await self._webui_turns.publish_run_status(
+            ctx.msg,
+            "running",
+            started_at=ctx.visible_run_started_at,
+        )
         result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
@@ -1399,15 +1425,25 @@ class AgentLoop:
         ctx.all_messages = all_msgs
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
+        await turn_continuation.maybe_continue_turn(ctx)
         return "ok"
 
     async def _state_save(self, ctx: TurnContext) -> str:
-        if ctx.final_content is None or not ctx.final_content.strip():
+        turn_continuation.prepare_save_boundary(ctx)
+
+        if (
+            (ctx.final_content is None or not ctx.final_content.strip())
+            and not ctx.suppress_response
+        ):
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
-
-        ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
+        latency_started_at = (
+            ctx.visible_run_started_at
+            if turn_continuation.internal_continuation_inbound(ctx.msg.metadata)
+            and ctx.visible_run_started_at is not None
+            else ctx.turn_wall_started_at
+        )
+        ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
         self._save_turn(
             ctx.session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
@@ -1427,6 +1463,9 @@ class AgentLoop:
         return "ok"
 
     async def _state_respond(self, ctx: TurnContext) -> str:
+        if ctx.suppress_response:
+            ctx.outbound = None
+            return "ok"
         ctx.outbound = self._assemble_outbound(
             ctx.msg,
             ctx.final_content,
