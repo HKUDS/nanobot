@@ -14,7 +14,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
@@ -28,7 +28,7 @@ from websockets.http11 import Response
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_media_dir, get_workspace_path
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
@@ -43,9 +43,6 @@ from nanobot.utils.media_decode import (
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.transcript import append_transcript_object
-
-if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
 
 
 def _strip_trailing_slash(path: str) -> str:
