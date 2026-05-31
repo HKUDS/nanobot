@@ -206,6 +206,72 @@ Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 </details>
 
 <details>
+<summary><b>Azure OpenAI</b></summary>
+
+The `azure_openai` provider talks to your Azure OpenAI resource via the OpenAI **Responses API** (`/openai/v1/responses`). Model names map to **deployment names**, not OpenAI model IDs. Two authentication modes are supported.
+
+**Mode 1: Static API key** (simplest)
+
+```json
+{
+  "providers": {
+    "azure_openai": {
+      "apiKey": "${AZURE_OPENAI_API_KEY}",
+      "apiBase": "https://my-resource.openai.azure.com"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "azure_openai",
+      "model": "my-gpt-5-deployment"
+    }
+  }
+}
+```
+
+**Mode 2: Microsoft Entra ID (Azure AD) via `DefaultAzureCredential`**
+
+Omit `apiKey` (or leave it empty / unset). The provider falls back to [`DefaultAzureCredential`](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains#defaultazurecredential-overview) and acquires a bearer token scoped to `https://cognitiveservices.azure.com/.default` for every request. The Azure SDK's own MSAL-backed cache returns valid tokens without a network round-trip.
+
+```json
+{
+  "providers": {
+    "azure_openai": {
+      "apiBase": "https://my-resource.openai.azure.com"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "azure_openai",
+      "model": "my-gpt-5-deployment"
+    }
+  }
+}
+```
+
+Install the optional dependency:
+
+```bash
+pip install 'nanobot-ai[azure]'
+```
+
+`DefaultAzureCredential` walks this chain in order and uses the first identity that succeeds:
+
+1. **EnvironmentCredential** — reads `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and one of `AZURE_CLIENT_SECRET` / `AZURE_CLIENT_CERTIFICATE_PATH` / `AZURE_USERNAME` + `AZURE_PASSWORD`.
+2. **WorkloadIdentityCredential** — for AKS workload-identity / federated tokens (`AZURE_FEDERATED_TOKEN_FILE`).
+3. **ManagedIdentityCredential** — for Azure VMs, App Service, Functions, Container Apps, etc.
+4. **AzureCliCredential** — uses the token from `az login` on your dev machine.
+5. **AzurePowerShellCredential** — uses the token from `Connect-AzAccount`.
+6. **AzureDeveloperCliCredential** — uses the token from `azd auth login`.
+7. **InteractiveBrowserCredential** *(disabled by default)*.
+
+The identity that ends up signing the request **must be assigned the `Cognitive Services OpenAI User` RBAC role** (or higher) on the Azure OpenAI resource. Without that role you will see `401`/`403` errors at the first request.
+
+> `apiBase` remains mandatory in both modes — it's your Azure resource endpoint and cannot be inferred. If neither `apiKey` is set nor `azure-identity` is installed, the provider raises a clear error pointing you at `pip install 'nanobot-ai[azure]'`.
+
+</details>
+
+<details>
 <summary><b>Skywork / APIFree</b></summary>
 
 Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provider

@@ -68,6 +68,9 @@ dependencies = [
 api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
+azure = [
+    "azure-identity>=1.19.0,<2.0.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
