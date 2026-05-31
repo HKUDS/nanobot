@@ -16,6 +16,17 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("pre div")).toBeNull();
   });
 
+  it("renders bare fenced code blocks without crashing", () => {
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"Some text\n\n```\ncode without language\n```"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.getByText("code without language")).toBeInTheDocument();
+    expect(container.querySelectorAll("pre")).toHaveLength(1);
+  });
+
   it("keeps streaming unfinished fenced code blocks to a single shell", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
