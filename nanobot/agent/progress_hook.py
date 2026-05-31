@@ -76,20 +76,25 @@ class AgentProgressHook(AgentHook):
         return name in sig.parameters
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        prev_clean = strip_think(self._stream_buf)
+        # The runner's XmlToolCallSanitizer has already cleaned *delta* of
+        # any XML tool-call artifacts.  We must use the sanitised delta
+        # directly rather than re-deriving incremental text from the raw
+        # _stream_buf (which still contains the un-sanitised content and
+        # would re-introduce the XML into the channel stream).
+        #
+        # _stream_buf is still updated for think-block extraction.
         self._stream_buf += delta
-        new_clean = strip_think(self._stream_buf)
-        incremental = new_clean[len(prev_clean) :]
 
         if await self._think_extractor.feed(self._stream_buf, self.emit_reasoning):
             context.streamed_reasoning = True
 
-        if incremental:
-            # Answer text has started; close the reasoning segment so the UI can
-            # lock the bubble before the answer renders below it.
+        # Use the already-clean delta directly instead of computing
+        # incremental from the raw buffer.
+        safe = strip_think(delta) or ""
+        if safe:
             await self.emit_reasoning_end()
             if self._on_stream:
-                await self._on_stream(incremental)
+                await self._on_stream(safe)
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self.emit_reasoning_end()

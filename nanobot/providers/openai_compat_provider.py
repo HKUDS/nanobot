@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re as _re
 import secrets
 import string
 import time
@@ -137,6 +138,212 @@ def _float_env(name: str, default: float) -> float:
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
+
+
+# -- XML tool call fallback parser -------------------------------------------
+# Some models (mimo-v2.5, glm-5.1) occasionally emit tool calls as XML text
+# in the content field instead of the structured tool_calls field.  When
+# nanobot only sees the structured field, the raw XML leaks to channels.
+# These patterns detect and convert the text-format tool calls back into
+# ToolCallRequest objects so they are executed normally.
+
+_XML_FUNCTION_RE = _re.compile(
+    r"<function=(?P<name>[^>]+)>\s*"
+    r"(?P<params>(?:<parameter=[^>]+>[^<]*</parameter>\s*)*)"
+    r"</function>",
+    _re.DOTALL,
+)
+_XML_PARAM_RE = _re.compile(
+    r"<parameter=(?P<key>[^>]+)>(?P<value>[^<]*)</parameter>",
+    _re.DOTALL,
+)
+# Spurious tool-call markers emitted by some models (e.g. <tool_call_none>)
+_XML_TOOL_CALL_MARKER_RE = _re.compile(r"<tool_call[^>]*/?>")
+# Closing tool-call tags
+_XML_TOOL_CALL_CLOSE_RE = _re.compile(r"</tool_call[^>]*>")
+# Orphan function blocks where the leading '<' was emitted in a reasoning
+# delta and the rest arrived in content deltas: ``function=NAME>…</function>``
+_XML_ORPHAN_FUNCTION_RE = _re.compile(
+    r"function=(?P<oname>[^>]+)>\s*"
+    r"(?P<oparams>(?:<parameter=[^>]+>[^<]*</parameter>\s*)*)"
+    r"</function>",
+    _re.DOTALL,
+)
+
+
+def _extract_xml_tool_calls(
+    content: str | None,
+) -> tuple[str | None, list[ToolCallRequest]]:
+    """Parse XML-format tool calls embedded in content text.
+
+    Returns (cleaned_content, parsed_tool_calls).  When no XML patterns are
+    found the original *content* is returned unchanged with an empty list.
+
+    Handles two patterns:
+    - ``<function=NAME><parameter=KEY>VALUE</parameter>...</function>``
+    - Strips spurious markers like ``<tool_call_none>`` / ``</tool_call``.
+    """
+    if not content or ("<function=" not in content and "tool_call" not in content
+                       and "<tool" not in content):
+        return content, []
+
+    calls: list[ToolCallRequest] = []
+    for m in _XML_FUNCTION_RE.finditer(content):
+        name = m.group("name").strip()
+        args: dict[str, str] = {}
+        for pm in _XML_PARAM_RE.finditer(m.group("params")):
+            args[pm.group("key").strip()] = pm.group("value")
+        calls.append(
+            ToolCallRequest(
+                id=_short_tool_id(),
+                name=name,
+                arguments=args,
+            )
+        )
+
+    # Strip all XML artifacts even if no parseable tool calls were found
+    cleaned = content
+    if calls:
+        logger.info(
+            "Extracted {} XML tool call(s) from content: {}",
+            len(calls),
+            [c.name for c in calls],
+        )
+        cleaned = _XML_FUNCTION_RE.sub("", cleaned)
+    # Remove spurious tool_call markers
+    cleaned = _XML_TOOL_CALL_MARKER_RE.sub("", cleaned)
+    cleaned = _XML_TOOL_CALL_CLOSE_RE.sub("", cleaned)
+    cleaned = cleaned.strip() or None
+
+    if not calls and cleaned == content:
+        return content, []
+    return cleaned if cleaned is not None else None, calls
+
+
+def _apply_xml_tool_call_fallback(response: LLMResponse) -> LLMResponse:
+    """Apply XML tool call extraction to an LLMResponse.
+
+    When the response has no structured tool calls but the content contains
+    XML-format tool calls, parse them out and override finish_reason to
+    ``tool_calls`` so the agent runner executes them.
+    """
+    if response.tool_calls:
+        return response  # structured tool calls present — no fallback needed
+    clean, xml_tcs = _extract_xml_tool_calls(response.content)
+    if not xml_tcs:
+        return response
+    return LLMResponse(
+        content=clean,
+        tool_calls=xml_tcs,
+        finish_reason="tool_calls",
+        usage=response.usage,
+        reasoning_content=response.reasoning_content,
+    )
+
+
+class XmlToolCallSanitizer:
+    """Strip XML tool call patterns from streaming content deltas.
+
+    Buffers text that may be the start of a ``<function=…>``,
+    ``<tool_call…>``, or ``</tool_call…>`` block and only flushes
+    content that is confirmed safe (not XML tool calls).
+    """
+
+    # Opening markers that signal a potential XML artifact
+    _OPEN_MARKERS = ("<function=", "<tool_call", "<tool")
+    # Prefixes to buffer during streaming — includes partial forms like
+    # ``<function`` (without ``=``) because the model may emit the tag
+    # name across multiple deltas: ``<function`` then ``=name>``.
+    # Also includes ``<parameter`` for nested parameter tags and
+    # ``function=`` to catch orphan fragments where the leading ``<`` was
+    # emitted in a reasoning delta (bypassing the content sanitizer).
+    _BUFFER_PREFIXES = (
+        "<function=", "<function", "<tool_call", "<tool", "</tool", "</",
+        "<parameter", "function=",
+    )
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def feed(self, delta: str) -> str:
+        """Process a streaming delta, returning safe text (empty if buffered)."""
+        self._buf += delta
+        out = ""
+        while self._buf:
+            # If buffer contains a complete <function=...> block, strip it
+            m = _XML_FUNCTION_RE.search(self._buf)
+            if m:
+                out += self._buf[: m.start()]
+                self._buf = self._buf[m.end():]
+                continue
+            # Strip complete <tool_call...> markers
+            m2 = _XML_TOOL_CALL_MARKER_RE.search(self._buf)
+            if m2:
+                out += self._buf[: m2.start()]
+                self._buf = self._buf[m2.end():]
+                continue
+            # Strip complete </tool_call...> markers
+            m3 = _XML_TOOL_CALL_CLOSE_RE.search(self._buf)
+            if m3:
+                out += self._buf[: m3.start()]
+                self._buf = self._buf[m3.end():]
+                continue
+            # Strip orphan function blocks (leading '<' was in reasoning delta)
+            m4 = _XML_ORPHAN_FUNCTION_RE.search(self._buf)
+            if m4:
+                out += self._buf[: m4.start()]
+                self._buf = self._buf[m4.end():]
+                continue
+            # Check if buffer might contain the START of an incomplete XML block
+            # Hold back from the earliest marker onward
+            earliest = len(self._buf)
+            for prefix in self._BUFFER_PREFIXES:
+                idx = self._buf.rfind(prefix)
+                if 0 <= idx < earliest:
+                    earliest = idx
+            if earliest < len(self._buf):
+                out += self._buf[:earliest]
+                self._buf = self._buf[earliest:]
+                break
+            # No XML pattern — flush everything
+            out += self._buf
+            self._buf = ""
+        return out
+
+    def flush(self) -> str:
+        """Flush any remaining buffer (call at end of stream).
+
+        Strips incomplete XML artifacts.  Complete ``<function=…>…</function>``
+        blocks were already removed by ``feed()``; anything left in the buffer
+        at flush time is by definition incomplete and safe to strip — *unless*
+        it looks like plain text that merely contains ``function=`` (e.g.
+        "the function=main is important").
+        """
+        remaining = self._buf
+        self._buf = ""
+        if not remaining:
+            return ""
+        # One last pass for complete orphan blocks that may have arrived in
+        # the final deltas.
+        m = _XML_ORPHAN_FUNCTION_RE.search(remaining)
+        if m:
+            remaining = remaining[: m.start()] + remaining[m.end():]
+        # Find the earliest prefix position (same strategy as feed()).
+        earliest = len(remaining)
+        for prefix in self._BUFFER_PREFIXES:
+            idx = remaining.rfind(prefix)
+            if idx < 0:
+                continue
+            # ``function=`` is ambiguous — only strip when the tail looks
+            # like an XML tag (``function=WORD>…``).  Plain text such as
+            # "function=main is important" is preserved.
+            if prefix == "function=" and not _re.search(r"function=\w+>", remaining[idx:]):
+                continue
+            if idx < earliest:
+                earliest = idx
+        if earliest < len(remaining):
+            remaining = remaining[:earliest]
+        return remaining
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -1031,13 +1238,14 @@ class OpenAICompatProvider(LLMProvider):
                     function_provider_specific_fields=fn_prov,
                 ))
 
-            return LLMResponse(
+            result = LLMResponse(
                 content=content,
                 tool_calls=parsed_tool_calls,
                 finish_reason=finish_reason,
                 usage=self._extract_usage(response_map),
                 reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
             )
+            return _apply_xml_tool_call_fallback(result)
 
         if not response.choices:
             return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
@@ -1078,13 +1286,14 @@ class OpenAICompatProvider(LLMProvider):
         if not reasoning_content and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
 
-        return LLMResponse(
+        result = LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
             reasoning_content=reasoning_content,
         )
+        return _apply_xml_tool_call_fallback(result)
 
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
@@ -1198,7 +1407,7 @@ class OpenAICompatProvider(LLMProvider):
                 b["id"] = _short_tool_id()
             _seen_tc_ids.add(b["id"])
 
-        return LLMResponse(
+        result = LLMResponse(
             content="".join(content_parts) or None,
             tool_calls=[
                 ToolCallRequest(
@@ -1215,6 +1424,7 @@ class OpenAICompatProvider(LLMProvider):
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
         )
+        return _apply_xml_tool_call_fallback(result)
 
     @classmethod
     def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:

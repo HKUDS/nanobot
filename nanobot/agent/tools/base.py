@@ -235,6 +235,28 @@ class Tool(ABC):
             items = schema.get("items")
             return [self._cast_value(x, items) for x in val] if items else val
 
+        # Some models emit tool parameters as XML text (e.g. <parameter=media>["a","b"]</parameter>)
+        # which arrives as a JSON string instead of the expected native type.
+        if isinstance(val, str):
+            import json as _json
+
+            stripped = val.strip()
+            if t == "array" and stripped.startswith("["):
+                try:
+                    parsed = _json.loads(stripped)
+                    if isinstance(parsed, list):
+                        items = schema.get("items")
+                        return [self._cast_value(x, items) for x in parsed] if items else parsed
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+            if t == "object" and stripped.startswith("{"):
+                try:
+                    parsed = _json.loads(stripped)
+                    if isinstance(parsed, dict):
+                        return self._cast_object(parsed, schema)
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+
         if t == "object" and isinstance(val, dict):
             return self._cast_object(val, schema)
 

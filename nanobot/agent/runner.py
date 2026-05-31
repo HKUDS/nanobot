@@ -678,10 +678,14 @@ class AgentRunner:
                 await live_file_edits.update(delta)
 
         if wants_streaming:
+            from nanobot.providers.openai_compat_provider import XmlToolCallSanitizer
+            _xml_sanitizer = XmlToolCallSanitizer()
+
             async def _stream(delta: str) -> None:
-                if delta:
+                safe = _xml_sanitizer.feed(delta)
+                if safe:
                     context.streamed_content = True
-                await hook.on_stream(context, delta)
+                    await hook.on_stream(context, safe)
 
             async def _thinking(delta: str) -> None:
                 if not delta:
