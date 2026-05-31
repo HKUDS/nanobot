@@ -3,6 +3,18 @@
 Uses ``AsyncOpenAI`` pointed at ``https://{endpoint}/openai/v1/`` which
 routes to the Responses API (``/responses``).  Reuses shared conversion
 helpers from :mod:`nanobot.providers.openai_responses`.
+
+Authentication
+--------------
+Two modes are supported, selected automatically:
+
+1. **Static API key** — when ``api_key`` is non-empty it is sent as the
+   ``api-key`` / ``Authorization: Bearer`` header (existing behavior).
+2. **Microsoft Entra ID (AAD)** — when ``api_key`` is empty the provider
+   falls back to :class:`azure.identity.aio.DefaultAzureCredential` and
+   acquires a bearer token scoped to
+   ``https://cognitiveservices.azure.com/.default``.  ``azure-identity``
+   is an optional dependency installed via ``pip install nanobot-ai[azure]``.
 """
 
 from __future__ import annotations
@@ -21,6 +33,48 @@ from nanobot.providers.openai_responses import (
     parse_response_output,
 )
 
+_AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
+
+
+class _AzureTokenProvider:
+    """Async bearer-token callback for AAD authentication.
+
+    Thin wrapper around :class:`azure.identity.aio.DefaultAzureCredential`
+    that exposes itself as an async callable returning a fresh bearer
+    token.  The Azure SDK's own MSAL-backed token cache already returns
+    valid tokens without network calls, so no extra caching is layered on
+    top here.
+
+    Raises ``RuntimeError`` with a clear install hint if
+    ``azure-identity`` is not installed.
+    """
+
+    def __init__(self, scope: str = _AZURE_OPENAI_SCOPE) -> None:
+        try:
+            from azure.identity.aio import DefaultAzureCredential
+        except ImportError as exc:
+            raise RuntimeError(
+                "Azure OpenAI AAD authentication requires the 'azure-identity' package. "
+                "Install it with: pip install 'nanobot-ai[azure]'"
+            ) from exc
+
+        self._scope = scope
+        self._credential = DefaultAzureCredential()
+
+    async def __call__(self) -> str:
+        """Return a bearer token for the configured scope."""
+        access_token = await self._credential.get_token(self._scope)
+        return access_token.token
+
+    async def aclose(self) -> None:
+        """Release credential resources.  Safe to call multiple times."""
+        close = getattr(self._credential, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
+
 
 class AzureOpenAIProvider(LLMProvider):
     """Azure OpenAI provider backed by the Responses API.
@@ -31,6 +85,8 @@ class AzureOpenAIProvider(LLMProvider):
     - Calls ``client.responses.create()`` (Responses API)
     - Reuses shared message/tool/SSE conversion from
       ``openai_responses``
+    - Falls back to :class:`DefaultAzureCredential` (AAD) when ``api_key``
+      is empty.  See module docstring for details.
     """
 
     def __init__(
@@ -42,8 +98,6 @@ class AzureOpenAIProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
 
-        if not api_key:
-            raise ValueError("Azure OpenAI api_key is required")
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
 
@@ -52,10 +106,22 @@ class AzureOpenAIProvider(LLMProvider):
             api_base += "/"
         self.api_base = api_base
 
+        # Select auth mode.  A truthy api_key wins; otherwise fall back to
+        # AAD via DefaultAzureCredential.  The OpenAI SDK accepts an async
+        # callable as ``api_key`` and invokes it per request, using the
+        # returned string as the bearer token.
+        self._token_provider: _AzureTokenProvider | None = None
+        client_api_key: str | Callable[[], Awaitable[str]]
+        if api_key:
+            client_api_key = api_key
+        else:
+            self._token_provider = _AzureTokenProvider()
+            client_api_key = self._token_provider
+
         # SDK client targeting the Azure Responses API endpoint
         base_url = f"{api_base.rstrip('/')}/openai/v1/"
         self._client = AsyncOpenAI(
-            api_key=api_key,
+            api_key=client_api_key,
             base_url=base_url,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
             max_retries=0,
