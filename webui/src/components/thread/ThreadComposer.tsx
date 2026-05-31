@@ -393,6 +393,15 @@ function mcpPresetMentionPayload(preset: McpPresetInfo): OutboundMcpPresetMentio
   };
 }
 
+function RunPulseIcon() {
+  return (
+    <span className="run-pulse-icon relative flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+      <span className="run-pulse-icon__ring" />
+      <span className="run-pulse-icon__dot" />
+    </span>
+  );
+}
+
 function RunElapsedStrip({
   startedAt,
   goalState,
@@ -586,7 +595,7 @@ function RunElapsedStrip({
         aria-label={ariaLabel}
       >
         {displayShowTimer ? (
-          <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
+          <RunPulseIcon />
         ) : (
           <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
         )}
