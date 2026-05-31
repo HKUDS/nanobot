@@ -28,7 +28,7 @@ from websockets.http11 import Response
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.ws_http import GatewayHTTPHandler
+from nanobot.webui.ws_http import GatewayHTTPHandler
 from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.config.schema import Base
 from nanobot.security.workspace_access import (
