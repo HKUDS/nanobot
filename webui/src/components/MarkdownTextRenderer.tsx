@@ -30,6 +30,13 @@ type MarkdownAstNode = {
   };
 };
 
+type CitationLink = {
+  href: string;
+  origin: string;
+  title: string;
+  initials: string;
+};
+
 const SAFE_INLINE_HTML_TAGS = new Set(["mark", "sub", "sup"]);
 
 function extensionOf(value: string): string {
@@ -179,6 +186,115 @@ function nodeText(value: ReactNode): string {
     .join("");
 }
 
+function citationParts(value: ReactNode): { text: string; href?: string } {
+  let text = "";
+  let href: string | undefined;
+  for (const child of Children.toArray(value)) {
+    if (typeof child === "string" || typeof child === "number") {
+      text += String(child);
+      continue;
+    }
+    if (!isValidElement(child)) {
+      continue;
+    }
+    const props = child.props as { href?: unknown; children?: ReactNode };
+    if (!href && typeof props.href === "string" && /^https?:\/\//i.test(props.href)) {
+      href = props.href;
+    }
+    const nested = citationParts(props.children);
+    text += nested.text;
+    href ||= nested.href;
+  }
+  return { text, href };
+}
+
+function cleanCitationText(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
+    .trim();
+}
+
+function citationInitials(value: string): string {
+  const clean = value
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\.[a-z]{2,}$/i, "");
+  const parts = clean.split(/[\s.-]+/).filter(Boolean);
+  return (parts.length > 1 ? parts.slice(0, 2).map((part) => part[0]).join("") : clean.slice(0, 2))
+    .toUpperCase();
+}
+
+function sourceLinkFromChildren(children: ReactNode): CitationLink | null {
+  const { text: rawText, href } = citationParts(children);
+  if (!href) return null;
+
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  const strippedUrl = rawText
+    .replace(/\s+/g, " ")
+    .replace(href, "")
+    .replace(url.toString(), "")
+    .replace(/https?:\/\/\S+/i, "")
+    .trim();
+  if (!strippedUrl || strippedUrl.length < 4) return null;
+
+  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(strippedUrl);
+  const sourceLabel = sourceMatch?.[1] ? cleanCitationText(sourceMatch[1]) : undefined;
+  const title = cleanCitationText(sourceMatch?.[2] ?? strippedUrl);
+  if (!title || /^https?:\/\//i.test(title)) return null;
+
+  return {
+    href,
+    origin: url.origin,
+    title,
+    initials: citationInitials(sourceLabel || url.hostname),
+  };
+}
+
+function CitationRow({ citation }: { citation: CitationLink }) {
+  return (
+    <a
+      href={citation.href}
+      target="_blank"
+      rel="noreferrer noopener"
+      aria-label={`Open source: ${citation.title}`}
+      className={cn(
+        "not-prose my-0.5 inline-flex max-w-full items-center gap-2 rounded-md",
+        "text-primary no-underline underline-offset-2 hover:underline",
+      )}
+    >
+      <span
+        className={cn(
+          "relative grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          "border border-border/65 bg-background text-[0.5625rem] font-semibold text-muted-foreground",
+        )}
+        aria-hidden
+      >
+        {citation.initials}
+        <img
+          src={`${citation.origin}/favicon.ico`}
+          alt=""
+          className="absolute h-3.5 w-3.5 rounded-[3px] object-contain"
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+          }}
+        />
+      </span>
+      <span className="min-w-0 truncate text-[0.95em] leading-normal">
+        {citation.title}
+      </span>
+    </a>
+  );
+}
+
 function isRenderedCodeBlock(value: ReactNode): boolean {
   if (!isValidElement(value)) return false;
   const props = value.props as { code?: unknown };
@@ -294,6 +410,22 @@ export default function MarkdownTextRenderer({
           >
             {markdownChildren}
           </a>
+        );
+      },
+      li({ children: markdownChildren, className: itemClassName, node: _node }) {
+        void _node;
+        const citation = sourceLinkFromChildren(markdownChildren);
+        if (citation) {
+          return (
+            <li className={cn("list-none pl-0", itemClassName)}>
+              <CitationRow citation={citation} />
+            </li>
+          );
+        }
+        return (
+          <li className={itemClassName}>
+            {markdownChildren}
+          </li>
         );
       },
       input({ type, checked }) {

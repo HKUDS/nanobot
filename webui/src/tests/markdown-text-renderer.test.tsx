@@ -68,6 +68,27 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.queryByRole("img", { name: "index.html" })).not.toBeInTheDocument();
   });
 
+  it("renders source-style link lists as citation rows", () => {
+    render(
+      <MarkdownTextRenderer>
+        {
+          "Sources:\n\n- Polymarket — “When will GPT-5.6 be released?”\n  https://polymarket.com/event/when-will-gpt-5pt6-be-released\n- Polymarket — “GPT-5.6 released by...?”\n  https://polymarket.com/event/gpt-5pt6-released-by"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Open source: When will GPT-5.6 be released?" }),
+    ).toHaveAttribute(
+      "href",
+      "https://polymarket.com/event/when-will-gpt-5pt6-be-released",
+    );
+    expect(
+      screen.getByRole("link", { name: "Open source: GPT-5.6 released by...?" }),
+    ).toHaveAttribute("href", "https://polymarket.com/event/gpt-5pt6-released-by");
+    expect(screen.queryByText("Polymarket · polymarket.com")).not.toBeInTheDocument();
+  });
+
   it("renders media attachments without an extra preview/code wrapper", () => {
     render(<MarkdownTextRenderer>![Diagram](/api/media/sig/payload)</MarkdownTextRenderer>);
 
