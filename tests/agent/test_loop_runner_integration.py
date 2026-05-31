@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -42,6 +41,30 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
 
     final_content, _, _, _, _ = await loop._run_agent_loop([])
 
+    assert final_content == (
+        "I reached the maximum number of tool call iterations (2) "
+        "without completing the task. You can try breaking the task into smaller steps."
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
+    loop = _make_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="working",
+        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+    ))
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.tools.execute = AsyncMock(return_value="ok")
+    loop.max_iterations = 2
+
+    final_content, _, _, stop_reason, _ = await loop._run_agent_loop(
+        [],
+        metadata={"original_command": "/goal"},
+    )
+
+    assert stop_reason == "max_iterations"
+    assert loop.provider.chat_with_retry.await_count == 2
     assert final_content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."

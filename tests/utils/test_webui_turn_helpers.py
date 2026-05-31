@@ -32,6 +32,19 @@ async def test_publish_turn_run_status_running_records_wall_clock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_turn_run_status_reuses_explicit_wall_clock() -> None:
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    msg = InboundMessage(channel="websocket", sender_id="u", chat_id="chat-a", content="hi")
+
+    await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
+
+    assert wth.websocket_turn_wall_started_at("chat-a") == 1234.5
+    call = bus.publish_outbound.await_args[0][0]
+    assert call.metadata.get("started_at") == 1234.5
+
+
+@pytest.mark.asyncio
 async def test_publish_turn_run_status_idle_clears_wall_clock() -> None:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
