@@ -1,4 +1,4 @@
-![cover-v5-optimized](./images/GitHub_README.png)
+![nanobot README cover](./images/readme-cover.png)
 
 <div align="center">
   <p>
