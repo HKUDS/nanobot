@@ -5,14 +5,10 @@ This file is checked periodically by your nanobot agent.
 Register it as a cron job (e.g. `cron add --name heartbeat --schedule "every 30m" --message "Check HEARTBEAT.md"`) to get the same behavior as the legacy heartbeat service.
 
 If this file has no tasks (only headers and comments), the agent will skip it.
+Completed tasks should be deleted, not kept — heartbeat only reads "Active Tasks".
 -->
 
 ## Active Tasks
 
 <!-- Add your periodic tasks below this line -->
-
-
-## Completed
-
-<!-- Move completed tasks here or delete them -->
 
