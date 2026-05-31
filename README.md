@@ -162,11 +162,11 @@
 
 ## 💡 Why nanobot
 
-- **Long-running by design**: goals, memory, tools, and channel context stay alive across real workflows.
-- **Meet users where they chat**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, and more from one agent loop.
-- **Bring your own model stack**: OpenAI-compatible providers, local LLMs, image generation, search, and fallback routing.
-- **Small core, serious surface area**: readable agent internals with MCP, memory, deployment, and automation built in.
-- **Built to be owned**: easy to inspect, customize, self-host, and extend without adopting a giant platform.
+- **Persistent workflows**: goals, memory, tools, and chat context survive long-running work.
+- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, and email.
+- **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
+- **Small core**: readable internals with MCP, memory, deployment, and automation built in.
+- **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
 
 ## 📦 Install
 
