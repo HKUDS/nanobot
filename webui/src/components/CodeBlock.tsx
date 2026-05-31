@@ -33,7 +33,7 @@ const LazyHighlightedCode = lazy(async () => {
     default({ language, code, isDark }: HighlightedCodeProps) {
       return (
         <SyntaxHighlighter
-          language={language}
+          language={language || "text"}
           style={isDark ? oneDark : oneLight}
           customStyle={{
             margin: 0,
