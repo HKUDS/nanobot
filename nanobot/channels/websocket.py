@@ -455,11 +455,7 @@ class WebSocketChannel(BaseChannel):
         config: Any,
         bus: MessageBus,
         *,
-        session_manager: "SessionManager | None" = None,
         http_handler: Any | None = None,
-        workspace_path: Path | None = None,
-        restrict_to_workspace: bool = False,
-        runtime_surface: str = "browser",
     ):
         if isinstance(config, dict):
             config = WebSocketConfig.model_validate(config)
@@ -473,10 +469,6 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[Any, str] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
-        self._default_restrict_to_workspace = restrict_to_workspace
-        self._runtime_surface = (
-            "native" if runtime_surface in {"native", "desktop"} else "browser"
-        )
 
         # HTTP handler injected from outside (ChannelManager / gateway startup).
         # Owns tokens, sessions, media, settings, static serving.
