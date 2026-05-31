@@ -106,7 +106,7 @@ def test_sign_media_path_rejects_paths_outside_media_root(
     media = tmp_path / "media"
     media.mkdir()
     channel = _ch(bus, port=0)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         assert channel._sign_media_path(outside) is None
         # Traversal via the media root is also rejected — the resolve() step
         # normalises ``..`` out before the relative_to check.
@@ -121,7 +121,7 @@ def test_sign_media_path_round_trips_via_hmac(
     media.mkdir()
     (media / "a.png").write_bytes(_PNG_BYTES)
     channel = _ch(bus, port=0)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url = channel._sign_media_path(media / "a.png")
     assert url is not None
     assert url.startswith("/api/media/")
@@ -144,7 +144,7 @@ def test_local_markdown_image_is_staged_and_rewritten(
     media = tmp_path / "media"
     channel = _ch(bus, workspace_path=workspace, port=0)
 
-    with patch("nanobot.channels.websocket.get_media_dir", side_effect=_fake_media_dir(media)):
+    with patch("nanobot.channels.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
         rewritten = channel._rewrite_local_markdown_images(
             "The result:\n![Cloud Architecture Diagram](demo_arch.png)"
         )
@@ -166,7 +166,7 @@ def test_local_markdown_video_is_staged_and_rewritten(
     media = tmp_path / "media"
     channel = _ch(bus, workspace_path=workspace, port=0)
 
-    with patch("nanobot.channels.websocket.get_media_dir", side_effect=_fake_media_dir(media)):
+    with patch("nanobot.channels.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
         rewritten = channel._rewrite_local_markdown_images(
             "The result:\n![nanobot-intro.mp4](nanobot-intro.mp4)"
         )
@@ -189,7 +189,7 @@ def test_local_markdown_image_rejects_workspace_escape(
     channel = _ch(bus, workspace_path=workspace, port=0)
     text = "![nope](../outside.png)"
 
-    with patch("nanobot.channels.websocket.get_media_dir", side_effect=_fake_media_dir(media)):
+    with patch("nanobot.channels.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
         assert channel._rewrite_local_markdown_images(text) == text
 
     assert not (media / "websocket").exists()
@@ -211,7 +211,7 @@ async def test_media_route_serves_signed_file(
     target.write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29920)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
@@ -244,7 +244,7 @@ async def test_media_route_serves_video_byte_ranges(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29927)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
@@ -276,7 +276,7 @@ async def test_media_route_serves_suffix_video_byte_ranges(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29928)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
@@ -305,7 +305,7 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29929)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
@@ -338,7 +338,7 @@ async def test_media_route_rejects_bad_signature(
     (media / "f.png").write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29921)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         good = channel._sign_media_path(media / "f.png")
         assert good is not None
         _, payload = good[len("/api/media/"):].split("/", 1)
@@ -381,7 +381,7 @@ async def test_media_route_rejects_path_traversal_payload(
     ).digest()[:16]
     url = f"/api/media/{b64url_encode(mac)}/{payload}"
 
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
@@ -405,7 +405,7 @@ async def test_media_route_404s_missing_file(
     target.write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29923)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         target.unlink()  # the file vanishes between signing and fetching
@@ -433,7 +433,7 @@ async def test_media_route_degrades_non_image_to_octet_stream(
     (media / "scary.html").write_bytes(b"<script>alert(1)</script>")
 
     channel = _ch(bus, port=29924)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         payload = b64url_encode(b"scary.html")
         mac = hmac.new(
             channel._media_secret, payload.encode("ascii"), hashlib.sha256
@@ -464,7 +464,7 @@ async def test_media_route_serves_svg_with_strict_csp(
     target.write_text("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
 
     channel = _ch(bus, port=29928)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         url_path = channel._sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
@@ -505,7 +505,7 @@ async def test_session_messages_exposes_signed_media_urls(
     sm.save(sess)
 
     channel = _ch(bus, session_manager=sm, port=29925)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
@@ -550,7 +550,7 @@ async def test_session_messages_skips_vanished_media(
     sm.save(sess)
 
     channel = _ch(bus, session_manager=sm, port=29926)
-    with patch("nanobot.channels.websocket.get_media_dir", return_value=media):
+    with patch("nanobot.channels.ws_http.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
