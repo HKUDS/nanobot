@@ -9,11 +9,20 @@ import type {
   GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
+import { createHostWebSocket } from "./runtime";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
 const WS_OPEN = 1;
 const WS_CLOSING = 2;
+const HOST_SOCKET_URL_PREFIX = "nanobot-host://";
+
+function createDefaultSocket(url: string): WebSocket {
+  if (url.startsWith(HOST_SOCKET_URL_PREFIX)) {
+    return createHostWebSocket(url);
+  }
+  return new WebSocket(url);
+}
 
 /** Inbound WebSocket ``console.log`` / parse-failure ``console.warn``.
  *
@@ -129,7 +138,7 @@ export class NanobotClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly shouldReconnect: boolean;
   private readonly maxBackoffMs: number;
-  private readonly socketFactory: (url: string) => WebSocket;
+  private socketFactory: (url: string) => WebSocket;
   private currentUrl: string;
   private status_: ConnectionStatus = "idle";
   private readyChatId: string | null = null;
@@ -140,8 +149,7 @@ export class NanobotClient {
   constructor(private options: NanobotClientOptions) {
     this.shouldReconnect = options.reconnect ?? true;
     this.maxBackoffMs = options.maxBackoffMs ?? 15_000;
-    this.socketFactory =
-      options.socketFactory ?? ((url) => new WebSocket(url));
+    this.socketFactory = options.socketFactory ?? createDefaultSocket;
     this.currentUrl = options.url;
   }
 
@@ -154,8 +162,11 @@ export class NanobotClient {
   }
 
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
-  updateUrl(url: string): void {
+  updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
+    if (socketFactory) {
+      this.socketFactory = socketFactory;
+    }
   }
 
   onStatus(handler: StatusHandler): Unsubscribe {

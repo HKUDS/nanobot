@@ -67,7 +67,8 @@ export function Sidebar(props: SidebarProps) {
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
       className={cn(
-        "flex h-full w-full min-w-0 flex-col bg-sidebar text-sidebar-foreground",
+        "flex h-full w-full min-w-0 flex-col text-sidebar-foreground",
+        props.hostChromeInset ? "bg-transparent" : "bg-sidebar",
         !props.hostChromeInset && "border-r border-sidebar-border/60",
       )}
     >

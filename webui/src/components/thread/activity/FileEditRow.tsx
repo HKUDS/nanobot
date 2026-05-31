@@ -38,6 +38,7 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
+  const rawFailureDetail = failed ? cleanFileEditError(edit.error) : "";
   const failureDetail = failed
     ? formatFileEditError(edit.error)
       || t("message.fileEditFailedFallback", { defaultValue: "File change was not applied." })
@@ -67,8 +68,8 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
       active={editing}
       tone={failed ? "error" : editing ? "active" : "success"}
       className="text-xs"
-      contentClassName="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"
-      title={failureDetail || edit.absolute_path || edit.path}
+      contentClassName={failed ? "min-w-0" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3"}
+      title={rawFailureDetail || edit.absolute_path || edit.path}
       label={edit.pending && !edit.path
         ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
         : (
@@ -82,13 +83,15 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
             testId="activity-file-reference"
           />
         )}
-      detail={failed ? (
-        <span className="min-w-0 truncate text-[11px] leading-4 text-destructive/75">
+      detail={null}
+      aside={hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
+    >
+      {failed ? (
+        <span className="block max-w-[42rem] truncate text-[11px] leading-4 text-destructive/75">
           {failureDetail}
         </span>
       ) : null}
-      aside={hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
-    />
+    </ActivityStep>
   );
 }
 
@@ -96,14 +99,23 @@ export function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "delet
   return edit.added > 0 || edit.deleted > 0;
 }
 
-function formatFileEditError(error?: string): string {
+function cleanFileEditError(error?: string): string {
   const firstLine = (error || "").replace(/\s+/g, " ").trim();
   if (!firstLine) return "";
-  const cleaned = firstLine
+  return firstLine
     .replace(/^Error applying patch:\s*/i, "")
     .replace(/^Error writing file:\s*/i, "")
     .replace(/^Error editing file:\s*/i, "")
     .replace(/^Error:\s*/i, "");
+}
+
+function formatFileEditError(error?: string): string {
+  const cleaned = cleanFileEditError(error);
+  if (!cleaned) return "";
+
+  if (/\bpermission denied\b/i.test(cleaned) || /\boperation not permitted\b/i.test(cleaned)) {
+    return "No permission to change this location.";
+  }
 
   return cleaned
     .replace(/^old_text not found in (.+)$/i, "Target text was not found in $1.")

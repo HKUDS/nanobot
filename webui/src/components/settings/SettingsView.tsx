@@ -4277,7 +4277,7 @@ function ProviderPicker({
   const disabled = providers.length === 0;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <Button
           type="button"
@@ -5098,11 +5098,12 @@ function ModelPresetPicker({
   const selectedPreset = presets.find((preset) => preset.name === value) ?? presets[0] ?? null;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={!presets.length}>
         <Button
           type="button"
           variant="outline"
+          aria-label={tx("settings.rows.currentModel", "Current configuration")}
           disabled={!presets.length}
           className={cn(
             "h-12 w-[min(430px,72vw)] justify-between rounded-full border-input bg-background px-3.5 text-[13px] font-normal shadow-none",
@@ -5155,7 +5156,9 @@ function ModelPresetPicker({
         })}
         <div className="mt-1 border-t border-border/55 pt-1">
           <DropdownMenuItem
-            onSelect={onCreateConfiguration}
+            onSelect={() => {
+              window.setTimeout(onCreateConfiguration, 0);
+            }}
             className={cn(
               "flex cursor-default items-center gap-2 rounded-[12px] px-2.5 py-2 text-[13px] font-medium",
               "text-foreground focus:bg-muted/85 focus:text-foreground",
