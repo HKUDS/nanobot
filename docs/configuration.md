@@ -121,10 +121,6 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 > [!TIP]
 > - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead, and optionally set `"transcriptionLanguage": "en"` (or another ISO-639-1 code) for more accurate transcription. The API key is picked from the matching provider config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the blackcat community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` to use OpenAI Whisper. API keys still live in the matching `providers.<provider>` config.
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper or `"openrouter"` for OpenRouter speech-to-text models. API keys still live in the matching `providers.<provider>` config.
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, or `"xiaomi_mimo"` for Xiaomi MiMo ASR. API keys still live in the matching `providers.<provider>` config.
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so blackcat keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
@@ -138,7 +134,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
-| `openrouter` | LLM (recommended, access to all models) + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
+| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=blackcat&utm_content=blackcat&utm_medium=devrel&utm_source=OWO&utm_term=blackcat) · [volcengine.com](https://www.volcengine.com) |
@@ -147,7 +143,6 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
 | `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
-| `assemblyai` | Voice transcription only | [assemblyai.com](https://www.assemblyai.com/) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
@@ -1004,8 +999,6 @@ That's it! Environment variables, model routing, config matching, and `blackcat 
 | `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`; required for providers that reject both being set simultaneously (e.g. VolcEngine) | `True` |
 
 </details>
-Contributor notes for adding new providers live in
-[`development.md`](./development.md#adding-an-llm-provider).
 
 ## Model Presets
 
@@ -1089,7 +1082,7 @@ Each fallback candidate can be either:
 
 String entries are preset names, not raw model names. If you want to use a model that is not already a preset, use the inline object form.
 
-Failover normally runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Stream-stall timeouts are the recovery exception: if the provider already emitted partial answer text and then stalls, nanobot closes the current stream segment and retries/fails over in a new segment. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
+Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
 
 If fallback candidates use smaller `contextWindowTokens` values, blackcat builds context using the smallest window in the active chain so every candidate can receive the same prompt.
 
@@ -1107,64 +1100,6 @@ Set `agents.defaults.modelPreset` to start with a named preset:
 
 When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
 
-## Transcription Settings
-
-Audio transcription is a shared capability used by chat-channel voice messages and by WebUI/desktop microphone input. Chat-channel voice messages are transcribed automatically before they enter the agent. WebUI and desktop microphone input is transcribed into the composer first, so you can edit the text before sending.
-
-Configure transcription under the top-level `transcription` section:
-
-```json
-{
-  "transcription": {
-    "enabled": true,
-    "provider": "groq",
-    "model": null,
-    "language": null,
-    "maxDurationSec": 120,
-    "maxUploadMb": 25
-  }
-}
-```
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI/desktop microphone input. |
-| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, `"xiaomi_mimo"`, or `"assemblyai"`. |
-| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, `mimo-v2.5-asr` for Xiaomi MiMo ASR, and `universal-3-pro,universal-2` for AssemblyAI. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. AssemblyAI accepts a comma-separated model fallback list. |
-| `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
-| `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
-| `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |
-
-Provider and language resolution is intentionally ordered for backwards compatibility:
-
-1. `transcription.provider` / `transcription.language`
-2. Legacy `channels.transcriptionProvider` / `channels.transcriptionLanguage`
-3. Built-in defaults (`provider: "groq"`, no language hint)
-
-The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI/desktop microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
-
-Transcription credentials are intentionally not stored in `transcription`. Put the API key and optional endpoint in the matching provider config:
-
-```json
-{
-  "providers": {
-    "groq": {
-      "apiKey": "gsk-...",
-      "apiBase": "https://api.groq.com/openai/v1"
-    }
-  },
-  "transcription": {
-    "provider": "groq",
-    "language": "zh"
-  }
-}
-```
-
-Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
-
-If you are adding a new transcription provider, see
-[`development.md`](./development.md#adding-a-transcription-provider).
-
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.blackcat/config.json`:
@@ -1176,6 +1111,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
     "sendToolHints": false,
     "extractDocumentText": true,
     "sendMaxRetries": 3,
+    "transcriptionProvider": "groq",
+    "transcriptionLanguage": null,
     "telegram": { ... }
   }
 }
@@ -1188,8 +1125,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
 | `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
-
-`channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
+| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key and optional `apiBase` are auto-resolved from the matching provider config. Chat-style bases such as `https://api.groq.com/openai/v1` are normalized to the audio transcription endpoint. |
+| `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
 
 `sendProgress` and `sendToolHints` can also be overridden per channel. The
 global values stay as defaults for channels that do not set their own value:
@@ -1247,7 +1184,7 @@ If you want to disable them, which removes both `web_search` and `web_fetch` fro
 }
 ```
 
-blackcat uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP connections. By default it blocks loopback, RFC1918/private ranges, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints. If you need to allow trusted private ranges, explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+If you need to allow trusted private ranges such as Tailscale / CGNAT addresses, you can explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
 
 ```json
 {
@@ -1256,8 +1193,6 @@ blackcat uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conn
   }
 }
 ```
-
-Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server.
 
 > [!TIP]
 > Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
@@ -1488,9 +1423,6 @@ Two transport modes are supported:
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
 | **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
 
-> [!IMPORTANT]
-> HTTP/SSE MCP URLs are validated before probing or connecting, and every outgoing MCP HTTP request is validated again before redirects are followed. `localhost`, `127.0.0.1`, RFC1918/private IPs, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints are blocked by default. This can break previously working local or private HTTP MCP configs until the endpoint is explicitly allowed with `tools.ssrfWhitelist`, preferably with a single-host CIDR such as `127.0.0.1/32`, `::1/128`, or `192.168.1.50/32`. Stdio MCP servers are not affected.
-
 Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
 ```json
@@ -1546,9 +1478,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables `restrictToWorkspace` for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
-| `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
 **Docker security**: The official Docker image runs as a non-root user (`blackcat`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
