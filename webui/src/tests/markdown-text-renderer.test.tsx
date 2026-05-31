@@ -68,7 +68,7 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.queryByRole("img", { name: "index.html" })).not.toBeInTheDocument();
   });
 
-  it("renders source-style link lists as citation rows", () => {
+  it("renders title plus url list items as compact link rows", () => {
     render(
       <MarkdownTextRenderer>
         {
@@ -78,15 +78,35 @@ describe("MarkdownTextRenderer", () => {
     );
 
     expect(
-      screen.getByRole("link", { name: "Open source: When will GPT-5.6 be released?" }),
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — When will GPT-5.6 be released?",
+      }),
     ).toHaveAttribute(
       "href",
       "https://polymarket.com/event/when-will-gpt-5pt6-be-released",
     );
     expect(
-      screen.getByRole("link", { name: "Open source: GPT-5.6 released by...?" }),
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — GPT-5.6 released by...?",
+      }),
     ).toHaveAttribute("href", "https://polymarket.com/event/gpt-5pt6-released-by");
     expect(screen.queryByText("Polymarket · polymarket.com")).not.toBeInTheDocument();
+  });
+
+  it("does not require a source heading for compact link rows", () => {
+    render(
+      <MarkdownTextRenderer>
+        {
+          "Useful links:\n\n- Polymarket — “When will GPT-5.6 be released?”\n  https://polymarket.com/event/when-will-gpt-5pt6-be-released"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — When will GPT-5.6 be released?",
+      }),
+    ).toHaveAttribute("href", "https://polymarket.com/event/when-will-gpt-5pt6-be-released");
   });
 
   it("renders media attachments without an extra preview/code wrapper", () => {

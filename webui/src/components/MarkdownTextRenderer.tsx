@@ -30,9 +30,10 @@ type MarkdownAstNode = {
   };
 };
 
-type CitationLink = {
+type InlineLinkPreview = {
   href: string;
   origin: string;
+  prefix?: string;
   title: string;
   initials: string;
 };
@@ -186,7 +187,7 @@ function nodeText(value: ReactNode): string {
     .join("");
 }
 
-function citationParts(value: ReactNode): { text: string; href?: string } {
+function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
   let text = "";
   let href: string | undefined;
   for (const child of Children.toArray(value)) {
@@ -201,21 +202,21 @@ function citationParts(value: ReactNode): { text: string; href?: string } {
     if (!href && typeof props.href === "string" && /^https?:\/\//i.test(props.href)) {
       href = props.href;
     }
-    const nested = citationParts(props.children);
+    const nested = linkPreviewParts(props.children);
     text += nested.text;
     href ||= nested.href;
   }
   return { text, href };
 }
 
-function cleanCitationText(value: string): string {
+function cleanLinkPreviewText(value: string): string {
   return value
     .replace(/\s+/g, " ")
     .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
     .trim();
 }
 
-function citationInitials(value: string): string {
+function linkPreviewInitials(value: string): string {
   const clean = value
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
@@ -225,8 +226,8 @@ function citationInitials(value: string): string {
     .toUpperCase();
 }
 
-function sourceLinkFromChildren(children: ReactNode): CitationLink | null {
-  const { text: rawText, href } = citationParts(children);
+function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview | null {
+  const { text: rawText, href } = linkPreviewParts(children);
   if (!href) return null;
 
   let url: URL;
@@ -246,50 +247,54 @@ function sourceLinkFromChildren(children: ReactNode): CitationLink | null {
   if (!strippedUrl || strippedUrl.length < 4) return null;
 
   const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(strippedUrl);
-  const sourceLabel = sourceMatch?.[1] ? cleanCitationText(sourceMatch[1]) : undefined;
-  const title = cleanCitationText(sourceMatch?.[2] ?? strippedUrl);
+  const prefix = sourceMatch?.[1] ? cleanLinkPreviewText(sourceMatch[1]) : undefined;
+  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? strippedUrl);
   if (!title || /^https?:\/\//i.test(title)) return null;
 
   return {
     href,
     origin: url.origin,
+    prefix,
     title,
-    initials: citationInitials(sourceLabel || url.hostname),
+    initials: linkPreviewInitials(prefix || url.hostname),
   };
 }
 
-function CitationRow({ citation }: { citation: CitationLink }) {
+function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
+  const label = link.prefix
+    ? `${link.prefix} — ${link.title}`
+    : link.title;
   return (
     <a
-      href={citation.href}
+      href={link.href}
       target="_blank"
       rel="noreferrer noopener"
-      aria-label={`Open source: ${citation.title}`}
+      aria-label={`Open link: ${label}`}
       className={cn(
-        "not-prose my-0.5 inline-flex max-w-full items-center gap-2 rounded-md",
+        "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
         "text-primary no-underline underline-offset-2 hover:underline",
       )}
     >
       <span
         className={cn(
-          "relative grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
-          "border border-border/65 bg-background text-[0.5625rem] font-semibold text-muted-foreground",
+          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
+          "border border-border/65 bg-background text-[0.5rem] font-semibold text-muted-foreground",
         )}
         aria-hidden
       >
-        {citation.initials}
+        {link.initials}
         <img
-          src={`${citation.origin}/favicon.ico`}
+          src={`${link.origin}/favicon.ico`}
           alt=""
-          className="absolute h-3.5 w-3.5 rounded-[3px] object-contain"
+          className="absolute h-3 w-3 rounded-[2px] object-contain"
           loading="lazy"
           onError={(event) => {
             event.currentTarget.style.display = "none";
           }}
         />
       </span>
-      <span className="min-w-0 truncate text-[0.95em] leading-normal">
-        {citation.title}
+      <span className="min-w-0 truncate leading-normal">
+        {label}
       </span>
     </a>
   );
@@ -412,13 +417,12 @@ export default function MarkdownTextRenderer({
           </a>
         );
       },
-      li({ children: markdownChildren, className: itemClassName, node: _node }) {
-        void _node;
-        const citation = sourceLinkFromChildren(markdownChildren);
-        if (citation) {
+      li({ children: markdownChildren, className: itemClassName }) {
+        const link = inlineLinkPreviewFromChildren(markdownChildren);
+        if (link) {
           return (
             <li className={cn("list-none pl-0", itemClassName)}>
-              <CitationRow citation={citation} />
+              <InlineLinkPreviewRow link={link} />
             </li>
           );
         }
