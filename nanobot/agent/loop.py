@@ -1,7 +1,7 @@
 """Agent loop: the core processing engine."""
 
 from __future__ import annotations
-
+print(123)
 import asyncio
 import dataclasses
 import os
