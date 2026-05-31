@@ -1455,9 +1455,9 @@ export function ThreadComposer({
     
     // Check if we can send: either has transcribed text OR normal conditions met
     const canProceed = !!textToSend || canSend;
-    if (!canProceed) {
-      return;
-    }
+    if (!canProceed) return;
+    
+    const content = trimmed;
     // Share the same normalized ``data:`` URL with both the wire payload and
     // the optimistic bubble preview: data URLs are self-contained (no blob
     // lifetime, safe under React StrictMode double-mount) and keep the
@@ -1475,37 +1475,24 @@ export function ThreadComposer({
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
-      imageMode || attachedCliApps.length > 0 || attachedMcpPresets.length > 0
+      attachedCliApps.length > 0 || attachedMcpPresets.length > 0
         ? {
-            ...(imageMode
-              ? {
-                  imageGeneration: {
-                    enabled: true,
-                    aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
-                  },
-                }
-              : {}),
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
           }
         : undefined;
-    onSend(trimmed, payload, options);
-    setValue("");
-    setInlineError(null);
+    onSend(content, payload, options);
+    setQueuedPrompts([]);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
-    setSlashMenuDismissed(false);
-    setCliAppMenuDismissed(false);
-    setCursorPosition(0);
-    resizeTextarea();
+    clearComposerText();
   }, [
     activeCliMentionApps,
     activeMcpPresetMentions,
     canSend,
     clear,
-    imageAspectRatio,
-    imageMode,
+    clearComposerText,
     isRecording,
     onSend,
     onTranscribe,
@@ -1514,6 +1501,7 @@ export function ThreadComposer({
     t,
     value,
   ]);
+
 
   const onChipKey = useCallback(
     (id: string) => (e: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -1756,61 +1744,6 @@ export function ThreadComposer({
                 isHero={isHero}
                 onChange={onWorkspaceScopeChange}
               />
-            ) : null}
-            {imageGenerationEnabled && !isRecording ? (
-              <div ref={aspectControlRef} className="relative flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={disabled}
-                  aria-pressed={imageMode}
-                  aria-label={t("thread.composer.imageMode.toggle")}
-                  onClick={() => {
-                    setImageMode(!imageMode);
-                    setAspectMenuOpen(false);
-                    textareaRef.current?.focus();
-                  }}
-                  className={cn(
-                    "max-w-[11rem] rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
-                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
-                    imageMode
-                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
-                      : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
-                  )}
-                >
-                  <ImageIcon className={cn("mr-1.5", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-                  <span className="truncate">{t("thread.composer.imageMode.label")}</span>
-                </Button>
-                {imageMode ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={disabled}
-                  aria-haspopup="listbox"
-                  aria-expanded={aspectMenuOpen}
-                  aria-label={t("thread.composer.imageMode.aspectAria")}
-                  onClick={() => setAspectMenuOpen((open) => !open)}
-                  className={cn(
-                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
-                    isHero ? "h-8 text-[11.5px]" : "h-9 text-[12px]",
-                  )}
-                >
-                  <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
-                  <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
-                </Button>
-                ) : null}
-                {imageMode && aspectMenuOpen ? (
-                  <ImageAspectMenu
-                    selected={imageAspectRatio}
-                    isHero={isHero}
-                    onSelect={(ratio) => {
-                      setImageAspectRatio(ratio);
-                      setAspectMenuOpen(false);
-                      textareaRef.current?.focus();
-                    }}
-                  />
-                ) : null}
-              </div>
             ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
