@@ -11,10 +11,33 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 
-from nanobot.channels.websocket import WebSocketChannel
+from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.session.manager import Session, SessionManager
+from nanobot.webui.ws_http import GatewayHTTPHandler
 
 _PORT = 29900
+
+
+def _make_handler(
+    cfg: dict[str, Any] | WebSocketConfig,
+    bus: Any,
+    *,
+    session_manager: SessionManager | None = None,
+    static_dist_path: Path | None = None,
+    runtime_model_name: Any | None = None,
+) -> GatewayHTTPHandler:
+    config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
+    workspace = Path.cwd()
+    return GatewayHTTPHandler(
+        config=config,
+        session_manager=session_manager,
+        static_dist_path=static_dist_path,
+        workspace_path=workspace,
+        runtime_model_name=runtime_model_name,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+        bus=bus,
+    )
 
 
 def _ch(
@@ -35,17 +58,13 @@ def _ch(
         "websocketRequiresToken": False,
     }
     cfg.update(extra)
-    ws_kwargs: dict[str, Any] = {
-        "session_manager": session_manager,
-        "static_dist_path": static_dist_path,
-    }
-    if runtime_model_name is not None:
-        ws_kwargs["runtime_model_name"] = runtime_model_name
-    return WebSocketChannel(
-        cfg,
-        bus,
-        **ws_kwargs,
+    http_handler = _make_handler(
+        cfg, bus,
+        session_manager=session_manager,
+        static_dist_path=static_dist_path,
+        runtime_model_name=runtime_model_name,
     )
+    return WebSocketChannel(cfg, bus, http_handler=http_handler)
 
 
 @pytest.fixture()
