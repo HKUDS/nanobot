@@ -58,11 +58,10 @@ function findStreamingAssistantIndex(
 /**
  * Append a reasoning chunk to the last open reasoning stream in ``prev``.
  *
- * Lookup rule: prefer the most recent assistant turn in the active UI tail.
- * Most providers emit reasoning before answer text, but some only expose
- * ``reasoning_content`` after the answer stream completes. In that post-hoc
- * case the reasoning still belongs to the same assistant turn and must render
- * above the answer, not as a new row below it.
+ * Lookup rule: reasoning can only extend the current reasoning placeholder.
+ * Once ordinary answer text has appeared, the next reasoning chunk starts a
+ * fresh Thought block so streamed output stays in arrival order:
+ * Thought -> answer -> Thought -> answer.
  */
 function attachReasoningChunk(
   prev: UIMessage[],
@@ -83,24 +82,15 @@ function attachReasoningChunk(
     if (candidate.role !== "assistant") continue;
     const activitySegmentId = candidate.activitySegmentId ?? segments?.ensure();
     const hasAnswer = candidate.content.length > 0;
+    if (hasAnswer) break;
     if (
       candidate.reasoningStreaming
       || candidate.reasoning !== undefined
-      || hasAnswer
       || candidate.isStreaming
     ) {
       const merged: UIMessage = {
         ...candidate,
         reasoning: (candidate.reasoning ?? "") + chunk,
-        reasoningStreaming: true,
-        ...(activitySegmentId ? { activitySegmentId } : {}),
-      };
-      return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
-    }
-    if (!hasAnswer && candidate.isStreaming) {
-      const merged: UIMessage = {
-        ...candidate,
-        reasoning: chunk,
         reasoningStreaming: true,
         ...(activitySegmentId ? { activitySegmentId } : {}),
       };
@@ -293,38 +283,6 @@ function stripCoveredFileEditToolHints(message: UIMessage, edits: UIFileEdit[]):
   };
 }
 
-function demoteInterruptedAssistantToActivity(
-  prev: UIMessage[],
-  segmentId: string,
-): UIMessage[] {
-  for (let i = prev.length - 1; i >= 0; i -= 1) {
-    const message = prev[i];
-    if (message.role === "user") break;
-    if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || !message.isStreaming
-      || !message.content.trim()
-      || message.media?.length
-    ) {
-      continue;
-    }
-    const reasoning = [message.reasoning, message.content]
-      .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
-      .join("\n\n");
-    const demoted: UIMessage = {
-      ...message,
-      content: "",
-      reasoning,
-      reasoningStreaming: false,
-      isStreaming: false,
-      activitySegmentId: message.activitySegmentId ?? segmentId,
-    };
-    return replaceMessageAt(prev, i, demoted);
-  }
-  return prev;
-}
-
 function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
   if (!edit || !edit.tool || (!edit.path && !edit.pending)) return null;
   const inferredStatus =
@@ -511,6 +469,7 @@ export function useNanobotStream(
     if (closedStreamId) closedAssistantStreamIdsRef.current.add(closedStreamId);
     buffer.current = null;
     activeAssistantRef.current = null;
+    return !!closedStreamId;
   }, []);
 
   const resolveActiveAssistantIndex = useCallback((prev: UIMessage[]): number | null => {
@@ -589,15 +548,18 @@ export function useNanobotStream(
           text += events[i].text;
           i += 1;
         }
-        next = kind === "delta"
-          ? appendAnswerChunk(next, text)
-          : attachReasoningChunk(next, text, {
-              ensure: ensureActivitySegmentId,
-            });
+        if (kind === "delta") {
+          next = appendAnswerChunk(next, text);
+        } else {
+          if (closeActiveAssistantStream()) clearActivitySegment();
+          next = attachReasoningChunk(next, text, {
+            ensure: ensureActivitySegmentId,
+          });
+        }
       }
       return next;
     },
-    [appendAnswerChunk, ensureActivitySegmentId],
+    [appendAnswerChunk, clearActivitySegment, closeActiveAssistantStream, ensureActivitySegmentId],
   );
 
   const flushPendingStreamEvents = useCallback((options?: {
@@ -735,7 +697,13 @@ export function useNanobotStream(
         return;
       }
 
-      flushPendingStreamEvents();
+      const shouldCloseAnswerBeforeEvent =
+        ev.event === "file_edit"
+        || (
+          ev.event === "message"
+          && (ev.kind === "tool_hint" || ev.kind === "progress")
+        );
+      flushPendingStreamEvents({ closeAnswerSegment: shouldCloseAnswerBeforeEvent });
 
       if (ev.event === "reasoning_end") {
         if (suppressStreamUntilTurnEndRef.current) return;
@@ -812,7 +780,7 @@ export function useNanobotStream(
           const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
           setMessages((prev) => {
             const segmentId = ensureActivitySegmentId();
-            const base = demoteInterruptedAssistantToActivity(prev, segmentId);
+            const base = prev;
             const visibleStructuredEvents = filterCoveredFileEditToolEvents(base, structuredEvents);
             const structuredLines = toolTraceLinesFromEvents(visibleStructuredEvents);
             const lines = structuredLines.length > 0
@@ -914,7 +882,7 @@ export function useNanobotStream(
         }
         setMessages((prev) => {
           let segmentId = eventSegmentId;
-          const base = segmentId ? demoteInterruptedAssistantToActivity(prev, segmentId) : prev;
+          const base = prev;
           const targetIndex = findFileEditTraceIndex(base, segmentId, normalized);
           if (targetIndex !== null) {
             const target = base[targetIndex];
