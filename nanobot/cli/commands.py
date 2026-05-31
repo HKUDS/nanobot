@@ -108,6 +108,7 @@ _HEARTBEAT_PREAMBLE = (
 def _heartbeat_has_active_tasks(content: str) -> bool:
     """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments."""
     in_comment = False
+    in_active_section: bool | None = None
     for line in content.splitlines():
         stripped = line.strip()
         if in_comment:
@@ -115,10 +116,15 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
                 in_comment = False
             continue
         if not stripped or stripped.startswith("#"):
+            if stripped.startswith("##") and not stripped.startswith("###"):
+                heading = stripped.lstrip("#").strip().lower()
+                in_active_section = heading.startswith("active tasks")
             continue
         if stripped.startswith("<!--"):
             if "-->" not in stripped[4:]:
                 in_comment = True
+            continue
+        if in_active_section is False:
             continue
         return True
     return False

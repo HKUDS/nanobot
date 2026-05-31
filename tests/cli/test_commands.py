@@ -960,6 +960,8 @@ def test_heartbeat_retains_recent_messages_by_default():
         ("<!--\nmulti-line\ncomment\n-->\n", False),  # block comment, not tasks
         ("<!-- single line -->\n", False),
         ("## Active Tasks\n\n- water the plants\n", True),
+        ("## Completed\n\n- water the plants\n", False),
+        ("## Active Tasks\n\n### Garden\n\n- water the plants\n", True),
     ],
 )
 def test_heartbeat_has_active_tasks(content, expected):
