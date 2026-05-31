@@ -626,6 +626,7 @@ async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -
         return ws_media if channel == "websocket" else media_root
 
     monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.ws_http.get_media_dir", fake_media_dir)
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
@@ -840,6 +841,7 @@ async def test_send_delta_stream_end_rewrites_local_markdown_image(monkeypatch, 
         return path
 
     monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.ws_http.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
         bus,
@@ -872,6 +874,7 @@ async def test_send_delta_stream_end_rewrites_inline_final_text(monkeypatch, tmp
         return path
 
     monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("nanobot.channels.ws_http.get_media_dir", fake_media_dir)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
         bus,
