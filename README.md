@@ -31,7 +31,7 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source and ultra-lightweight AI agent in the spirit of [OpenClaw](https://github.com/openclaw/openclaw), [Claude Code](https://www.anthropic.com/claude-code), and [Codex](https://www.openai.com/codex/). It keeps the core agent loop small and readable while still supporting chat channels, memory, MCP and practical deployment paths, so you can go from local setup to a long-running personal agent with minimal overhead.
+🐈 **nanobot** is an open-source, ultra-lightweight agent runtime for people who want to own their AI agent stack. It gives you a small, readable core plus the practical pieces for real long-running agents: WebUI, chat channels, tools, memory, MCP, model routing, and deployment.
 
 ## 📢 News
 
