@@ -310,7 +310,6 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=sessions,
         http_handler=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
@@ -357,7 +356,6 @@ async def test_webui_scope_expands_home_project_path(
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=SessionManager(tmp_path / "sessions"),
         http_handler=_basic_handler(bus, session_manager=SessionManager(tmp_path / "sessions"), workspace_path=default_workspace),
     )
     conn = AsyncMock()
@@ -395,7 +393,6 @@ async def test_webui_scope_rejects_missing_project_path(bus: MagicMock, tmp_path
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=SessionManager(tmp_path / "sessions"),
         http_handler=_basic_handler(bus, session_manager=SessionManager(tmp_path / "sessions"), workspace_path=default_workspace),
     )
     conn = AsyncMock()
@@ -433,7 +430,6 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=sessions,
         http_handler=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
@@ -490,7 +486,6 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=sessions,
         http_handler=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
@@ -550,7 +545,6 @@ async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
         bus,
-        session_manager=sessions,
         http_handler=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
