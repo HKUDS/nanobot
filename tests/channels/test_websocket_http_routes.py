@@ -814,7 +814,7 @@ def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
 
 def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.channels.ws_http._default_model_name_from_config",
+        "nanobot.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
@@ -826,7 +826,7 @@ def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytes
 
 def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.channels.ws_http._default_model_name_from_config",
+        "nanobot.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
@@ -838,7 +838,7 @@ def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeyp
 
 def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.channels.ws_http._default_model_name_from_config",
+        "nanobot.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
 
