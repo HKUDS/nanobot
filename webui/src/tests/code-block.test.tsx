@@ -12,13 +12,16 @@ const mockedStyles = vi.hoisted(() => ({
 vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
   default: ({
     children,
+    language,
     style,
   }: {
     children: string;
+    language?: string;
     style: Record<string, unknown>;
   }) => (
     <pre
       data-testid="highlighted-code"
+      data-language={language}
       data-theme={style === mockedStyles.dark ? "dark" : "light"}
     >
       <code>{children}</code>
@@ -61,6 +64,7 @@ describe("CodeBlock", () => {
     });
 
     expect(screen.getByTestId("highlighted-code")).toBeInTheDocument();
+    expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "text");
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
   });
 
