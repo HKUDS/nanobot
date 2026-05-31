@@ -21,12 +21,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from nanobot.channels.websocket import WebSocketChannel
+from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.webui.media_api import (
     b64url_decode,
     b64url_encode,
 )
 from nanobot.session.manager import Session, SessionManager
+from nanobot.webui.ws_http import GatewayHTTPHandler
 
 
 # PNG magic bytes + a couple of sentinel bytes so we can verify byte-for-byte
@@ -47,19 +48,26 @@ def _ch(
     workspace_path: Path | None = None,
     port: int,
 ) -> WebSocketChannel:
-    return WebSocketChannel(
-        {
-            "enabled": True,
-            "allowFrom": ["*"],
-            "host": "127.0.0.1",
-            "port": port,
-            "path": "/",
-            "websocketRequiresToken": False,
-        },
-        bus,
+    cfg = {
+        "enabled": True,
+        "allowFrom": ["*"],
+        "host": "127.0.0.1",
+        "port": port,
+        "path": "/",
+        "websocketRequiresToken": False,
+    }
+    parsed = WebSocketConfig.model_validate(cfg)
+    http_handler = GatewayHTTPHandler(
+        config=parsed,
         session_manager=session_manager,
-        workspace_path=workspace_path,
+        static_dist_path=None,
+        workspace_path=workspace_path or Path.cwd(),
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+        bus=bus,
     )
+    return WebSocketChannel(cfg, bus, http_handler=http_handler)
 
 
 @pytest.fixture()
