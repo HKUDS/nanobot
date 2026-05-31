@@ -178,7 +178,13 @@ def websocket_turn_wall_started_at(chat_id: str) -> float | None:
     return _WEBSOCKET_TURN_WALL_STARTED_AT.get(chat_id)
 
 
-async def publish_turn_run_status(bus: MessageBus, msg: InboundMessage, status: str) -> None:
+async def publish_turn_run_status(
+    bus: MessageBus,
+    msg: InboundMessage,
+    status: str,
+    *,
+    started_at: float | None = None,
+) -> None:
     """Notify WebSocket clients while a user turn is executing (timing strip)."""
     if msg.channel != "websocket":
         return
@@ -189,7 +195,10 @@ async def publish_turn_run_status(bus: MessageBus, msg: InboundMessage, status: 
         "goal_status": status,
     }
     if status == "running":
-        t0 = time.time()
+        if isinstance(started_at, int | float) and started_at > 0:
+            t0 = float(started_at)
+        else:
+            t0 = time.time()
         meta["started_at"] = t0
         _WEBSOCKET_TURN_WALL_STARTED_AT[cid] = t0
     else:
@@ -300,8 +309,14 @@ class WebuiTurnCoordinator:
     def discard(self, session_key: str) -> None:
         self._title_contexts.pop(session_key, None)
 
-    async def publish_run_status(self, msg: InboundMessage, status: str) -> None:
-        await publish_turn_run_status(self.bus, msg, status)
+    async def publish_run_status(
+        self,
+        msg: InboundMessage,
+        status: str,
+        *,
+        started_at: float | None = None,
+    ) -> None:
+        await publish_turn_run_status(self.bus, msg, status, started_at=started_at)
 
     async def handle_turn_end(
         self,
