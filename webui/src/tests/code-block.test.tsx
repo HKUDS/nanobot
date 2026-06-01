@@ -12,13 +12,16 @@ const mockedStyles = vi.hoisted(() => ({
 vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
   default: ({
     children,
+    language,
     style,
   }: {
     children: string;
+    language?: string;
     style: Record<string, unknown>;
   }) => (
     <pre
       data-testid="highlighted-code"
+      data-language={language}
       data-theme={style === mockedStyles.dark ? "dark" : "light"}
     >
       <code>{children}</code>
@@ -45,6 +48,24 @@ describe("CodeBlock", () => {
     expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
     expect(screen.getByText("ts")).toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
+  });
+
+  it("falls back to 'text' language when language is undefined", async () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock language={undefined} code="const value = 1;" />
+      </ThemeProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("highlighted-code")).toBeInTheDocument();
+    expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "text");
+    expect(screen.getByText("const value = 1;")).toBeInTheDocument();
   });
 
   it("reads theme from context without creating per-block observers", async () => {

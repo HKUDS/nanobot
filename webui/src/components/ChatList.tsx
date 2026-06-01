@@ -540,7 +540,7 @@ function SessionActivityIndicator({
         title={label}
         className="grid h-4 w-4 shrink-0 place-items-center"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 dark:bg-blue-400" />
+        <span className="h-2 w-2 rounded-full bg-blue-500 dark:bg-blue-400" />
       </span>
     );
   }

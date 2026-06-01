@@ -6,11 +6,14 @@ settings payload shape and the allowlisted config mutations exposed to WebUI.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from contextlib import suppress
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
+
+import httpx
 
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import ModelPresetConfig
@@ -87,6 +90,47 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
 }
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+_ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+_MODEL_LIST_UNSUPPORTED_BACKENDS = {
+    "anthropic",
+    "azure_openai",
+    "bedrock",
+    "github_copilot",
+    "openai_codex",
+}
+
+_MODEL_LIST_CATALOG_PROVIDERS = {
+    "aihubmix",
+    "byteplus",
+    "byteplus_coding_plan",
+    "huggingface",
+    "novita",
+    "openrouter",
+    "siliconflow",
+    "volcengine",
+    "volcengine_coding_plan",
+}
+
+_MODEL_LIST_OFFICIAL_PROVIDERS = {
+    "ant_ling",
+    "dashscope",
+    "deepseek",
+    "gemini",
+    "groq",
+    "longcat",
+    "minimax",
+    "minimax_anthropic",
+    "mistral",
+    "moonshot",
+    "nvidia",
+    "openai",
+    "qianfan",
+    "skywork",
+    "stepfun",
+    "xiaomi_mimo",
+    "zhipu",
+}
 
 
 class WebUISettingsError(ValueError):
@@ -180,6 +224,25 @@ def _mask_secret_hint(secret: str | None) -> str | None:
     return f"{secret[:4]}••••{secret[-4:]}"
 
 
+def _resolve_env_placeholders(value: str | None) -> str | None:
+    if not value:
+        return None
+    missing = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal missing
+        env_value = os.environ.get(match.group(1))
+        if env_value is None:
+            missing = True
+            return ""
+        return env_value
+
+    resolved = _ENV_REF_RE.sub(replace, value).strip()
+    if missing and not resolved:
+        return None
+    return resolved or None
+
+
 def _provider_requires_api_key(spec: Any) -> bool:
     if spec.backend == "azure_openai":
         return True
@@ -249,6 +312,191 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
         or getattr(provider_config, "region", None)
         or getattr(provider_config, "profile", None)
     )
+
+
+def _model_catalog_kind(spec: Any) -> str:
+    if spec.name in _MODEL_LIST_CATALOG_PROVIDERS:
+        return "catalog"
+    if spec.name in _MODEL_LIST_OFFICIAL_PROVIDERS:
+        return "official"
+    if spec.is_local:
+        return "local"
+    if spec.is_direct:
+        return "custom"
+    if spec.is_gateway:
+        return "catalog"
+    return "official"
+
+
+def _model_id_from_row(row: Any) -> str | None:
+    if isinstance(row, str):
+        return row.strip() or None
+    if not isinstance(row, dict):
+        return None
+    for key in ("id", "name", "model"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _model_context_window(row: Any) -> int | None:
+    if not isinstance(row, dict):
+        return None
+    for key in (
+        "context_window",
+        "context_length",
+        "max_context_length",
+        "max_model_len",
+        "max_input_tokens",
+    ):
+        value = row.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, float) and value > 0:
+            return int(value)
+    return None
+
+
+def _model_row_payload(row: Any) -> dict[str, Any] | None:
+    model_id = _model_id_from_row(row)
+    if not model_id:
+        return None
+    label: str | None = None
+    owned_by: str | None = None
+    if isinstance(row, dict):
+        raw_label = row.get("display_name") or row.get("label") or row.get("name")
+        if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
+            label = raw_label.strip()
+        raw_owner = row.get("owned_by") or row.get("owner") or row.get("organization")
+        if isinstance(raw_owner, str) and raw_owner.strip():
+            owned_by = raw_owner.strip()
+    return {
+        "id": model_id,
+        "label": label,
+        "owned_by": owned_by,
+        "context_window": _model_context_window(row),
+    }
+
+
+def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
+    raw_rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(raw_rows, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_row in raw_rows:
+        row = _model_row_payload(raw_row)
+        if row is None or row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        rows.append(row)
+    return rows
+
+
+def provider_models_payload(query: QueryParams) -> dict[str, Any]:
+    """Fetch an OpenAI-compatible provider's model list for Settings.
+
+    The result is advisory only: users can always type a custom model id. This
+    helper deliberately avoids mutating config so probing model lists never
+    changes runtime behavior.
+    """
+    provider_name = (_query_first(query, "provider") or "").strip()
+    if not provider_name:
+        raise WebUISettingsError("provider is required")
+    spec = find_by_name(provider_name)
+    if spec is None:
+        raise WebUISettingsError("unknown provider")
+
+    base_payload: dict[str, Any] = {
+        "provider": spec.name,
+        "label": spec.label,
+        "catalog_kind": _model_catalog_kind(spec),
+        "models": [],
+        "model_count": 0,
+        "message": None,
+        "fetched_at": time.time(),
+    }
+    if (
+        spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
+        and spec.name != "minimax_anthropic"
+    ) or spec.is_oauth:
+        return {
+            **base_payload,
+            "status": "unsupported",
+            "catalog_kind": "unsupported",
+            "message": "Model list is not available for this provider. Type a model ID manually.",
+        }
+
+    config = load_config()
+    provider_config = getattr(config.providers, spec.name, None)
+    if provider_config is None:
+        raise WebUISettingsError("unknown provider")
+
+    api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
+    if spec.name == "openai" and not api_base:
+        api_base = "https://api.openai.com/v1"
+    if not api_base:
+        return {
+            **base_payload,
+            "status": "missing_api_base",
+            "message": "Configure an API base URL to load models.",
+        }
+
+    api_key = _resolve_env_placeholders(provider_config.api_key)
+    if _provider_requires_api_key(spec) and not api_key:
+        return {
+            **base_payload,
+            "status": "not_configured",
+            "message": "Configure this provider before loading models.",
+        }
+
+    headers = {"Accept": "application/json"}
+    if api_key:
+        if spec.name == "minimax_anthropic":
+            headers["X-Api-Key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    models_url = f"{api_base.rstrip('/')}/models"
+    if spec.name == "minimax_anthropic" and not api_base.rstrip("/").endswith("/v1"):
+        models_url = f"{api_base.rstrip('/')}/v1/models"
+
+    try:
+        response = httpx.get(
+            models_url,
+            headers=headers,
+            timeout=10.0,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        rows = _extract_model_rows(response.json())
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in {401, 403}:
+            return {
+                **base_payload,
+                "status": "not_configured",
+                "message": "The provider rejected the configured credential.",
+            }
+        return {
+            **base_payload,
+            "status": "error",
+            "message": f"Model list request failed with HTTP {status}.",
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        return {
+            **base_payload,
+            "status": "error",
+            "message": f"Could not load models: {exc}",
+        }
+
+    return {
+        **base_payload,
+        "status": "available",
+        "models": rows,
+        "model_count": len(rows),
+    }
 
 
 def _parse_bool(value: str, field: str) -> bool:

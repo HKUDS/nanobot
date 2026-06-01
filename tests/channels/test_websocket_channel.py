@@ -203,6 +203,35 @@ def test_issue_route_secret_matches_empty_secret() -> None:
 
 
 @pytest.mark.asyncio
+async def test_token_issue_route_requires_secret_when_static_token_configured(bus: MagicMock) -> None:
+    port = 29882
+    channel = _ch(
+        bus,
+        port=port,
+        token="static-token",
+        tokenIssuePath="/auth/token",
+        websocketRequiresToken=True,
+    )
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        denied = await _http_get(f"http://127.0.0.1:{port}/auth/token")
+        assert denied.status_code == 401
+
+        allowed = await _http_get(
+            f"http://127.0.0.1:{port}/auth/token",
+            headers={"Authorization": "Bearer static-token"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["token"].startswith("nbwt_")
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = MagicMock()

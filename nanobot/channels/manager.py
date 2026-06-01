@@ -389,6 +389,13 @@ class ChannelManager:
             # to a single delta + end pair so plugins only implement the
             # streaming primitives.
             await channel.send_reasoning(msg)
+        elif msg.metadata.get("_file_edit_events"):
+            edits = msg.metadata.get("_file_edit_events")
+            await channel.send_file_edit_events(
+                msg.chat_id,
+                edits if isinstance(edits, list) else [],
+                msg.metadata,
+            )
         elif msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
         elif not msg.metadata.get("_streamed"):

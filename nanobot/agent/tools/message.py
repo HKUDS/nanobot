@@ -4,6 +4,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
@@ -83,6 +85,10 @@ class MessageTool(Tool, ContextAware):
             "message_record_channel_delivery",
             default=False,
         )
+        self._suppress_delivery_var: ContextVar[bool] = ContextVar(
+            "message_suppress_delivery",
+            default=False,
+        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -120,6 +126,14 @@ class MessageTool(Tool, ContextAware):
     def reset_record_channel_delivery(self, token) -> None:
         """Restore previous proactive delivery recording state."""
         self._record_channel_delivery_var.reset(token)
+
+    def set_suppress_delivery(self, active: bool):
+        """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
+        return self._suppress_delivery_var.set(active)
+
+    def reset_suppress_delivery(self, token) -> None:
+        """Restore previous delivery-suppression state."""
+        self._suppress_delivery_var.reset(token)
 
     @property
     def _sent_in_turn(self) -> bool:
@@ -240,6 +254,10 @@ class MessageTool(Tool, ContextAware):
             buttons=buttons or [],
             metadata=metadata,
         )
+
+        if self._suppress_delivery_var.get():
+            logger.debug("MessageTool: delivery suppressed during internal check")
+            return f"Message acknowledged for {channel}:{chat_id} (not delivered)"
 
         try:
             await self._send_callback(msg)

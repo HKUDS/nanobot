@@ -43,6 +43,32 @@ def test_list_sessions_includes_metadata_title(tmp_path):
     assert rows[0]["title"] == "自动生成标题"
 
 
+def test_list_sessions_hides_generated_think_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-think-title")
+    session.metadata["title"] = "<think> The user said hello and assistant replied"
+    session.add_message("user", "hello")
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-think-title"
+    assert rows[0]["title"] == ""
+    assert rows[0]["preview"] == "hello"
+
+
+def test_list_sessions_keeps_user_edited_think_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-user-title")
+    session.metadata["title"] = "<think> literally discussed"
+    session.metadata["title_user_edited"] = True
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["title"] == "<think> literally discussed"
+
+
 def test_list_sessions_includes_user_preview(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-preview")
@@ -512,3 +538,159 @@ def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
     session.retain_recent_legal_suffix(6)
 
     assert len(session.messages) <= 6
+
+
+# --- enforce_file_cap archive correctness (issue #4128) ---
+
+
+def test_retain_recent_legal_suffix_returns_dropped_messages():
+    """retain_recent_legal_suffix returns the actually-dropped messages."""
+    session = Session(key="test:return-dropped")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
+
+    assert len(dropped) == 6
+    assert [m["content"] for m in dropped] == [f"msg{i}" for i in range(6)]
+    assert len(session.messages) == 4
+    assert already_cons == 0
+
+
+def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
+    """No messages dropped → empty list returned."""
+    session = Session(key="test:no-drop")
+    for i in range(3):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
+
+    assert dropped == []
+    assert already_cons == 0
+    assert len(session.messages) == 3
+
+
+def test_retain_recent_legal_suffix_returns_all_on_zero():
+    """max_messages=0 clears session and returns all messages."""
+    session = Session(key="test:zero-return")
+    for i in range(5):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 3
+
+    dropped, already_cons = session.retain_recent_legal_suffix(0)
+
+    assert len(dropped) == 5
+    assert already_cons == 3
+    assert session.messages == []
+
+
+def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
+    """When the tail is assistant-only, enforce_file_cap must not archive
+    messages that are also retained (the bug from issue #4128)."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-archive")
+    # Build: 15 user messages, then 10 assistant messages (no user in tail)
+    for i in range(15):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=6)
+
+    # Verify retained messages
+    retained_contents = [m["content"] for m in session.messages]
+    assert len(session.messages) <= 6
+
+    # Verify archived messages have NO overlap with retained
+    if archive_fn.called:
+        archived = archive_fn.call_args.args[0]
+        archived_ids = set(id(m) for m in archived)
+        retained_ids = set(id(m) for m in session.messages)
+        assert not archived_ids & retained_ids, (
+            f"Duplicate messages in archive and retained: "
+            f"overlap contents = {[m['content'] for m in archived if id(m) in retained_ids]}"
+        )
+
+
+def test_enforce_file_cap_no_message_loss_in_else_branch():
+    """In the else branch, no messages should silently disappear — every
+    message must be either retained or archived."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-no-loss")
+    all_messages = []
+    for i in range(15):
+        msg = {"role": "user", "content": f"u{i}"}
+        session.messages.append(msg)
+        all_messages.append(msg)
+    for i in range(10):
+        msg = {"role": "assistant", "content": f"a{i}"}
+        session.messages.append(msg)
+        all_messages.append(msg)
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=6)
+
+    # Collect all messages accounted for (retained + archived)
+    accounted = set(id(m) for m in session.messages)
+    if archive_fn.called:
+        for m in archive_fn.call_args.args[0]:
+            accounted.add(id(m))
+
+    all_ids = set(id(m) for m in all_messages)
+    missing = all_ids - accounted
+    assert not missing, (
+        f"Lost {len(missing)} message(s) — neither retained nor archived"
+    )
+
+
+def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
+    """When last_consolidated > 0 and the else branch fires, only the
+    unconsolidated dropped messages should be raw-archived.  Messages in the
+    consolidated prefix that are dropped do NOT need raw archiving."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-lc-archive")
+    # 20 messages total: u0..u9 (user), a0..a9 (assistant)
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    # First 8 messages already consolidated
+    session.last_consolidated = 8
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=4)
+
+    if archive_fn.called:
+        archived = archive_fn.call_args.args[0]
+        # Archived messages should NOT include any from the consolidated prefix
+        # (u0..u7). They should only be unconsolidated dropped messages.
+        archived_contents = [m["content"] for m in archived]
+        for c in archived_contents:
+            assert c not in [f"u{i}" for i in range(8)], (
+                f"Consolidated message {c!r} should not be raw-archived"
+            )
+
+
+def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
+    """last_consolidated after retain_recent_legal_suffix should reflect how
+    many retained messages were inside the old consolidated prefix."""
+    session = Session(key="test:else-lc-correct")
+    # 20 messages: u0..u9, a0..a9
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
+
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
+
+    # Retained messages start from latest user (u9) + max_messages forward
+    # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
+    # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
+    assert session.last_consolidated == 3
+    # already_cons should count dropped messages with original index < 12
+    assert already_cons == 9

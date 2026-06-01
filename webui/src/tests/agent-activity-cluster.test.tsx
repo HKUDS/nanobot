@@ -736,7 +736,7 @@ describe("AgentActivityCluster", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /1 tool calls/i }));
 
-    expect(screen.getByText("Shell")).toBeInTheDocument();
+    expect(screen.getByText("Command")).toBeInTheDocument();
     expect(screen.getByText(/cat << 'EOF' \| bash · script, 6 lines/)).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
     expect(screen.queryByText(/for id in/)).not.toBeInTheDocument();
@@ -869,6 +869,39 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Target text was not found in angry-birds.html.")).toBeInTheDocument();
   });
 
+  it("keeps permission errors readable for failed file edits", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "write_file()",
+          traces: ["write_file()"],
+          fileEdits: [{
+            call_id: "call-write",
+            tool: "write_file",
+            path: "/Users/renxubin/.nanobot/workspace/agent-research-video/composition.html",
+            phase: "error",
+            added: 0,
+            deleted: 0,
+            approximate: false,
+            status: "error",
+            error: "Error writing file: [Errno 13] Permission denied: '/Users/renxubin'",
+          }],
+          createdAt: 3,
+        })}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /failed composition\.html/i }));
+
+    expect(screen.getByText("No permission to change this location.")).toBeInTheDocument();
+    expect(screen.queryByText(/\[Errno 13\]/)).not.toBeInTheDocument();
+  });
+
   it("merges repeated edits for the same path and lets successful edits win over failures", async () => {
     const restoreMotion = installReducedMotion();
     try {
@@ -935,5 +968,68 @@ describe("AgentActivityCluster", () => {
     } finally {
       restoreMotion();
     }
+  });
+
+  it("renders tool event embeds as inline activity evidence", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-evidence",
+          role: "tool",
+          kind: "trace",
+          content: 'web_fetch({"url":"https://example.com"})',
+          traces: ['web_fetch({"url":"https://example.com"})'],
+          toolEvents: [{
+            phase: "end",
+            call_id: "call-fetch",
+            name: "web_fetch",
+            arguments: { url: "https://example.com" },
+            embeds: [{
+              url: "/api/media/signed/screenshot.png",
+              name: "Homepage screenshot",
+              type: "image/png",
+            }],
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Web")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Homepage screenshot" })).toHaveAttribute(
+      "src",
+      "/api/media/signed/screenshot.png",
+    );
+  });
+
+  it("shows missing evidence as a file-safe placeholder", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-missing-evidence",
+          role: "tool",
+          kind: "trace",
+          content: 'screenshot({"path":"missing.png"})',
+          traces: ['screenshot({"path":"missing.png"})'],
+          toolEvents: [{
+            phase: "end",
+            call_id: "call-shot",
+            name: "screenshot",
+            arguments: { path: "missing.png" },
+            files: [{ name: "missing.png", type: "image/png" }],
+          }],
+          createdAt: 1,
+        }]}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByText("Vision")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-evidence-preview")).toBeInTheDocument();
+    expect(screen.getByText("missing.png")).toBeInTheDocument();
   });
 });

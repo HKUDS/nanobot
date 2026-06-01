@@ -1,8 +1,4 @@
-"""Session turn helpers for WebUI-capable WebSocket sessions.
-
-AgentLoop uses these without importing a concrete channel plugin; only
-``channel == "websocket"`` messages are affected.
-"""
+"""Session turn helpers for WebUI-capable WebSocket sessions."""
 
 from __future__ import annotations
 
@@ -14,12 +10,22 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.bus import progress as bus_progress
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import (
+    GoalStateChanged,
+    RuntimeEventBus,
+    RuntimeEventContext,
+    RuntimeModelChanged,
+    SessionTurnStarted,
+    TurnCompleted,
+    TurnRunStatusChanged,
+)
 from nanobot.providers.base import LLMProvider
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import truncate_text
+from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -48,6 +54,7 @@ def clean_generated_title(raw: str | None) -> str:
         return ""
     text = re.sub(r"^\s*(title|标题)\s*[:：]\s*", "", text, flags=re.IGNORECASE)
     text = text.strip().strip("\"'`“”‘’")
+    text = strip_think(text)
     text = re.sub(r"\s+", " ", text).strip()
     text = text.rstrip("。.!！?？,，;；:")
     if len(text) > TITLE_MAX_CHARS:
@@ -64,6 +71,9 @@ def _title_inputs(session: Session) -> tuple[str, str]:
         role = message.get("role")
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
+            continue
+        content = strip_think(content)
+        if not content:
             continue
         if role == "user" and not user_text:
             user_text = content.strip()
@@ -89,7 +99,13 @@ async def maybe_generate_webui_title(
         return False
     current_title = session.metadata.get(WEBUI_TITLE_METADATA_KEY)
     if isinstance(current_title, str) and current_title.strip():
-        return False
+        cleaned_current_title = clean_generated_title(current_title)
+        if cleaned_current_title:
+            if cleaned_current_title != current_title:
+                session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
+                sessions.save(session)
+            return False
+        session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
     user_text, assistant_text = _title_inputs(session)
     if not user_text:
@@ -168,7 +184,21 @@ def websocket_turn_wall_started_at(chat_id: str) -> float | None:
     return _WEBSOCKET_TURN_WALL_STARTED_AT.get(chat_id)
 
 
-async def publish_turn_run_status(bus: MessageBus, msg: InboundMessage, status: str) -> None:
+def build_bus_progress_callback(
+    bus: MessageBus,
+    msg: InboundMessage,
+) -> Callable[..., Awaitable[None]]:
+    """Compatibility wrapper for the generic bus progress callback."""
+    return bus_progress.build_bus_progress_callback(bus, msg)
+
+
+async def publish_turn_run_status(
+    bus: MessageBus,
+    msg: InboundMessage,
+    status: str,
+    *,
+    started_at: float | None = None,
+) -> None:
     """Notify WebSocket clients while a user turn is executing (timing strip)."""
     if msg.channel != "websocket":
         return
@@ -179,7 +209,10 @@ async def publish_turn_run_status(bus: MessageBus, msg: InboundMessage, status: 
         "goal_status": status,
     }
     if status == "running":
-        t0 = time.time()
+        if isinstance(started_at, int | float) and started_at > 0:
+            t0 = float(started_at)
+        else:
+            t0 = time.time()
         meta["started_at"] = t0
         _WEBSOCKET_TURN_WALL_STARTED_AT[cid] = t0
     else:
@@ -193,90 +226,119 @@ async def publish_turn_run_status(bus: MessageBus, msg: InboundMessage, status: 
         ),
     )
 
-
-def build_bus_progress_callback(
-    bus: MessageBus,
-    msg: InboundMessage,
-) -> Callable[..., Awaitable[None]]:
-    """Return the bus progress callback for agent runtime events."""
-
-    async def _publish_progress(
-        content: str,
-        *,
-        tool_hint: bool = False,
-        tool_events: list[dict[str, Any]] | None = None,
-        file_edit_events: list[dict[str, Any]] | None = None,
-        reasoning: bool = False,
-        reasoning_end: bool = False,
-    ) -> None:
-        meta = dict(msg.metadata or {})
-        meta["_progress"] = True
-        meta["_tool_hint"] = tool_hint
-        if reasoning:
-            meta["_reasoning_delta"] = True
-        if reasoning_end:
-            meta["_reasoning_end"] = True
-        if tool_events:
-            meta["_tool_events"] = tool_events
-        if file_edit_events:
-            meta["_file_edit_events"] = file_edit_events
-        await bus.publish_outbound(
-            OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=content,
-                metadata=meta,
-            )
-        )
-
-    if msg.channel == "websocket":
-        async def _websocket_progress(
-            content: str,
-            *,
-            tool_hint: bool = False,
-            tool_events: list[dict[str, Any]] | None = None,
-            file_edit_events: list[dict[str, Any]] | None = None,
-            reasoning: bool = False,
-            reasoning_end: bool = False,
-        ) -> None:
-            await _publish_progress(
-                content,
-                tool_hint=tool_hint,
-                tool_events=tool_events,
-                file_edit_events=file_edit_events,
-                reasoning=reasoning,
-                reasoning_end=reasoning_end,
-            )
-
-        return _websocket_progress
-
-    async def _bus_progress(
-        content: str,
-        *,
-        tool_hint: bool = False,
-        tool_events: list[dict[str, Any]] | None = None,
-        reasoning: bool = False,
-        reasoning_end: bool = False,
-    ) -> None:
-        await _publish_progress(
-            content,
-            tool_hint=tool_hint,
-            tool_events=tool_events,
-            reasoning=reasoning,
-            reasoning_end=reasoning_end,
-        )
-
-    return _bus_progress
-
-
 @dataclass
 class WebuiTurnCoordinator:
-    """Own the WebUI/WebSocket wire details that hang off AgentLoop turns."""
+    """Translate generic runtime events into WebUI/WebSocket wire messages."""
 
     bus: MessageBus
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     _title_contexts: dict[str, LLMRuntime] = field(default_factory=dict)
+
+    def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
+        """Subscribe this coordinator to runtime events."""
+        unsubscribe = [
+            runtime_events.subscribe(
+                self._handle_session_turn_started,
+                SessionTurnStarted,
+            ),
+            runtime_events.subscribe(
+                self._handle_run_status_changed,
+                TurnRunStatusChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_turn_completed_event,
+                TurnCompleted,
+            ),
+            runtime_events.subscribe(
+                self._handle_goal_state_changed,
+                GoalStateChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_runtime_model_changed,
+                RuntimeModelChanged,
+            ),
+        ]
+
+        def _unsubscribe() -> None:
+            for fn in reversed(unsubscribe):
+                fn()
+
+        return _unsubscribe
+
+    @staticmethod
+    def _ctx_msg(ctx: RuntimeEventContext) -> InboundMessage:
+        return InboundMessage(
+            channel=ctx.channel,
+            sender_id="runtime",
+            chat_id=ctx.chat_id,
+            content="",
+            metadata=dict(ctx.metadata or {}),
+            session_key_override=ctx.session_key,
+        )
+
+    @staticmethod
+    def _is_websocket_event(ctx: RuntimeEventContext) -> bool:
+        return ctx.channel == "websocket"
+
+    def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        session = self.sessions.get_or_create(event.context.session_key)
+        mark_webui_session(session, event.context.metadata)
+
+    async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        await publish_turn_run_status(
+            self.bus,
+            self._ctx_msg(event.context),
+            event.status,
+            started_at=event.started_at,
+        )
+
+    async def _handle_turn_completed_event(self, event: TurnCompleted) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        msg = self._ctx_msg(event.context)
+        await self.handle_turn_end(
+            msg,
+            session_key=event.context.session_key,
+            latency_ms=event.latency_ms,
+        )
+        self._schedule_title_update_from_event(event)
+
+    async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:
+        if not self._is_websocket_event(event.context):
+            return
+        cid = str(event.context.chat_id or "").strip()
+        if not cid:
+            return
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel=event.context.channel,
+                chat_id=cid,
+                content="",
+                metadata={
+                    "_goal_state_sync": True,
+                    "goal_state": goal_state_ws_blob(event.session_metadata),
+                },
+            ),
+        )
+
+    async def _handle_runtime_model_changed(self, event: RuntimeModelChanged) -> None:
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel="websocket",
+                chat_id="*",
+                content="",
+                metadata={
+                    "_runtime_model_updated": True,
+                    "model": event.model,
+                    "model_preset": event.model_preset,
+                },
+            )
+        )
 
     def capture_title_context(
         self,
@@ -290,8 +352,14 @@ class WebuiTurnCoordinator:
     def discard(self, session_key: str) -> None:
         self._title_contexts.pop(session_key, None)
 
-    async def publish_run_status(self, msg: InboundMessage, status: str) -> None:
-        await publish_turn_run_status(self.bus, msg, status)
+    async def publish_run_status(
+        self,
+        msg: InboundMessage,
+        status: str,
+        *,
+        started_at: float | None = None,
+    ) -> None:
+        await publish_turn_run_status(self.bus, msg, status, started_at=started_at)
 
     async def handle_turn_end(
         self,
@@ -339,6 +407,40 @@ class WebuiTurnCoordinator:
                     content="",
                     metadata={
                         **msg.metadata,
+                        "_session_updated": True,
+                        "_session_update_scope": "metadata",
+                    },
+                ))
+
+        self.schedule_background(_generate_title_and_notify())
+
+    def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
+        title_context = event.runtime
+        if (
+            event.context.metadata.get("webui") is not True
+            or title_context is None
+            or not isinstance(title_context, LLMRuntime)
+        ):
+            return
+
+        async def _generate_title_and_notify(
+            title_llm: LLMRuntime = title_context,
+        ) -> None:
+            generated = await maybe_generate_webui_title_after_turn(
+                channel=event.context.channel,
+                metadata=event.context.metadata,
+                sessions=self.sessions,
+                session_key=event.context.session_key,
+                provider=title_llm.provider,
+                model=title_llm.model,
+            )
+            if generated:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=event.context.channel,
+                    chat_id=event.context.chat_id,
+                    content="",
+                    metadata={
+                        **event.context.metadata,
                         "_session_updated": True,
                         "_session_update_scope": "metadata",
                     },

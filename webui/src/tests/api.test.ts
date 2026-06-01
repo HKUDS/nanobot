@@ -5,6 +5,7 @@ import {
   deleteSession,
   fetchCliApps,
   fetchMcpPresets,
+  fetchProviderModels,
   fetchSidebarState,
   fetchWebuiThread,
   fetchWorkspaces,
@@ -159,6 +160,17 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches provider model lists", async () => {
+    await fetchProviderModels("tok", "deepseek");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider-models?provider=deepseek",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

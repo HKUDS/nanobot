@@ -1,4 +1,4 @@
-![cover-v5-optimized](./images/GitHub_README.png)
+![nanobot README cover](./images/readme-cover.png)
 
 <div align="center">
   <p>
@@ -31,10 +31,30 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source and ultra-lightweight AI agent in the spirit of [OpenClaw](https://github.com/openclaw/openclaw), [Claude Code](https://www.anthropic.com/claude-code), and [Codex](https://www.openai.com/codex/). It keeps the core agent loop small and readable while still supporting chat channels, memory, MCP and practical deployment paths, so you can go from local setup to a long-running personal agent with minimal overhead.
+🐈 **nanobot** is an open-source, ultra-lightweight agent runtime for people who want to own their AI agent stack. It gives you a small, readable core plus the practical pieces for real long-running agents: WebUI, chat channels, tools, memory, MCP, model routing, and deployment.
 
 ## 📢 News
 
+- **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
+- **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
+- **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
+- **2026-05-28** 🗂️ Project workspaces, access controls, steadier goals and streaming.
+- **2026-05-27** ⏱️ Codex streams respect idle timeouts during long runs.
+- **2026-05-26** 📡 Telegram webhooks, refreshed Kagi search, cleaner transport errors.
+- **2026-05-25** 🔌 Unified CLI Apps and MCP, Step Plan support, steadier sustained goals.
+- **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
+- **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
+- **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
+
+<details>
+<summary>Earlier news</summary>
+
+- **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
+- **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
+- **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
+- **2026-05-18** 🖌️ Gemini and MiniMax images, Ant Ling, live file-edit activity.
+- **2026-05-17** 🌊 Smoother WebUI streaming, AutoCompact fixes, buffered CLI reasoning.
+- **2026-05-16** 🧠 Atomic Chat provider, goal-aware timeouts, safer exec URL handling.
 - **2026-05-15** 🚀 Released **v0.2.0** — **`/goal`** holds sustained objectives across turns, WebUI now ships inside the wheel, image generation end to end, 5 new providers with `fallback_models`, and a real agent-loop refactor. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.0) for details.
 - **2026-05-14** 🎯 **`/goal`** for long-term objectives, visible multi-step progress, long-horizon missions in chat.
 - **2026-05-13** 🧠 Streaming reasoning before answers, automatic backup models, smoother plug-in reconnects.
@@ -45,10 +65,6 @@
 - **2026-05-07** 📜 Locale-aware slash palette in WebUI, LAN login, faithful HTTP streaming responses.
 - **2026-05-06** 🧩 Tunable tool hint, steadier voice and plug-in startups, schedules and reminders that stick.
 - **2026-05-05** 🛡️ Quiet deny for unknown Telegram chats, Dream cleanup, fuller automation summaries.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-05-04** 🔐 Safer DingTalk outbound media links, durable cron persistence, DeepSeek polish.
 - **2026-05-03** ⚙️ Predictable shell allow-list behavior, isolated chats mid-reply, cleaner interactive retries.
 - **2026-05-02** 🐈 LongCat support, smarter token sizing hints, clearer bundled upgrade guidance.
@@ -145,12 +161,13 @@
 </details>
 
 
-## 💡 Key Features of nanobot
+## 💡 Why nanobot
 
-- **Ultra-lightweight**: stable long-running agent behavior with a small, readable core.
-- **Research-ready**: the codebase is intentionally simple enough to study, modify, and extend.
-- **Practical**: chat channels, API, memory, MCP, and deployment paths are already built in.
-- **Hackable**: you can start fast, then go deeper through repo docs instead of a monolithic landing page.
+- **Persistent workflows**: goals, memory, tools, and chat context survive long-running work.
+- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, and email.
+- **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
+- **Small core**: readable internals with MCP, memory, deployment, and automation built in.
+- **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
 
 ## 📦 Install
 

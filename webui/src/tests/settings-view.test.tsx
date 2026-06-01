@@ -245,6 +245,138 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
   });
 
+  it("can close the new configuration dialog without trapping the settings page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const configurationButton = await screen.findByRole("button", { name: "Current configuration" });
+    fireEvent.pointerDown(configurationButton!);
+    fireEvent.click(await screen.findByText("Add configuration"));
+
+    expect(await screen.findByRole("heading", { name: "New model configuration" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "New model configuration" })).not.toBeInTheDocument(),
+    );
+    expect(document.body.style.pointerEvents).not.toBe("none");
+
+    fireEvent.pointerDown(configurationButton!);
+    expect(await screen.findByText("Add configuration")).toBeInTheDocument();
+  });
+
+  it("loads provider models and lets users choose one without typing the id manually", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      agent: {
+        ...settingsPayload().agent,
+        model: "deepseek-chat",
+        provider: "deepseek",
+        resolved_provider: "deepseek",
+      },
+      model_presets: [
+        {
+          ...settingsPayload().model_presets[0],
+          model: "deepseek-chat",
+          provider: "deepseek",
+        },
+      ],
+      providers: [
+        {
+          name: "deepseek",
+          label: "DeepSeek",
+          configured: true,
+          auth_type: "api_key",
+          api_key_required: true,
+          api_key_hint: "sk-...",
+          api_base: "https://api.deepseek.com",
+          default_api_base: "https://api.deepseek.com",
+        },
+      ],
+    };
+    const updatedPayload: SettingsPayload = {
+      ...payload,
+      agent: {
+        ...payload.agent,
+        model: "deepseek-reasoner",
+      },
+      model_presets: [
+        {
+          ...payload.model_presets[0],
+          model: "deepseek-reasoner",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/provider-models?provider=deepseek") {
+        return jsonResponse({
+          provider: "deepseek",
+          label: "DeepSeek",
+          status: "available",
+          catalog_kind: "official",
+          models: [
+            { id: "deepseek-chat", owned_by: "deepseek", context_window: 65536 },
+            { id: "deepseek-reasoner", owned_by: "deepseek", context_window: 65536 },
+          ],
+          model_count: 2,
+          fetched_at: 1,
+        });
+      }
+      if (url === "/api/settings/update?model_preset=default&model=deepseek-reasoner") {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models" });
+
+    const modelButtons = await screen.findAllByRole("button", { name: /deepseek-chat/i });
+    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    await screen.findByText("deepseek-reasoner");
+    fireEvent.click(screen.getAllByText("deepseek-reasoner")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/provider-models?provider=deepseek",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/update?model_preset=default&model=deepseek-reasoner",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
   it("saves network safety without exposing technical SSRF copy", async () => {
     const payload = settingsPayload();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

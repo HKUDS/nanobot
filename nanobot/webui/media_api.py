@@ -50,10 +50,17 @@ _MEDIA_ALLOWED_MIMES: frozenset[str] = frozenset({
     "image/jpeg",
     "image/webp",
     "image/gif",
+    "image/svg+xml",
     "video/mp4",
     "video/webm",
     "video/quicktime",
 })
+_SVG_MEDIA_HEADERS: tuple[tuple[str, str], ...] = (
+    (
+        "Content-Security-Policy",
+        "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+    ),
+)
 
 _BYTE_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
@@ -203,6 +210,8 @@ def serve_signed_media(
         ("Cache-Control", "private, max-age=31536000, immutable"),
         ("X-Content-Type-Options", "nosniff"),
     ]
+    if mime == "image/svg+xml":
+        common_headers.extend(_SVG_MEDIA_HEADERS)
     try:
         size = candidate.stat().st_size
     except OSError:
