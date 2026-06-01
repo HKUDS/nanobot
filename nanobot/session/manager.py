@@ -269,13 +269,19 @@ class Session:
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
-    def retain_recent_legal_suffix(self, max_messages: int) -> None:
-        """Keep a legal recent suffix constrained by a hard message cap."""
+    def retain_recent_legal_suffix(self, max_messages: int) -> list[dict]:
+        """Keep a legal recent suffix constrained by a hard message cap.
+
+        Returns the list of messages that were removed.
+        """
         if max_messages <= 0:
+            dropped = list(self.messages)
             self.clear()
-            return
+            return dropped
         if len(self.messages) <= max_messages:
-            return
+            return []
+
+        original = list(self.messages)
 
         retained = list(self.messages[-max_messages:])
 
@@ -306,10 +312,16 @@ class Session:
             if start:
                 retained = retained[start:]
 
-        dropped = len(self.messages) - len(retained)
+        # Compute actually-dropped messages using identity comparison so that
+        # even when retained is a non-contiguous slice of original (the else
+        # branch above), we never duplicate or lose messages.
+        retained_ids = set(id(m) for m in retained)
+        dropped = [m for m in original if id(m) not in retained_ids]
+
         self.messages = retained
-        self.last_consolidated = max(0, self.last_consolidated - dropped)
+        self.last_consolidated = max(0, self.last_consolidated - len(dropped))
         self.updated_at = datetime.now()
+        return dropped
 
     def enforce_file_cap(
         self,
@@ -320,23 +332,19 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
-        before = list(self.messages)
         before_last_consolidated = self.last_consolidated
-        before_count = len(before)
-        self.retain_recent_legal_suffix(limit)
-        dropped_count = before_count - len(self.messages)
-        if dropped_count <= 0:
+        dropped = self.retain_recent_legal_suffix(limit)
+        if not dropped:
             return
 
-        dropped = before[:dropped_count]
-        already_consolidated = min(before_last_consolidated, dropped_count)
+        already_consolidated = min(before_last_consolidated, len(dropped))
         archive_chunk = dropped[already_consolidated:]
         if archive_chunk and on_archive:
             on_archive(archive_chunk)
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
-            dropped_count,
+            len(dropped),
             len(archive_chunk),
             len(self.messages),
         )
