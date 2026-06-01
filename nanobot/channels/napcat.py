@@ -12,11 +12,12 @@ import uuid
 from collections import deque
 from pathlib import Path
 from typing import Annotated, Any, Literal
+
 import aiohttp
 from loguru import logger
 from pydantic import Field
-
-from websockets.asyncio.client import ClientConnection, connect as ws_connect
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as ws_connect
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -75,6 +76,7 @@ class NapcatChannel(BaseChannel):
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._processed_ids: deque[int] = deque(maxlen=2000)
         self._bot_outbound_ids: deque[int] = deque(maxlen=2000)
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -161,6 +163,12 @@ class NapcatChannel(BaseChannel):
                 pass
             self._http = None
         self._fail_pending(RuntimeError("napcat: stopped"))
+        tasks = list(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
 
     def _fail_pending(self, err: BaseException) -> None:
         for fut in self._pending.values():
@@ -198,9 +206,24 @@ class NapcatChannel(BaseChannel):
 
         post_type = payload.get("post_type")
         if post_type == "message":
-            asyncio.create_task(self._on_message(payload))
+            self._create_background_task(self._on_message(payload), "message")
         elif post_type == "notice":
-            asyncio.create_task(self._on_notice(payload))  # avoid deadlock
+            self._create_background_task(self._on_notice(payload), "notice")
+
+    def _create_background_task(self, coro: Any, kind: str) -> None:
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+
+        def _done(done: asyncio.Task[None]) -> None:
+            self._background_tasks.discard(done)
+            try:
+                done.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("napcat: {} handler failed: {}", kind, e)
+
+        task.add_done_callback(_done)
 
     # ------------------------------------------------------------------
     # Inbound: messages
@@ -245,8 +268,6 @@ class NapcatChannel(BaseChannel):
                 return
 
             chat_id = f"group:{group_id}"
-            label = nickname or str(user_id)
-            content = f"{label}: {text}"
             content = self._format_group_content(
                 text=text,
                 nickname=nickname,
@@ -367,7 +388,14 @@ class NapcatChannel(BaseChannel):
         if group_id is None or user_id is None:
             return
 
-        nickname = await self._lookup_member_name(int(group_id), int(user_id))
+        try:
+            group_id_int = int(group_id)
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            logger.warning("napcat: invalid group_increase ids group_id={} user_id={}", group_id, user_id)
+            return
+
+        nickname = await self._lookup_member_name(group_id_int, user_id_int)
 
         # Note: this routes through is_allowed(). For group bots set
         # `allow_from: ["*"]` (or include the joining user's id) for welcomes
@@ -467,7 +495,14 @@ class NapcatChannel(BaseChannel):
             await self._ws.send(
                 json.dumps({"action": action, "params": params, "echo": echo}, ensure_ascii=False)
             )
-            return await asyncio.wait_for(fut, timeout=timeout)
+            resp = await asyncio.wait_for(fut, timeout=timeout)
+            status = resp.get("status")
+            retcode = resp.get("retcode")
+            if (status and status != "ok") or (retcode not in (None, 0)):
+                raise RuntimeError(
+                    f"napcat: action {action} failed status={status!r} retcode={retcode!r}"
+                )
+            return resp
         finally:
             self._pending.pop(echo, None)
 
@@ -503,7 +538,10 @@ class NapcatChannel(BaseChannel):
             pass
 
         try:
-            async with self._http.get(url, allow_redirects=True) as resp:
+            async with self._http.get(url, allow_redirects=False) as resp:
+                if 300 <= resp.status < 400:
+                    logger.warning("napcat: image download redirect rejected url={}", url)
+                    return None
                 if resp.status >= 400:
                     logger.warning("napcat: image download status={} url={}", resp.status, url)
                     return None
