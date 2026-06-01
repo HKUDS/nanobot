@@ -132,6 +132,71 @@ async def test_tavily_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_volcengine_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://open.feedcoopapi.com/search_api/web_search"
+        assert kw["headers"]["Authorization"] == "Bearer volc-key"
+        assert kw["headers"]["X-Traffic-Tag"] == "nanobot"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {
+            "Query": "北京周边游",
+            "SearchType": "web",
+            "Count": 2,
+            "NeedSummary": True,
+            "TimeRange": "OneWeek",
+            "Filter": {"AuthInfoLevel": 1},
+            "QueryControl": {"QueryRewrite": True},
+        }
+        return _response(json={
+            "Result": {
+                "WebResults": [
+                    {
+                        "Title": "北京周边游攻略",
+                        "Url": "https://example.cn/travel",
+                        "Summary": "适合周末出行的路线。",
+                        "AuthInfoDes": "非常权威",
+                    }
+                ]
+            }
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="volcengine", api_key="volc-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="北京周边游", count=2, timeRange="OneWeek", authLevel=1, queryRewrite=True)
+
+    assert "北京周边游攻略" in result
+    assert "https://example.cn/travel" in result
+    assert "非常权威" in result
+
+
+@pytest.mark.asyncio
+async def test_volcengine_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("VOLCENGINE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("WEB_SEARCH_API_KEY", raising=False)
+
+    tool = _tool(provider="volcengine")
+    result = await tool.execute(query="test")
+
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_volcengine_invalid_time_range_returns_error():
+    tool = _tool(provider="volcengine", api_key="volc-key")
+    result = await tool.execute(query="test", timeRange="Yesterday")
+
+    assert "timeRange must be" in result
+
+
+@pytest.mark.asyncio
 async def test_searxng_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "searx.example" in url
