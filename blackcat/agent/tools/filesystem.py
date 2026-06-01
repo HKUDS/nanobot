@@ -24,7 +24,7 @@ from blackcat.utils.helpers import build_image_content_blocks, detect_image_mime
 class FileToolsConfig(Base):
     """Filesystem tools configuration."""
 
-    enable: bool = True  # built-in file tools on by default; set false to act only through MCP servers
+    enable: bool = True  # built-in file tools on by default
 
 
 class _FsTool(Tool):
