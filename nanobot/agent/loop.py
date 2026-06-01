@@ -45,13 +45,13 @@ from nanobot.security.workspace_access import (
     bind_workspace_scope,
     reset_workspace_scope,
 )
-from nanobot.session import turn_continuation
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session import turn_continuation
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
