@@ -102,7 +102,7 @@ describe("ThreadMessages", () => {
     expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["r2"]);
   });
 
-  it("does not split ordinary tool activity just because segment ids changed", () => {
+  it("splits ordinary tool activity when segment ids changed", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -142,13 +142,56 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(1);
+    expect(units).toHaveLength(2);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "r1",
       "t1",
+    ]);
+    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
       "r2",
       "t2",
     ]);
+  });
+
+  it("renders a later tool segment after the visible answer that preceded it", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "I should do a fresh search.",
+        activitySegmentId: "seg-1",
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Let me search the latest data.",
+        createdAt: 2,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "Searching query: HKUDS/nanobot GitHub stars",
+        traces: ["Searching query: HKUDS/nanobot GitHub stars"],
+        activitySegmentId: "seg-2",
+        createdAt: 3,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+
+    expect(units).toHaveLength(3);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
+    expect(units[1]).toMatchObject({
+      type: "message",
+      message: {
+        id: "a1",
+        content: "Let me search the latest data.",
+      },
+    });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
   });
 
   it("only marks the current activity timeline as live while streaming", () => {
@@ -254,7 +297,7 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 
-  it("keeps late activity above the live assistant answer while streaming", () => {
+  it("keeps late activity after the live assistant answer while streaming", () => {
     const messages: UIMessage[] = [
       {
         id: "t0",
@@ -285,11 +328,8 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(2);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
-      "t0",
-      "t1",
-    ]);
+    expect(units).toHaveLength(3);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["t0"]);
     expect(units[1]).toMatchObject({
       type: "message",
       message: {
@@ -297,15 +337,16 @@ describe("ThreadMessages", () => {
         content: "partial answer",
       },
     });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
-    const activity = screen.getByRole("button", { name: /working/i });
     const answer = screen.getByText("partial answer");
-    expect(activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const liveActivity = screen.getByRole("button", { name: /working/i });
+    expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps late activity above a completed assistant answer", () => {
+  it("keeps late activity after a completed assistant answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -335,11 +376,8 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(2);
-    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
-      "r1",
-      "t1",
-    ]);
+    expect(units).toHaveLength(3);
+    expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual(["r1"]);
     expect(units[1]).toMatchObject({
       type: "message",
       message: {
@@ -347,13 +385,14 @@ describe("ThreadMessages", () => {
         content: "Hong Kong is hot today.",
       },
     });
+    expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["t1"]);
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const activity = screen.getByText("Thought for 2m 41s");
     const answer = screen.getByText("Hong Kong is hot today.");
-    expect(activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getAllByText(/thought/i)).toHaveLength(1);
+    const laterActivity = screen.getAllByText(/thought/i).at(-1);
+    expect(laterActivity).toBeTruthy();
+    expect(answer.compareDocumentPosition(laterActivity!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("renders interrupted pre-tool text as activity before the final answer", () => {
