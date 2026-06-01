@@ -77,6 +77,20 @@ def _message_preview_text(message: dict[str, Any]) -> str:
 
 
 @dataclass
+class RetentionResult:
+    """Result of applying the recent-message retention policy."""
+
+    retained: list[dict[str, Any]]
+    dropped: list[dict[str, Any]]
+    already_consolidated_count: int
+    new_last_consolidated: int
+
+    @property
+    def archive_messages(self) -> list[dict[str, Any]]:
+        return self.dropped[self.already_consolidated_count:]
+
+
+@dataclass
 class Session:
     """A conversation session."""
 
@@ -257,19 +271,31 @@ class Session:
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
-    def retain_recent_legal_suffix(self, max_messages: int) -> None:
-        """Keep a legal recent suffix constrained by a hard message cap."""
+    def calculate_retention(self, max_messages: int) -> RetentionResult:
+        """Calculate retained and dropped messages without mutating the session."""
         if max_messages <= 0:
-            self.clear()
-            return
+            dropped = list(self.messages)
+            return RetentionResult(
+                retained=[],
+                dropped=dropped,
+                already_consolidated_count=min(self.last_consolidated, len(dropped)),
+                new_last_consolidated=0,
+            )
         if len(self.messages) <= max_messages:
-            return
+            return RetentionResult(
+                retained=list(self.messages),
+                dropped=[],
+                already_consolidated_count=0,
+                new_last_consolidated=self.last_consolidated,
+            )
 
-        retained = list(self.messages[-max_messages:])
+        retained_indices = list(range(len(self.messages) - max_messages, len(self.messages)))
+        retained = [self.messages[i] for i in retained_indices]
 
         # Prefer starting at a user turn when one exists within the tail.
         first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
         if first_user is not None:
+            retained_indices = retained_indices[first_user:]
             retained = retained[first_user:]
         else:
             # If the tail is assistant/tool-only, anchor to the latest user in
@@ -280,24 +306,56 @@ class Session:
                 None,
             )
             if latest_user is not None:
-                retained = list(self.messages[latest_user: latest_user + max_messages])
+                retained_indices = list(range(latest_user, min(latest_user + max_messages, len(self.messages))))
+                retained = [self.messages[i] for i in retained_indices]
 
         # Mirror get_history(): avoid persisting orphan tool results at the front.
         start = find_legal_message_start(retained)
         if start:
+            retained_indices = retained_indices[start:]
             retained = retained[start:]
 
         # Hard-cap guarantee: never keep more than max_messages.
         if len(retained) > max_messages:
+            retained_indices = retained_indices[-max_messages:]
             retained = retained[-max_messages:]
             start = find_legal_message_start(retained)
             if start:
+                retained_indices = retained_indices[start:]
                 retained = retained[start:]
 
-        dropped = len(self.messages) - len(retained)
-        self.messages = retained
-        self.last_consolidated = max(0, self.last_consolidated - dropped)
+        retained_index_set = set(retained_indices)
+        dropped = [
+            message
+            for i, message in enumerate(self.messages)
+            if i not in retained_index_set
+        ]
+        new_last_consolidated = sum(
+            1 for i in retained_indices
+            if i < self.last_consolidated
+        )
+        already_consolidated_count = sum(
+            1
+            for i in range(min(self.last_consolidated, len(self.messages)))
+            if i not in retained_index_set
+        )
+        return RetentionResult(
+            retained=retained,
+            dropped=dropped,
+            already_consolidated_count=already_consolidated_count,
+            new_last_consolidated=new_last_consolidated,
+        )
+
+    def retain_recent_legal_suffix(self, max_messages: int) -> RetentionResult:
+        """Keep a legal recent suffix constrained by a hard message cap."""
+        result = self.calculate_retention(max_messages)
+        if max_messages <= 0:
+            self.clear()
+            return result
+        self.messages = result.retained
+        self.last_consolidated = result.new_last_consolidated
         self.updated_at = datetime.now()
+        return result
 
     def enforce_file_cap(
         self,
@@ -308,23 +366,17 @@ class Session:
         if limit <= 0 or len(self.messages) <= limit:
             return
 
-        before = list(self.messages)
-        before_last_consolidated = self.last_consolidated
-        before_count = len(before)
-        self.retain_recent_legal_suffix(limit)
-        dropped_count = before_count - len(self.messages)
-        if dropped_count <= 0:
+        result = self.retain_recent_legal_suffix(limit)
+        if not result.dropped:
             return
 
-        dropped = before[:dropped_count]
-        already_consolidated = min(before_last_consolidated, dropped_count)
-        archive_chunk = dropped[already_consolidated:]
+        archive_chunk = result.archive_messages
         if archive_chunk and on_archive:
             on_archive(archive_chunk)
         logger.info(
             "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
             self.key,
-            dropped_count,
+            len(result.dropped),
             len(archive_chunk),
             len(self.messages),
         )

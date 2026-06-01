@@ -68,7 +68,7 @@ def _make_fake_compact(
             loop.sessions.save(session)
             return ""
 
-        probe = _Session(
+        retention_source = _Session(
             key=session.key,
             messages=tail.copy(),
             created_at=session.created_at,
@@ -76,10 +76,9 @@ def _make_fake_compact(
             metadata={},
             last_consolidated=0,
         )
-        probe.retain_recent_legal_suffix(max_suffix)
-        kept = probe.messages
-        cut = len(tail) - len(kept)
-        archive_msgs = tail[:cut]
+        retention = retention_source.calculate_retention(max_suffix)
+        kept = retention.retained
+        archive_msgs = retention.archive_messages
 
         if not archive_msgs and not kept:
             session.updated_at = datetime.now()
@@ -229,6 +228,47 @@ class TestAgentLoopTTLParam:
         archive_fn.assert_called_once()
         archived = archive_fn.call_args.args[0]
         assert [m["content"] for m in archived] == ["u2", "u3"]
+
+    def test_session_enforce_file_cap_archives_non_contiguous_dropped_messages(self, tmp_path):
+        from nanobot.session.manager import Session
+        archive_fn = MagicMock()
+        session = Session(key="cli:direct")
+        for role, content in [
+            ("user", "u0"),
+            ("assistant", "a0"),
+            ("user", "u1"),
+            ("assistant", "a1"),
+            ("assistant", "a2"),
+            ("assistant", "a3"),
+        ]:
+            session.add_message(role, content)
+        session.last_consolidated = 1
+
+        result = session.retain_recent_legal_suffix(3)
+
+        assert [m["content"] for m in result.retained] == ["u1", "a1", "a2"]
+        assert [m["content"] for m in result.dropped] == ["u0", "a0", "a3"]
+        assert result.already_consolidated_count == 1
+        assert [m["content"] for m in result.archive_messages] == ["a0", "a3"]
+
+        session = Session(key="cli:direct")
+        for role, content in [
+            ("user", "u0"),
+            ("assistant", "a0"),
+            ("user", "u1"),
+            ("assistant", "a1"),
+            ("assistant", "a2"),
+            ("assistant", "a3"),
+        ]:
+            session.add_message(role, content)
+        session.last_consolidated = 1
+
+        session.enforce_file_cap(on_archive=archive_fn, limit=3)
+
+        archive_fn.assert_called_once()
+        archived = archive_fn.call_args.args[0]
+        assert [m["content"] for m in archived] == ["a0", "a3"]
+        assert [m["content"] for m in session.messages] == ["u1", "a1", "a2"]
 
 
 class TestAutoCompact:

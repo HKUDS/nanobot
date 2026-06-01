@@ -799,7 +799,7 @@ class Consolidator:
                 self.sessions.save(session)
                 return ""
 
-            probe = Session(
+            retention_source = Session(
                 key=session.key,
                 messages=tail.copy(),
                 created_at=session.created_at,
@@ -807,10 +807,9 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            probe.retain_recent_legal_suffix(max_suffix)
-            kept = probe.messages
-            cut = len(tail) - len(kept)
-            archive_msgs = tail[:cut]
+            retention = retention_source.calculate_retention(max_suffix)
+            kept = retention.retained
+            archive_msgs = retention.archive_messages
 
             if not archive_msgs and not kept:
                 session.updated_at = datetime.now()

@@ -108,11 +108,22 @@ def test_retain_recent_legal_suffix_keeps_recent_messages():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
     assert len(session.messages) == 4
     assert session.messages[0]["content"] == "msg6"
     assert session.messages[-1]["content"] == "msg9"
+    assert [m["content"] for m in result.retained] == ["msg6", "msg7", "msg8", "msg9"]
+    assert [m["content"] for m in result.dropped] == [
+        "msg0",
+        "msg1",
+        "msg2",
+        "msg3",
+        "msg4",
+        "msg5",
+    ]
+    assert result.already_consolidated_count == 0
+    assert result.new_last_consolidated == 0
 
 
 def test_retain_recent_legal_suffix_adjusts_last_consolidated():
@@ -121,10 +132,12 @@ def test_retain_recent_legal_suffix_adjusts_last_consolidated():
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 7
 
-    session.retain_recent_legal_suffix(4)
+    result = session.retain_recent_legal_suffix(4)
 
     assert len(session.messages) == 4
     assert session.last_consolidated == 1
+    assert result.already_consolidated_count == 6
+    assert result.new_last_consolidated == 1
 
 
 def test_retain_recent_legal_suffix_zero_clears_session():
@@ -132,11 +145,15 @@ def test_retain_recent_legal_suffix_zero_clears_session():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
     session.last_consolidated = 5
+    session.metadata["_last_summary"] = {"text": "old"}
 
-    session.retain_recent_legal_suffix(0)
+    result = session.retain_recent_legal_suffix(0)
 
     assert session.messages == []
     assert session.last_consolidated == 0
+    assert "_last_summary" not in session.metadata
+    assert [m["content"] for m in result.dropped] == [f"msg{i}" for i in range(10)]
+    assert result.already_consolidated_count == 5
 
 
 def test_retain_recent_legal_suffix_keeps_legal_tool_boundary():
