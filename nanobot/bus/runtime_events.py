@@ -75,7 +75,15 @@ RuntimeEvent = (
     | GoalStateChanged
     | RuntimeModelChanged
 )
-RuntimeEventHandler = Callable[[RuntimeEvent], Awaitable[None] | None]
+RuntimeEventType = (
+    type[SessionTurnStarted]
+    | type[TurnRunStatusChanged]
+    | type[TurnCompleted]
+    | type[GoalStateChanged]
+    | type[RuntimeModelChanged]
+)
+RuntimeEventHandler = Callable[[Any], Awaitable[None] | None]
+_HandlerEntry = tuple[RuntimeEventType | None, RuntimeEventHandler]
 
 
 class RuntimeEventBus:
@@ -87,19 +95,26 @@ class RuntimeEventBus:
     """
 
     def __init__(self) -> None:
-        self._handlers: list[RuntimeEventHandler] = []
+        self._handlers: list[_HandlerEntry] = []
 
-    def subscribe(self, handler: RuntimeEventHandler) -> Callable[[], None]:
-        self._handlers.append(handler)
+    def subscribe(
+        self,
+        handler: RuntimeEventHandler,
+        event_type: RuntimeEventType | None = None,
+    ) -> Callable[[], None]:
+        entry = (event_type, handler)
+        self._handlers.append(entry)
 
         def _unsubscribe() -> None:
             with contextlib.suppress(ValueError):
-                self._handlers.remove(handler)
+                self._handlers.remove(entry)
 
         return _unsubscribe
 
     async def publish(self, event: RuntimeEvent) -> None:
-        for handler in list(self._handlers):
+        for event_type, handler in list(self._handlers):
+            if event_type is not None and not isinstance(event, event_type):
+                continue
             try:
                 result = handler(event)
                 if inspect.isawaitable(result):

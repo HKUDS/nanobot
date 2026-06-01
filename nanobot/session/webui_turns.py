@@ -15,7 +15,6 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import (
     GoalStateChanged,
-    RuntimeEvent,
     RuntimeEventBus,
     RuntimeEventContext,
     RuntimeModelChanged,
@@ -238,24 +237,34 @@ class WebuiTurnCoordinator:
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
-        return runtime_events.subscribe(self.handle_runtime_event)
+        unsubscribe = [
+            runtime_events.subscribe(
+                self._handle_session_turn_started,
+                SessionTurnStarted,
+            ),
+            runtime_events.subscribe(
+                self._handle_run_status_changed,
+                TurnRunStatusChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_turn_completed_event,
+                TurnCompleted,
+            ),
+            runtime_events.subscribe(
+                self._handle_goal_state_changed,
+                GoalStateChanged,
+            ),
+            runtime_events.subscribe(
+                self._handle_runtime_model_changed,
+                RuntimeModelChanged,
+            ),
+        ]
 
-    async def handle_runtime_event(self, event: RuntimeEvent) -> None:
-        if isinstance(event, SessionTurnStarted):
-            self._handle_session_turn_started(event)
-            return
-        if isinstance(event, TurnRunStatusChanged):
-            await self._handle_run_status_changed(event)
-            return
-        if isinstance(event, TurnCompleted):
-            await self._handle_turn_completed_event(event)
-            return
-        if isinstance(event, GoalStateChanged):
-            await self._handle_goal_state_changed(event)
-            return
-        if isinstance(event, RuntimeModelChanged):
-            await self._handle_runtime_model_changed(event)
-            return
+        def _unsubscribe() -> None:
+            for fn in reversed(unsubscribe):
+                fn()
+
+        return _unsubscribe
 
     @staticmethod
     def _ctx_msg(ctx: RuntimeEventContext) -> InboundMessage:
