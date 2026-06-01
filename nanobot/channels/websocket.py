@@ -27,16 +27,16 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.security.workspace_access import (
-    WORKSPACE_SCOPE_METADATA_KEY,
-    WorkspaceScopeError,
-)
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.config.schema import Base
+from nanobot.security.workspace_access import (
+    WORKSPACE_SCOPE_METADATA_KEY,
+    WorkspaceScopeError,
+)
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
@@ -44,14 +44,14 @@ from nanobot.utils.media_decode import (
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_media_path,
     sign_or_stage_media_path,
 )
-from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.settings_routes import WebUISettingsRouter
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
@@ -1687,15 +1687,12 @@ class WebSocketChannel(BaseChannel):
             )
             return
         if msg.metadata.get("_file_edit_events"):
-            payload: dict[str, Any] = {
-                "event": "file_edit",
-                "chat_id": msg.chat_id,
-                "edits": msg.metadata["_file_edit_events"],
-            }
-            self._try_append_webui_transcript(msg.chat_id, payload)
-            raw = json.dumps(payload, ensure_ascii=False)
-            for connection in conns:
-                await self._safe_send_to(connection, raw, label=" ")
+            edits = msg.metadata.get("_file_edit_events")
+            await self.send_file_edit_events(
+                msg.chat_id,
+                edits if isinstance(edits, list) else [],
+                msg.metadata,
+            )
             return
         text = msg.content
         wire_text = self._rewrite_local_markdown_images(text)
@@ -1786,6 +1783,25 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning_end ")
+
+    async def send_file_edit_events(
+        self,
+        chat_id: str,
+        edits: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        payload: dict[str, Any] = {
+            "event": "file_edit",
+            "chat_id": chat_id,
+            "edits": edits,
+        }
+        self._try_append_webui_transcript(chat_id, payload)
+        raw = json.dumps(payload, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" file_edit ")
 
     async def send_delta(
         self,

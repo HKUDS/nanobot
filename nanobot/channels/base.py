@@ -155,6 +155,19 @@ class BaseChannel(ABC):
         """
         return
 
+    async def send_file_edit_events(
+        self,
+        chat_id: str,
+        edits: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Deliver structured live file-edit events.
+
+        Default is no-op. Channels with a rich activity surface can override
+        this to render editing progress without receiving empty text messages.
+        """
+        return
+
     async def send_reasoning(self, msg: OutboundMessage) -> None:
         """Deliver a complete reasoning block.
 
