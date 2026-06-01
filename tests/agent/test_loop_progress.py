@@ -11,6 +11,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -22,6 +23,15 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     return AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+
+
+def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
+    coordinator = WebuiTurnCoordinator(
+        bus=bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: loop._schedule_background(coro),
+    )
+    coordinator.subscribe(loop.runtime_events)
 
 
 class TestToolEventProgress:
@@ -456,6 +466,7 @@ class TestToolEventProgress:
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
@@ -549,6 +560,7 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
@@ -593,6 +605,7 @@ class TestToolEventProgress:
 
         provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
@@ -641,6 +654,7 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
@@ -693,6 +707,7 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
 
         async def fake_title_after_turn(**_kwargs: object) -> bool:
             raise AssertionError("command-only turns should not generate titles")

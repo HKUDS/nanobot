@@ -881,19 +881,21 @@ def _run_gateway(
     from nanobot.agent.tools.cron import CronTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
+    from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.channels.websocket import publish_runtime_model_update
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
+    from nanobot.session.webui_turns import WebuiTurnCoordinator
 
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
+    runtime_events = RuntimeEventBus()
     try:
         provider_snapshot = build_provider_snapshot(config)
     except ValueError as exc:
@@ -919,13 +921,14 @@ def _run_gateway(
         session_manager=session_manager,
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=load_provider_snapshot,
-        runtime_model_publisher=lambda model, preset: publish_runtime_model_update(
-            bus,
-            model,
-            preset,
-        ),
+        runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
     )
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=session_manager,
+        schedule_background=lambda coro: agent._schedule_background(coro),
+    ).subscribe(runtime_events)
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
     from nanobot.bus.events import OutboundMessage

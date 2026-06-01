@@ -7,6 +7,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
 def _make_loop(tmp_path):
@@ -25,6 +26,11 @@ def _make_loop(tmp_path):
         workspace=tmp_path,
         model="test-model",
     )
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: loop._schedule_background(coro),
+    ).subscribe(loop.runtime_events)
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
 

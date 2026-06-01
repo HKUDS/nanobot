@@ -39,7 +39,13 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
-    return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    WebuiTurnCoordinator(
+        bus=loop.bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: loop._schedule_background(coro),
+    ).subscribe(loop.runtime_events)
+    return loop
 
 
 def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
