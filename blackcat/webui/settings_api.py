@@ -245,8 +245,8 @@ def _resolve_env_placeholders(value: str | None) -> str | None:
 
 
 def _provider_requires_api_key(spec: Any) -> bool:
-    if spec.backend == "azure_openai":
-        return True
+    if spec.name == "azure_openai":
+        return False
     if spec.is_oauth:
         return False
     if spec.is_local or spec.is_direct:
@@ -305,6 +305,8 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
+    if spec.name == "azure_openai":
+        return bool(provider_config.api_base)
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
     return bool(
