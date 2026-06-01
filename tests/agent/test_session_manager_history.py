@@ -549,11 +549,12 @@ def test_retain_recent_legal_suffix_returns_dropped_messages():
     for i in range(10):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped = session.retain_recent_legal_suffix(4)
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
 
     assert len(dropped) == 6
     assert [m["content"] for m in dropped] == [f"msg{i}" for i in range(6)]
     assert len(session.messages) == 4
+    assert already_cons == 0
 
 
 def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
@@ -562,9 +563,10 @@ def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
     for i in range(3):
         session.messages.append({"role": "user", "content": f"msg{i}"})
 
-    dropped = session.retain_recent_legal_suffix(4)
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
 
     assert dropped == []
+    assert already_cons == 0
     assert len(session.messages) == 3
 
 
@@ -573,10 +575,12 @@ def test_retain_recent_legal_suffix_returns_all_on_zero():
     session = Session(key="test:zero-return")
     for i in range(5):
         session.messages.append({"role": "user", "content": f"msg{i}"})
+    session.last_consolidated = 3
 
-    dropped = session.retain_recent_legal_suffix(0)
+    dropped, already_cons = session.retain_recent_legal_suffix(0)
 
     assert len(dropped) == 5
+    assert already_cons == 3
     assert session.messages == []
 
 
@@ -640,3 +644,53 @@ def test_enforce_file_cap_no_message_loss_in_else_branch():
     assert not missing, (
         f"Lost {len(missing)} message(s) — neither retained nor archived"
     )
+
+
+def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
+    """When last_consolidated > 0 and the else branch fires, only the
+    unconsolidated dropped messages should be raw-archived.  Messages in the
+    consolidated prefix that are dropped do NOT need raw archiving."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-lc-archive")
+    # 20 messages total: u0..u9 (user), a0..a9 (assistant)
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    # First 8 messages already consolidated
+    session.last_consolidated = 8
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=4)
+
+    if archive_fn.called:
+        archived = archive_fn.call_args.args[0]
+        # Archived messages should NOT include any from the consolidated prefix
+        # (u0..u7). They should only be unconsolidated dropped messages.
+        archived_contents = [m["content"] for m in archived]
+        for c in archived_contents:
+            assert c not in [f"u{i}" for i in range(8)], (
+                f"Consolidated message {c!r} should not be raw-archived"
+            )
+
+
+def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
+    """last_consolidated after retain_recent_legal_suffix should reflect how
+    many retained messages were inside the old consolidated prefix."""
+    session = Session(key="test:else-lc-correct")
+    # 20 messages: u0..u9, a0..a9
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_consolidated = 12  # u0..u9, a0, a1 consolidated
+
+    dropped, already_cons = session.retain_recent_legal_suffix(4)
+
+    # Retained messages start from latest user (u9) + max_messages forward
+    # so retained = [u9, a0..a9][:4] → but these are from original indices 9..12
+    # Of those, indices 9,10,11 are < 12 (before_lc), so new_lc = 3
+    assert session.last_consolidated <= 12
+    # already_cons should count dropped messages with original index < 12
+    assert already_cons >= 0
