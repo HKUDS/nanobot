@@ -10,18 +10,35 @@ from typing import Any
 from blackcat.agent.tools.base import Tool, tool_parameters
 from blackcat.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from blackcat.agent.tools.path_utils import resolve_workspace_path
+from blackcat.config.schema import Base
+from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from blackcat.security.workspace_access import current_tool_workspace
-from blackcat.utils.media import build_image_content_blocks, detect_image_mime
+from blackcat.utils.helpers import build_image_content_blocks, detect_image_mime
+
+
+class FileToolsConfig(Base):
+    """Filesystem tools configuration."""
+
+    enable: bool = True  # built-in file tools on by default; set false to act only through MCP servers
 
 
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
+
+    config_key = "file"
+
+    @classmethod
+    def config_cls(cls):
+        return FileToolsConfig
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.config.file.enable
 
     def __init__(
         self,
@@ -166,9 +183,6 @@ class ReadFileTool(_FsTool):
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
     _MAX_PDF_PAGES = 20
-
-    parameters: dict[str, Any] # type: ignore[assignment]
-
 
     @property
     def name(self) -> str:
@@ -352,9 +366,9 @@ class ReadFileTool(_FsTool):
         parts: list[str] = []
         for i in range(start, end + 1):
             page = doc[i]
-            text: str = page.get_text()  # type: ignore[union-attr]
+            text = page.get_text().strip()
             if text:
-                parts.append(f"--- Page {i + 1} ---\n{text.strip()}")
+                parts.append(f"--- Page {i + 1} ---\n{text}")
         doc.close()
 
         if not parts:
@@ -402,8 +416,6 @@ class ReadFileTool(_FsTool):
 class WriteFileTool(_FsTool):
     """Write content to a file."""
     _scopes = {"core", "subagent", "memory"}
-
-    parameters: dict[str, Any] # type: ignore[assignment]
 
     @property
     def name(self) -> str:
@@ -733,9 +745,6 @@ class EditFileTool(_FsTool):
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
 
-    # Type hint for Pylance: decorator injects this at runtime
-    parameters: dict[str, Any] # type: ignore[assignment]
-
     @property
     def name(self) -> str:
         return "edit_file"
@@ -966,8 +975,6 @@ class ListDirTool(_FsTool):
         "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
         ".ruff_cache", ".coverage", "htmlcov",
     }
-
-    parameters: dict[str, Any] # type: ignore[assignment]
 
     @property
     def name(self) -> str:
