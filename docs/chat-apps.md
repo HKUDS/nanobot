@@ -447,13 +447,18 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_STAFF_ID"]
+      "allowFrom": ["YOUR_STAFF_ID"],
+      "groupUserIsolation": false
     }
   }
 }
 ```
 
 > `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
+>
+> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per
+> group chat. Set it to `true` to give each sender in a DingTalk group chat a separate
+> session while replies still go back to the same group.
 
 **3. Run**
 
