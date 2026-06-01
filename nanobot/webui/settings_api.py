@@ -73,6 +73,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "jina", "label": "Jina", "credential": "api_key"},
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
