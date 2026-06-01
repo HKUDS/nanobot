@@ -14,8 +14,10 @@ from nanobot.agent.tools.long_task import (
     LongTaskTool,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
 def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:
@@ -120,8 +122,14 @@ async def test_goal_tools_context_isolated_across_tool_types(tmp_path):
 async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm, bus=bus)
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sm,
+        schedule_background=lambda _coro: None,
+    ).subscribe(runtime_events)
+    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
     rc = RequestContext(
         channel="websocket",
         chat_id="chat-99",
@@ -148,9 +156,15 @@ async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
 async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
+    runtime_events = RuntimeEventBus()
     sm = SessionManager(tmp_path)
-    lt = LongTaskTool(sessions=sm, bus=bus)
-    cg = CompleteGoalTool(sessions=sm, bus=bus)
+    WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sm,
+        schedule_background=lambda _coro: None,
+    ).subscribe(runtime_events)
+    lt = LongTaskTool(sessions=sm, runtime_events=runtime_events)
+    cg = CompleteGoalTool(sessions=sm, runtime_events=runtime_events)
     rc = RequestContext(
         channel="websocket",
         chat_id="chat-z",
