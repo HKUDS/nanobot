@@ -1492,7 +1492,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         providers = {provider["name"]: provider for provider in body["providers"]}
         assert providers["openai"]["configured"] is True
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
-        assert providers["azure_openai"]["api_key_required"] is True
+        assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
         assert providers["skywork"]["label"] == "Skywork"
