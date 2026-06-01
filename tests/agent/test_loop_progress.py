@@ -577,6 +577,45 @@ class TestToolEventProgress:
         assert outbound.index(done_msgs[0]) < outbound.index(turn_end_msgs[0])
 
     @pytest.mark.asyncio
+    async def test_websocket_dispatch_publishes_turn_end_after_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+
+        async def raise_from_turn(*_args, **_kwargs):
+            raise RuntimeError("boom")
+
+        loop._process_message = raise_from_turn  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        error_msgs = [m for m in outbound if m.content == "Sorry, I encountered an error."]
+        turn_end_msgs = [m for m in outbound if m.metadata.get("_turn_end")]
+        statuses = [m for m in outbound if m.metadata.get("_goal_status")]
+
+        assert len(error_msgs) == 1
+        assert len(turn_end_msgs) == 1
+        assert turn_end_msgs[0].content == ""
+        assert turn_end_msgs[0].chat_id == "chat1"
+        assert [m.metadata["goal_status"] for m in statuses] == ["idle"]
+        assert outbound.index(error_msgs[0]) < outbound.index(turn_end_msgs[0])
+        assert outbound.index(turn_end_msgs[0]) < outbound.index(statuses[-1])
+
+    @pytest.mark.asyncio
     async def test_webui_title_generation_runs_after_turn_end(self, tmp_path: Path) -> None:
         bus = MessageBus()
         provider = MagicMock()
