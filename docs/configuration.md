@@ -1155,6 +1155,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `kagi` | `apiKey` | `KAGI_API_KEY` | No |
 | `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
+| `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1230,6 +1231,25 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 
 You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
 
+**Volcengine Search:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "volcengine",
+        "apiKey": "${VOLCENGINE_SEARCH_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-search skill.
+Create the key in the [Volcengine web search console](https://console.volcengine.com/search-infinity/web-search),
+then copy it from [API keys](https://console.volcengine.com/search-infinity/api-key).
+Volcengine Ark keys are separate and do not work for this search provider.
+
 **SearXNG** (self-hosted, no API key needed):
 ```json
 {
@@ -1261,8 +1281,8 @@ You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in c
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
-| `apiKey` | string | `""` | API key for Brave or Tavily |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `volcengine`, `searxng`, `duckduckgo` |
+| `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
 
