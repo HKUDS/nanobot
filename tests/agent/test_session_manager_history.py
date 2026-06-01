@@ -538,3 +538,105 @@ def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
     session.retain_recent_legal_suffix(6)
 
     assert len(session.messages) <= 6
+
+
+# --- enforce_file_cap archive correctness (issue #4128) ---
+
+
+def test_retain_recent_legal_suffix_returns_dropped_messages():
+    """retain_recent_legal_suffix returns the actually-dropped messages."""
+    session = Session(key="test:return-dropped")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    dropped = session.retain_recent_legal_suffix(4)
+
+    assert len(dropped) == 6
+    assert [m["content"] for m in dropped] == [f"msg{i}" for i in range(6)]
+    assert len(session.messages) == 4
+
+
+def test_retain_recent_legal_suffix_returns_empty_when_no_drop():
+    """No messages dropped → empty list returned."""
+    session = Session(key="test:no-drop")
+    for i in range(3):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    dropped = session.retain_recent_legal_suffix(4)
+
+    assert dropped == []
+    assert len(session.messages) == 3
+
+
+def test_retain_recent_legal_suffix_returns_all_on_zero():
+    """max_messages=0 clears session and returns all messages."""
+    session = Session(key="test:zero-return")
+    for i in range(5):
+        session.messages.append({"role": "user", "content": f"msg{i}"})
+
+    dropped = session.retain_recent_legal_suffix(0)
+
+    assert len(dropped) == 5
+    assert session.messages == []
+
+
+def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
+    """When the tail is assistant-only, enforce_file_cap must not archive
+    messages that are also retained (the bug from issue #4128)."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-archive")
+    # Build: 15 user messages, then 10 assistant messages (no user in tail)
+    for i in range(15):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+    for i in range(10):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=6)
+
+    # Verify retained messages
+    retained_contents = [m["content"] for m in session.messages]
+    assert len(session.messages) <= 6
+
+    # Verify archived messages have NO overlap with retained
+    if archive_fn.called:
+        archived = archive_fn.call_args.args[0]
+        archived_ids = set(id(m) for m in archived)
+        retained_ids = set(id(m) for m in session.messages)
+        assert not archived_ids & retained_ids, (
+            f"Duplicate messages in archive and retained: "
+            f"overlap contents = {[m['content'] for m in archived if id(m) in retained_ids]}"
+        )
+
+
+def test_enforce_file_cap_no_message_loss_in_else_branch():
+    """In the else branch, no messages should silently disappear — every
+    message must be either retained or archived."""
+    from unittest.mock import MagicMock
+
+    session = Session(key="test:else-no-loss")
+    all_messages = []
+    for i in range(15):
+        msg = {"role": "user", "content": f"u{i}"}
+        session.messages.append(msg)
+        all_messages.append(msg)
+    for i in range(10):
+        msg = {"role": "assistant", "content": f"a{i}"}
+        session.messages.append(msg)
+        all_messages.append(msg)
+
+    archive_fn = MagicMock()
+    session.enforce_file_cap(on_archive=archive_fn, limit=6)
+
+    # Collect all messages accounted for (retained + archived)
+    accounted = set(id(m) for m in session.messages)
+    if archive_fn.called:
+        for m in archive_fn.call_args.args[0]:
+            accounted.add(id(m))
+
+    all_ids = set(id(m) for m in all_messages)
+    missing = all_ids - accounted
+    assert not missing, (
+        f"Lost {len(missing)} message(s) — neither retained nor archived"
+    )
