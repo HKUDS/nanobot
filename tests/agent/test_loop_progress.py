@@ -283,7 +283,7 @@ class TestToolEventProgress:
         assert finish["result"] == "file.txt"
 
     @pytest.mark.asyncio
-    async def test_bus_progress_forwards_file_edit_events_for_websocket_only(self, tmp_path: Path) -> None:
+    async def test_bus_progress_forwards_file_edit_events_without_channel_branch(self, tmp_path: Path) -> None:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
@@ -299,26 +299,17 @@ class TestToolEventProgress:
             "status": "editing",
         }]
 
-        websocket_progress = await loop._build_bus_progress_callback(InboundMessage(
-            channel="websocket",
+        progress = await loop._build_bus_progress_callback(InboundMessage(
+            channel="telegram",
             sender_id="u1",
             chat_id="chat1",
             content="edit",
         ))
-        assert on_progress_accepts_file_edit_events(websocket_progress) is True
-        await websocket_progress("", file_edit_events=edit_events)
+        assert on_progress_accepts_file_edit_events(progress) is True
+        await invoke_file_edit_progress(progress, edit_events)
         outbound = await bus.consume_outbound()
+        assert outbound.channel == "telegram"
         assert outbound.metadata["_file_edit_events"] == edit_events
-
-        telegram_progress = await loop._build_bus_progress_callback(InboundMessage(
-            channel="telegram",
-            sender_id="u1",
-            chat_id="chat2",
-            content="edit",
-        ))
-        assert on_progress_accepts_file_edit_events(telegram_progress) is False
-        await invoke_file_edit_progress(telegram_progress, edit_events)
-        assert bus.outbound_size == 0
 
     @pytest.mark.asyncio
     async def test_goal_turn_keeps_live_file_edit_progress_for_webui(self, tmp_path: Path) -> None:
