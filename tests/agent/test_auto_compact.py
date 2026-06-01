@@ -76,10 +76,9 @@ def _make_fake_compact(
             metadata={},
             last_consolidated=0,
         )
-        probe.retain_recent_legal_suffix(max_suffix)
+        dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix)
         kept = probe.messages
-        cut = len(tail) - len(kept)
-        archive_msgs = tail[:cut]
+        archive_msgs = dropped[already_consolidated:]
 
         if not archive_msgs and not kept:
             session.updated_at = datetime.now()

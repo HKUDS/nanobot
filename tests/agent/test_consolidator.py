@@ -441,6 +441,44 @@ class TestCompactIdleSession:
         assert "u25" in user_content or "a25" in user_content
 
     @pytest.mark.asyncio
+    async def test_non_contiguous_suffix_archives_actual_dropped_messages(
+        self,
+        real_consolidator,
+        mock_provider,
+    ):
+        """Assistant-only tails retain a non-contiguous slice, so archive the
+        actual dropped messages rather than a computed prefix."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Tail summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:noncontiguous")
+        for i in range(15):
+            session.add_message("user", f"user-{i:02d}")
+        for i in range(10):
+            session.add_message("assistant", f"assistant-{i:02d}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:noncontiguous", max_suffix=6)
+        assert result == "Tail summary."
+
+        reloaded = sessions.get_or_create("cli:noncontiguous")
+        assert [m["content"] for m in reloaded.messages] == [
+            "user-14",
+            "assistant-00",
+            "assistant-01",
+            "assistant-02",
+            "assistant-03",
+            "assistant-04",
+        ]
+
+        archived_call = mock_provider.chat_with_retry.call_args
+        user_content = archived_call.kwargs["messages"][1]["content"]
+        assert "user-14" not in user_content
+        assert "assistant-00" not in user_content
+        assert "assistant-09" in user_content
+
+    @pytest.mark.asyncio
     async def test_acquires_consolidation_lock(self, real_consolidator, mock_provider):
         """Verify lock is held during execution."""
         import asyncio
