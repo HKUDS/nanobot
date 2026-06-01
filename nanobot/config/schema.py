@@ -41,8 +41,12 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
-    transcription_model: str | None = None  # Model path/name for local provider
-
+    transcription_api_key: str | None = (
+        None  # Override API key for transcription (takes precedence over provider config)
+    )
+    transcription_base_url: str | None = (
+        None  # Override base URL for transcription (takes precedence over provider config)
+    )
 
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""

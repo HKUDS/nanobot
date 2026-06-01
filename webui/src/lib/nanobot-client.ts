@@ -347,20 +347,41 @@ export class NanobotClient {
     return new Promise((resolve, reject) => {
       const requestId = `transcribe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       
-      // Set up one-time handler for the response
-      const handler = (event: InboundEvent) => {
-        if (event.event === "transcribe_result" && event.request_id === requestId) {
-          unsubscribe();
-          if (event.error) {
-            reject(new Error(event.error));
-          } else {
-            resolve(event.text || "");
+      // Listen for transcription results without attaching to a chat_id
+      // We intercept messages at the socket level rather than using onChat
+      const sock = this.socket;
+      if (!sock || sock.readyState !== WS_OPEN) {
+        reject(new Error("WebSocket not connected"));
+        return;
+      }
+      
+      const originalOnMessage = sock.onmessage;
+      let handled = false;
+      
+      sock.onmessage = (ev: MessageEvent) => {
+        // Check if this is our transcription result
+        try {
+          const parsed = JSON.parse(ev.data) as InboundEvent;
+          if (!handled && parsed.event === "transcribe_result" && parsed.request_id === requestId) {
+            handled = true;
+            // Restore original handler
+            sock.onmessage = originalOnMessage;
+            if (parsed.error) {
+              reject(new Error(parsed.error));
+            } else {
+              resolve(parsed.text || "");
+            }
+            return;
           }
+        } catch {
+          // Ignore parse errors
+        }
+        
+        // Call original handler for all other messages
+        if (originalOnMessage) {
+          originalOnMessage.call(sock, ev);
         }
       };
-      
-      // Listen on a special internal chat ID for transcription results
-      const unsubscribe = this.onChat("__transcription__", handler);
       
       // Send the transcription request
       this.queueSend({
@@ -372,8 +393,14 @@ export class NanobotClient {
       
       // Timeout after 30 seconds
       setTimeout(() => {
-        unsubscribe();
-        reject(new Error("Transcription timeout"));
+        if (!handled) {
+          handled = true;
+          // Restore original handler on timeout
+          if (sock.onmessage !== originalOnMessage) {
+            sock.onmessage = originalOnMessage;
+          }
+          reject(new Error("Transcription timeout"));
+        }
       }, 30000);
     });
   }

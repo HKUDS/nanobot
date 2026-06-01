@@ -42,6 +42,7 @@ from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
+    webm_to_wav_async,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
@@ -942,7 +943,6 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(
                     connection,
                     "transcribe_result",
-                    chat_id="__transcription__",
                     request_id=request_id,
                     error="missing data_url",
                 )
@@ -954,18 +954,26 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(
                     connection,
                     "transcribe_result",
-                    chat_id="__transcription__",
                     request_id=request_id,
                     error=f"invalid audio data: {error_reason}",
                 )
                 return
 
+            # Convert webm to wav before transcription
+            audio_path = paths[0]
+            if Path(audio_path).suffix.lower() == ".webm":
+                input_path = Path(audio_path)
+                output_path = input_path.with_suffix(".wav")
+                converted = await webm_to_wav_async(input_file=input_path, output_file=output_path)
+                if isinstance(converted, Path):
+                    audio_path = str(converted)
+                    input_path.unlink(missing_ok=True)
+
             # Transcribe the audio
-            transcription = await self.transcribe_audio(paths[0])
+            transcription = await self.transcribe_audio(audio_path)
             await self._send_event(
                 connection,
                 "transcribe_result",
-                chat_id="__transcription__",
                 request_id=request_id,
                 text=transcription or "",
             )
@@ -973,7 +981,6 @@ class WebSocketChannel(BaseChannel):
             await self._send_event(
                 connection,
                 "transcribe_result",
-                chat_id="__transcription__",
                 request_id=envelope.get("request_id", ""),
                 error=f"transcription failed: {str(e)}",
             )

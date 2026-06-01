@@ -1350,6 +1350,21 @@ export function ThreadComposer({
 
   const stopRecording = useCallback(async () => {
     if (mediaRecorderRef.current && isRecording) {
+      // Wrap onstop in a Promise to ensure proper sequencing
+      const onStopPromise = new Promise<void>((resolve) => {
+        const recorder = mediaRecorderRef.current;
+        if (recorder) {
+          const originalOnStop = recorder.onstop;
+          recorder.onstop = (event) => {
+            // Call original handler if it exists
+            if (originalOnStop) {
+              originalOnStop.call(recorder, event);
+            }
+            resolve();
+          };
+        }
+      });
+      
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (recordingTimerRef.current) {
@@ -1357,8 +1372,8 @@ export function ThreadComposer({
         recordingTimerRef.current = null;
       }
       
-      // Wait for onstop to complete and audio processing
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for onstop to complete properly
+      await onStopPromise;
       
       // Transcribe the audio
       if (audioBlobRef.current && audioNameRef.current && onTranscribe) {
@@ -1401,6 +1416,21 @@ export function ThreadComposer({
     // If recording, stop and transcribe first
     if (isRecording && onTranscribe) {
       try {
+        // Wrap onstop in a Promise to ensure proper sequencing
+        const onStopPromise = new Promise<void>((resolve) => {
+          const recorder = mediaRecorderRef.current;
+          if (recorder) {
+            const originalOnStop = recorder.onstop;
+            recorder.onstop = (event) => {
+              // Call original handler if it exists
+              if (originalOnStop) {
+                originalOnStop.call(recorder, event);
+              }
+              resolve();
+            };
+          }
+        });
+        
         // Stop recording
         mediaRecorderRef.current?.stop();
         setIsRecording(false);
@@ -1409,17 +1439,8 @@ export function ThreadComposer({
           recordingTimerRef.current = null;
         }
         
-        // Wait for onstop to complete and blob to be created
-        await new Promise<void>((resolve) => {
-          const checkBlob = () => {
-            if (audioBlobRef.current && audioNameRef.current) {
-              resolve();
-            } else {
-              setTimeout(checkBlob, 50);
-            }
-          };
-          checkBlob();
-        });
+        // Wait for onstop to complete properly
+        await onStopPromise;
         
         // Transcribe the audio
         const reader = new FileReader();

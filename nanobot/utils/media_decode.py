@@ -7,14 +7,14 @@ size guard, and filesystem layout.
 
 from __future__ import annotations
 
+import asyncio
 import base64
-import mimetypes
-import re
-import uuid
 import io
+import mimetypes
 import os
-import subprocess
+import re
 import tempfile
+import uuid
 from pathlib import Path
 
 from nanobot.utils.helpers import safe_filename
@@ -65,11 +65,11 @@ def save_base64_data_url(
     return str(dest)
 
 
-def webm_to_wav(
+async def webm_to_wav_async(
     audio_bytes: bytes = None, input_file: Path = None, output_file: Path = None
 ) -> io.BytesIO | Path | None:
     """
-    Convert non-WAV audio to WAV format using ffmpeg.
+    Convert non-WAV audio to WAV format using ffmpeg (async version).
 
     Args:
         audio_bytes: Raw audio data bytes (optional if input_file is provided)
@@ -106,39 +106,42 @@ def webm_to_wav(
         else:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
                 out_path = tmp_out.name
-        # Use ffmpeg to convert to WAV
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-i",
-                in_path,
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                "-f",
-                "wav",
-                "-y",
-                out_path,
-            ],
-            capture_output=True,
-            check=True,
+
+        # Use asyncio subprocess to avoid blocking the event loop
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-i",
+            in_path,
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-f",
+            "wav",
+            "-y",
+            out_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+
+        await process.communicate()
+
+        if process.returncode != 0:
+            return None
+
         if output_file:
             return output_file
         # Read converted WAV file
         with open(out_path, "rb") as f:
             wav_io = io.BytesIO(f.read())
         return wav_io
-    except subprocess.CalledProcessError as e:
-        return None
     except FileNotFoundError:
         return None
-    except Exception as e:
+    except Exception:
         return None
     finally:
-        # Cleanup temporary files
-        if in_path and os.path.exists(in_path):
+        # Only unlink the input if it was a temporary file we created from audio_bytes
+        if audio_bytes is not None and in_path and os.path.exists(in_path):
             os.unlink(in_path)
         if not output_file and out_path and os.path.exists(out_path):
             os.unlink(out_path)
