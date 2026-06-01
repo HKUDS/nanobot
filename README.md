@@ -35,6 +35,7 @@
 
 ## 📢 News
 
+- **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
 - **2026-05-28** 🗂️ Project workspaces, access controls, steadier goals and streaming.
@@ -44,11 +45,11 @@
 - **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
 - **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
 - **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
-- **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
 
 <details>
 <summary>Earlier news</summary>
 
+- **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
 - **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
 - **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
 - **2026-05-18** 🖌️ Gemini and MiniMax images, Ant Ling, live file-edit activity.
