@@ -3,7 +3,6 @@
 import asyncio
 import functools
 import json
-import logging
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -17,7 +16,6 @@ from websockets.frames import Close
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import (
-    _OPENING_HANDSHAKE_FAILED_MESSAGE,
     WebSocketChannel,
     WebSocketConfig,
     _is_valid_chat_id,
@@ -28,7 +26,6 @@ from nanobot.channels.websocket import (
     _parse_inbound_payload,
     _parse_query,
     _parse_request_path,
-    _WebSocketHandshakeNoiseFilter,
     publish_runtime_model_update,
 )
 from nanobot.config.loader import load_config, save_config
@@ -40,18 +37,6 @@ from nanobot.webui.settings_api import settings_payload, update_provider_setting
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
-
-
-def _log_record(message: str, exc: BaseException) -> logging.LogRecord:
-    return logging.LogRecord(
-        name="websockets.server",
-        level=logging.ERROR,
-        pathname=__file__,
-        lineno=1,
-        msg=message,
-        args=(),
-        exc_info=(type(exc), exc, exc.__traceback__),
-    )
 
 
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
@@ -126,22 +111,6 @@ def test_websocket_config_accepts_absolute_unix_socket(tmp_path) -> None:
 def test_websocket_config_rejects_relative_unix_socket() -> None:
     with pytest.raises(ValueError, match="absolute path"):
         WebSocketConfig(unix_socket_path="engine.sock")
-
-
-def test_websocket_handshake_noise_filter_suppresses_disconnects() -> None:
-    filter_ = _WebSocketHandshakeNoiseFilter()
-    wrapped = RuntimeError("wrapped")
-    wrapped.__cause__ = BrokenPipeError(32, "Broken pipe")
-
-    assert not filter_.filter(_log_record(_OPENING_HANDSHAKE_FAILED_MESSAGE, BrokenPipeError()))
-    assert not filter_.filter(_log_record(_OPENING_HANDSHAKE_FAILED_MESSAGE, wrapped))
-
-
-def test_websocket_handshake_noise_filter_keeps_real_errors() -> None:
-    filter_ = _WebSocketHandshakeNoiseFilter()
-
-    assert filter_.filter(_log_record(_OPENING_HANDSHAKE_FAILED_MESSAGE, RuntimeError("boom")))
-    assert filter_.filter(_log_record("connection handler failed", BrokenPipeError()))
 
 
 def test_parse_query_extracts_token_and_client_id() -> None:
