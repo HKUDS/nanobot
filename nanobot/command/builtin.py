@@ -325,11 +325,21 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 return
             prompt, last_cursor = result
             key = dream_session_key()
-            resp = await loop.process_direct(prompt, session_key=key, ephemeral=True)
+            resp = await loop.process_direct(
+                prompt,
+                session_key=key,
+                ephemeral=True,
+                tools=store.build_dream_tools(),
+            )
             elapsed = time.monotonic() - t0
-            if resp is not None:
+            if MemoryStore.dream_run_completed(resp):
                 store.set_last_dream_cursor(last_cursor)
-            content = f"Dream completed in {elapsed:.1f}s."
+                content = f"Dream completed in {elapsed:.1f}s."
+            else:
+                content = (
+                    f"Dream did not complete after {elapsed:.1f}s; "
+                    "memory cursor was not advanced."
+                )
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"

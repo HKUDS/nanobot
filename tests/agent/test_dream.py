@@ -3,6 +3,7 @@
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.providers.base import LLMResponse
 
 
 @pytest.fixture
@@ -63,6 +64,39 @@ class TestBuildDreamPrompt:
         # The full 2000 chars should not appear — truncated to 500
         assert long_content not in prompt
         assert "x" * 500 in prompt
+
+    def test_batches_oldest_unprocessed_entries_first(self, store):
+        for i in range(25):
+            store.append_history(f"entry-{i + 1:02d}")
+
+        result = store.build_dream_prompt(max_entries=20)
+        assert result is not None
+        prompt, cursor = result
+
+        assert cursor == 20
+        assert "entry-01" in prompt
+        assert "entry-20" in prompt
+        assert "entry-21" not in prompt
+
+        store.set_last_dream_cursor(cursor)
+        next_result = store.build_dream_prompt(max_entries=20)
+        assert next_result is not None
+        next_prompt, next_cursor = next_result
+        assert next_cursor == 25
+        assert "entry-21" in next_prompt
+        assert "entry-25" in next_prompt
+
+
+class TestDreamTools:
+    def test_dream_tools_are_restricted_to_file_edits(self, store):
+        tools = store.build_dream_tools()
+
+        assert set(tools.tool_names) == {
+            "apply_patch",
+            "edit_file",
+            "read_file",
+            "write_file",
+        }
 
 
 class TestEphemeralDirect:
@@ -178,6 +212,21 @@ class TestEphemeralDirect:
                 "test", session_key="dream:consolidate-test", ephemeral=True,
             )
             mock_consolidate.assert_not_called()
+
+    async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
+        loop, store = _make_loop
+        loop.provider.chat_with_retry.return_value = LLMResponse(
+            content="provider error",
+            finish_reason="error",
+        )
+
+        resp = await loop.process_direct(
+            "test", session_key="dream:error", ephemeral=True,
+        )
+
+        assert resp is not None
+        assert resp.metadata["_stop_reason"] == "error"
+        assert MemoryStore.dream_run_completed(resp) is False
 
 
 class TestEphemeralHooks:

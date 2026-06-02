@@ -999,10 +999,21 @@ def _run_gateway(
                     return None
                 prompt, last_cursor = result
                 key = dream_session_key()
-                resp = await agent.process_direct(prompt, session_key=key, ephemeral=True)
-                if resp is not None:
+                resp = await agent.process_direct(
+                    prompt,
+                    session_key=key,
+                    ephemeral=True,
+                    tools=store.build_dream_tools(),
+                    on_progress=_silent,
+                )
+                if MemoryStore.dream_run_completed(resp):
                     store.set_last_dream_cursor(last_cursor)
                     logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
+                else:
+                    logger.warning(
+                        "Dream cron job did not complete; cursor remains at {}",
+                        store.get_last_dream_cursor(),
+                    )
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
