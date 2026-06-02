@@ -61,6 +61,95 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 type ShellView = "chat" | "settings" | "apps";
+type ShellRoute = {
+  view: ShellView;
+  activeKey: string | null;
+  settingsSection: SettingsSectionKey;
+};
+
+const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
+  "overview",
+  "appearance",
+  "models",
+  "image",
+  "browser",
+  "apps",
+  "runtime",
+  "advanced",
+];
+
+function isSettingsSectionKey(value: string | null): value is SettingsSectionKey {
+  return SETTINGS_SECTION_KEYS.includes(value as SettingsSectionKey);
+}
+
+function defaultShellRoute(): ShellRoute {
+  return { view: "chat", activeKey: null, settingsSection: "overview" };
+}
+
+function readShellRoute(): ShellRoute {
+  if (typeof window === "undefined") return defaultShellRoute();
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  if (!hash || hash === "/" || hash === "/new") return defaultShellRoute();
+
+  const [path, query = ""] = hash.split("?", 2);
+  const params = new URLSearchParams(query);
+  const rawSettingsSection = params.get("section");
+  const settingsSection = isSettingsSectionKey(rawSettingsSection)
+    ? rawSettingsSection
+    : "overview";
+  const activeKey = params.get("chat")?.trim() || null;
+
+  if (path === "/settings") {
+    return { view: "settings", activeKey, settingsSection };
+  }
+  if (path === "/apps") {
+    return { view: "apps", activeKey, settingsSection: "apps" };
+  }
+  if (path.startsWith("/chat/")) {
+    const encoded = path.slice("/chat/".length);
+    try {
+      const key = decodeURIComponent(encoded).trim();
+      return key
+        ? { view: "chat", activeKey: key, settingsSection: "overview" }
+        : defaultShellRoute();
+    } catch {
+      return defaultShellRoute();
+    }
+  }
+  return defaultShellRoute();
+}
+
+function shellRouteHash(route: ShellRoute): string {
+  if (route.view === "chat") {
+    return route.activeKey
+      ? `#/chat/${encodeURIComponent(route.activeKey)}`
+      : "#/new";
+  }
+  const params = new URLSearchParams();
+  if (route.activeKey) params.set("chat", route.activeKey);
+  if (route.view === "settings" && route.settingsSection !== "overview") {
+    params.set("section", route.settingsSection);
+  }
+  const query = params.toString();
+  return `#/${route.view}${query ? `?${query}` : ""}`;
+}
+
+function writeShellRoute(route: ShellRoute, replace = false): void {
+  if (typeof window === "undefined") return;
+  const nextHash = shellRouteHash(route);
+  if (window.location.hash === nextHash) return;
+  if (replace) {
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}${nextHash}`,
+    );
+    return;
+  }
+  window.location.hash = nextHash;
+}
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
   return Date.now() + Math.max(0, expiresInSeconds) * 1000;
@@ -433,9 +522,14 @@ function Shell({
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [view, setView] = useState<ShellView>("chat");
-  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>("overview");
+  const initialRouteRef = useRef<ShellRoute | null>(null);
+  if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
+  const [activeKey, setActiveKey] = useState<string | null>(
+    initialRouteRef.current.activeKey,
+  );
+  const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [settingsInitialSection, setSettingsInitialSection] =
+    useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -466,6 +560,31 @@ function Shell({
     useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
+
+  const navigate = useCallback(
+    (route: ShellRoute, options?: { replace?: boolean }) => {
+      setActiveKey(route.activeKey);
+      setView(route.view);
+      setSettingsInitialSection(route.settingsSection);
+      writeShellRoute(route, options?.replace);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const applyRoute = () => {
+      const route = readShellRoute();
+      setActiveKey(route.activeKey);
+      setView(route.view);
+      setSettingsInitialSection(route.settingsSection);
+      setWorkspaceError(null);
+      if (route.view === "chat" && !route.activeKey) {
+        setDraftWorkspaceScope(null);
+      }
+    };
+    window.addEventListener("hashchange", applyRoute);
+    return () => window.removeEventListener("hashchange", applyRoute);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -557,6 +676,21 @@ function Shell({
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
     });
   }, [loading, sessions]);
+
+  useEffect(() => {
+    if (loading || !activeKey) return;
+    if (sessions.some((session) => session.key === activeKey)) return;
+    const currentRoute = readShellRoute();
+    navigate(
+      currentRoute.view === "chat"
+        ? defaultShellRoute()
+        : {
+            ...currentRoute,
+            activeKey: null,
+          },
+      { replace: true },
+    );
+  }, [activeKey, loading, navigate, sessions]);
 
   useEffect(() => {
     return client.onSessionUpdate((_chatId, _scope, workspaceScope) => {
@@ -653,8 +787,11 @@ function Shell({
     try {
       const scope = workspaceScope ?? activeWorkspaceScope;
       const chatId = await createChat(scope);
-      setActiveKey(`websocket:${chatId}`);
-      setView("chat");
+      navigate({
+        view: "chat",
+        activeKey: `websocket:${chatId}`,
+        settingsSection: "overview",
+      });
       setMobileSidebarOpen(false);
       if (scope) {
         setWorkspaceOverrides((current) => ({
@@ -670,15 +807,14 @@ function Shell({
       }
       return null;
     }
-  }, [activeWorkspaceScope, createChat, t]);
+  }, [activeWorkspaceScope, createChat, navigate, t]);
 
   const onNewChat = useCallback(() => {
-    setActiveKey(null);
+    navigate(defaultShellRoute());
     setDraftWorkspaceScope(null);
     setWorkspaceError(null);
-    setView("chat");
     setMobileSidebarOpen(false);
-  }, []);
+  }, [navigate]);
 
   const onNewChatInProject = useCallback(
     (projectPath: string, projectName: string) => {
@@ -688,7 +824,7 @@ function Shell({
         onNewChat();
         return;
       }
-      setActiveKey(null);
+      navigate(defaultShellRoute());
       setDraftWorkspaceScope(normalizeWorkspaceScope({
         project_path: trimmed,
         project_name: projectName || projectNameFromPath(trimmed),
@@ -696,10 +832,9 @@ function Shell({
         restrict_to_workspace: base.access_mode === "restricted",
       }));
       setWorkspaceError(null);
-      setView("chat");
       setMobileSidebarOpen(false);
     },
-    [activeWorkspaceScope, onNewChat, workspaces?.default_scope],
+    [activeWorkspaceScope, navigate, onNewChat, workspaces?.default_scope],
   );
 
   const onSelectChat = useCallback(
@@ -720,11 +855,10 @@ function Shell({
         setDraftWorkspaceScope(null);
       }
       setWorkspaceError(null);
-      setActiveKey(key);
-      setView("chat");
+      navigate({ view: "chat", activeKey: key, settingsSection: "overview" });
       setMobileSidebarOpen(false);
     },
-    [sessions],
+    [navigate, sessions],
   );
 
   const onTogglePin = useCallback(
@@ -845,10 +979,14 @@ function Shell({
       if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
         const archived = new Set([...sidebarState.archived_keys, key]);
         const next = sessions.find((session) => !archived.has(session.key));
-        setActiveKey(next?.key ?? null);
+        navigate({
+          view: "chat",
+          activeKey: next?.key ?? null,
+          settingsSection: "overview",
+        });
       }
     },
-    [activeKey, sessions, sidebarState.archived_keys, updateSidebarState],
+    [activeKey, navigate, sessions, sidebarState.archived_keys, updateSidebarState],
   );
 
   const onToggleArchived = useCallback(() => {
@@ -891,27 +1029,40 @@ function Shell({
 
   const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
-    setSettingsInitialSection(section);
-    setView("settings");
+    navigate({ view: "settings", activeKey, settingsSection: section });
     setMobileSidebarOpen(false);
-  }, []);
+  }, [activeKey, navigate]);
 
   const onOpenApps = useCallback(() => {
     setSessionSearchOpen(false);
-    setSettingsInitialSection("apps");
-    setView("apps");
+    navigate({ view: "apps", activeKey, settingsSection: "apps" });
     setMobileSidebarOpen(false);
-  }, []);
+  }, [activeKey, navigate]);
+
+  const onSettingsSectionChange = useCallback(
+    (section: SettingsSectionKey) => {
+      navigate({
+        view: section === "apps" ? "apps" : "settings",
+        activeKey,
+        settingsSection: section,
+      });
+    },
+    [activeKey, navigate],
+  );
 
   const onBackToChat = useCallback(() => {
-    setView("chat");
     setMobileSidebarOpen(false);
-    setActiveKey((current) => {
-      if (!current) return null;
-      if (sessions.some((session) => session.key === current)) return current;
+    const nextKey = (() => {
+      if (!activeKey) return null;
+      if (sessions.some((session) => session.key === activeKey)) return activeKey;
       return sessions[0]?.key ?? null;
+    })();
+    navigate({
+      view: "chat",
+      activeKey: nextKey,
+      settingsSection: "overview",
     });
-  }, [sessions]);
+  }, [activeKey, navigate, sessions]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1003,14 +1154,26 @@ function Shell({
       ? (sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null)
       : activeKey;
     setPendingDelete(null);
-    if (deletingActive) setActiveKey(fallbackKey);
+    if (deletingActive) {
+      navigate({
+        view: "chat",
+        activeKey: fallbackKey,
+        settingsSection: "overview",
+      }, { replace: true });
+    }
     try {
       await deleteChat(key);
     } catch (e) {
-      if (deletingActive) setActiveKey(key);
+      if (deletingActive) {
+        navigate({
+          view: "chat",
+          activeKey: key,
+          settingsSection: "overview",
+        }, { replace: true });
+      }
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, sessions]);
+  }, [pendingDelete, deleteChat, activeKey, navigate, sessions]);
 
   const headerTitle = activeSession
     ? sidebarState.title_overrides[activeSession.key] ||
@@ -1205,6 +1368,7 @@ function Shell({
                   onModelNameChange={onModelNameChange}
                   onSettingsChange={setSettingsSnapshot}
                   onWorkspaceSettingsChange={refreshWorkspaces}
+                  onSectionChange={onSettingsSectionChange}
                   onLogout={onLogout}
                   onRestart={onRestart}
                   isRestarting={isRestarting}

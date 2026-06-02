@@ -271,6 +271,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   onWorkspaceSettingsChange?: () => void | Promise<void>;
+  onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
   isRestarting?: boolean;
@@ -319,6 +320,7 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   onWorkspaceSettingsChange,
+  onSectionChange,
   onLogout,
   onRestart,
   isRestarting = false,
@@ -392,6 +394,14 @@ export function SettingsView({
   useEffect(() => {
     setActiveSection(initialSection);
   }, [initialSection]);
+
+  const selectSection = useCallback(
+    (section: SettingsSectionKey) => {
+      setActiveSection(section);
+      onSectionChange?.(section);
+    },
+    [onSectionChange],
+  );
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
   const [form, setForm] = useState<AgentSettingsDraft>({
@@ -1128,7 +1138,7 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             showBrandLogos={localPrefs.brandLogos}
-            onSelectSection={setActiveSection}
+            onSelectSection={selectSection}
           />
         );
       case "appearance":
@@ -1199,7 +1209,7 @@ export function SettingsView({
             saving={imageGenerationSaving}
             onChangeForm={setImageGenerationForm}
             onSave={saveImageGenerationSettings}
-            onOpenProviders={() => setActiveSection("models")}
+            onOpenProviders={() => selectSection("models")}
             showBrandLogos={localPrefs.brandLogos}
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
@@ -1318,7 +1328,7 @@ export function SettingsView({
       {showSidebar ? (
         <SettingsSidebar
           activeSection={activeSection}
-          onSelectSection={setActiveSection}
+          onSelectSection={selectSection}
           onBackToChat={onBackToChat}
           onLogout={onLogout}
           hostChromeInset={hostChromeInset}
