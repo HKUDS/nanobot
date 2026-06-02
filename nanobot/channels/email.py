@@ -187,6 +187,11 @@ class EmailChannel(BaseChannel):
             self.logger.warning("SMTP host not configured")
             return
 
+        # Skip progress messages to prevent sending an empty email after each tool call
+        if (msg.metadata or {}).get("_progress"):
+            self.logger.debug("Skip progress message to {}", msg.chat_id)
+            return
+
         to_addr = msg.chat_id.strip()
         if not to_addr:
             self.logger.warning("Missing recipient address")
