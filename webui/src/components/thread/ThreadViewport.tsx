@@ -10,6 +10,7 @@ import {
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { Button } from "@/components/ui/button";
@@ -288,6 +289,14 @@ export function ThreadViewport({
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-background to-transparent"
       />
+
+      {hasMessages ? (
+        <PromptRail
+          messages={visibleMessages}
+          scrollRef={scrollRef}
+          bottomOffset={scrollButtonBottom}
+        />
+      ) : null}
 
       {showScrollToBottomButton && !atBottom && (
         <Button
