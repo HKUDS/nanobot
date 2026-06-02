@@ -65,6 +65,32 @@ def manager() -> ChannelManager:
     return mgr
 
 
+def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nanobot.webui.workspaces.read_webui_default_access_mode",
+        lambda: "default",
+    )
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"workspace": str(tmp_path)}},
+            "tools": {"restrictToWorkspace": True},
+            "channels": {
+                "websocket": {
+                    "enabled": True,
+                    "websocketRequiresToken": False,
+                },
+            },
+        }
+    )
+
+    mgr = ChannelManager(config, MessageBus(), webui_static_dist=False)
+    channel = mgr.channels["websocket"]
+
+    scope = channel.gateway.workspaces.default_scope()
+    assert scope.project_path == tmp_path
+    assert scope.restrict_to_workspace is True
+
+
 @pytest.mark.asyncio
 async def test_reasoning_delta_routes_to_send_reasoning_delta(manager):
     channel = manager.channels["mock"]

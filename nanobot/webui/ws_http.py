@@ -9,185 +9,68 @@ Also houses shared HTTP utility functions used by both this module and
 
 from __future__ import annotations
 
-import email.utils
-import hmac
-import http
 import json
 import mimetypes
 import re
-import secrets
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlparse
 
 from loguru import logger
-from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.command.builtin import builtin_command_palette
-from nanobot.config.paths import get_media_dir
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.media_api import (
-    serve_signed_media,
-    sign_media_path,
-    sign_or_stage_media_path,
+from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
+from nanobot.webui.http_utils import (
+    case_insensitive_header as _case_insensitive_header,
 )
+from nanobot.webui.http_utils import (
+    host_for_url as _host_for_url,
+)
+from nanobot.webui.http_utils import (
+    http_error as _http_error,
+)
+from nanobot.webui.http_utils import (
+    http_json_response as _http_json_response,
+)
+from nanobot.webui.http_utils import (
+    http_response as _http_response,
+)
+from nanobot.webui.http_utils import (
+    is_localhost as _is_localhost,
+)
+from nanobot.webui.http_utils import (
+    issue_route_secret_matches as _issue_route_secret_matches,
+)
+from nanobot.webui.http_utils import (
+    normalize_config_path as _normalize_config_path,
+)
+from nanobot.webui.http_utils import (
+    parse_query as _parse_query,
+)
+from nanobot.webui.http_utils import (
+    parse_request_path as _parse_request_path,
+)
+from nanobot.webui.http_utils import (
+    query_first as _query_first,
+)
+from nanobot.webui.http_utils import (
+    safe_host_header as _safe_host_header,
+)
+from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
 from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import (
-    build_webui_thread_response,
-    rewrite_local_markdown_images,
-)
+from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.workspaces import WebUIWorkspaceController
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionManager
-
-
-# ---------------------------------------------------------------------------
-# Shared HTTP utility functions (imported by websocket.py)
-# ---------------------------------------------------------------------------
-
-
-def _strip_trailing_slash(path: str) -> str:
-    if len(path) > 1 and path.endswith("/"):
-        return path.rstrip("/")
-    return path or "/"
-
-
-def _normalize_config_path(path: str) -> str:
-    return _strip_trailing_slash(path)
-
-
-def _case_insensitive_header(headers: Any, key: str) -> str:
-    """Read a header from websockets/http test stubs without assuming casing."""
-    try:
-        value = headers.get(key)
-    except Exception:
-        value = None
-    if value is None:
-        try:
-            value = headers.get(key.lower())
-        except Exception:
-            value = None
-    return str(value or "").strip()
-
-
-def _safe_host_header(value: str) -> str:
-    """Return a safe Host header value, or empty when it should not be echoed."""
-    value = value.strip()
-    if not value:
-        return ""
-    if re.fullmatch(r"\[[0-9A-Fa-f:.]+\](?::\d{1,5})?", value):
-        return value
-    if re.fullmatch(r"[A-Za-z0-9.-]+(?::\d{1,5})?", value):
-        return value
-    return ""
-
-
-def _host_for_url(host: str, port: int) -> str:
-    host = host.strip()
-    if host in ("0.0.0.0", "::"):
-        host = "127.0.0.1"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"{host}:{port}"
-
-
-def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
-    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    headers = Headers(
-        [
-            ("Date", email.utils.formatdate(usegmt=True)),
-            ("Connection", "close"),
-            ("Content-Length", str(len(body))),
-            ("Content-Type", "application/json; charset=utf-8"),
-        ]
-    )
-    reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, headers, body)
-
-
-def _http_response(
-    body: bytes,
-    *,
-    status: int = 200,
-    content_type: str = "text/plain; charset=utf-8",
-    extra_headers: list[tuple[str, str]] | None = None,
-) -> Response:
-    headers = [
-        ("Date", email.utils.formatdate(usegmt=True)),
-        ("Connection", "close"),
-        ("Content-Length", str(len(body))),
-        ("Content-Type", content_type),
-    ]
-    if extra_headers:
-        headers.extend(extra_headers)
-    reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, Headers(headers), body)
-
-
-def _http_error(status: int, message: str | None = None) -> Response:
-    body = (message or http.HTTPStatus(status).phrase).encode("utf-8")
-    return _http_response(body, status=status)
-
-
-def _parse_request_path(path_with_query: str) -> tuple[str, dict[str, list[str]]]:
-    """Parse normalized path and query parameters in one pass."""
-    parsed = urlparse("ws://x" + path_with_query)
-    path = _strip_trailing_slash(parsed.path or "/")
-    return path, parse_qs(parsed.query, keep_blank_values=True)
-
-
-def _normalize_http_path(path_with_query: str) -> str:
-    return _parse_request_path(path_with_query)[0]
-
-
-def _parse_query(path_with_query: str) -> dict[str, list[str]]:
-    return _parse_request_path(path_with_query)[1]
-
-
-def _query_first(query: dict[str, list[str]], key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
-
-
-def _is_localhost(connection: Any) -> bool:
-    addr = getattr(connection, "remote_address", None)
-    if not addr:
-        return False
-    host = addr[0] if isinstance(addr, tuple) else addr
-    if not isinstance(host, str):
-        return False
-    if host.startswith("::ffff:"):
-        host = host[7:]
-    return host in {"127.0.0.1", "::1", "localhost"}
-
-
-def _bearer_token(headers: Any) -> str | None:
-    auth = headers.get("Authorization") or headers.get("authorization")
-    if auth and auth.lower().startswith("bearer "):
-        return auth[7:].strip() or None
-    return None
-
-
-def _issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
-    if not configured_secret:
-        return True
-    authorization = headers.get("Authorization") or headers.get("authorization")
-    if authorization and authorization.lower().startswith("bearer "):
-        supplied = authorization[7:].strip()
-        return hmac.compare_digest(supplied, configured_secret)
-    header_token = headers.get("X-Nanobot-Auth") or headers.get("x-nanobot-auth")
-    if not header_token:
-        return False
-    return hmac.compare_digest(header_token.strip(), configured_secret)
 
 
 def _decode_api_key(raw_key: str) -> str | None:
@@ -234,11 +117,9 @@ def _resolve_bootstrap_model_name(
 class GatewayHTTPHandler:
     """Handles all HTTP routes served alongside the WebSocket endpoint.
 
-    Owns token management, session API, media API, static file serving,
-    and delegates settings routes to ``WebUISettingsRouter``.
+    Routes HTTP requests and delegates stateful work to explicit gateway
+    services owned by the composition layer.
     """
-
-    _MAX_ISSUED_TOKENS = 10_000
 
     def __init__(
         self,
@@ -246,36 +127,26 @@ class GatewayHTTPHandler:
         config: Any,  # WebSocketConfig
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
-        workspace_path: Path,
         runtime_model_name: Callable[[], str | None] | None,
         runtime_surface: str,
         runtime_capabilities_overrides: dict[str, Any] | None,
         bus: MessageBus,
+        tokens: GatewayTokenStore,
+        media: WebUIMediaGateway,
+        workspaces: WebUIWorkspaceController,
         log: Any = logger,
     ) -> None:
         self.config = config
         self.session_manager = session_manager
         self.static_dist_path = static_dist_path
-        self.workspace_path = workspace_path
         self.runtime_model_name = runtime_model_name
         self.bus = bus
+        self.tokens = tokens
+        self.media = media
+        self.workspaces = workspaces
         self._log = log
         self._runtime_surface = runtime_surface
 
-        self.issued_tokens: dict[str, float] = {}
-        self.api_tokens: dict[str, float] = {}
-        self.media_secret: bytes = secrets.token_bytes(32)
-
-        # Workspace controller
-        from nanobot.webui.workspaces import WebUIWorkspaceController
-
-        self.workspaces = WebUIWorkspaceController(
-            session_manager=session_manager,
-            default_workspace=workspace_path,
-            default_restrict_to_workspace=None,
-        )
-
-        # Settings router
         from nanobot.webui.settings_api import runtime_capabilities as _rc
         from nanobot.webui.settings_routes import WebUISettingsRouter
 
@@ -294,46 +165,13 @@ class GatewayHTTPHandler:
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
-        self._purge_expired_api_tokens()
-        token = _bearer_token(request.headers) or _query_first(
-            _parse_query(request.path), "token"
-        )
-        if not token:
-            return False
-        expiry = self.api_tokens.get(token)
-        if expiry is None or time.monotonic() > expiry:
-            self.api_tokens.pop(token, None)
-            return False
-        return True
-
-    def _purge_expired_api_tokens(self) -> None:
-        now = time.monotonic()
-        for token_key, expiry in list(self.api_tokens.items()):
-            if now > expiry:
-                self.api_tokens.pop(token_key, None)
-
-    def _purge_expired_issued_tokens(self) -> None:
-        now = time.monotonic()
-        for token_key, expiry in list(self.issued_tokens.items()):
-            if now > expiry:
-                self.issued_tokens.pop(token_key, None)
-
-    def take_issued_token_if_valid(self, token_value: str | None) -> bool:
-        if not token_value:
-            return False
-        self._purge_expired_issued_tokens()
-        expiry = self.issued_tokens.pop(token_value, None)
-        if expiry is None:
-            return False
-        if time.monotonic() > expiry:
-            return False
-        return True
+        return self.tokens.check_api_token(request)
 
     # -- Main dispatch ------------------------------------------------------
 
     async def dispatch(self, connection: Any, request: WsRequest) -> Any | None:
         """Route an HTTP request. Returns Response or None."""
-        got, query = _parse_request_path(request.path)
+        got, _ = _parse_request_path(request.path)
 
         # Token issue endpoint
         if self.config.token_issue_path:
@@ -389,18 +227,14 @@ class GatewayHTTPHandler:
                 "token_issue_path is set but token_issue_secret is empty; "
                 "any client can obtain connection tokens — set token_issue_secret for production."
             )
-        self._purge_expired_issued_tokens()
-        if len(self.issued_tokens) >= self._MAX_ISSUED_TOKENS:
+        if not self.tokens.can_issue():
             self._log.error(
                 "too many outstanding issued tokens ({}), rejecting issuance",
-                len(self.issued_tokens),
+                len(self.tokens.issued_tokens),
             )
             return _http_json_response({"error": "too many outstanding tokens"}, status=429)
-        token_value = f"nbwt_{secrets.token_urlsafe(32)}"
-        self.issued_tokens[token_value] = time.monotonic() + float(self.config.token_ttl_s)
-        return _http_json_response(
-            {"token": token_value, "expires_in": self.config.token_ttl_s}
-        )
+        token_value = self.tokens.issue_token(self.config.token_ttl_s)
+        return _http_json_response(token_response_payload(token_value, self.config.token_ttl_s))
 
     # -- Bootstrap ----------------------------------------------------------
 
@@ -412,21 +246,13 @@ class GatewayHTTPHandler:
         elif not _is_localhost(connection):
             return _http_error(403, "bootstrap is localhost-only")
 
-        self._purge_expired_issued_tokens()
-        self._purge_expired_api_tokens()
-        if (
-            len(self.issued_tokens) >= self._MAX_ISSUED_TOKENS
-            or len(self.api_tokens) >= self._MAX_ISSUED_TOKENS
-        ):
+        if not self.tokens.can_issue(include_api_token=True):
             return _http_response(
                 json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
                 status=429,
                 content_type="application/json; charset=utf-8",
             )
-        token = f"nbwt_{secrets.token_urlsafe(32)}"
-        expiry = time.monotonic() + float(self.config.token_ttl_s)
-        self.issued_tokens[token] = expiry
-        self.api_tokens[token] = expiry
+        token = self.tokens.issue_token(self.config.token_ttl_s, api_token=True)
 
         ws_url = self._bootstrap_ws_url(request)
         expected_path = _normalize_config_path(self.config.path)
@@ -510,7 +336,7 @@ class GatewayHTTPHandler:
         messages = data.get("messages")
         if isinstance(messages, list):
             scrub_subagent_messages_for_channel(messages)
-        self._augment_media_urls(data)
+        self.media.augment_media_urls(data)
         return _http_json_response(data)
 
     def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
@@ -524,11 +350,11 @@ class GatewayHTTPHandler:
         scope = self.workspaces.scope_for_session_key(decoded_key)
         data = build_webui_thread_response(
             decoded_key,
-            augment_user_media=self._augment_transcript_user_media,
-            augment_assistant_text=lambda text: rewrite_local_markdown_images(
+            augment_user_media=self.media.augment_transcript_media,
+            augment_assistant_media=self.media.augment_transcript_media,
+            augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
                 text,
                 workspace_path=scope.project_path,
-                sign_path=self.sign_or_stage_media_path,
             ),
         )
         if data is None:
@@ -561,34 +387,10 @@ class GatewayHTTPHandler:
     def _handle_media_fetch(
         self, sig: str, payload: str, request: WsRequest | None = None
     ) -> Response:
-        return serve_signed_media(
+        return self.media.serve_signed_media(
             sig,
             payload,
-            secret=self.media_secret,
             request=request,
-            media_dir=lambda channel=None: get_media_dir(channel),
-        )
-
-    def sign_media_path(self, abs_path: Path) -> str | None:
-        return sign_media_path(
-            abs_path,
-            secret=self.media_secret,
-            media_dir=lambda channel=None: get_media_dir(channel),
-        )
-
-    def sign_or_stage_media_path(self, path: Path) -> dict[str, str] | None:
-        return sign_or_stage_media_path(
-            path,
-            secret=self.media_secret,
-            media_dir=lambda channel=None: get_media_dir(channel),
-            logger=self._log,
-        )
-
-    def rewrite_local_markdown_images(self, text: str) -> str:
-        return rewrite_local_markdown_images(
-            text,
-            workspace_path=self.workspace_path,
-            sign_path=self.sign_or_stage_media_path,
         )
 
     # -- Misc routes --------------------------------------------------------
@@ -687,45 +489,6 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache)],
         )
-
-    # -- Media helpers (called by WebSocketChannel.send) --------------------
-
-    def _augment_media_urls(self, payload: dict[str, Any]) -> None:
-        messages = payload.get("messages")
-        if not isinstance(messages, list):
-            return
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            media = msg.get("media")
-            if not isinstance(media, list) or not media:
-                continue
-            urls: list[dict[str, str]] = []
-            for entry in media:
-                if not isinstance(entry, str) or not entry:
-                    continue
-                signed = self.sign_media_path(Path(entry))
-                if signed is None:
-                    continue
-                urls.append({"url": signed, "name": Path(entry).name})
-            if urls:
-                msg["media_urls"] = urls
-            msg.pop("media", None)
-
-    def _augment_transcript_user_media(self, paths: list[str]) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        for pstr in paths:
-            path = Path(pstr)
-            att = self.sign_or_stage_media_path(path)
-            if att is None:
-                continue
-            mime, _ = mimetypes.guess_type(path.name)
-            kind = "video" if mime and mime.startswith("video/") else "image"
-            out.append(
-                {"kind": kind, "url": att["url"], "name": att.get("name", path.name)},
-            )
-        return out
-
 
 def _is_websocket_channel_session_key(key: str) -> bool:
     return key.startswith("websocket:")
