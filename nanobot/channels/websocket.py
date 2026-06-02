@@ -27,16 +27,16 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.security.workspace_access import (
-    WORKSPACE_SCOPE_METADATA_KEY,
-    WorkspaceScopeError,
-)
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir, get_workspace_path
 from nanobot.config.schema import Base
+from nanobot.security.workspace_access import (
+    WORKSPACE_SCOPE_METADATA_KEY,
+    WorkspaceScopeError,
+)
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
@@ -44,14 +44,14 @@ from nanobot.utils.media_decode import (
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_media_path,
     sign_or_stage_media_path,
 )
-from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.settings_api import runtime_capabilities
 from nanobot.webui.settings_routes import WebUISettingsRouter
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
@@ -990,7 +990,8 @@ class WebSocketChannel(BaseChannel):
         scope = self._webui_workspaces.scope_for_session_key(decoded_key)
         data = build_webui_thread_response(
             decoded_key,
-            augment_user_media=self._augment_transcript_user_media,
+            augment_user_media=self._augment_transcript_media,
+            augment_assistant_media=self._augment_transcript_media,
             augment_assistant_text=lambda text: rewrite_local_markdown_images(
                 text,
                 workspace_path=scope.project_path,
@@ -1010,7 +1011,7 @@ class WebSocketChannel(BaseChannel):
         except (ValueError, TypeError) as e:
             self.logger.warning("webui transcript append failed: {}", e)
 
-    def _augment_transcript_user_media(self, paths: list[str]) -> list[dict[str, Any]]:
+    def _augment_transcript_media(self, paths: list[str]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for pstr in paths:
             path = Path(pstr)
@@ -1018,7 +1019,12 @@ class WebSocketChannel(BaseChannel):
             if att is None:
                 continue
             mime, _ = mimetypes.guess_type(path.name)
-            kind = "video" if mime and mime.startswith("video/") else "image"
+            if mime and mime.startswith("video/"):
+                kind = "video"
+            elif mime and mime.startswith("image/"):
+                kind = "image"
+            else:
+                kind = "file"
             out.append(
                 {"kind": kind, "url": att["url"], "name": att.get("name", path.name)},
             )
