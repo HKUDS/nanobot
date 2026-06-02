@@ -99,6 +99,11 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
+    def __post_init__(self) -> None:
+        # An out-of-range offset (corrupt metadata) would hide all history; reset it.
+        if not 0 <= self.last_consolidated <= len(self.messages):
+            self.last_consolidated = 0
+
     @staticmethod
     def _annotate_message_time(message: dict[str, Any], content: Any) -> Any:
         """Expose persisted turn timestamps to the model for relative-date reasoning.
