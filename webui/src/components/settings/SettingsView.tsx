@@ -4755,7 +4755,7 @@ function timezonesWithCurrent(current: string): string[] {
   const intl = Intl as typeof Intl & {
     supportedValuesOf?: (key: "timeZone") => string[];
   };
-  let values: string[] = [];
+  let values: string[];
   try {
     values = intl.supportedValuesOf?.("timeZone") ?? [];
   } catch {
