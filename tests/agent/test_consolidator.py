@@ -10,6 +10,7 @@ from nanobot.agent.memory import (
     MemoryStore,
 )
 from nanobot.session.manager import Session
+from nanobot.utils.prompt_templates import render_template
 
 
 @pytest.fixture
@@ -74,6 +75,17 @@ class TestConsolidatorSummarize:
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
         assert result is None
+
+
+class TestConsolidatorPromptContract:
+    def test_archive_prompt_outputs_attribute_tags_without_missing_context_claims(self):
+        prompt = render_template("agent/consolidator_archive.md", strip=True)
+
+        assert "SNIP" in prompt
+        for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
+            assert mark in prompt
+        assert "check context below" not in prompt.lower()
+        assert "Do not mark something [skip] merely because it might already exist" in prompt
 
 
 class TestConsolidatorArchiveErrorHandling:

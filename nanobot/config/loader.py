@@ -92,10 +92,9 @@ _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 def resolve_config_env_vars(config: Config) -> Config:
     """Return *config* with ``${VAR}`` env-var references resolved.
 
-    Walks in place so fields declared with ``exclude=True`` (e.g.
-    ``DreamConfig.cron``) survive; returns the same instance when no
-    references are present. Raises ``ValueError`` if a referenced
-    variable is not set.
+    Walks in place so fields declared with ``exclude=True`` survive;
+    returns the same instance when no references are present.
+    Raises ``ValueError`` if a referenced variable is not set.
     """
     return _resolve_in_place(config)
 

@@ -742,9 +742,6 @@ def settings_payload(
             },
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
-                "max_batch_size": defaults.dream.max_batch_size,
-                "max_iterations": defaults.dream.max_iterations,
-                "annotate_line_ages": defaults.dream.annotate_line_ages,
             },
             "unified_session": defaults.unified_session,
         },
