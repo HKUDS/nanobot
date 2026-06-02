@@ -228,6 +228,56 @@ class TestEphemeralDirect:
         assert resp.metadata["_stop_reason"] == "error"
         assert MemoryStore.dream_run_completed(resp) is False
 
+    async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
+        """Dream must only see the batch selected by build_dream_prompt."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        store = MemoryStore(tmp_path)
+        for i in range(60):
+            store.append_history(f"entry-{i + 1:02d}")
+
+        result = store.build_dream_prompt(max_entries=20)
+        assert result is not None
+        prompt, cursor = result
+        assert cursor == 20
+
+        captured: dict[str, list[dict]] = {}
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+
+        async def chat_with_retry(**kwargs):
+            captured["messages"] = kwargs["messages"]
+            return LLMResponse(content="done", finish_reason="stop")
+
+        provider.chat_with_retry = chat_with_retry
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            context_window_tokens=8000,
+        )
+
+        await loop.process_direct(
+            prompt,
+            session_key="dream:test",
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        messages = captured["messages"]
+        system_prompt = messages[0]["content"]
+        request_text = "\n".join(str(message.get("content", "")) for message in messages)
+        assert "# Recent History" not in system_prompt
+        assert "entry-01" in request_text
+        assert "entry-20" in request_text
+        assert "entry-21" not in request_text
+        assert "entry-60" not in request_text
+
 
 class TestEphemeralHooks:
     """When ephemeral=True, extra hooks must not fire."""

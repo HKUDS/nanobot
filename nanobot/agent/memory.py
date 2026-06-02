@@ -953,5 +953,3 @@ class Consolidator:
                 )
 
             return summary
-
-

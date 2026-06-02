@@ -593,6 +593,7 @@ class AgentLoop:
         session: Session,
         history: list[dict[str, Any]],
         pending_summary: str | None,
+        include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -608,6 +609,7 @@ class AgentLoop:
             workspace=scope.project_path,
             runtime_state=self,
             inbound_message=msg,
+            include_memory_recent_history=include_memory_recent_history,
         )
 
     async def _dispatch_command_inline(
@@ -1408,6 +1410,7 @@ class AgentLoop:
             ctx.session,
             ctx.history,
             ctx.pending_summary,
+            include_memory_recent_history=not ctx.ephemeral,
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
