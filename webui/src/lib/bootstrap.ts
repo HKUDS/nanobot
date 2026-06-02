@@ -1,4 +1,5 @@
 import type { BootstrapResponse } from "./types";
+import { fetchWithTimeout } from "./http";
 
 const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
 
@@ -37,16 +38,17 @@ export function clearSavedSecret(): void {
 export async function fetchBootstrap(
   baseUrl: string = "",
   secret: string = "",
+  timeoutMs?: number,
 ): Promise<BootstrapResponse> {
   const headers: Record<string, string> = {};
   if (secret) {
     headers["X-Nanobot-Auth"] = secret;
   }
-  const res = await fetch(`${baseUrl}/webui/bootstrap`, {
+  const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
     headers,
-  });
+  }, timeoutMs);
   if (!res.ok) {
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }

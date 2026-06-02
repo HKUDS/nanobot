@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createModelConfiguration,
@@ -36,6 +36,11 @@ describe("webui API helpers", () => {
         json: async () => ({ deleted: true, key: "websocket:chat-1", messages: [] }),
       }),
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
@@ -149,6 +154,18 @@ describe("webui API helpers", () => {
       status: 500,
       message: "npm error ENOTEMPTY",
     });
+  });
+
+  it("times out when an API request never responds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    const pending = expect(listSessions("tok")).rejects.toThrow(
+      "Request timed out after 20000ms",
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    await pending;
   });
 
   it("serializes provider settings updates without returning secrets", async () => {
