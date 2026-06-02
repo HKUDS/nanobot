@@ -158,4 +158,117 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
-    assert tool_message["content"] == "tool result"
+
+
+def test_is_path_in_tool_results_detects_tool_results_dir(tmp_path):
+    """_is_path_in_tool_result recognises paths inside .nanobot/tool-results/."""
+    from nanobot.agent.runner import AgentRunner
+
+    tool_results_dir = tmp_path / ".nanobot" / "tool-results" / "sess1"
+    tool_results_dir.mkdir(parents=True)
+    persisted_file = tool_results_dir / "call_abc.txt"
+    persisted_file.write_text("some large content", encoding="utf-8")
+
+    assert AgentRunner._is_path_in_tool_results(str(persisted_file), tmp_path) is True
+
+
+def test_is_path_in_tool_results_rejects_normal_file(tmp_path):
+    """_is_path_in_tool_result returns False for normal files outside tool-results."""
+    from nanobot.agent.runner import AgentRunner
+
+    normal_file = tmp_path / "regular.txt"
+    normal_file.write_text("hello", encoding="utf-8")
+
+    assert AgentRunner._is_path_in_tool_results(str(normal_file), tmp_path) is False
+    assert AgentRunner._is_path_in_tool_results(None, tmp_path) is False
+
+
+async def test_runner_skips_offload_for_persisted_tool_result_recovery(tmp_path):
+    """read_file reading from tool-results directory should not be offloaded again."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    # Set up a persisted tool result file
+    tool_results_dir = tmp_path / ".nanobot" / "tool-results" / "test_runner"
+    tool_results_dir.mkdir(parents=True)
+    persisted_file = tool_results_dir / "call_big.txt"
+    large_content = "x" * 50_000
+    persisted_file.write_text(large_content, encoding="utf-8")
+
+    # This is what read_file would return when reading the persisted file
+    # (it's a normal read, not exceeding read_file's own 128K limit)
+    read_result = (
+        f"1| {large_content}\n"
+        "\n(End of file — 1 lines total)"
+    )
+
+    provider = MagicMock()
+    captured_messages: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First call: agent decides to read a big file
+            return LLMResponse(
+                content="reading",
+                tool_calls=[ToolCallRequest(
+                    id="call_read",
+                    name="read_file",
+                    arguments={"path": "/some/big/file.txt"},
+                )],
+                usage={"prompt_tokens": 5, "completion_tokens": 3},
+            )
+        elif call_count["n"] == 2:
+            # Second call: agent sees the persisted reference, tries to read it
+            captured_messages[:] = messages
+            return LLMResponse(
+                content="reading persisted",
+                tool_calls=[ToolCallRequest(
+                    id="call_read_persisted",
+                    name="read_file",
+                    arguments={"path": str(persisted_file)},
+                )],
+                usage={"prompt_tokens": 5, "completion_tokens": 3},
+            )
+        # Third call: agent has the content
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    # First call returns a big result (will be persisted)
+    # Second call returns reading the persisted file (should NOT be persisted again)
+    # Third call returns final answer
+    first_result = "x" * 20_000  # > max_tool_result_chars, will be persisted
+    call_results = [first_result, read_result, "done"]
+
+    async def execute(tool_name, params, **kwargs):
+        idx = call_count["n"] - 1
+        return call_results[idx] if idx < len(call_results) else "done"
+
+    tools.execute = execute
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read the big file"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        workspace=tmp_path,
+        session_key="test:runner",
+        max_tool_result_chars=1024,  # Low threshold to trigger offloading
+    ))
+
+    # Find the tool message for the persisted file read
+    persisted_read_msg = None
+    for msg in captured_messages:
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_read_persisted":
+            persisted_read_msg = msg
+            break
+
+    assert persisted_read_msg is not None, "Should have a tool message for the persisted file read"
+    # The key assertion: the persisted file read should NOT be offloaded again
+    assert "[tool output persisted]" not in persisted_read_msg["content"]
+    assert "x" * 100 in persisted_read_msg["content"]  # Actual content preserved

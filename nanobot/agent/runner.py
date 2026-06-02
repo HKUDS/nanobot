@@ -367,17 +367,23 @@ class AgentRunner:
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
                 for tool_call, result in zip(response.tool_calls, results):
+                    normalized_content = self._normalize_tool_result(
+                        spec,
+                        tool_call.id,
+                        tool_call.name,
+                        result,
+                        tool_call_arguments=tool_call.arguments,
+                    )
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": self._normalize_tool_result(
-                            spec,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
+                        "content": normalized_content,
                     }
+                    # Store arguments for later re-normalization passes
+                    # (e.g. _apply_tool_result_budget) so they can detect
+                    # persisted tool result paths correctly.
+                    tool_message["_tool_call_arguments"] = tool_call.arguments
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 if fatal_error is not None:
@@ -1106,14 +1112,104 @@ class AgentRunner:
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
 
+    @staticmethod
+    def _is_persisted_tool_result_path(
+        result: str,
+        workspace: Path | None,
+    ) -> bool:
+        """Check if a read_file result contains a reference to a persisted tool result.
+
+        This detects the reference text format produced by ``maybe_persist_tool_result``
+        when the output was offloaded to ``.nanobot/tool-results/``.
+        """
+        marker = "Full output saved to:"
+        if marker not in result:
+            return False
+
+        for line in result.splitlines():
+            if not line.startswith("Full output saved to:"):
+                continue
+            filepath = line.split(":", 1)[1].strip()
+            try:
+                resolved = Path(filepath).resolve()
+            except (ValueError, OSError):
+                continue
+
+            # Check against workspace/.nanobot/tool-results/
+            if workspace:
+                tool_results_dir = (workspace / ".nanobot" / "tool-results").resolve()
+                try:
+                    resolved.relative_to(tool_results_dir)
+                    return True
+                except ValueError:
+                    pass
+
+            # Fallback: check for the pattern in any ancestor path
+            parts = resolved.parts
+            if ".nanobot" in parts and "tool-results" in parts:
+                idx = parts.index(".nanobot")
+                if idx + 1 < len(parts) and parts[idx + 1] == "tool-results":
+                    return True
+
+        return False
+
+    @staticmethod
+    def _is_path_in_tool_results(
+        file_path: str | None,
+        workspace: Path | None,
+    ) -> bool:
+        """Check if a file path points to a location inside the tool-results directory.
+
+        Files inside ``.nanobot/tool-results/`` are recovery artifacts from
+        previously offloaded tool outputs.  ``read_file`` should not offload
+        them a second time, otherwise the agent enters an infinite
+        persist→read→persist loop and never sees the actual content.
+        """
+        if not file_path:
+            return False
+        try:
+            resolved = Path(file_path).resolve()
+        except (ValueError, OSError):
+            return False
+
+        # Check against workspace/.nanobot/tool-results/
+        if workspace:
+            tool_results_dir = (workspace / ".nanobot" / "tool-results").resolve()
+            try:
+                resolved.relative_to(tool_results_dir)
+                return True
+            except ValueError:
+                pass
+
+        # Fallback: check for the pattern in any ancestor path
+        parts = resolved.parts
+        if ".nanobot" in parts and "tool-results" in parts:
+            idx = parts.index(".nanobot")
+            if idx + 1 < len(parts) and parts[idx + 1] == "tool-results":
+                return True
+
+        return False
+
     def _normalize_tool_result(
         self,
         spec: AgentRunSpec,
         tool_call_id: str,
         tool_name: str,
         result: Any,
+        tool_call_arguments: dict[str, Any] | None = None,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
+
+        # Skip offloading in two cases for read_file:
+        # 1. Reading a file inside .nanobot/tool-results/ (recovery path)
+        # 2. Content is already a persisted reference (prevents double-normalization)
+        if tool_name == "read_file" and isinstance(result, str):
+            file_path = (tool_call_arguments or {}).get("path")
+            if self._is_path_in_tool_results(file_path, spec.workspace):
+                return result
+            if self._is_persisted_tool_result_path(result, spec.workspace):
+                return result
+
         try:
             content = maybe_persist_tool_result(
                 spec.workspace,
@@ -1240,6 +1336,7 @@ class AgentRunner:
                 str(message.get("tool_call_id") or f"tool_{idx}"),
                 str(message.get("name") or "tool"),
                 message.get("content"),
+                tool_call_arguments=message.get("_tool_call_arguments"),
             )
             if normalized != message.get("content"):
                 if updated is messages:
