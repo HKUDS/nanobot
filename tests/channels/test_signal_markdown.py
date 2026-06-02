@@ -356,7 +356,7 @@ def test_reported_daily_brief_pattern():
 # ---------------------------------------------------------------------------
 # Chunk redistribution
 #
-# split_message can break a long Signal payload into multiple chunks. The
+# split_message can break a int Signal payload into multiple chunks. The
 # style ranges from _markdown_to_signal are anchored to the full text, so
 # they must be redistributed per-chunk with rebased offsets — otherwise
 # styles for chunks 1..N are silently lost.

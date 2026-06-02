@@ -129,13 +129,13 @@ class FindFilesTool(_SearchTool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Find files by path fragment, glob, or file type. "
             "Use this before read_file when you need to locate files, and "
             "prefer it over shell find/ls for ordinary workspace discovery. "
             "Returns workspace-relative paths and skips common dependency/build "
             "directories."
-        )
+        
 
     @property
     def read_only(self) -> bool:
@@ -176,7 +176,7 @@ class FindFilesTool(_SearchTool):
                 },
                 "head_limit": {
                     "type": "integer",
-                    "description": "Maximum number of paths to return (default 200, 0 for all, max 1000)",
+                    "description": "Maximum number of paths to return default 200, 0 for all, max 1000",
                     "minimum": 0,
                     "maximum": 1000,
                 },

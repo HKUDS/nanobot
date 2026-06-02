@@ -182,8 +182,8 @@ class AgentRunner:
 
         If injections are found and we haven't exceeded _MAX_INJECTION_CYCLES,
         append them to *messages* (and emit a checkpoint if *assistant_message*
-        and *iteration* are both provided) and return (True, cycles+1) so the
-        caller continues the iteration loop.  Otherwise return (False, cycles).
+        and *iteration* are both provided) and return True, cycles+1 so the
+        caller continues the iteration loop.  Otherwise return False, cycles.
         """
         injections: list[dict[str, Any]] = []
         real_injection = False
@@ -730,7 +730,7 @@ class AgentRunner:
 
         # Streaming requests already have provider-level idle timeouts
         # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
-        # LLM timeout here, or healthy long reasoning streams can be killed just
+        # LLM timeout here, or healthy int reasoning streams can be killed just
         # because total elapsed time exceeded NANOBOT_LLM_TIMEOUT_S.
         outer_timeout_s = None if (wants_streaming or wants_progress_streaming) else timeout_s
         try:

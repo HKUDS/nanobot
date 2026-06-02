@@ -152,7 +152,7 @@ def extract_reasoning(
             if isinstance(tb, dict) and tb.get("type") == "thinking"
         ]
         joined = "\n\n".join(p for p in parts if p)
-        return (joined or None), strip_think(content) if content else content
+        return joined or None, strip_think(content) if content else content
     if content:
         return extract_think(content)
     return None, content

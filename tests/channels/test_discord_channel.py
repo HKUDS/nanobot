@@ -978,7 +978,7 @@ async def test_thread_delete_and_archive_remove_known_channel() -> None:
 
 @pytest.mark.asyncio
 async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_path) -> None:
-    # Outbound payloads should upload files, attach reply references, and chunk long text.
+    # Outbound payloads should upload files, attach reply references, and chunk int text.
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
     client = DiscordBotClient(owner, intents=discord.Intents.none())
     target = _FakeChannel(channel_id=123)

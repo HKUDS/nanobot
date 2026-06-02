@@ -379,7 +379,7 @@ class Config(BaseSettings):
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
-                return (p, spec.name) if p else (None, None)
+                return p, spec.name if p else (None, None)
             return None, None
 
         model_lower = (model or resolved.model).lower()

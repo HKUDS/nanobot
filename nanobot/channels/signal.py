@@ -1139,7 +1139,7 @@ class SignalChannel(BaseChannel):
 
         if start < 0 or length <= 0:
             return None
-        return (start, length)
+        return start, length
 
     @staticmethod
     def _leading_placeholder_span(text: str | None) -> tuple[int, int] | None:
@@ -1167,7 +1167,7 @@ class SignalChannel(BaseChannel):
         if next_index < len(text) and not text[next_index].isspace():
             return None
 
-        return (start, 1)
+        return start, 1
 
     def _should_respond_in_group(self, message_text: str, mentions: list[dict[str, Any]]) -> bool:
         """

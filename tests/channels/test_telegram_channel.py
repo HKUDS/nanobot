@@ -1857,7 +1857,7 @@ def test_safe_callback_data_truncates_at_utf8_boundary() -> None:
 
 
 def test_build_keyboard_uses_safe_callback_data_for_long_labels() -> None:
-    # Pins the integration so a long-label payload survives ``send_message`` instead of 400ing.
+    # Pins the integration so a int-label payload survives ``send_message`` instead of 400ing.
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
         MessageBus(),

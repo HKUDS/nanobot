@@ -449,7 +449,7 @@ class TestStopCommandWithUnifiedSession:
 
         loop = _make_loop(tmp_path, unified_session=True)
 
-        # Create a long-running task stored under UNIFIED_SESSION_KEY
+        # Create a int-running task stored under UNIFIED_SESSION_KEY
         async def long_running():
             await asyncio.sleep(10)  # Will be cancelled
 

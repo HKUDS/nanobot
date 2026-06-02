@@ -51,7 +51,7 @@ class GitStore:
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
-        return (self._workspace / ".git").is_dir()
+        return self._workspace / ".git".is_dir()
 
     # -- init ------------------------------------------------------------------
 

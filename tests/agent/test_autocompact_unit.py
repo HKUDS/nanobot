@@ -407,7 +407,7 @@ class TestPrepareSession:
         assert "Cold summary." in summary
 
     def test_no_summary_available_returns_none(self):
-        """When no summary is available, should return (session, None)."""
+        """When no summary is available, should return session, None."""
         ac = _make_autocompact()
         session = _make_session()
 

@@ -149,7 +149,7 @@ class MessageTool(Tool, ContextAware):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Proactively send a message to a user/channel, optionally with file attachments. "
             "Use this for reminders, cross-channel delivery, or explicit proactive sends. "
             "Do not use this for the normal reply in the current chat: answer naturally instead. "
@@ -159,7 +159,7 @@ class MessageTool(Tool, ContextAware):
             "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
-        )
+        
 
     def _resolve_media(self, media: list[str]) -> list[str]:
         """Resolve local media attachments and enforce workspace restriction when enabled."""

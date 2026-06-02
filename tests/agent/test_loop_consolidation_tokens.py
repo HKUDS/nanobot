@@ -105,10 +105,10 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
     def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
-            return (500, "test")
+            return 500, "test"
         if call_count[0] == 2:
-            return (300, "test")
-        return (80, "test")
+            return 300, "test"
+        return 80, "test"
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 100)
@@ -142,10 +142,10 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
     def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
-            return (500, "test")
+            return 500, "test"
         if call_count[0] == 2:
-            return (150, "test")
-        return (80, "test")
+            return 150, "test"
+        return 80, "test"
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 100)
@@ -174,8 +174,8 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
     def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
-            return (500, "test")
-        return (80, "test")
+            return 500, "test"
+        return 80, "test"
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 150)
@@ -243,7 +243,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     call_count = [0]
     def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
-        return (1000 if call_count[0] <= 1 else 80, "test")
+        return 1000 if call_count[0] <= 1 else 80, "test"
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")

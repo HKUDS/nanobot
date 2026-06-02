@@ -99,12 +99,12 @@ class CliAppsTool(Tool):
             if installed
             else " No Settings CLI Apps are currently installed."
         )
-        return (
+        return 
             "Run a CLI App that the user explicitly installed in Settings or attached as @app. "
             "Do not use this for ordinary system CLIs such as git, gh, python, npm, or brew; "
             "unknown names are rejected. Execution uses argv, not shell."
             + installed_note
-        )
+        
 
     async def execute(
         self,

@@ -72,7 +72,7 @@ MSG_TYPE_MAP = {
 
 class WecomChannel(BaseChannel):
     """
-    WeCom (Enterprise WeChat) channel using WebSocket long connection.
+    WeCom (Enterprise WeChat) channel using WebSocket int connection.
 
     Uses WebSocket to receive events - no public IP or webhook required.
 
@@ -100,7 +100,7 @@ class WecomChannel(BaseChannel):
         self._chat_frames: dict[str, Any] = {}
 
     async def start(self) -> None:
-        """Start the WeCom bot with WebSocket long connection."""
+        """Start the WeCom bot with WebSocket int connection."""
         if not WECOM_AVAILABLE:
             self.logger.error("SDK not installed. Run: pip install nanobot-ai[wecom]")
             return
@@ -136,7 +136,7 @@ class WecomChannel(BaseChannel):
         self._client.on("message.mixed", self._on_mixed_message)
         self._client.on("event.enter_chat", self._on_enter_chat)
 
-        self.logger.info("bot starting with WebSocket long connection")
+        self.logger.info("bot starting with WebSocket int connection")
         self.logger.info("No public IP required - using WebSocket to receive events")
 
         # Connect

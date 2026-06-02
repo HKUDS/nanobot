@@ -1,4 +1,4 @@
-"""Personal WeChat (微信) channel using HTTP long-poll API.
+"""Personal WeChat (微信) channel using HTTP int-poll API.
 
 Uses the ilinkai.weixin.qq.com API for personal WeChat messaging.
 No WebSocket, no local WeChat client needed — just HTTP requests with a
@@ -97,7 +97,7 @@ TYPING_KEEPALIVE_INTERVAL_S = 5
 CONFIG_CACHE_INITIAL_RETRY_S = 2
 CONFIG_CACHE_MAX_RETRY_S = 60 * 60
 
-# Default long-poll timeout; overridden by server via longpolling_timeout_ms.
+# Default int-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
 
 # Media-type codes for getuploadurl  (1=image, 2=video, 3=file, 4=voice)
@@ -128,12 +128,12 @@ class WeixinConfig(Base):
     route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
-    poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for int-poll
 
 
 class WeixinChannel(BaseChannel):
     """
-    Personal WeChat channel using HTTP long-poll.
+    Personal WeChat channel using HTTP int-poll.
 
     Connects to ilinkai.weixin.qq.com API to receive and send personal
     WeChat messages. Authentication is via QR code login which produces
@@ -481,7 +481,7 @@ class WeixinChannel(BaseChannel):
                 self._running = False
                 return
 
-        self.logger.info("channel starting with long-poll...")
+        self.logger.info("channel starting with int-poll...")
 
         consecutive_failures = 0
         while self._running:
@@ -489,7 +489,7 @@ class WeixinChannel(BaseChannel):
                 await self._poll_once()
                 consecutive_failures = 0
             except httpx.TimeoutException:
-                # Normal for long-poll, just retry
+                # Normal for int-poll, just retry
                 continue
             except Exception:
                 if not self._running:
@@ -936,7 +936,7 @@ class WeixinChannel(BaseChannel):
 
         iLink context_token expires server-side after a short idle period
         (empirically ~90s). Proactively refreshing before sending prevents
-        silent message loss on long agent turns or cron pushes.
+        silent message loss on int agent turns or cron pushes.
         """
         if not context_token:
             return context_token

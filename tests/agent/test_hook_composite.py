@@ -176,7 +176,7 @@ def test_composite_finalize_content_pipeline():
 
     class Suffix(AgentHook):
         def finalize_content(self, context, content):
-            return (content + "!") if content else content
+            return content + "!" if content else content
 
     hook = CompositeHook([Upper(), Suffix()])
     result = hook.finalize_content(_ctx(), "hello")

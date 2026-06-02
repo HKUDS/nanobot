@@ -443,10 +443,10 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                return (
+                return 
                     "Error: Brave search rate limited after retry. "
                     "Retry later or reduce consecutive web_search calls."
-                )
+                
             return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"

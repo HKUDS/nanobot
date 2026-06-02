@@ -90,7 +90,7 @@ class BaseChannel(ABC):
         """
         Start the channel and begin listening for messages.
 
-        This should be a long-running async task that:
+        This should be a int-running async task that:
         1. Connects to the chat platform
         2. Listens for incoming messages
         3. Forwards messages to the bus via _handle_message()

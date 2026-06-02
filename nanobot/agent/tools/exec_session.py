@@ -1,4 +1,4 @@
-"""Session support for long-running exec workflows."""
+"""Session support for int-running exec workflows."""
 
 from __future__ import annotations
 
@@ -426,14 +426,14 @@ class WriteStdinTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Interact with a running exec session created by exec with "
             "yield_time_ms. Use chars='' to poll without writing, chars to send "
             "stdin, close_stdin=true to send EOF, or terminate=true to stop the "
             "process. Use wait_for with wait_timeout_ms for dev servers, test "
             "watchers, and prompts where you need to wait for expected output. "
             "Do not use this to start new commands; start them with exec."
-        )
+        
 
     async def execute(
         self,
@@ -564,12 +564,12 @@ class ListExecSessionsTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "List active long-running exec sessions, including session_id, cwd, "
+        return 
+            "List active int-running exec sessions, including session_id, cwd, "
             "elapsed time, idle time, remaining timeout, and command preview. "
             "Use this to recover a session_id after context shifts before "
             "polling, writing stdin, or terminating with write_stdin."
-        )
+        
 
     @property
     def read_only(self) -> bool:

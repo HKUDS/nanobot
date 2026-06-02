@@ -106,10 +106,10 @@ def repeated_external_lookup_error(
         signature[:160],
         count,
     )
-    return (
+    return 
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
-    )
+    
 
 
 # Workspace-boundary violations are soft errors, with per-target throttling.

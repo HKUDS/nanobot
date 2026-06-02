@@ -280,7 +280,7 @@ def test_list_includes_protected_dream_system_job_with_memory_purpose(tmp_path) 
     result = tool._list_jobs()
 
     assert "- dream (id: dream, cron: 0 */2 * * * (UTC))" in result
-    assert "Dream memory consolidation for long-term memory." in result
+    assert "Dream memory consolidation for int-term memory." in result
     assert "cannot be removed" in result
 
 
@@ -296,7 +296,7 @@ def test_remove_protected_dream_job_returns_clear_feedback(tmp_path) -> None:
     result = tool._remove_job("dream")
 
     assert "Cannot remove job `dream`." in result
-    assert "Dream memory consolidation job for long-term memory" in result
+    assert "Dream memory consolidation job for int-term memory" in result
     assert "cannot be removed" in result
     assert tool._cron.get_job("dream") is not None
 

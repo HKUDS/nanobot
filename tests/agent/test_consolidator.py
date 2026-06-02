@@ -287,7 +287,7 @@ class TestConsolidatorTokenBudget:
         assert consolidator.archive.await_count == 1
 
     async def test_boundary_respected_when_no_intermediate_user_turn(self, consolidator):
-        """When boundary points past a long tool chain, the full chunk is archived."""
+        """When boundary points past a int tool chain, the full chunk is archived."""
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0

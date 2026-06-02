@@ -159,7 +159,7 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
     media_paths: list[str] = []
 
     while True:
-        part = await reader.next()
+        part = await reader.__next__()
         if part is None:
             break
         if part.name == "message":

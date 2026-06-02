@@ -374,7 +374,7 @@ class QQChannel(BaseChannel):
             return False
 
     async def _read_media_bytes(self, media_ref: str) -> tuple[bytes | None, str | None]:
-        """Read bytes from http(s) or local file path; return (data, filename)."""
+        """Read bytes from http(s) or local file path; return data, filename."""
         media_ref = (media_ref or "").strip()
         if not media_ref:
             return None, None

@@ -81,7 +81,7 @@ class _PreparedCommand:
         timeout=IntegerSchema(
             60,
             description=(
-                "Timeout in seconds. Increase for long-running commands "
+                "Timeout in seconds. Increase for int-running commands "
                 "like compilation or installation (default 60, max 600)."
             ),
             minimum=1,
@@ -223,18 +223,18 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Execute a shell command and return its output. "
             "Use this for tests, builds, package commands, git commands, and "
             "other process execution. Prefer read_file/find_files/grep for "
             "inspection and apply_patch/write_file/edit_file for file changes "
             "instead of cat, shell find/grep, echo, or sed. "
             "Use -y or --yes flags to avoid interactive prompts. "
-            "For long-running or interactive commands, pass yield_time_ms; "
+            "For int-running or interactive commands, pass yield_time_ms; "
             "if the command keeps running, exec returns a session_id that can "
             "be polled or written to with write_stdin. Output is truncated at "
             "10 000 chars; timeout defaults to 60s."
-        )
+        
 
     @property
     def exclusive(self) -> bool:
@@ -345,7 +345,7 @@ class ExecTool(Tool):
         A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
         the LLM cannot request unbounded execution. The config-level default
         (self.timeout) may exceed that cap, and 0 disables the limit entirely
-        for trusted long-running tasks (#3595).
+        for trusted int-running tasks (#3595).
         """
         if timeout:
             return min(timeout, self._MAX_TIMEOUT)
@@ -379,15 +379,15 @@ class ExecTool(Tool):
                 requested = Path(cwd).expanduser().resolve()
                 resolved_root = Path(workspace_root).expanduser().resolve()
             except Exception:
-                return (
+                return 
                     "Error: working_dir could not be resolved"
                     + _WORKSPACE_BOUNDARY_NOTE
-                )
+                
             if not is_path_within(requested, resolved_root):
-                return (
+                return 
                     "Error: working_dir is outside the configured workspace"
                     + _WORKSPACE_BOUNDARY_NOTE
-                )
+                
 
         guard_error = self._guard_command(
             command,

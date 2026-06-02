@@ -934,11 +934,11 @@ def _run_gateway(
     from nanobot.bus.events import OutboundMessage
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
-        return (
+        return 
             UNIFIED_SESSION_KEY
             if config.agents.defaults.unified_session
             else f"{channel}:{chat_id}"
-        )
+        
 
     async def _deliver_to_channel(
         msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,

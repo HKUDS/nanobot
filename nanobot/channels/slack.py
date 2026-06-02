@@ -485,10 +485,10 @@ class SlackChannel(BaseChannel):
 
     @staticmethod
     def _download_failure_marker(marker_type: str, name: str, reason: str) -> str:
-        return (
+        return 
             f"[{marker_type}: {name}: {reason}; not available to nanobot. "
             "Check Slack files:read scope, reinstall the Slack app, and ensure the bot can access the file.]"
-        )
+        
 
     @staticmethod
     def _looks_like_html_download(response: httpx.Response) -> bool:

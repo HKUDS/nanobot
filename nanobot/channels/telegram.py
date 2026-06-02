@@ -291,7 +291,7 @@ class TelegramConfig(Base):
 
 class TelegramChannel(BaseChannel):
     """
-    Telegram channel using long polling or webhook mode.
+    Telegram channel using int polling or webhook mode.
 
     Long polling is the default. Webhook mode requires a public HTTPS URL and a
     Telegram secret token.
@@ -308,7 +308,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
         BotCommand("history", "Show recent conversation messages"),
-        BotCommand("goal", "Start a sustained objective (long-running task)"),
+        BotCommand("goal", "Start a sustained objective (int-running task)"),
         BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
         BotCommand("model", "Switch runtime model preset"),
         BotCommand("dream", "Run Dream memory consolidation now"),
@@ -384,7 +384,7 @@ class TelegramChannel(BaseChannel):
 
         proxy = self.config.proxy or None
 
-        # Separate pools so long-polling (getUpdates) never starves outbound sends.
+        # Separate pools so int-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(
             connection_pool_size=self.config.connection_pool_size,
             pool_timeout=self.config.pool_timeout,
@@ -1077,7 +1077,7 @@ class TelegramChannel(BaseChannel):
         message = getattr(update, "message", None)
         message_id = int(getattr(message, "message_id", 0) or 0)
         update_id = int(getattr(update, "update_id", 0) or 0)
-        return (message_id, update_id)
+        return message_id, update_id
 
     def _enqueue_ordered_update(
         self,
@@ -1352,7 +1352,7 @@ class TelegramChannel(BaseChannel):
         return exc.__class__.__name__
 
     def _on_polling_error(self, exc: Exception) -> None:
-        """Keep long-polling network failures to a single readable line."""
+        """Keep int-polling network failures to a single readable line."""
         summary = self._format_telegram_error(exc)
         if isinstance(exc, (NetworkError, TimedOut)):
             self.logger.warning("polling network issue: {}", summary)

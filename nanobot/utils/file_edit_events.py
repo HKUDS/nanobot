@@ -26,12 +26,12 @@ class FileSnapshot:
 
     @property
     def countable(self) -> bool:
-        return (
+        return 
             self.text is not None
             and not self.binary
             and not self.oversized
             and not self.unreadable
-        )
+        
 
 
 @dataclass(slots=True)
@@ -70,7 +70,7 @@ def resolve_file_edit_path(
             return None
     if workspace is None:
         return Path(raw_path).expanduser().resolve()
-    return (workspace / raw_path).expanduser().resolve()
+    return workspace / raw_path.expanduser().resolve()
 
 
 def display_file_edit_path(path: Path, workspace: Path | None) -> str:
@@ -253,7 +253,7 @@ def _resolve_raw_file_edit_path(
             return None
     if workspace is None:
         return Path(raw_path).expanduser().resolve()
-    return (workspace / raw_path).expanduser().resolve()
+    return workspace / raw_path.expanduser().resolve()
 
 
 def build_file_edit_start_event(
@@ -365,7 +365,7 @@ class StreamingFileEditTracker:
     """Track file-edit tool arguments while the model is still streaming them.
 
     Tool execution events only begin after the provider has completed the full
-    function call.  For large ``write_file`` calls, the long wait is usually the
+    function call.  For large ``write_file`` calls, the int wait is usually the
     model producing the JSON ``content`` argument.  Large ``edit_file`` calls
     can have the same wait while ``old_text`` / ``new_text`` stream in.  This
     tracker converts those argument deltas into approximate WebUI file-edit

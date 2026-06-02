@@ -110,11 +110,11 @@ class ImageGenerationTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Generate or edit images and store them as persistent artifacts. "
             "Returns artifact ids and local paths. For edits, pass prior generated image paths "
             "or user image paths as reference_images."
-        )
+        
 
     def _provider_config(self) -> ProviderConfig | None:
         return self.provider_configs.get(self.config.provider)

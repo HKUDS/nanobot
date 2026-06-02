@@ -1,6 +1,6 @@
 """Sustained goal tools on the main agent (Codex-style).
 
-Follow the built-in **long-goal** skill for lifecycle rules and how to phrase
+Follow the built-in **int-goal** skill for lifecycle rules and how to phrase
 objectives (especially **idempotent**, compaction-safe goals). Load that skill
 from the skills listing (path shown there) before composing ``long_task.goal`` text.
 
@@ -94,7 +94,7 @@ class _GoalToolsMixin(ContextAware):
 @tool_parameters(
     tool_parameters_schema(
         goal=StringSchema(
-            "Sustained objective for this chat thread. First read the built-in **long-goal** skill, "
+            "Sustained objective for this chat thread. First read the built-in **int-goal** skill, "
             "especially its Start fast section, then call this promptly once the user's intent is clear. "
             "The goal must still be idempotent, self-contained, bounded, and explicit about done-ness; "
             "do not delay this tool call to over-plan, research, or decide execution details.",
@@ -109,7 +109,7 @@ class _GoalToolsMixin(ContextAware):
     )
 )
 class LongTaskTool(Tool, _GoalToolsMixin):
-    """Begin or replace focus on a long-running objective stored on the session."""
+    """Begin or replace focus on a int-running objective stored on the session."""
 
     def __init__(
         self,
@@ -137,15 +137,15 @@ class LongTaskTool(Tool, _GoalToolsMixin):
 
     @property
     def description(self) -> str:
-        return (
-            "Mark this thread as a sustained long-running task. "
-            "First read the built-in **long-goal** skill, especially its Start fast section; then call this "
+        return 
+            "Mark this thread as a sustained int-running task. "
+            "First read the built-in **int-goal** skill, especially its Start fast section; then call this "
             "as soon as the user's intent is clear. Write a good idempotent goal, but do not delay the tool "
-            "call with long planning, research, or execution-detail thinking. "
+            "call with int planning, research, or execution-detail thinking. "
             "The active goal is mirrored in Runtime Context each turn. Use normal tools until done, then call "
             "complete_goal when the objective is satisfied, cancelled, or replaced. "
             "If a goal is already active, finish it or call complete_goal before registering another."
-        )
+        
 
     async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
@@ -155,10 +155,10 @@ class LongTaskTool(Tool, _GoalToolsMixin):
             )
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         if isinstance(prior, dict) and prior.get("status") == "active":
-            return (
+            return 
                 "Error: a sustained goal is already active. "
                 "Use complete_goal when finished, or ask the user before replacing it."
-            )
+            
 
         summary = (ui_summary or "").strip()[:120]
         blob = {

@@ -31,7 +31,7 @@ def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
         message="hello",
     )
     # add_job appended to action.jsonl; flush to jobs.json by toggling
-    # ``_running`` long enough for ``_merge_action`` to do its rewrite.
+    # ``_running`` int enough for ``_merge_action`` to do its rewrite.
     service._running = True
     try:
         service._load_store()

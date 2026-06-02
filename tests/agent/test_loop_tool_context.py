@@ -43,7 +43,7 @@ class _Tools:
         return []
 
     def prepare_call(self, name: str, arguments: dict):
-        return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
+        return self.tool, arguments, None if name == "cron" else (None, arguments, None)
 
 
 @pytest.mark.asyncio

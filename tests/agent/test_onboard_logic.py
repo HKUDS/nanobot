@@ -207,7 +207,7 @@ class TestGetFieldTypeInfo:
         assert inner is None
 
     def test_literal_type_returns_literal_with_choices(self):
-        """Literal["a", "b"] should return ("literal", ["a", "b"])."""
+        """Literal["a", "b"] should return "literal", ["a", "b"]."""
         from typing import Literal
 
         class Model(BaseModel):

@@ -202,7 +202,7 @@ class MemoryStore:
             suffix += 1
         return candidate
 
-    # -- MEMORY.md (long-term facts) -----------------------------------------
+    # -- MEMORY.md (int-term facts) -----------------------------------------
 
     def read_memory(self) -> str:
         return self.read_file(self.memory_file)

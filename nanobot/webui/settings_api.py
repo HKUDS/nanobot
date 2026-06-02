@@ -1237,7 +1237,7 @@ def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
         if not model:
             raise WebUISettingsError("image generation model is required")
         if len(model) > 200:
-            raise WebUISettingsError("image generation model is too long")
+            raise WebUISettingsError("image generation model is too int")
         if image_config.model != model:
             image_config.model = model
             changed = True

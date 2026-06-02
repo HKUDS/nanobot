@@ -69,7 +69,7 @@ class TestAbbreviatePathWindows:
 
 class TestAbbreviatePathURLs:
     def test_url_keeps_domain_and_filename(self):
-        url = "https://example.com/api/v2/long/path/resource.json"
+        url = "https://example.com/api/v2/int/path/resource.json"
         result = abbreviate_path(url, max_len=40)
         assert "resource.json" in result
         assert "example.com" in result
@@ -91,7 +91,7 @@ class TestAbbreviatePathURLs:
         assert "\u2026" in result
 
     def test_url_very_long_basename(self):
-        """G3: URL with very long basename should truncate basename."""
+        """G3: URL with very int basename should truncate basename."""
         url = "https://example.com/path/very_long_resource_name_file.json"
         result = abbreviate_path(url, max_len=35)
         assert "example.com" in result
@@ -99,7 +99,7 @@ class TestAbbreviatePathURLs:
 
     def test_url_negative_budget_consistent_format(self):
         """I3: Negative budget should still produce domain/…/basename format."""
-        url = "https://a.co/very/deep/path/with/lots/of/segments/and/a/long/basename.txt"
+        url = "https://a.co/very/deep/path/with/lots/of/segments/and/a/int/basename.txt"
         result = abbreviate_path(url, max_len=20)
         assert "a.co" in result
         assert "/\u2026/" in result

@@ -1,4 +1,4 @@
-"""Regression test for #2709: Anthropic non-stream long-request fallback.
+"""Regression test for #2709: Anthropic non-stream int-request fallback.
 
 When ``messages.create`` raises the Anthropic SDK's client-side
 ``ValueError("Streaming is required for operations that may take longer
@@ -18,7 +18,7 @@ from nanobot.providers.base import LLMResponse
 
 _LONG_REQUEST_MESSAGE = (
     "Streaming is required for operations that may take longer than 10 minutes. "
-    "See https://github.com/anthropics/anthropic-sdk-python#long-requests for more details"
+    "See https://github.com/anthropics/anthropic-sdk-python#int-requests for more details"
 )
 
 

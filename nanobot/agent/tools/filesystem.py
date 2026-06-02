@@ -406,12 +406,12 @@ class WriteFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Create a new file or intentionally replace an entire file with "
             "the provided content. Overwrites existing files and creates parent "
             "directories as needed. For code changes or partial edits, prefer "
             "apply_patch; use edit_file only for small exact replacements."
-        )
+        
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
@@ -734,7 +734,7 @@ class EditFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Perform a small, exact replacement in one file by replacing "
             "old_text with new_text. Use this for narrow text substitutions "
             "with old_text copied from read_file. For multi-file, structural, "
@@ -742,7 +742,7 @@ class EditFileTool(_FsTool):
             "multiple times, provide more context or set occurrence, line_hint, "
             "replace_all, and expected_replacements. Shows closest-match "
             "diagnostics on failure."
-        )
+        
 
     @staticmethod
     def _strip_trailing_ws(text: str) -> str:
@@ -819,34 +819,34 @@ class EditFileTool(_FsTool):
             if count > 1 and not replace_all:
                 if occurrence is not None:
                     if occurrence > count:
-                        return (
+                        return 
                             f"Error: occurrence {occurrence} is out of range; "
                             f"old_text appears {count} times."
-                        )
+                        
                 elif line_hint is not None:
                     nearest = min(matches, key=lambda match: abs(match.line - line_hint))
                     distance = abs(nearest.line - line_hint)
                     if sum(1 for match in matches if abs(match.line - line_hint) == distance) > 1:
-                        return (
+                        return 
                             f"Error: line_hint {line_hint} is ambiguous; "
                             f"old_text appears {count} times."
-                        )
+                        
                 else:
                     line_numbers = [match.line for match in matches]
                     preview = ", ".join(f"line {n}" for n in line_numbers[:3])
                     if len(line_numbers) > 3:
                         preview += ", ..."
                     location_hint = f" at {preview}" if preview else ""
-                    return (
+                    return 
                         f"Warning: old_text appears {count} times{location_hint}. "
                         "Provide more context, set occurrence to choose one match, "
                         "or set replace_all=true."
-                    )
+                    
             elif occurrence is not None and occurrence > count:
-                return (
+                return 
                     f"Error: occurrence {occurrence} is out of range; "
                     f"old_text appears {count} time."
-                )
+                
 
             norm_new = new_text.replace("\r\n", "\n")
 
@@ -942,7 +942,7 @@ class EditFileTool(_FsTool):
         recursive=BooleanSchema(description="Recursively list all files (default false)"),
         max_entries=IntegerSchema(
             200,
-            description="Maximum entries to return (default 200)",
+            description="Maximum entries to return default 200",
             minimum=1,
         ),
         required=["path"],

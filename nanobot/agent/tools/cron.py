@@ -117,10 +117,10 @@ class CronTool(Tool, ContextAware):
 
     @property
     def description(self) -> str:
-        return (
+        return 
             "Schedule reminders and recurring tasks. Actions: add, list, remove. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
-        )
+        
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         errors = super().validate_params(params)
@@ -256,7 +256,7 @@ class CronTool(Tool, ContextAware):
     @staticmethod
     def _system_job_purpose(job: CronJob) -> str:
         if job.name == "dream":
-            return "Dream memory consolidation for long-term memory."
+            return "Dream memory consolidation for int-term memory."
         return "System-managed internal job."
 
     def _list_jobs(self) -> str:
@@ -283,13 +283,13 @@ class CronTool(Tool, ContextAware):
         if result == "protected":
             job = self._cron.get_job(job_id)
             if job and job.name == "dream":
-                return (
+                return 
                     "Cannot remove job `dream`.\n"
-                    "This is a system-managed Dream memory consolidation job for long-term memory.\n"
+                    "This is a system-managed Dream memory consolidation job for int-term memory.\n"
                     "It remains visible so you can inspect it, but it cannot be removed."
-                )
-            return (
+                
+            return 
                 f"Cannot remove job `{job_id}`.\n"
                 "This is a protected system-managed cron job."
-            )
+            
         return f"Job {job_id} not found"

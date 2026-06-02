@@ -579,7 +579,7 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
     session = loop.sessions.get_or_create("feishu:c-auto")
     session.metadata[GOAL_STATE_KEY] = {
         "status": "active",
-        "objective": "Finish the long goal.",
+        "objective": "Finish the int goal.",
     }
     loop.sessions.save(session)
 
@@ -588,20 +588,20 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
     async def fake_run_agent_loop(initial_messages, *, metadata=None, **_kwargs):
         calls.append({"initial_messages": initial_messages, "metadata": metadata})
         if len(calls) == 1:
-            return (
+            return 
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
                 "max_iterations",
                 False,
-            )
-        return (
+            
+        return 
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
             "completed",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
     pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
@@ -620,7 +620,7 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
     queued = pending.get_nowait()
     assert queued.sender_id == "system:continuation"
     assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert "Finish the long goal." in queued.content
+    assert "Finish the int goal." in queued.content
 
     session = loop.sessions.get_or_create("feishu:c-auto")
     assert [
@@ -651,7 +651,7 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
     session = loop.sessions.get_or_create("feishu:c-stream")
     session.metadata[GOAL_STATE_KEY] = {
         "status": "active",
-        "objective": "Finish the streamed long goal.",
+        "objective": "Finish the streamed int goal.",
     }
     loop.sessions.save(session)
 
@@ -661,24 +661,24 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return (
+            return 
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
                 "max_iterations",
                 False,
-            )
+            
         assert on_stream is not None
         assert on_stream_end is not None
         await on_stream("done")
         await on_stream_end(resuming=False)
-        return (
+        return 
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
             "completed",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
@@ -730,7 +730,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     session = loop.sessions.get_or_create("websocket:c-auto")
     session.metadata[GOAL_STATE_KEY] = {
         "status": "active",
-        "objective": "Finish the long goal.",
+        "objective": "Finish the int goal.",
     }
     loop.sessions.save(session)
 
@@ -740,20 +740,20 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return (
+            return 
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
                 "max_iterations",
                 False,
-            )
-        return (
+            
+        return 
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
             "completed",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
@@ -1012,13 +1012,13 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     assert interrupted.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is not None
 
     async def resumed_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return 
             "next answer",
             None,
             [*initial_messages, {"role": "assistant", "content": "next answer"}],
             "stop",
             False,
-        )
+        
 
     loop._run_agent_loop = resumed_run_agent_loop  # type: ignore[method-assign]
     result = await loop._process_message(
@@ -1063,13 +1063,13 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
         seen["initial_messages"] = initial_messages
-        return (
+        return 
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
             "stop",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
@@ -1119,13 +1119,13 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        return (
+        return 
             "ack",
             [],
             [*initial_messages, {"role": "assistant", "content": "ack"}],
             "stop",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
@@ -1245,13 +1245,13 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
         seen["initial_messages"] = initial_messages
-        return (
+        return 
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
             "stop",
             False,
-        )
+        
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 

@@ -181,12 +181,12 @@ def get_approved(channel: str) -> list[str]:
 
 def format_pairing_reply(code: str) -> str:
     """Return the pairing-code message sent to unrecognised DM senders."""
-    return (
+    return 
         "Hi there! This assistant only responds to approved users.\n\n"
         f"Your pairing code is: `{code}`\n\n"
         "To get access, ask the owner to approve this code:\n"
         f"- In this chat: send `/pairing approve {code}`"
-    )
+    
 
 
 def format_expiry(expires_at: float) -> str:
@@ -248,7 +248,7 @@ def handle_pairing_command(channel: str, subcommand_text: str) -> str:
             )
         return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
 
-    return (
+    return 
         "Unknown pairing command.\n"
         "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>|revoke <channel> <user_id>]`"
-    )
+    

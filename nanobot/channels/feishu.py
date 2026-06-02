@@ -1,4 +1,4 @@
-"""Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
+"""Feishu/Lark channel implementation using lark-oapi SDK with WebSocket int connection."""
 
 import asyncio
 import importlib.util
@@ -244,7 +244,7 @@ def _extract_post_text(content_json: dict) -> str:
 
 
 class FeishuConfig(Base):
-    """Feishu/Lark channel configuration using WebSocket long connection."""
+    """Feishu/Lark channel configuration using WebSocket int connection."""
 
     enabled: bool = False
     app_id: str = ""
@@ -277,7 +277,7 @@ class _FeishuStreamBuf:
 
 class FeishuChannel(BaseChannel):
     """
-    Feishu/Lark channel using WebSocket long connection.
+    Feishu/Lark channel using WebSocket int connection.
 
     Uses WebSocket to receive events - no public IP or webhook required.
 
@@ -320,7 +320,7 @@ class FeishuChannel(BaseChannel):
         return method(handler) if callable(method) else builder
 
     async def start(self) -> None:
-        """Start the Feishu bot with WebSocket long connection."""
+        """Start the Feishu bot with WebSocket int connection."""
         if not FEISHU_AVAILABLE:
             self.logger.error("SDK not installed. Run: pip install lark-oapi")
             return
@@ -378,7 +378,7 @@ class FeishuChannel(BaseChannel):
         )
         event_handler = builder.build()
 
-        # Create WebSocket client for long connection
+        # Create WebSocket client for int connection
         self._ws_client = lark.ws.Client(
             self.config.app_id,
             self.config.app_secret,
@@ -424,7 +424,7 @@ class FeishuChannel(BaseChannel):
         else:
             self.logger.warning("Could not fetch bot open_id; @mention matching may be inaccurate")
 
-        self.logger.info("bot started with WebSocket long connection")
+        self.logger.info("bot started with WebSocket int connection")
         self.logger.info("No public IP required - using WebSocket to receive events")
 
         # Keep running until stopped
@@ -959,7 +959,7 @@ class FeishuChannel(BaseChannel):
                         CreateFileRequestBody.builder()
                         .file_type(file_type)
                         .file_name(file_name)
-                        .file(f)
+                        .open(f)
                         .build()
                     )
                     .build()
@@ -1655,7 +1655,7 @@ class FeishuChannel(BaseChannel):
                     await loop.run_in_executor(None, _do_send, "post", post_body)
 
                 else:
-                    # Complex / long content – send as interactive card
+                    # Complex / int content – send as interactive card
                     elements = self._build_card_elements(msg.content)
                     for chunk in self._split_elements_by_table_limit(elements):
                         card = {"config": {"wide_screen_mode": True}, "elements": chunk}

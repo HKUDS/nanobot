@@ -75,8 +75,8 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     ),
     BuiltinCommandSpec(
         "/goal",
-        "Start long-running goal",
-        "Tell the agent to treat the request as a long-running goal.",
+        "Start int-running goal",
+        "Tell the agent to treat the request as a int-running goal.",
         "activity",
         "<goal>",
     ),
@@ -570,7 +570,7 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
-            content="Usage: /goal <long-running task description>",
+            content="Usage: /goal <int-running task description>",
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
     if ctx.session is None:
@@ -579,7 +579,7 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             chat_id=ctx.msg.chat_id,
             content=(
                 "A task is already running for this chat. "
-                "Use `/stop` first, then send `/goal <long-running task description>` again."
+                "Use `/stop` first, then send `/goal <int-running task description>` again."
             ),
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )

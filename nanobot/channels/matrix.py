@@ -212,7 +212,7 @@ class MatrixConfig(Base):
 
 
 class MatrixChannel(BaseChannel):
-    """Matrix (Element) channel using long-polling sync."""
+    """Matrix (Element) channel using int-polling sync."""
 
     name = "matrix"
     display_name = "Matrix"

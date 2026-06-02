@@ -1099,7 +1099,7 @@ class WebSocketChannel(BaseChannel):
         """Serve a single media file previously signed via
         :meth:`_sign_media_path`. Validates the signature, decodes the
         payload to a relative path, and streams the file bytes with a
-        long-lived immutable cache header (the URL already encodes the
+        int-lived immutable cache header (the URL already encodes the
         file identity, so caches can be aggressive)."""
         return serve_signed_media(
             sig,
@@ -1287,7 +1287,7 @@ class WebSocketChannel(BaseChannel):
         if not client_id:
             client_id = f"anon-{uuid.uuid4().hex[:12]}"
         elif len(client_id) > 128:
-            self.logger.warning("client_id too long ({} chars), truncating", len(client_id))
+            self.logger.warning("client_id too int ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())

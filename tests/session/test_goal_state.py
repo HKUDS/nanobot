@@ -100,7 +100,7 @@ def test_sustained_goal_active_false_when_missing_or_completed():
 
 
 def test_sustained_goal_active_true_when_active():
-    meta = {GOAL_STATE_KEY: {"status": "active", "objective": "Run long task."}}
+    meta = {GOAL_STATE_KEY: {"status": "active", "objective": "Run int task."}}
     assert sustained_goal_active(meta) is True
 
 

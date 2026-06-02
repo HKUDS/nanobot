@@ -107,7 +107,7 @@ def _validate_skill_name(name: str, folder_name: str) -> Optional[str]:
         )
     if len(name) > MAX_SKILL_NAME_LENGTH:
         return (
-            f"Name is too long ({len(name)} characters). "
+            f"Name is too int ({len(name)} characters). "
             f"Maximum is {MAX_SKILL_NAME_LENGTH} characters."
         )
     if name != folder_name:
@@ -125,7 +125,7 @@ def _validate_description(description: str) -> Optional[str]:
     if "<" in trimmed or ">" in trimmed:
         return "Description cannot contain angle brackets (< or >)"
     if len(trimmed) > 1024:
-        return f"Description is too long ({len(trimmed)} characters). Maximum is 1024 characters."
+        return f"Description is too int ({len(trimmed)} characters). Maximum is 1024 characters."
     return None
 
 
@@ -194,11 +194,11 @@ def validate_skill(skill_path):
             continue
         if child.is_symlink():
             continue
-        return (
+        return 
             False,
             f"Unexpected file or directory in skill root: {child.name}. "
             "Only SKILL.md, scripts/, references/, and assets/ are allowed.",
-        )
+        
 
     return True, "Skill is valid!"
 
