@@ -24,6 +24,8 @@ from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
 
 MediaDirProvider = Callable[[str | None], Path]
+SignedMediaPath = Callable[[Path], dict[str, str] | None]
+SignedMediaUrl = Callable[[Path], str | None]
 
 
 def b64url_encode(data: bytes) -> str:
@@ -170,6 +172,64 @@ def sign_or_stage_media_path(
     if signed is None:
         return None
     return {"url": signed, "name": path.name}
+
+
+def media_attachment_kind(name: str) -> str:
+    """Infer the WebUI media attachment kind from a filename."""
+    mime, _ = mimetypes.guess_type(name)
+    if mime and mime.startswith("video/"):
+        return "video"
+    if mime and mime.startswith("image/"):
+        return "image"
+    return "file"
+
+
+def signed_media_attachments(
+    paths: list[str],
+    *,
+    sign_path: SignedMediaPath,
+) -> list[dict[str, Any]]:
+    """Map persisted media paths to WebUI attachment dicts with fresh signed URLs."""
+    out: list[dict[str, Any]] = []
+    for pstr in paths:
+        path = Path(pstr)
+        att = sign_path(path)
+        if att is None:
+            continue
+        url = att.get("url")
+        if not url:
+            continue
+        name = att.get("name") or path.name
+        out.append({"kind": media_attachment_kind(name), "url": url, "name": name})
+    return out
+
+
+def attach_signed_media_urls(
+    payload: dict[str, Any],
+    *,
+    sign_path: SignedMediaUrl,
+) -> None:
+    """Replace raw media path lists in a WebUI session payload with signed URLs."""
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        media = msg.get("media")
+        if not isinstance(media, list) or not media:
+            continue
+        urls: list[dict[str, str]] = []
+        for entry in media:
+            if not isinstance(entry, str) or not entry:
+                continue
+            signed = sign_path(Path(entry))
+            if signed is None:
+                continue
+            urls.append({"url": signed, "name": Path(entry).name})
+        if urls:
+            msg["media_urls"] = urls
+        msg.pop("media", None)
 
 
 def serve_signed_media(
