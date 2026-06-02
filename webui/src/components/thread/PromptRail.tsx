@@ -27,6 +27,7 @@ interface MeasuredPrompt extends PromptAnchor {
 }
 
 interface PromptMarker {
+  count: number;
   ids: string[];
   label: string;
   topPercent: number;
@@ -34,7 +35,13 @@ interface PromptMarker {
 
 const MIN_PROMPTS_FOR_RAIL = 3;
 const RAIL_MIN_SCROLL_RANGE_PX = 240;
+const DENSE_PROMPT_THRESHOLD = 30;
+const DENSE_BUCKET_HEIGHT_PX = 12;
+const DENSE_BUCKET_FALLBACK_COUNT = 32;
+const DENSE_BUCKET_MAX_COUNT = 42;
 const MARKER_MIN_GAP_PX = 9;
+const MARKER_BASE_WIDTH_PX = 26;
+const MARKER_MAX_WIDTH_PX = 42;
 
 export function PromptRail({
   bottomOffset,
@@ -100,12 +107,14 @@ export function PromptRail({
 
   if (markers.length === 0) return null;
 
+  const maxMarkerCount = Math.max(...markers.map((marker) => marker.count));
+
   return (
     <div
       ref={railRef}
       aria-label="User prompt navigation"
       className={cn(
-        "pointer-events-none absolute right-2 top-12 z-20 hidden w-10 md:block",
+        "pointer-events-none absolute right-6 top-12 z-20 hidden w-12 md:block",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}
       style={{ bottom: Math.max(80, bottomOffset) }}
@@ -120,13 +129,17 @@ export function PromptRail({
             aria-label={`Jump to prompt: ${marker.label}`}
             onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
             className={cn(
-              "pointer-events-auto absolute right-1 h-1.5 w-7 -translate-y-1/2 rounded-full",
+              "pointer-events-auto absolute right-0 h-1.5 -translate-y-1/2 rounded-full",
               "bg-muted-foreground/30 transition-all duration-150",
-              "hover:w-9 hover:bg-blue-500/80 focus-visible:w-9 focus-visible:bg-blue-500",
+              "hover:bg-blue-500/80 focus-visible:bg-blue-500",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
-              active && "w-9 bg-foreground shadow-sm",
+              marker.count > 1 && "bg-muted-foreground/45",
+              active && "bg-foreground shadow-sm",
             )}
-            style={{ top: `${marker.topPercent}%` }}
+            style={{
+              top: `${marker.topPercent}%`,
+              width: markerWidth(marker.count, maxMarkerCount, active),
+            }}
           />
         );
       })}
@@ -171,6 +184,10 @@ function groupPromptMarkers(
   railHeight: number,
 ): PromptMarker[] {
   if (measured.length === 0) return [];
+  if (measured.length >= DENSE_PROMPT_THRESHOLD) {
+    return bucketPromptMarkers(measured, railHeight);
+  }
+
   const minGapPercent = railHeight > 0
     ? (MARKER_MIN_GAP_PX / railHeight) * 100
     : 2;
@@ -179,11 +196,13 @@ function groupPromptMarkers(
   for (const prompt of measured) {
     const last = groups[groups.length - 1];
     if (last && prompt.topPercent - last.topPercent < minGapPercent) {
+      last.count += 1;
       last.ids.push(prompt.id);
-      last.label = `${last.ids.length} prompts, latest: ${prompt.label}`;
+      last.label = groupedPromptLabel(last.count, prompt.label);
       continue;
     }
     groups.push({
+      count: 1,
       ids: [prompt.id],
       label: prompt.label,
       topPercent: prompt.topPercent,
@@ -191,6 +210,44 @@ function groupPromptMarkers(
   }
 
   return groups;
+}
+
+function bucketPromptMarkers(
+  measured: MeasuredPrompt[],
+  railHeight: number,
+): PromptMarker[] {
+  const bucketCount = railHeight > 0
+    ? clamp(
+      Math.floor(railHeight / DENSE_BUCKET_HEIGHT_PX),
+      1,
+      DENSE_BUCKET_MAX_COUNT,
+    )
+    : DENSE_BUCKET_FALLBACK_COUNT;
+  const buckets = Array.from({ length: bucketCount }, () => [] as MeasuredPrompt[]);
+
+  for (const prompt of measured) {
+    const bucketIndex = clamp(
+      Math.floor((prompt.topPercent / 100) * bucketCount),
+      0,
+      bucketCount - 1,
+    );
+    buckets[bucketIndex].push(prompt);
+  }
+
+  return buckets.flatMap((bucket) => {
+    if (bucket.length === 0) return [];
+    const latest = bucket[bucket.length - 1];
+    const topPercent =
+      bucket.reduce((sum, prompt) => sum + prompt.topPercent, 0) / bucket.length;
+    return [{
+      count: bucket.length,
+      ids: bucket.map((prompt) => prompt.id),
+      label: bucket.length === 1
+        ? latest.label
+        : groupedPromptLabel(bucket.length, latest.label),
+      topPercent,
+    }];
+  });
 }
 
 function activePromptForScroll(
@@ -208,6 +265,18 @@ function activePromptForScroll(
     break;
   }
   return active.id;
+}
+
+function groupedPromptLabel(count: number, latestLabel: string): string {
+  return `${count} prompts, latest: ${latestLabel}`;
+}
+
+function markerWidth(count: number, maxCount: number, active: boolean): number {
+  if (maxCount <= 1) return active ? 34 : MARKER_BASE_WIDTH_PX;
+  const density = Math.log2(count + 1) / Math.log2(maxCount + 1);
+  const width = MARKER_BASE_WIDTH_PX
+    + (MARKER_MAX_WIDTH_PX - MARKER_BASE_WIDTH_PX) * density;
+  return Math.round(active ? width + 4 : width);
 }
 
 function jumpToPrompt(scrollEl: HTMLElement | null, promptId: string | undefined): void {
