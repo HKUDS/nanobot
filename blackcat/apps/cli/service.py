@@ -25,12 +25,12 @@ from blackcat.security.workspace_policy import is_path_within
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
 CLI_ANYTHING_PUBLIC_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/public_registry.json"
 CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main"
-BLACKCAT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main/registry.json"
-BLACKCAT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main"
+NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main/registry.json"
+NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main"
 _CATALOG_SOURCES = (
     ("harness", CLI_ANYTHING_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
     ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
-    ("extensions", BLACKCAT_EXTENSION_REGISTRY_URL, BLACKCAT_EXTENSION_RAW_BASE, False),
+    ("extensions", NANOBOT_EXTENSION_REGISTRY_URL, NANOBOT_EXTENSION_RAW_BASE, False),
 )
 
 _MAX_TOOL_OUTPUT_CHARS = 12_000
@@ -95,8 +95,6 @@ class CliAppsRuntimeConfig:
 
 _BRANDS: dict[str, tuple[str, str]] = {
     "1password-cli": ("1password", "#3B66BC"),
-    "arcgis": ("arcgis", "#2C7AC3"),
-    "arcgis-pro": ("arcgis", "#2C7AC3"),
     "audacity": ("audacity", "#0000CC"),
     "blender": ("blender", "#E87D0D"),
     "browser": ("googlechrome", "#4285F4"),
@@ -118,7 +116,6 @@ _BRANDS: dict[str, tuple[str, str]] = {
     "intelwatch": ("intel", "#0071C5"),
     "iterm2": ("iterm2", "#000000"),
     "jimeng": ("bytedance", "#3C8CFF"),
-    "joplin": ("joplin", "#1071D3"),
     "kdenlive": ("kdenlive", "#527EB2"),
     "krita": ("krita", "#3BABFF"),
     "libreoffice": ("libreoffice", "#18A303"),
@@ -726,7 +723,7 @@ class CliAppManager:
             if pip_available:
                 prefix.extend(["--upgrade", "--force-reinstall"])
             else:
-                prefix.extend(["--upgrade", "--reinstall"])
+                prefix.append("--upgrade")
         return prefix + args
 
     def _pip_uninstall_argv(
@@ -737,7 +734,7 @@ class CliAppManager:
         if self._pip_available():
             prefix = [sys.executable, "-m", "pip", "uninstall", "-y"]
         elif shutil.which("uv"):
-            prefix = ["uv", "pip", "uninstall", "--python", sys.executable]
+            prefix = ["uv", "pip", "uninstall", "--python", sys.executable, "-y"]
         else:
             raise CliAppError("pip is not available and uv is not installed")
         distribution = str((installed_entry or {}).get("pip_distribution") or "").strip()
@@ -921,7 +918,7 @@ Prefer machine-readable output when the CLI supports `--json`.
             return content
         name = str(app.get("name") or "unknown")
         note = f"""{marker}
-## Blackcat execution
+## Nanobot execution
 
 Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not invoke this CLI through shell unless the user explicitly asks. Prefer this skill when Runtime Context mentions `@{name}` as a CLI App Attachment.
 """

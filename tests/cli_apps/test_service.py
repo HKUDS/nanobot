@@ -283,7 +283,6 @@ def test_install_dispatches_safe_pip_and_installs_skill(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
-    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
     monkeypatch.setattr(
         manager,
         "_fetch_skill_content",
@@ -573,7 +572,6 @@ def test_uninstall_uses_safe_python_m_pip_uninstall_command(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
-    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
 
     payload = manager.uninstall("suno")
 
@@ -601,7 +599,6 @@ def test_uninstall_uses_recorded_pip_distribution(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
-    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
 
     payload = manager.uninstall("gimp")
 
@@ -624,7 +621,6 @@ def test_uninstall_keeps_state_when_entry_point_still_available(
         "_run_argv",
         lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
     )
-    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
     monkeypatch.setattr(
         "blackcat.apps.cli.service.shutil.which",
         lambda command: "/usr/local/bin/cli-anything-gimp" if command == "cli-anything-gimp" else None,
@@ -815,34 +811,6 @@ def test_install_uses_uv_pip_when_pip_unavailable(
     ]
 
 
-def test_update_uses_uv_pip_reinstall_when_pip_unavailable(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = _manager(tmp_path)
-    monkeypatch.setattr(CliAppManager, "_pip_available", staticmethod(lambda: False))
-    monkeypatch.setattr(
-        "blackcat.apps.cli.service.shutil.which",
-        lambda command: "/usr/bin/uv" if command == "uv" else None,
-    )
-
-    argv = manager._pip_install_argv(
-        {"name": "gimp", "install_cmd": "pip install cli-anything-gimp"},
-        update=True,
-    )
-
-    assert argv == [
-        "uv",
-        "pip",
-        "install",
-        "--python",
-        sys.executable,
-        "--upgrade",
-        "--reinstall",
-        "cli-anything-gimp",
-    ]
-
-
 def test_uninstall_uses_uv_pip_when_pip_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -871,5 +839,6 @@ def test_uninstall_uses_uv_pip_when_pip_unavailable(
         "uninstall",
         "--python",
         sys.executable,
+        "-y",
         "suno-cli",
     ]
