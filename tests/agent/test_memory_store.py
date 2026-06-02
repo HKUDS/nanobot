@@ -168,6 +168,17 @@ class TestHistoryWithCursor:
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
 
+    def test_compact_history_preserves_unprocessed_entries(self, tmp_path):
+        store = MemoryStore(tmp_path, max_history_entries=50)
+        for idx in range(100):
+            store.append_history(f"event {idx + 1}")
+
+        store.compact_history(protect_after_cursor=20)
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        cursors = {entry["cursor"] for entry in entries}
+        assert set(range(21, 101)).issubset(cursors)
+
     def test_write_entries_uses_atomic_write(self, tmp_path):
         """_write_entries uses temp file + os.replace for atomicity."""
         store = MemoryStore(tmp_path)

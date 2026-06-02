@@ -324,14 +324,34 @@ class MemoryStore:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]
 
-    def compact_history(self) -> None:
-        """Drop oldest entries if the file exceeds *max_history_entries*."""
+    def compact_history(self, *, protect_after_cursor: int | None = None) -> None:
+        """Drop oldest processed entries if the file exceeds *max_history_entries*."""
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
         if len(entries) <= self.max_history_entries:
             return
-        kept = entries[-self.max_history_entries:]
+        if protect_after_cursor is None:
+            kept = entries[-self.max_history_entries:]
+        else:
+            protected: list[dict[str, Any]] = []
+            processed: list[dict[str, Any]] = []
+            for entry in entries:
+                cursor = self._valid_cursor(entry.get("cursor"))
+                if cursor is not None and cursor > protect_after_cursor:
+                    protected.append(entry)
+                else:
+                    processed.append(entry)
+            if len(protected) >= self.max_history_entries:
+                logger.warning(
+                    "Dream history compaction kept {} unprocessed entries above cursor {}, "
+                    "exceeding max_history_entries={}",
+                    len(protected), protect_after_cursor, self.max_history_entries,
+                )
+                kept = protected
+            else:
+                room = self.max_history_entries - len(protected)
+                kept = processed[-room:] + protected
         self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
@@ -1138,9 +1158,11 @@ class Dream:
                     changelog.append(f"{event['name']}: {event['detail']}")
 
         # Only advance cursor on successful completion to prevent silent loss
+        protect_cursor = last_cursor
         if result and result.stop_reason == "completed":
             new_cursor = batch[-1]["cursor"]
             self.store.set_last_dream_cursor(new_cursor)
+            protect_cursor = new_cursor
             logger.info(
                 "Dream done: {} change(s), cursor advanced to {}",
                 len(changelog), new_cursor,
@@ -1152,7 +1174,7 @@ class Dream:
                 reason,
             )
 
-        self.store.compact_history()
+        self.store.compact_history(protect_after_cursor=protect_cursor)
 
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():
