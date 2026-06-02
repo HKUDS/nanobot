@@ -213,13 +213,39 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_preflight_consolidation_summary_reaches_current_prompt(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    session = loop.sessions.get_or_create("cli:test")
+    loop.auto_compact.prepare_session = MagicMock(
+        return_value=(session, "earlier context")
+    )  # type: ignore[method-assign]
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(
+        return_value="fresh compacted context"
+    )  # type: ignore[method-assign]
+    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    captured: dict[str, str] = {}
+
+    async def track_llm(*args, **kwargs):
+        captured["system"] = kwargs["messages"][0]["content"]
+        return LLMResponse(content="ok", tool_calls=[])
+
+    loop.provider.chat_with_retry = track_llm
+    loop.provider.chat_stream_with_retry = track_llm
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    assert "earlier context" in captured["system"]
+    assert "fresh compacted context" in captured["system"]
+
+
+@pytest.mark.asyncio
 async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) -> None:
     """Verify preflight consolidation runs before the LLM call in process_direct."""
     order: list[str] = []
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
 
-    async def track_consolidate(messages):
+    async def track_consolidate(messages, **_kwargs):
         order.append("consolidate")
         return True
     loop.consolidator.archive = track_consolidate  # type: ignore[method-assign]

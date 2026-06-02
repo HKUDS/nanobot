@@ -621,7 +621,13 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                 "memory/MEMORY.md",
             ],
         )
-        gs.init()
+        if gs.init() or gs.is_initialized():
+            manual_gs = GitStore(
+                workspace / "memory" / "manual",
+                tracked_files=["MEMORY.md"],
+                allow_nested=True,
+            )
+            manual_gs.init()
     except Exception:
         logger.exception("Failed to initialize git store for {}", workspace)
 

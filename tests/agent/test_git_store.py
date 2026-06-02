@@ -59,6 +59,13 @@ class TestBuildGitignore:
             assert f"!{f}\n" in content
         assert content.startswith("/*\n")
 
+    def test_nested_subdirectory_dirs_include_all_ancestors(self, tmp_path):
+        gs = GitStore(tmp_path, tracked_files=["a/b/c.md"])
+        content = gs._build_gitignore()
+        assert "!a/\n" in content
+        assert "!a/b/\n" in content
+        assert "!a/b/c.md\n" in content
+
     def test_root_level_files_no_dir_entries(self, tmp_path):
         gs = GitStore(tmp_path, tracked_files=["a.md", "b.md"])
         content = gs._build_gitignore()
@@ -228,7 +235,29 @@ class TestMemoryStoreGitProperty:
         store = MemoryStore(tmp_path)
         assert isinstance(store.git, GitStore)
 
-    def test_git_property_is_same_object(self, tmp_path):
+    def test_auto_mode_git_property_uses_auto_store(self, tmp_path):
         from nanobot.agent.memory import MemoryStore
         store = MemoryStore(tmp_path)
-        assert store.git is store._git
+        assert store.git is store.auto_git
+
+    def test_manual_mode_git_property_uses_manual_store(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        assert store.git is store.manual_git
+        assert store.git._workspace == tmp_path / "memory" / "manual"
+        assert store.git._tracked_files == ["MEMORY.md"]
+
+    def test_auto_git_does_not_track_manual_memory_file(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+        store = MemoryStore(tmp_path)
+        assert "memory/manual/MEMORY.md" not in store.auto_git._tracked_files
+
+    def test_manual_git_can_initialize_inside_auto_git_workspace(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+        auto = MemoryStore(tmp_path, memory_mode="auto")
+        assert auto.git.init() is True
+
+        manual = MemoryStore(tmp_path, memory_mode="manual")
+        assert manual.git.init() is True
+        assert (tmp_path / "memory" / "manual" / ".git").is_dir()
+        assert len(manual.git.log()) == 1

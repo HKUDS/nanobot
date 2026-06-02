@@ -77,6 +77,12 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class MemoryConfig(Base):
+    """Long-term memory behavior configuration."""
+
+    mode: Literal["auto", "manual"] = "auto"
+
+
 class InlineFallbackConfig(Base):
     """One inline fallback model configuration."""
 
@@ -159,6 +165,7 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("consolidationRatio"),
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 

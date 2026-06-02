@@ -14,6 +14,7 @@ class _FakeStore:
     def __init__(self, git, last_dream_cursor: int = 1):
         self.git = git
         self._last_dream_cursor = last_dream_cursor
+        self.memory_mode = "auto"
 
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
@@ -50,6 +51,7 @@ def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
     loop = SimpleNamespace(consolidator=SimpleNamespace(store=store))
+    loop.context = SimpleNamespace(memory=store)
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
 
 

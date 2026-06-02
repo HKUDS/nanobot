@@ -68,7 +68,9 @@ workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
 └── memory/
-    ├── MEMORY.md        # Project facts, decisions, and durable context
+    ├── MEMORY.md        # Auto-mode project facts, decisions, and durable context
+    ├── manual/
+    │   └── MEMORY.md    # Manual-mode long-term memory, edited by the user
     ├── history.jsonl    # Append-only history summaries
     ├── .cursor          # Consolidator write cursor
     ├── .dream_cursor    # Dream consumption cursor
@@ -151,6 +153,9 @@ Dream is configured under `agents.defaults.dream`:
         "modelOverride": null,
         "maxBatchSize": 20,
         "maxIterations": 10
+      },
+      "memory": {
+        "mode": "auto"
       }
     }
   }
@@ -170,6 +175,29 @@ In practical terms:
 - `maxBatchSize` controls how many new `history.jsonl` entries Dream consumes in one run. Larger batches catch up faster; smaller batches are lighter and steadier.
 - `maxIterations` limits how many read/edit steps Dream can take while updating `SOUL.md`, `USER.md`, and `MEMORY.md`. It is a safety budget, not a quality score.
 - `intervalH` is the normal way to configure Dream. Internally it runs as an `every` schedule, not as a cron expression.
+
+### Manual memory mode
+
+Set `agents.defaults.memory.mode` to `"manual"` when ordinary conversation should not automatically become long-term memory material.
+
+In manual mode:
+
+- ordinary conversation still persists in `sessions/*.jsonl` for chat continuity
+- automatic summaries are not written to `memory/history.jsonl`
+- long-term memory is read from `memory/manual/MEMORY.md`, not `memory/MEMORY.md`
+- durable manual memory is edited directly in `memory/manual/MEMORY.md`
+- `/dream` optimizes only `memory/manual/MEMORY.md`; it does not read conversation history
+- session-continuity summaries stay in the session metadata as `_last_summary`
+
+Manual mode uses a separate long-term memory file:
+
+```text
+memory/
+└── manual/
+    └── MEMORY.md
+```
+
+Switching modes does not migrate or merge memory files. Auto mode reads `memory/MEMORY.md`; manual mode reads `memory/manual/MEMORY.md`. If you want the same facts in both modes, copy them manually.
 
 Legacy note:
 

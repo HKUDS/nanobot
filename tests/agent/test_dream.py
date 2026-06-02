@@ -1,10 +1,9 @@
 """Tests for the Dream class — two-phase memory consolidation via AgentRunner."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
@@ -77,6 +76,50 @@ class TestDreamRun:
         spec = mock_runner.run.call_args[0][0]
         assert spec.max_iterations == 10
         assert spec.fail_on_tool_error is False
+
+    async def test_manual_mode_dream_optimizes_manual_memory_only(
+        self,
+        tmp_path,
+        mock_provider,
+        mock_runner,
+    ):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        store.write_soul("# Soul\n- Helpful")
+        store.write_user("# User\n- Developer")
+        store.write_memory("# Memory\n- Project X active")
+        auto_store = MemoryStore(tmp_path, memory_mode="auto")
+        auto_store.write_memory("# Auto Memory\n- Auto-only fact")
+        dream = Dream(store=store, provider=mock_provider, model="test-model", max_batch_size=5)
+        dream._runner = mock_runner
+        mock_runner.run = AsyncMock(return_value=_make_run_result(
+            tool_events=[{"name": "edit_file", "status": "ok", "detail": "memory/manual/MEMORY.md"}],
+        ))
+
+        result = await dream.run()
+
+        assert result is True
+        mock_provider.chat_with_retry.assert_not_called()
+        mock_runner.run.assert_awaited_once()
+        spec = mock_runner.run.call_args.args[0]
+        assert "memory/manual/MEMORY.md" in spec.initial_messages[1]["content"]
+        assert "Project X active" in spec.initial_messages[1]["content"]
+        assert "Auto-only fact" not in spec.initial_messages[1]["content"]
+
+    async def test_manual_mode_dream_noops_when_manual_memory_empty(
+        self,
+        tmp_path,
+        mock_provider,
+        mock_runner,
+    ):
+        store = MemoryStore(tmp_path, memory_mode="manual")
+        dream = Dream(store=store, provider=mock_provider, model="test-model", max_batch_size=5)
+        dream._runner = mock_runner
+
+        result = await dream.run()
+
+        assert result is False
+        mock_provider.chat_with_retry.assert_not_called()
+        mock_runner.run.assert_not_called()
 
     async def test_advances_dream_cursor(self, dream, mock_provider, mock_runner, store):
         """Dream should advance the cursor after processing."""
@@ -157,7 +200,6 @@ class TestDreamRun:
         call_args = mock_provider.chat_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         # The ← suffix should only appear in MEMORY.md section
-        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
         soul_section = user_msg.split("## Current SOUL.md")[1].split("## Current USER.md")[0]
         user_section = user_msg.split("## Current USER.md")[1]
         # SOUL and USER should not contain age arrows
@@ -306,4 +348,3 @@ class TestDreamPromptCaps:
         user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         history_section = user_msg.split("## Conversation History\n")[1].split("\n\n## Current Date")[0]
         assert len(history_section) < dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS + 500
-

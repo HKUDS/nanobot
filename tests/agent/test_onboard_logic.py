@@ -374,6 +374,25 @@ class TestSyncWorkspaceTemplates:
 
         assert (workspace / "memory").exists() or (workspace / "skills").exists()
 
+    def test_initializes_manual_memory_git_when_root_store_exists(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        sync_workspace_templates(workspace, silent=True)
+
+        assert (workspace / ".git").is_dir()
+        assert (workspace / "memory" / "manual" / ".git").is_dir()
+
+    def test_skips_manual_memory_git_inside_external_git_repo(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".git").mkdir()
+        workspace = project / "workspace"
+
+        sync_workspace_templates(workspace, silent=True)
+
+        assert not (workspace / ".git").exists()
+        assert not (workspace / "memory" / "manual" / ".git").exists()
+
     def test_returns_list_of_added_files(self, tmp_path):
         """Should return list of relative paths for added files."""
         workspace = tmp_path / "workspace"
