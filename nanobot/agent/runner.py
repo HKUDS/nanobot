@@ -69,6 +69,8 @@ _COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "find_files",
     "web_search", "web_fetch", "list_dir", "list_exec_sessions",
 })
+# read_file is the recovery path for persisted results; exempting it prevents persist->read->persist loops.
+_TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
 # Backward-compatible module attribute for tests/extensions that monkeypatch
@@ -1114,6 +1116,9 @@ class AgentRunner:
         result: Any,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
+        if tool_name in _TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
+            # Exempt tools bound their own output; skip generic offload and truncation.
+            return result
         try:
             content = maybe_persist_tool_result(
                 spec.workspace,
