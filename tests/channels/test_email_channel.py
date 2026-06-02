@@ -1175,6 +1175,108 @@ async def test_send_skips_missing_attachment_file(tmp_path, monkeypatch) -> None
     # Only the existing file should be attached
     assert len(attachment_parts) == 1
     assert attachment_parts[0].get_filename() == "real.txt"
+    body = sent.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert "[attachment: nonexistent.pdf - send failed]" in body.get_content()
+
+
+@pytest.mark.asyncio
+async def test_send_skips_oversized_attachment_file(tmp_path, monkeypatch) -> None:
+    """Attachment exceeding max_attachment_size is skipped with a visible note."""
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    attachment = tmp_path / "too-large.bin"
+    attachment.write_bytes(b"1234")
+
+    channel = EmailChannel(_make_config(max_attachment_size=3), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Attachment should be skipped.",
+            media=[str(attachment)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    assert not sent.is_multipart()
+    assert "[attachment: too-large.bin - too large]" in sent.get_content()
+
+
+@pytest.mark.asyncio
+async def test_send_limits_outbound_attachment_count(tmp_path, monkeypatch) -> None:
+    """Only max_attachments_per_email outbound attachments are included."""
+    sent_messages: list[EmailMessage] = []
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            sent_messages.append(msg)
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    file1 = tmp_path / "first.txt"
+    file1.write_text("first")
+    file2 = tmp_path / "second.txt"
+    file2.write_text("second")
+
+    channel = EmailChannel(_make_config(max_attachments_per_email=1), MessageBus())
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="Only one attachment should be sent.",
+            media=[str(file1), str(file2)],
+        )
+    )
+
+    assert len(sent_messages) == 1
+    sent = sent_messages[0]
+    attachment_parts = []
+    for part in sent.walk():
+        if part.get_content_disposition() == "attachment":
+            attachment_parts.append(part)
+    assert len(attachment_parts) == 1
+    assert attachment_parts[0].get_filename() == "first.txt"
+    body = sent.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert "[attachment: second.txt - too many attachments]" in body.get_content()
 
 
 @pytest.mark.asyncio
