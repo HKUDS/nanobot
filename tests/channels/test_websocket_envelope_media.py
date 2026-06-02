@@ -61,6 +61,28 @@ def _make_channel() -> WebSocketChannel:
     return channel
 
 
+def _make_restricted_channel(allow_from: list[str]) -> WebSocketChannel:
+    """Build a channel whose allowFrom list excludes the test client."""
+    bus = MagicMock()
+    bus.publish_inbound = AsyncMock()
+    cfg = {"enabled": True, "allowFrom": allow_from, "websocketRequiresToken": False}
+    parsed = WebSocketConfig.model_validate(cfg)
+    gateway = build_gateway_services(
+        config=parsed,
+        bus=bus,
+        session_manager=None,
+        static_dist_path=None,
+        workspace_path=Path.cwd(),
+        default_restrict_to_workspace=False,
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+    )
+    channel = WebSocketChannel(cfg, bus, gateway=gateway)
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    return channel
+
+
 # -- Pure helpers --------------------------------------------------------------
 
 
@@ -467,3 +489,56 @@ async def test_non_string_content_still_rejected() -> None:
     channel._handle_message.assert_not_awaited()
     err = json.loads(mock_conn.send.call_args[0][0])
     assert err["detail"] == "missing content"
+
+
+# -- access-control: is_allowed() before media I/O -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_rejected_before_media_save(tmp_path: Path) -> None:
+    """Unauthorized sender must be rejected *before* media I/O.
+
+    An is_allowed() failure must emit access_denied, skip
+    _handle_message, and leave no media file on disk — even when the
+    envelope carries valid image data.
+    """
+    channel = _make_restricted_channel(["onlyme"])
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "should be blocked",
+        "media": [{"data_url": _tiny_png_data_url()}],
+    }
+
+    with patch(
+        "nanobot.channels.websocket.get_media_dir", return_value=tmp_path
+    ):
+        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_not_awaited()
+
+    err = json.loads(mock_conn.send.call_args[0][0])
+    assert err["detail"] == "access_denied"
+    assert "allowFrom" in err.get("reason", "")
+
+    leftover = list(tmp_path.iterdir())
+    assert leftover == [], f"media file leaked before auth: {leftover}"
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_rejected_before_media_save_no_media() -> None:
+    """Unauthorized sender without media — same guard, simpler envelope."""
+    channel = _make_restricted_channel(["onlyme"])
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "no media, still blocked",
+    }
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_not_awaited()
+    err = json.loads(mock_conn.send.call_args[0][0])
+    assert err["detail"] == "access_denied"

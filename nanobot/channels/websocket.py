@@ -713,6 +713,15 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail="missing content")
                 return
 
+            if not self.is_allowed(client_id):
+                await self._send_event(
+                    connection, "error",
+                    detail="access_denied", reason=(
+                        "unauthorized — not in allowFrom"
+                    ),
+                )
+                return
+
             raw_media = envelope.get("media")
             media_paths: list[str] = []
             if raw_media is not None:
