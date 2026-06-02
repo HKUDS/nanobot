@@ -752,6 +752,27 @@ class TestProactiveAutoCompact:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
+    async def test_proactive_archive_skips_dream_sessions(self, tmp_path):
+        """Internal Dream sessions should be left to Dream retention, not idle compact."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("dream:20260602-155256")
+        _add_turns(session, 6, prefix="dream")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        _fake_compact = _make_fake_compact(loop)
+        loop.consolidator.compact_idle_session = _fake_compact
+
+        await self._run_check_expired(loop)
+
+        session_after = loop.sessions.get_or_create("dream:20260602-155256")
+        assert len(session_after.messages) == 12
+        assert _fake_compact.state["count"] == 0
+        assert "dream:20260602-155256" not in loop.auto_compact._archiving
+        assert "dream:20260602-155256" not in loop.auto_compact._summaries
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
     async def test_no_proactive_archive_when_active(self, tmp_path):
         """Recently active session should NOT be archived on idle tick."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
