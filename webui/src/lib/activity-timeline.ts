@@ -132,7 +132,12 @@ function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], vis
   for (const message of activityMessages) {
     const bucket = isFileEditActivityMessage(message) ? "file" : "other";
     const segmentId = message.activitySegmentId;
-    const segmentChanged = !!runSegmentId && !!segmentId && runSegmentId !== segmentId;
+    const segmentChanged =
+      bucket === "file"
+      && runBucket === "file"
+      && !!runSegmentId
+      && !!segmentId
+      && runSegmentId !== segmentId;
     if ((runBucket && bucket !== runBucket) || segmentChanged) {
       flushRun();
     }

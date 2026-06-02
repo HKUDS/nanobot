@@ -102,7 +102,7 @@ describe("ThreadMessages", () => {
     expect(units[2].type === "activity" ? units[2].messages.map((m) => m.id) : []).toEqual(["r2"]);
   });
 
-  it("splits ordinary tool activity when segment ids changed", () => {
+  it("keeps ordinary tool activity in one Thought block across segment ids", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -142,12 +142,10 @@ describe("ThreadMessages", () => {
 
     const units = buildDisplayUnits(messages);
 
-    expect(units).toHaveLength(2);
+    expect(units).toHaveLength(1);
     expect(units[0].type === "activity" ? units[0].messages.map((m) => m.id) : []).toEqual([
       "r1",
       "t1",
-    ]);
-    expect(units[1].type === "activity" ? units[1].messages.map((m) => m.id) : []).toEqual([
       "r2",
       "t2",
     ]);
