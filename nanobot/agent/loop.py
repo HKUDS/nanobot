@@ -53,7 +53,10 @@ from nanobot.session.goal_state import (
 )
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
-from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import (
+    image_placeholder_text,
+    warmup_tokenizer,
+)
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -840,7 +843,7 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
+        await self.startup()
         logger.info("Agent loop started")
 
         while self._running:
@@ -1078,6 +1081,11 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
+
+    async def startup(self) -> None:
+        """Initialize resources needed before accepting messages."""
+        await self._connect_mcp()
+        warmup_tokenizer()
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -1372,10 +1380,17 @@ class AgentLoop:
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
+        t_step = time.perf_counter()
         await self.consolidator.maybe_consolidate_by_tokens(
             ctx.session,
             replay_max_messages=self._max_messages,
         )
+        logger.debug(
+            "[turn {}] BUILD consolidate took {:.1f}ms",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+        )
+        t_step = time.perf_counter()
         self._set_tool_context(
             ctx.msg.channel,
             ctx.msg.chat_id,
@@ -1386,32 +1401,70 @@ class AgentLoop:
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+        logger.debug(
+            "[turn {}] BUILD tool_context took {:.1f}ms",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+        )
 
+        t_step = time.perf_counter()
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
+        logger.debug(
+            "[turn {}] BUILD get_history took {:.1f}ms (history={} msgs)",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+            len(ctx.history),
+        )
+        t_step = time.perf_counter()
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
             self.llm_runtime(),
         )
+        logger.debug(
+            "[turn {}] BUILD runtime_context took {:.1f}ms",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+        )
 
+        t_step = time.perf_counter()
         ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
             ctx.pending_summary,
         )
+        logger.debug(
+            "[turn {}] BUILD initial_messages took {:.1f}ms (messages={})",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+            len(ctx.initial_messages),
+        )
+        t_step = time.perf_counter()
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
         )
+        logger.debug(
+            "[turn {}] BUILD persist_user took {:.1f}ms (persisted={})",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+            ctx.user_persisted_early,
+        )
 
+        t_step = time.perf_counter()
         if ctx.on_progress is None:
             ctx.on_progress = await self._build_bus_progress_callback(ctx.msg)
         if ctx.on_retry_wait is None:
             ctx.on_retry_wait = await self._build_retry_wait_callback(ctx.msg)
+        logger.debug(
+            "[turn {}] BUILD callbacks took {:.1f}ms",
+            ctx.turn_id,
+            (time.perf_counter() - t_step) * 1000,
+        )
 
         return "ok"
 
@@ -1722,7 +1775,7 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
-        await self._connect_mcp()
+        await self.startup()
         msg = InboundMessage(
             channel=channel, sender_id="user", chat_id=chat_id,
             content=content, media=media or [],

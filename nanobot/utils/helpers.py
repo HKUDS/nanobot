@@ -4,6 +4,7 @@ import base64
 import json
 import re
 import shutil
+import threading
 import time
 import uuid
 from contextlib import suppress
@@ -13,6 +14,33 @@ from typing import Any
 
 import tiktoken
 from loguru import logger
+
+_TOKENIZER_ENCODING: Any | None = None
+_TOKENIZER_LOCK = threading.RLock()
+
+
+def get_tokenizer_encoding() -> Any:
+    """Return the shared tiktoken encoding."""
+    global _TOKENIZER_ENCODING
+    with _TOKENIZER_LOCK:
+        if _TOKENIZER_ENCODING is None:
+            _TOKENIZER_ENCODING = tiktoken.get_encoding("cl100k_base")
+        return _TOKENIZER_ENCODING
+
+
+def warmup_tokenizer() -> None:
+    """Best-effort initialize the shared tokenizer before message processing starts."""
+    t0 = time.perf_counter()
+    try:
+        with _TOKENIZER_LOCK:
+            enc = get_tokenizer_encoding()
+            enc.encode("warmup")
+        logger.debug(
+            "tiktoken warmup completed in {:.1f}ms",
+            (time.perf_counter() - t0) * 1000,
+        )
+    except Exception:
+        logger.debug("tiktoken warmup failed", exc_info=True)
 
 
 def strip_think(text: str) -> str:
@@ -427,7 +455,7 @@ def estimate_prompt_tokens(
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = get_tokenizer_encoding()
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")
@@ -494,7 +522,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if not payload:
         return 4
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = get_tokenizer_encoding()
         return max(4, len(enc.encode(payload)) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)
