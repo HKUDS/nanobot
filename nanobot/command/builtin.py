@@ -305,17 +305,52 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
+        from nanobot.agent.memory import MemoryStore
+
+        dream_session_key = MemoryStore.dream_session_key
+        build_dream_commit_message = MemoryStore.build_dream_commit_message
+        prune_dream_sessions = MemoryStore.prune_dream_sessions
+
+        store = loop.context.memory
+        content = ""
+        resp = None
         t0 = time.monotonic()
         try:
-            did_work = await loop.dream.run()
+            result = store.build_dream_prompt()
+            if result is None:
+                await loop.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Dream: nothing to process.",
+                ))
+                return
+            prompt, last_cursor = result
+            key = dream_session_key()
+            resp = await loop.process_direct(
+                prompt,
+                session_key=key,
+                ephemeral=True,
+                tools=store.build_dream_tools(),
+            )
             elapsed = time.monotonic() - t0
-            if did_work:
+            if MemoryStore.dream_run_completed(resp):
+                store.set_last_dream_cursor(last_cursor)
                 content = f"Dream completed in {elapsed:.1f}s."
             else:
-                content = "Dream: nothing to process."
+                content = (
+                    f"Dream did not complete after {elapsed:.1f}s; "
+                    "memory cursor was not advanced."
+                )
         except Exception as e:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
+        finally:
+            if store.git.is_initialized():
+                commit_msg = build_dream_commit_message("dream: manual run", resp)
+                sha = store.git.auto_commit(commit_msg)
+                if sha:
+                    content += f" (commit {sha})"
+            store.compact_history()
+            prune_dream_sessions(loop.sessions.sessions_dir)
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
