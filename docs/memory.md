@@ -19,6 +19,8 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 This keeps the system light in the moment, but reflective over time.
 
+For **long single-session tasks** (many large tool results in one sitting), see also [Layered Memory](./layered-memory.md). It adds Task Canvas + optional L0–L3 long-term memory (`memory.sqlite`, `memory/scenes/`, persona `USER.md`). That layer is separate from Consolidator/Dream for `MEMORY.md` / `SOUL.md`; when `layeredMemory.persona.enable` is on, Dream does not edit `USER.md`.
+
 ## The Flow
 
 Memory moves through nanobot in two stages.

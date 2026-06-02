@@ -883,6 +883,8 @@ class Dream:
         max_iterations: int = 10,
         max_tool_result_chars: int = 16_000,
         annotate_line_ages: bool = True,
+        *,
+        skip_user_edits: bool = False,
     ):
         self.store = store
         self.provider = provider
@@ -890,10 +892,8 @@ class Dream:
         self.max_batch_size = max_batch_size
         self.max_iterations = max_iterations
         self.max_tool_result_chars = max_tool_result_chars
-        # Kill switch for the git-blame-based per-line age annotation in Phase 1.
-        # Default True keeps the #3212 behavior; set False to feed MEMORY.md raw
-        # (e.g. if a specific LLM reacts poorly to the `← Nd` suffix).
         self.annotate_line_ages = annotate_line_ages
+        self.skip_user_edits = skip_user_edits
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
 
@@ -1054,6 +1054,7 @@ class Dream:
                 "content": render_template(
                     "agent/dream_phase2.md",
                     strip=True,
+                    skip_user_edits=self.skip_user_edits,
                 ),
             },
             {"role": "user", "content": phase2_prompt},

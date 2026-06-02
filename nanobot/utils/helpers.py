@@ -7,6 +7,7 @@ import shutil
 import time
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -275,13 +276,16 @@ def _render_tool_result_reference(
     original_size: int,
     preview: str,
     truncated_preview: bool,
+    node_id: str | None = None,
 ) -> str:
     result = (
         f"[tool output persisted]\n"
         f"Full output saved to: {filepath}\n"
         f"Original size: {original_size} chars\n"
-        f"Preview:\n{preview}"
     )
+    if node_id:
+        result += f"node_id: {node_id}\n"
+    result += f"Preview:\n{preview}"
     if truncated_preview:
         result += "\n...\n(Read the saved file if you need the full output.)"
     return result
@@ -319,6 +323,43 @@ def _write_text_atomic(path: Path, content: str) -> None:
             tmp.unlink(missing_ok=True)
 
 
+@dataclass(frozen=True)
+class ToolPersistMeta:
+    """Metadata when a tool result is written to disk."""
+
+    node_id: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class MaybePersistOutcome:
+    """Normalized tool result content plus optional persist metadata."""
+
+    content: Any
+    meta: ToolPersistMeta | None = None
+
+
+def persist_path_from_tool_content(content: Any, *, workspace: Path | None = None) -> str | None:
+    """Extract persisted tool path from a ``[tool output persisted]`` reference string."""
+    if not isinstance(content, str) or "[tool output persisted]" not in content:
+        return None
+    for line in content.splitlines():
+        prefix = "Full output saved to:"
+        if not line.startswith(prefix):
+            continue
+        raw = line[len(prefix) :].strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        if workspace is not None:
+            try:
+                return path.relative_to(workspace).as_posix()
+            except ValueError:
+                pass
+        return path.as_posix()
+    return None
+
+
 def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
@@ -326,10 +367,10 @@ def maybe_persist_tool_result(
     content: Any,
     *,
     max_chars: int,
-) -> Any:
+) -> MaybePersistOutcome:
     """Persist oversized tool output and replace it with a stable reference string."""
     if workspace is None or max_chars <= 0:
-        return content
+        return MaybePersistOutcome(content)
 
     text_payload: str | None = None
     suffix = "txt"
@@ -338,13 +379,13 @@ def maybe_persist_tool_result(
     elif isinstance(content, list):
         text_payload = stringify_text_blocks(content)
         if text_payload is None:
-            return content
+            return MaybePersistOutcome(content)
         suffix = "json"
     else:
-        return content
+        return MaybePersistOutcome(content)
 
     if len(text_payload) <= max_chars:
-        return content
+        return MaybePersistOutcome(content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -360,11 +401,20 @@ def maybe_persist_tool_result(
             _write_text_atomic(path, text_payload)
 
     preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
-    return _render_tool_result_reference(
+    reference = _render_tool_result_reference(
         path,
         original_size=len(text_payload),
         preview=preview,
         truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        node_id=tool_call_id,
+    )
+    try:
+        rel_path = path.relative_to(workspace)
+    except ValueError:
+        rel_path = path
+    return MaybePersistOutcome(
+        reference,
+        meta=ToolPersistMeta(node_id=tool_call_id, path=rel_path),
     )
 
 

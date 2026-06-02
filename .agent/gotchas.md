@@ -42,3 +42,7 @@ Built-in skills live in `nanobot/skills/` (markdown + YAML frontmatter format). 
 ## Atomic Session Writes
 
 `agent/memory.py` writes `history.jsonl` atomically (temp file + fsync + rename + directory fsync). This guarantees durability across crashes. Do not replace this with a plain `open(..., "w")` write.
+
+## Layered Memory vs Dream (`USER.md`)
+
+When `layeredMemory.enable` and `layeredMemory.persona.enable` are both true (with capture on), **L3 persona job** is the single writer for `workspace/USER.md` (file lock: `.nanobot/persona.lock`). Dream Phase 2 sets `skip_user_edits=True` and must not edit `USER.md`. Dream still maintains `MEMORY.md` and `SOUL.md`. Disable `persona.enable` to restore Dream as the USER profile writer.

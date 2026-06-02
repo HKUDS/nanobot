@@ -34,9 +34,14 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.agent.evolution.models import TurnTrace
 from nanobot.agent.evolution.post_task import PostTaskEvolver, resolve_post_task_provider
 from nanobot.agent.evolution.trace_recorder import TraceRecorder
+from nanobot.agent.layered_memory import LayeredMemoryFacade
+from nanobot.agent.layered_memory.capture_slice import l0_capture_skip
+from nanobot.agent.layered_memory.obs import log_layered_memory_startup
+from nanobot.agent.layered_memory.offload.hook import LayeredMemoryHook
 from nanobot.config.schema import (
     AgentDefaults,
     EvolutionConfig,
+    LayeredMemoryConfig,
     ModelPresetConfig,
     SkillRetrievalConfig,
 )
@@ -196,6 +201,7 @@ class AgentLoop:
         disabled_skills: list[str] | None = None,
         skill_retrieval: SkillRetrievalConfig | None = None,
         evolution: EvolutionConfig | None = None,
+        layered_memory: LayeredMemoryConfig | None = None,
         provider_config: Any | None = None,
         skill_llm_provider: LLMProvider | None = None,
         tools_config: ToolsConfig | None = None,
@@ -257,6 +263,13 @@ class AgentLoop:
         self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
         self._evolution = evolution or EvolutionConfig()
+        self._layered_memory = layered_memory or LayeredMemoryConfig()
+        self._layered_memory_facade = LayeredMemoryFacade(
+            workspace,
+            self._layered_memory,
+            provider=provider,
+        )
+        log_layered_memory_startup(self._layered_memory)
         self._provider_config = provider_config
         self._trace_recorder = TraceRecorder(workspace, self._evolution)
         self._post_task_evolver: PostTaskEvolver | None = None
@@ -301,6 +314,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            layered_memory=self._layered_memory,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -341,6 +355,7 @@ class AgentLoop:
             store=self.context.memory,
             provider=provider,
             model=self.model,
+            skip_user_edits=self._layered_memory.persona_enabled(),
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None
@@ -415,6 +430,7 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             skill_retrieval=skill_retrieval,
             evolution=defaults.evolution,
+            layered_memory=defaults.layered_memory,
             provider_config=config,
             skill_llm_provider=skill_llm_provider,
             session_ttl_minutes=defaults.session_ttl_minutes,
@@ -521,6 +537,7 @@ class AgentLoop:
             provider_snapshot_loader=self._provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
+            layered_memory=self._layered_memory,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -578,6 +595,11 @@ class AgentLoop:
             session_key=effective_key,
             metadata=dict(metadata or {}),
         )
+
+        if self._layered_memory.capture_enabled():
+            from nanobot.agent.layered_memory.search_budget import reset_memory_search_calls
+
+            reset_memory_search_calls()
 
         for name in self.tools.tool_names:
             tool = self.tools.get(name)
@@ -643,8 +665,12 @@ class AgentLoop:
         history: list[dict[str, Any]],
         pending_summary: str | None,
         skill_entries: list[dict[str, object]] | None = None,
+        *,
+        runtime_lines: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
+        if runtime_lines is None:
+            runtime_lines = cli_app_utils.runtime_lines(msg, self.context.workspace)
         return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
@@ -653,8 +679,23 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
-            session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace),
+            session_metadata=session.metadata,
+            current_runtime_lines=runtime_lines,
             skill_entries=skill_entries,
+        )
+
+    async def _layered_memory_runtime_lines(
+        self,
+        session_key: str,
+        query: str,
+        *,
+        is_subagent: bool = False,
+    ) -> list[str]:
+        """Delegate to facade runtime_lines (LM2-F)."""
+        return await self._layered_memory_facade.runtime_lines(
+            query,
+            session_key,
+            is_subagent=is_subagent,
         )
 
     async def _resolve_turn_skill_entries(
@@ -738,6 +779,7 @@ class AgentLoop:
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        is_subagent: bool = False,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -763,9 +805,17 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
-        hook: AgentHook = (
-            CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
-        )
+        hooks: list[AgentHook] = [loop_hook]
+        if self._layered_memory.offload_enabled(is_subagent=is_subagent):
+            hooks.append(
+                LayeredMemoryHook(
+                    self._layered_memory_facade,
+                    session_key or "default",
+                    is_subagent=is_subagent,
+                ),
+            )
+        hooks.extend(self._extra_hooks)
+        hook: AgentHook = CompositeHook(hooks) if len(hooks) > 1 else hooks[0]
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -852,6 +902,7 @@ class AgentLoop:
                     session.key if session is not None else session_key,
                     metadata=(session.metadata if session is not None else None),
                 ),
+                layered_memory_facade=self._layered_memory_facade,
             ))
         finally:
             reset_file_states(file_state_token)
@@ -1244,6 +1295,11 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        if self._layered_memory.enable:
+            try:
+                await self._layered_memory_facade.close()
+            except Exception:
+                logger.exception("layered_memory shutdown failed")
         for name, stack in self._mcp_stacks.items():
             try:
                 await stack.aclose()
@@ -1256,6 +1312,32 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
+
+    def _schedule_l0_capture(
+        self,
+        *,
+        session_key: str,
+        all_messages: list[dict],
+        skip: int,
+        turn_id: str,
+        is_subagent: bool,
+    ) -> None:
+        """Persist sanitized turn slice to L0 (LM2-A), non-blocking."""
+        if not self._layered_memory.capture_enabled(is_subagent=is_subagent):
+            return
+        if skip < 0:
+            skip = 0
+        new_slice = [dict(m) for m in all_messages[skip:]]
+        if not new_slice:
+            return
+        self._schedule_background(
+            self._layered_memory_facade.capture_turn(
+                session_key,
+                new_slice,
+                turn_id=turn_id,
+                is_subagent=is_subagent,
+            ),
+        )
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -1308,10 +1390,19 @@ class AgentLoop:
         current_role = "assistant" if is_subagent else "user"
 
         current_message = "" if is_subagent else msg.content
+        retrieval_query = (
+            ContextBuilder._extract_retrieval_query(current_message) if not is_subagent else ""
+        )
         skill_entries = None
         if not is_subagent:
             skill_entries = await self._resolve_turn_skill_entries(current_message)
-        # skill_entries = await self._resolve_turn_skill_entries(msg.content)
+        runtime_lines = list(
+            cli_app_utils.runtime_lines(msg, self.context.workspace, skip=is_subagent),
+        )
+        if not is_subagent:
+            runtime_lines.extend(
+                await self._layered_memory_runtime_lines(key, retrieval_query),
+            )
         messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
@@ -1320,13 +1411,11 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
-            session_metadata=session.metadata, current_runtime_lines=cli_app_utils.runtime_lines(msg, self.context.workspace, skip=is_subagent),
+            session_metadata=session.metadata,
+            current_runtime_lines=runtime_lines,
             skill_entries=skill_entries,
         )
         baseline_len = len(messages)
-        retrieval_query = (
-            ContextBuilder._extract_retrieval_query(current_message) if not is_subagent else ""
-        )
         t_wall = time.time()
         final_content, tools_used, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
@@ -1334,6 +1423,7 @@ class AgentLoop:
             metadata=msg.metadata,
             session_key=key,
             pending_queue=pending_queue,
+            is_subagent=is_subagent,
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
@@ -1352,11 +1442,20 @@ class AgentLoop:
         if trace is not None:
             self._schedule_post_task(trace, is_subagent=is_subagent)
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
+        if self._layered_memory.offload_enabled(is_subagent=is_subagent):
+            self._layered_memory_facade.refresh_canvas(key, is_subagent=is_subagent)
         if channel == "websocket":
             self._pending_turn_latency_ms[key] = latency_ms
         session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
+        self._schedule_l0_capture(
+            session_key=key,
+            all_messages=all_msgs,
+            skip=1 + len(history),
+            turn_id=f"{key}:{time.time_ns()}",
+            is_subagent=is_subagent,
+        )
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
@@ -1587,12 +1686,23 @@ class AgentLoop:
         ctx.skill_entry_names = (
             [str(entry["name"]) for entry in skill_entries] if skill_entries else []
         )
+        runtime_lines = list(
+            cli_app_utils.runtime_lines(ctx.msg, self.context.workspace),
+        )
+        runtime_lines.extend(
+            await self._layered_memory_runtime_lines(
+                ctx.session_key,
+                ctx.retrieval_query,
+                is_subagent=ctx.msg.sender_id == "subagent",
+            ),
+        )
         ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
             ctx.pending_summary,
             skill_entries=skill_entries,
+            runtime_lines=runtime_lines,
         )
         ctx.trace_baseline_len = len(ctx.initial_messages)
         ctx.user_persisted_early = self._persist_user_message_early(
@@ -1621,6 +1731,7 @@ class AgentLoop:
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
+            is_subagent=ctx.msg.sender_id == "subagent",
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1656,12 +1767,29 @@ class AgentLoop:
             ctx.session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
         )
+        if self._layered_memory.offload_enabled(
+            is_subagent=ctx.msg.sender_id == "subagent",
+        ):
+            self._layered_memory_facade.refresh_canvas(
+                ctx.session_key,
+                is_subagent=ctx.msg.sender_id == "subagent",
+            )
         if ctx.msg.channel == "websocket":
             self._pending_turn_latency_ms[ctx.session_key] = ctx.turn_latency_ms
         ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         self.sessions.save(ctx.session)
+        self._schedule_l0_capture(
+            session_key=ctx.session_key,
+            all_messages=ctx.all_messages,
+            skip=l0_capture_skip(
+                session_save_skip=ctx.save_skip,
+                user_persisted_early=ctx.user_persisted_early,
+            ),
+            turn_id=ctx.turn_id,
+            is_subagent=ctx.msg.sender_id == "subagent",
+        )
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,

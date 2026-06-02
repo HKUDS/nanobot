@@ -1463,6 +1463,73 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
 
+## Layered Memory
+
+Layered Memory adds **Task Canvas** short-term indexing plus an optional **L0→L1→L2→L3** long-term pipeline (capture, atoms, scenes, `USER.md` persona).
+
+See [Layered Memory](./layered-memory.md) for architecture, Dream boundaries, storage layout, and tuning.
+
+**Minimum (LM1 canvas only):**
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "layeredMemory": {
+        "enable": true,
+        "offload": {
+          "enable": true
+        }
+      }
+    }
+  }
+}
+```
+
+**Full stack (L0–L3 + recall)** — see [Quick start](./layered-memory.md#quick-start) in the layered-memory guide.
+
+Both `layeredMemory.enable` and `layeredMemory.offload.enable` must be `true` for canvas injection and `read_memory_node`. L0/L1/pipeline require `capture.enable`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `layeredMemory.enable` | `false` | Master switch |
+| `layeredMemory.offload.enable` | `false` | Task canvas, `nodes.json`, `read_memory_node` |
+| `layeredMemory.offload.maxCanvasChars` | `1500` | Max `[Task canvas]` block size |
+| `layeredMemory.offload.maxNodeSummaryChars` | `120` | Per-node summary in `nodes.json` |
+| `layeredMemory.offload.updateCanvasEveryNTools` | `0` | Refresh `canvas.mmd` every N tools; `0` = turn end only |
+| `layeredMemory.capture.enable` | `false` | L0 SQLite capture; enables pipeline + search tools |
+| `layeredMemory.capture.l0RetentionDays` | `30` | Prune L0 older than N days; `0` = no prune |
+| `layeredMemory.pipeline.everyNConversations` | `5` | L1 trigger every N turns |
+| `layeredMemory.pipeline.enableWarmup` | `true` | L1 warmup 1→2→4→… |
+| `layeredMemory.pipeline.l1IdleTimeoutSeconds` | `600` | L1 on user idle |
+| `layeredMemory.pipeline.l2DelayAfterL1Seconds` | `90` | Delay before L2 after L1 |
+| `layeredMemory.pipeline.l2MinIntervalSeconds` | `900` | Min gap between L2 runs |
+| `layeredMemory.pipeline.l2MaxIntervalSeconds` | `3600` | Max gap before L2 must run |
+| `layeredMemory.pipeline.sessionActiveWindowHours` | `24` | Skip L2 when session cold |
+| `layeredMemory.pipeline.maxMemoriesPerSession` | `20` | L1 atoms cap per job |
+| `layeredMemory.pipeline.enableL1Dedup` | `true` | L1 near-duplicate skip |
+| `layeredMemory.pipeline.extractionModel` | `null` | L1/L2/L3 LLM; null = main provider |
+| `layeredMemory.persona.enable` | `true` | L3 `USER.md`; Dream skips USER when on |
+| `layeredMemory.persona.minIntervalSeconds` | `900` | Min gap between L3 runs |
+| `layeredMemory.persona.backupCount` | `3` | `USER.md` backup rotation |
+| `layeredMemory.persona.maxUserChars` | `8000` | Max L3 `USER.md` size |
+| `layeredMemory.persona.lockTimeoutSeconds` | `30` | Persona file lock timeout |
+| `layeredMemory.persona.model` | `null` | L3 LLM override |
+| `layeredMemory.recall.enable` | `false` | Turn-before recall injection |
+| `layeredMemory.recall.strategy` | `hybrid` | `fts` / `embedding` / `hybrid` |
+| `layeredMemory.recall.topK` | `8` | L1 hits in recall |
+| `layeredMemory.recall.timeoutMs` | `5000` | Recall timeout |
+| `layeredMemory.recall.maxPrependChars` | `4000` | Max recall block size |
+| `layeredMemory.recall.maxSearchCallsPerTurn` | `3` | Search tool budget per turn |
+| `layeredMemory.embedding.enable` | `false` | Optional vectors for hybrid recall |
+| `layeredMemory.subagent.enableOffload` | `false` | Subagents: no canvas |
+| `layeredMemory.subagent.enableRecall` | `false` | Subagents: no recall |
+| `layeredMemory.subagent.enableCapture` | `false` | Subagents: no L0/pipeline |
+
+Related: `agents.defaults.maxToolResultChars` (default `16000`) controls tool spill threshold. Layered Memory indexes spills; it does not change the threshold.
+
+When `persona.enable` is true with `capture.enable`, Dream does not edit `USER.md` — see [Layered Memory vs Dream](./layered-memory.md#layered-memory-vs-dream).
+
 ## Disabled Skills
 
 nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
