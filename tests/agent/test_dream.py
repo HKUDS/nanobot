@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.providers.base import LLMResponse
+from nanobot.utils.prompt_templates import render_template
 
 
 @pytest.fixture
@@ -85,6 +86,18 @@ class TestBuildDreamPrompt:
         assert next_cursor == 25
         assert "entry-21" in next_prompt
         assert "entry-25" in next_prompt
+
+    def test_dream_prompt_consumes_consolidator_attribute_tags(self):
+        prompt = render_template(
+            "agent/dream.md",
+            strip=True,
+            skill_creator_path="skills/skill-creator/SKILL.md",
+        )
+
+        assert "History attribute tags" in prompt
+        assert "[skip]: audit-only" in prompt
+        assert "[correction]: replace the older conflicting fact" in prompt
+        assert "Always strip these bracketed tags from saved memory content" in prompt
 
 
 class TestDreamTools:
