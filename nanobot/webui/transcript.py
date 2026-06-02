@@ -353,17 +353,36 @@ def _merge_unique_tool_trace_lines(
     return traces, added
 
 
+def _media_from_signed_urls(value: Any) -> list[dict[str, Any]]:
+    media: list[dict[str, Any]] = []
+    urls = value if isinstance(value, list) else []
+    for m in urls:
+        if isinstance(m, dict) and m.get("url"):
+            name = str(m.get("name") or "")
+            media.append(
+                {
+                    "kind": _media_kind_from_name(name),
+                    "url": str(m["url"]),
+                    "name": name,
+                },
+            )
+    return media
+
+
 def replay_transcript_to_ui_messages(
     lines: list[dict[str, Any]],
     *,
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
     Mirrors the core fold in ``useNanobotStream.ts`` (delta, reasoning,
     message+kind, turn_end). ``augment_user_media`` maps persisted filesystem
-    paths to ``{url, name?}`` / attachment dicts the client expects.
+    paths to ``{url, name?}`` / attachment dicts the client expects. Assistant
+    media gets a separate hook so replay can re-sign outbound attachments after
+    a gateway restart instead of reusing stale process-local signed URLs.
     """
     messages: list[dict[str, Any]] = []
     buffer_message_id: str | None = None
@@ -832,19 +851,14 @@ def replay_transcript_to_ui_messages(
             buffer_parts = []
             text = rec.get("text")
             content_s = text if isinstance(text, str) else ""
-            media_urls = rec.get("media_urls")
             media: list[dict[str, Any]] = []
-            if isinstance(media_urls, list):
-                for m in media_urls:
-                    if isinstance(m, dict) and m.get("url"):
-                        name = str(m.get("name") or "")
-                        media.append(
-                            {
-                                "kind": _media_kind_from_name(name),
-                                "url": str(m["url"]),
-                                "name": name,
-                            },
-                        )
+            raw_media = rec.get("media")
+            raw_media_list = raw_media if isinstance(raw_media, list) else []
+            media_paths = [path for path in raw_media_list if isinstance(path, str) and path]
+            if media_paths and augment_assistant_media is not None:
+                media = augment_assistant_media(media_paths)
+            if not media and (not media_paths or augment_assistant_media is None):
+                media = _media_from_signed_urls(rec.get("media_urls"))
             extra: dict[str, Any] = {"content": content_s}
             if media:
                 extra["media"] = media
@@ -888,6 +902,7 @@ def build_webui_thread_response(
     session_key: str,
     *,
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
 ) -> dict[str, Any] | None:
     """Return a payload compatible with ``WebuiThreadPersistedPayload``."""
@@ -897,6 +912,7 @@ def build_webui_thread_response(
     msgs = replay_transcript_to_ui_messages(
         lines,
         augment_user_media=augment_user_media,
+        augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
     )
     return {
