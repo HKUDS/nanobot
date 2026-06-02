@@ -515,6 +515,66 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
 
 
 @pytest.mark.asyncio
+async def test_webui_thread_resigns_assistant_media_urls(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    media_root = tmp_path / "media"
+    websocket_media = media_root / "websocket"
+    websocket_media.mkdir(parents=True)
+    external = tmp_path / "clip.mp4"
+    external.write_bytes(b"video")
+
+    def fake_media_dir(channel: str | None = None) -> Path:
+        return websocket_media if channel == "websocket" else media_root
+
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+
+    append_transcript_object(
+        "websocket:video-replay",
+        {"event": "user", "chat_id": "video-replay", "text": "make a video"},
+    )
+    append_transcript_object(
+        "websocket:video-replay",
+        {
+            "event": "message",
+            "chat_id": "video-replay",
+            "text": "video ready",
+            "media": [str(external)],
+            "media_urls": [{"url": "/api/media/old-sig/old-payload", "name": "clip.mp4"}],
+        },
+    )
+
+    channel = _ch(bus, port=29914)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        resp = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket:video-replay/webui-thread",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        media = assistant["media"]
+        assert media[0]["kind"] == "video"
+        assert media[0]["name"] == "clip.mp4"
+        assert media[0]["url"].startswith("/api/media/")
+        assert media[0]["url"] != "/api/media/old-sig/old-payload"
+
+        fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
+        assert fetched.status_code == 200
+        assert fetched.content == b"video"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_routes_reject_non_websocket_keys(
     bus: MagicMock, tmp_path: Path
 ) -> None:
