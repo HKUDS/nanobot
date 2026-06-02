@@ -98,8 +98,17 @@ export function ThreadMessages({
           && next?.type === "message"
           && next.message.role === "assistant";
 
+        const userPromptId =
+          unit.type === "message" && unit.message.role === "user"
+            ? unit.message.id
+            : undefined;
+
         return (
-          <div key={unitKey(unit, index)} className={marginTop}>
+          <div
+            key={unitKey(unit, index)}
+            className={marginTop}
+            data-user-prompt-id={userPromptId}
+          >
             {unit.type === "activity" ? (
               <AgentActivityCluster
                 messages={unit.messages}
