@@ -14,6 +14,7 @@ import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import type {
@@ -71,8 +72,8 @@ export function MessageBubble({
   }, []);
 
   const onCopyAssistantReply = useCallback(() => {
-    if (!navigator.clipboard) return;
-    void navigator.clipboard.writeText(message.content).then(() => {
+    void copyTextToClipboard(message.content).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       if (copyResetRef.current !== null) {
         window.clearTimeout(copyResetRef.current);
