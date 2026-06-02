@@ -13,7 +13,7 @@ import pytest
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.session.manager import Session, SessionManager
-from nanobot.webui.ws_http import GatewayHTTPHandler
+from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
 
@@ -25,18 +25,19 @@ def _make_handler(
     session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
     runtime_model_name: Any | None = None,
-) -> GatewayHTTPHandler:
+) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = Path.cwd()
-    return GatewayHTTPHandler(
+    return build_gateway_services(
         config=config,
+        bus=bus,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
         workspace_path=workspace,
+        default_restrict_to_workspace=False,
         runtime_model_name=runtime_model_name,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
-        bus=bus,
     )
 
 
@@ -58,13 +59,13 @@ def _ch(
         "websocketRequiresToken": False,
     }
     cfg.update(extra)
-    http_handler = _make_handler(
+    gateway = _make_handler(
         cfg, bus,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
         runtime_model_name=runtime_model_name,
     )
-    return WebSocketChannel(cfg, bus, http_handler=http_handler)
+    return WebSocketChannel(cfg, bus, gateway=gateway)
 
 
 @pytest.fixture()
@@ -729,20 +730,20 @@ async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> 
     channel = _ch(bus, session_manager=sm, port=29908)
     # Don't start a server — directly inject and validate.
     import time as _time
-    channel._http.api_tokens["expired"] = _time.monotonic() - 1
-    channel._http.api_tokens["live"] = _time.monotonic() + 60
+    channel.gateway.tokens.api_tokens["expired"] = _time.monotonic() - 1
+    channel.gateway.tokens.api_tokens["live"] = _time.monotonic() + 60
 
     class _FakeReq:
         path = "/api/sessions"
         headers = {"Authorization": "Bearer expired"}
 
-    assert channel._http.check_api_token(_FakeReq()) is False
+    assert channel.gateway.tokens.check_api_token(_FakeReq()) is False
 
     class _LiveReq:
         path = "/api/sessions"
         headers = {"Authorization": "Bearer live"}
 
-    assert channel._http.check_api_token(_LiveReq()) is True
+    assert channel.gateway.tokens.check_api_token(_LiveReq()) is True
 
 
 class _FakeConn:
@@ -797,7 +798,7 @@ def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
 
 def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
@@ -806,7 +807,7 @@ def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
 def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
     """When only token (not token_issue_secret) is set, bootstrap accepts it."""
     channel = _ch(bus, host="0.0.0.0", token="static-tok")
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
     )
     assert resp.status_code == 200
@@ -816,7 +817,7 @@ def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
 
 def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1", port=29931)
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _LOCAL,
         _FakeReq({"Host": "nanobot.example", "X-Forwarded-Proto": "https"}),
     )
@@ -827,7 +828,7 @@ def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
 
 def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
-    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
 
 
@@ -837,7 +838,7 @@ def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytes
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
-    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "live/model"
@@ -849,7 +850,7 @@ def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeyp
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
-    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "from-disk"
@@ -865,7 +866,7 @@ def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: p
         raise RuntimeError("resolver failed")
 
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=boom)
-    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["model_name"] == "from-disk"
@@ -873,7 +874,7 @@ def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: p
 
 def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="correct")
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer wrong"})
     )
     assert resp.status_code == 401
@@ -881,7 +882,7 @@ def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
 
 def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer s3cret"})
     )
     assert resp.status_code == 200
@@ -891,7 +892,7 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
 
 def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_bootstrap(
+    resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
@@ -900,5 +901,5 @@ def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
 def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     """When secret is set, even localhost must provide it (reverse-proxy safety)."""
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
