@@ -7,6 +7,7 @@ import email.utils
 import hmac
 import http
 import json
+import logging
 import mimetypes
 import re
 import secrets
@@ -114,6 +115,45 @@ def _host_for_url(host: str, port: int) -> str:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     return f"{host}:{port}"
+
+
+_OPENING_HANDSHAKE_FAILED_MESSAGE = "opening handshake failed"
+
+
+def _exception_chain_has_disconnect(exc: BaseException | None) -> bool:
+    seen: set[int] = set()
+    while exc is not None:
+        ident = id(exc)
+        if ident in seen:
+            return False
+        seen.add(ident)
+        if isinstance(exc, (
+            BrokenPipeError,
+            ConnectionAbortedError,
+            ConnectionResetError,
+            ConnectionClosed,
+        )):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+class _WebSocketHandshakeNoiseFilter(logging.Filter):
+    """Suppress noisy restart-time handshakes where the client already disconnected."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage() != _OPENING_HANDSHAKE_FAILED_MESSAGE:
+            return True
+        exc_info = record.exc_info
+        exc = exc_info[1] if isinstance(exc_info, tuple) and len(exc_info) >= 2 else None
+        return not _exception_chain_has_disconnect(exc)
+
+
+def _websockets_server_logger() -> logging.Logger:
+    ws_logger = logging.getLogger("websockets.server")
+    if not any(isinstance(f, _WebSocketHandshakeNoiseFilter) for f in ws_logger.filters):
+        ws_logger.addFilter(_WebSocketHandshakeNoiseFilter())
+    return ws_logger
 
 
 class WebSocketConfig(Base):
@@ -1239,6 +1279,7 @@ class WebSocketChannel(BaseChannel):
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
         redirect_lib_logging("websockets", level="WARNING")
+        ws_logger = _websockets_server_logger()
 
         self._running = True
         self._stop_event = asyncio.Event()
@@ -1290,6 +1331,7 @@ class WebSocketChannel(BaseChannel):
                     max_size=self.config.max_message_bytes,
                     ping_interval=self.config.ping_interval_s,
                     ping_timeout=self.config.ping_timeout_s,
+                    logger=ws_logger,
                 )
                 with suppress(OSError):
                     path_obj.chmod(0o600)
@@ -1303,6 +1345,7 @@ class WebSocketChannel(BaseChannel):
                     ping_interval=self.config.ping_interval_s,
                     ping_timeout=self.config.ping_timeout_s,
                     ssl=ssl_context,
+                    logger=ws_logger,
                 )
             try:
                 assert self._stop_event is not None
