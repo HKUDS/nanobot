@@ -2,8 +2,8 @@
 integration on ``/api/sessions/<key>/messages``.
 
 The route is the return path for images attached to persisted user turns:
-:meth:`WebSocketChannel._sign_media_path` mints URLs during session reads,
-and :meth:`WebSocketChannel._handle_media_fetch` serves the bytes back.
+:meth:`WebSocketChannel.gateway.media.sign_media_path` mints URLs during session reads,
+and :meth:`GatewayHTTPHandler._handle_media_fetch` serves the bytes back.
 These tests cover the two halves end-to-end plus the adversarial edges
 (bad signatures, ``..`` traversal, non-existent files, non-image types).
 """
@@ -22,13 +22,12 @@ import httpx
 import pytest
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
+from nanobot.session.manager import Session, SessionManager
+from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.media_api import (
     b64url_decode,
     b64url_encode,
 )
-from nanobot.session.manager import Session, SessionManager
-from nanobot.webui.ws_http import GatewayHTTPHandler
-
 
 # PNG magic bytes + a couple of sentinel bytes so we can verify byte-for-byte
 # round-trip of the served payload. Stays under mimetype + size limits.
@@ -57,17 +56,18 @@ def _ch(
         "websocketRequiresToken": False,
     }
     parsed = WebSocketConfig.model_validate(cfg)
-    http_handler = GatewayHTTPHandler(
+    gateway = build_gateway_services(
         config=parsed,
+        bus=bus,
         session_manager=session_manager,
         static_dist_path=None,
         workspace_path=workspace_path or Path.cwd(),
+        default_restrict_to_workspace=False,
         runtime_model_name=None,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
-        bus=bus,
     )
-    return WebSocketChannel(cfg, bus, http_handler=http_handler)
+    return WebSocketChannel(cfg, bus, gateway=gateway)
 
 
 @pytest.fixture()
@@ -95,7 +95,7 @@ async def _http_get(
 
 
 # ---------------------------------------------------------------------------
-# _sign_media_path: the URL minter
+# gateway.media.sign_media_path: the URL minter
 # ---------------------------------------------------------------------------
 
 
@@ -114,11 +114,11 @@ def test_sign_media_path_rejects_paths_outside_media_root(
     media = tmp_path / "media"
     media.mkdir()
     channel = _ch(bus, port=0)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        assert channel._sign_media_path(outside) is None
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        assert channel.gateway.media.sign_media_path(outside) is None
         # Traversal via the media root is also rejected — the resolve() step
         # normalises ``..`` out before the relative_to check.
-        assert channel._sign_media_path(media / ".." / "secrets" / "cred.txt") is None
+        assert channel.gateway.media.sign_media_path(media / ".." / "secrets" / "cred.txt") is None
 
 
 def test_sign_media_path_round_trips_via_hmac(
@@ -129,13 +129,13 @@ def test_sign_media_path_round_trips_via_hmac(
     media.mkdir()
     (media / "a.png").write_bytes(_PNG_BYTES)
     channel = _ch(bus, port=0)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url = channel._sign_media_path(media / "a.png")
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url = channel.gateway.media.sign_media_path(media / "a.png")
     assert url is not None
     assert url.startswith("/api/media/")
     sig, payload = url[len("/api/media/"):].split("/", 1)
     expected = hmac.new(
-        channel._media_secret, payload.encode("ascii"), hashlib.sha256
+        channel.gateway.media.secret, payload.encode("ascii"), hashlib.sha256
     ).digest()[:16]
     assert b64url_decode(sig) == expected
     # The payload decodes back to the *relative* path — no absolute-path leaks.
@@ -152,8 +152,8 @@ def test_local_markdown_image_is_staged_and_rewritten(
     media = tmp_path / "media"
     channel = _ch(bus, workspace_path=workspace, port=0)
 
-    with patch("nanobot.webui.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
-        rewritten = channel._rewrite_local_markdown_images(
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        rewritten = channel.gateway.media.rewrite_local_markdown_images(
             "The result:\n![Cloud Architecture Diagram](demo_arch.png)"
         )
 
@@ -174,8 +174,8 @@ def test_local_markdown_video_is_staged_and_rewritten(
     media = tmp_path / "media"
     channel = _ch(bus, workspace_path=workspace, port=0)
 
-    with patch("nanobot.webui.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
-        rewritten = channel._rewrite_local_markdown_images(
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        rewritten = channel.gateway.media.rewrite_local_markdown_images(
             "The result:\n![nanobot-intro.mp4](nanobot-intro.mp4)"
         )
 
@@ -197,8 +197,8 @@ def test_local_markdown_image_rejects_workspace_escape(
     channel = _ch(bus, workspace_path=workspace, port=0)
     text = "![nope](../outside.png)"
 
-    with patch("nanobot.webui.ws_http.get_media_dir", side_effect=_fake_media_dir(media)):
-        assert channel._rewrite_local_markdown_images(text) == text
+    with patch("nanobot.webui.media_gateway.get_media_dir", side_effect=_fake_media_dir(media)):
+        assert channel.gateway.media.rewrite_local_markdown_images(text) == text
 
     assert not (media / "websocket").exists()
 
@@ -219,8 +219,8 @@ async def test_media_route_serves_signed_file(
     target.write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29920)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -252,8 +252,8 @@ async def test_media_route_serves_video_byte_ranges(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29927)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -284,8 +284,8 @@ async def test_media_route_serves_suffix_video_byte_ranges(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29928)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -313,8 +313,8 @@ async def test_media_route_rejects_unsatisfiable_byte_range(
     target.write_bytes(b"0123456789")
 
     channel = _ch(bus, port=29929)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -339,15 +339,15 @@ async def test_media_route_rejects_bad_signature(
     """A payload re-signed with a different secret must 401.
 
     Protects against a restart: old URLs baked into a stale tab become
-    un-forgeable once ``_media_secret`` regenerates.
+    un-forgeable once ``gateway.media.secret`` regenerates.
     """
     media = tmp_path / "media"
     media.mkdir()
     (media / "f.png").write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29921)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        good = channel._sign_media_path(media / "f.png")
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        good = channel.gateway.media.sign_media_path(media / "f.png")
         assert good is not None
         _, payload = good[len("/api/media/"):].split("/", 1)
         # Forge a sig with a *different* secret.
@@ -385,11 +385,11 @@ async def test_media_route_rejects_path_traversal_payload(
     # Hand-craft a traversal payload the legit signer would refuse to mint.
     payload = b64url_encode(b"../secret.txt")
     mac = hmac.new(
-        channel._media_secret, payload.encode("ascii"), hashlib.sha256
+        channel.gateway.media.secret, payload.encode("ascii"), hashlib.sha256
     ).digest()[:16]
     url = f"/api/media/{b64url_encode(mac)}/{payload}"
 
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
@@ -413,8 +413,8 @@ async def test_media_route_404s_missing_file(
     target.write_bytes(_PNG_BYTES)
 
     channel = _ch(bus, port=29923)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         target.unlink()  # the file vanishes between signing and fetching
         server_task = asyncio.create_task(channel.start())
@@ -441,10 +441,10 @@ async def test_media_route_degrades_non_image_to_octet_stream(
     (media / "scary.html").write_bytes(b"<script>alert(1)</script>")
 
     channel = _ch(bus, port=29924)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         payload = b64url_encode(b"scary.html")
         mac = hmac.new(
-            channel._media_secret, payload.encode("ascii"), hashlib.sha256
+            channel.gateway.media.secret, payload.encode("ascii"), hashlib.sha256
         ).digest()[:16]
         url = f"/api/media/{b64url_encode(mac)}/{payload}"
         server_task = asyncio.create_task(channel.start())
@@ -472,8 +472,8 @@ async def test_media_route_serves_svg_with_strict_csp(
     target.write_text("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
 
     channel = _ch(bus, port=29928)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
-        url_path = channel._sign_media_path(target)
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
+        url_path = channel.gateway.media.sign_media_path(target)
         assert url_path is not None
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
@@ -513,7 +513,7 @@ async def test_session_messages_exposes_signed_media_urls(
     sm.save(sess)
 
     channel = _ch(bus, session_manager=sm, port=29925)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
@@ -558,7 +558,7 @@ async def test_session_messages_skips_vanished_media(
     sm.save(sess)
 
     channel = _ch(bus, session_manager=sm, port=29926)
-    with patch("nanobot.webui.ws_http.get_media_dir", return_value=media):
+    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=media):
         server_task = asyncio.create_task(channel.start())
         await asyncio.sleep(0.3)
         try:
