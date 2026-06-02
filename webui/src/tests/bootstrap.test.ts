@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deriveWsUrl } from "@/lib/bootstrap";
+import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 
 describe("bootstrap helpers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it("prefers the server-provided websocket URL over the current dev host", () => {
     expect(deriveWsUrl("/", "tok en", "ws://127.0.0.1:8765/")).toBe(
       "ws://127.0.0.1:8765/?token=tok%20en",
@@ -19,5 +24,17 @@ describe("bootstrap helpers", () => {
     expect(deriveWsUrl("/", "tok")).toBe(
       "ws://localhost:3000/?token=tok",
     );
+  });
+
+  it("times out when the bootstrap endpoint never responds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    const pending = expect(fetchBootstrap("", "", 25)).rejects.toThrow(
+      "Request timed out after 25ms",
+    );
+    await vi.advanceTimersByTimeAsync(25);
+
+    await pending;
   });
 });

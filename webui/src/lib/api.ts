@@ -17,6 +17,9 @@ import type {
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "./types";
+import { fetchWithTimeout } from "./http";
+
+const API_READ_TIMEOUT_MS = 20_000;
 
 export class ApiError extends Error {
   status: number;
@@ -31,15 +34,20 @@ async function request<T>(
   url: string,
   token: string,
   init?: RequestInit,
+  timeoutMs: number = 0,
 ): Promise<T> {
-  const res = await fetch(url, {
-    ...(init ?? {}),
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
+  const res = await fetchWithTimeout(
+    url,
+    {
+      ...(init ?? {}),
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "same-origin",
     },
-    credentials: "same-origin",
-  });
+    timeoutMs,
+  );
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
     throw new ApiError(res.status, text || `HTTP ${res.status}`);
@@ -95,6 +103,8 @@ export async function listSessions(
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
     token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
   return body.sessions.map((s) => ({
     key: s.key,
@@ -115,7 +125,7 @@ export async function fetchWebuiThread(
   base: string = "",
 ): Promise<WebuiThreadPersistedPayload | null> {
   const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "same-origin",
   });
@@ -140,21 +150,36 @@ export async function fetchSettings(
   token: string,
   base: string = "",
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(`${base}/api/settings`, token);
+  return request<SettingsPayload>(
+    `${base}/api/settings`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function fetchWorkspaces(
   token: string,
   base: string = "",
 ): Promise<WorkspacesPayload> {
-  return request<WorkspacesPayload>(`${base}/api/workspaces`, token);
+  return request<WorkspacesPayload>(
+    `${base}/api/workspaces`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function fetchCliApps(
   token: string,
   base: string = "",
 ): Promise<CliAppsPayload> {
-  return request<CliAppsPayload>(`${base}/api/settings/cli-apps`, token);
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function runCliAppAction(
@@ -172,7 +197,12 @@ export async function fetchMcpPresets(
   token: string,
   base: string = "",
 ): Promise<McpPresetsPayload> {
-  return request<McpPresetsPayload>(`${base}/api/settings/mcp-presets`, token);
+  return request<McpPresetsPayload>(
+    `${base}/api/settings/mcp-presets`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function fetchProviderModels(
@@ -185,6 +215,8 @@ export async function fetchProviderModels(
   return request<ProviderModelsPayload>(
     `${base}/api/settings/provider-models?${query}`,
     token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
 }
 
@@ -252,7 +284,12 @@ export async function listSlashCommands(
     icon: string;
     arg_hint?: string;
   };
-  const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
+  const body = await request<{ commands: Row[] }>(
+    `${base}/api/commands`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
   return body.commands
     .filter((command) => !["/stop", "/restart"].includes(command.command))
     .map((command) => ({
@@ -268,7 +305,12 @@ export async function fetchSidebarState(
   token: string,
   base: string = "",
 ): Promise<SidebarStatePayload> {
-  return request<SidebarStatePayload>(`${base}/api/webui/sidebar-state`, token);
+  return request<SidebarStatePayload>(
+    `${base}/api/webui/sidebar-state`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
 }
 
 export async function updateSidebarState(
