@@ -312,4 +312,104 @@ describe("ChatList", () => {
     expect(chatsIdx).toBeLessThan(projBIdx);
     expect(within(allRegions[chatsIdx]).getByText("Recent chat")).toBeInTheDocument();
   });
+
+  it("keeps one Projects heading when Chats sorts between project groups", () => {
+    const sessions = [
+      session({
+        chatId: "project-a",
+        title: "Project A task",
+        updatedAt: "2026-05-21T12:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/project-a",
+          project_name: "project-a",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "middle-chat",
+        title: "Middle chat",
+        updatedAt: "2026-05-21T11:00:00Z",
+      }),
+      session({
+        chatId: "project-b",
+        title: "Project B task",
+        updatedAt: "2026-05-21T10:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/project-b",
+          project_name: "project-b",
+          access_mode: "restricted",
+        },
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey="websocket:middle-chat"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        showTimestamps
+      />,
+    );
+
+    const regionNames = screen
+      .getAllByRole("region")
+      .map((r) => r.getAttribute("aria-label") ?? "");
+
+    expect(regionNames).toEqual(["project-a", "Chats", "project-b"]);
+    expect(screen.getAllByText("Projects")).toHaveLength(1);
+  });
+
+  it("keeps Chats last when its latest conversation is older than all projects", () => {
+    const sessions = [
+      session({
+        chatId: "project-a",
+        title: "Project A task",
+        updatedAt: "2026-05-21T12:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/project-a",
+          project_name: "project-a",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "project-b",
+        title: "Project B task",
+        updatedAt: "2026-05-21T11:00:00Z",
+        workspaceScope: {
+          project_path: "/Users/me/project-b",
+          project_name: "project-b",
+          access_mode: "restricted",
+        },
+      }),
+      session({
+        chatId: "old-chat",
+        title: "Old chat",
+        updatedAt: "2026-05-21T10:00:00Z",
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey="websocket:old-chat"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        showTimestamps
+      />,
+    );
+
+    const regionNames = screen
+      .getAllByRole("region")
+      .map((r) => r.getAttribute("aria-label") ?? "");
+
+    expect(regionNames).toEqual(["project-a", "project-b", "Chats"]);
+    expect(screen.getAllByText("Projects")).toHaveLength(1);
+  });
 });
