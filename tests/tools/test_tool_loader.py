@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-from blackcat.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
 
 
 class _MinimalTool(Tool):
@@ -49,8 +52,6 @@ def test_tool_plugin_discoverable_default_is_true():
 
 # --- ToolContext tests ---
 
-from blackcat.agent.tools.context import ToolContext
-
 
 def test_tool_context_has_required_fields():
     field_names = {f.name for f in fields(ToolContext)}
@@ -73,8 +74,6 @@ def test_tool_context_defaults():
 
 
 # --- ToolLoader tests ---
-
-from blackcat.agent.tools.loader import _SKIP_MODULES, ToolLoader
 
 
 def test_skip_modules_excludes_infrastructure():
@@ -117,8 +116,8 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
     """Real config objects catch bad ctx.config attribute paths that mocks hide."""
     from types import SimpleNamespace
 
-    from blackcat.agent.tools.registry import ToolRegistry
-    from blackcat.config.schema import ToolsConfig
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.config.schema import ToolsConfig
 
     ctx = ToolContext(
         config=ToolsConfig(),
@@ -140,11 +139,9 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
 
 # --- Task 4: _FsTool.create() ---
 
-from pathlib import Path
-
 
 def test_fs_tool_create_builds_from_context():
-    from blackcat.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.filesystem import ReadFileTool
     mock_config = MagicMock()
     mock_config.restrict_to_workspace = False
     mock_config.exec.sandbox = ""
@@ -155,7 +152,7 @@ def test_fs_tool_create_builds_from_context():
 
 
 def test_fs_tool_create_respects_restrict_to_workspace():
-    from blackcat.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.filesystem import ReadFileTool
     mock_config = MagicMock()
     mock_config.restrict_to_workspace = True
     mock_config.exec.sandbox = ""
@@ -165,7 +162,7 @@ def test_fs_tool_create_respects_restrict_to_workspace():
 
 
 def test_fs_tool_create_respects_sandbox():
-    from blackcat.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.filesystem import ReadFileTool
     mock_config = MagicMock()
     mock_config.restrict_to_workspace = False
     mock_config.exec.sandbox = "bwrap"
@@ -178,7 +175,7 @@ def test_fs_tool_create_respects_sandbox():
 
 
 async def test_message_tool_create():
-    from blackcat.agent.tools.message import MessageTool
+    from nanobot.agent.tools.message import MessageTool
     mock_bus = MagicMock()
     mock_config = MagicMock()
     ctx = ToolContext(config=mock_config, workspace="/tmp", bus=mock_bus)
@@ -187,7 +184,7 @@ async def test_message_tool_create():
 
 
 def test_spawn_tool_create():
-    from blackcat.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.spawn import SpawnTool
     mock_mgr = MagicMock()
     mock_config = MagicMock()
     ctx = ToolContext(config=mock_config, workspace="/tmp", subagent_manager=mock_mgr)
@@ -196,14 +193,14 @@ def test_spawn_tool_create():
 
 
 def test_cron_tool_enabled_without_service():
-    from blackcat.agent.tools.cron import CronTool
+    from nanobot.agent.tools.cron import CronTool
     mock_config = MagicMock()
     ctx = ToolContext(config=mock_config, workspace="/tmp", cron_service=None)
     assert CronTool.enabled(ctx) is False
 
 
 def test_cron_tool_enabled_with_service():
-    from blackcat.agent.tools.cron import CronTool
+    from nanobot.agent.tools.cron import CronTool
     mock_service = MagicMock()
     mock_config = MagicMock()
     ctx = ToolContext(config=mock_config, workspace="/tmp", cron_service=mock_service)
@@ -211,7 +208,7 @@ def test_cron_tool_enabled_with_service():
 
 
 def test_cron_tool_create():
-    from blackcat.agent.tools.cron import CronTool
+    from nanobot.agent.tools.cron import CronTool
     mock_service = MagicMock()
     mock_config = MagicMock()
     ctx = ToolContext(
@@ -226,13 +223,13 @@ def test_cron_tool_create():
 
 
 def test_exec_tool_config_cls():
-    from blackcat.agent.tools.shell import ExecTool, ExecToolConfig
+    from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
     assert ExecTool.config_cls() is ExecToolConfig
     assert ExecTool.config_key == "exec"
 
 
 def test_exec_tool_enabled():
-    from blackcat.agent.tools.shell import ExecTool
+    from nanobot.agent.tools.shell import ExecTool
     mock_config = MagicMock()
     mock_config.exec.enable = True
     ctx = ToolContext(config=mock_config, workspace="/tmp")
@@ -242,12 +239,11 @@ def test_exec_tool_enabled():
 
 
 def test_exec_tool_create():
-    from blackcat.agent.tools.shell import ExecTool
+    from nanobot.agent.tools.shell import ExecTool
     mock_config = MagicMock()
     mock_config.exec.enable = True
     mock_config.exec.timeout = 120
     mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = "/venv/bin"
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
@@ -256,11 +252,10 @@ def test_exec_tool_create():
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = ExecTool.create(ctx)
     assert isinstance(tool, ExecTool)
-    assert tool.path_prepend == "/venv/bin"
 
 
 def test_web_tools_config_cls():
-    from blackcat.agent.tools.web import WebFetchTool, WebSearchTool, WebToolsConfig
+    from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, WebToolsConfig
     assert WebSearchTool.config_key == "web"
     assert WebSearchTool.config_cls() is WebToolsConfig
     assert WebFetchTool.config_key == "web"
@@ -268,7 +263,7 @@ def test_web_tools_config_cls():
 
 
 def test_web_tools_enabled():
-    from blackcat.agent.tools.web import WebSearchTool
+    from nanobot.agent.tools.web import WebSearchTool
     mock_config = MagicMock()
     mock_config.web.enable = True
     ctx = ToolContext(config=mock_config, workspace="/tmp")
@@ -278,7 +273,7 @@ def test_web_tools_enabled():
 
 
 def test_web_search_tool_create():
-    from blackcat.agent.tools.web import WebSearchTool
+    from nanobot.agent.tools.web import WebSearchTool
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
@@ -290,7 +285,7 @@ def test_web_search_tool_create():
 
 
 def test_web_fetch_tool_create():
-    from blackcat.agent.tools.web import WebFetchTool
+    from nanobot.agent.tools.web import WebFetchTool
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.fetch = MagicMock()
@@ -302,13 +297,13 @@ def test_web_fetch_tool_create():
 
 
 def test_image_gen_tool_config_cls():
-    from blackcat.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
+    from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
     assert ImageGenerationTool.config_key == "image_generation"
     assert ImageGenerationTool.config_cls() is ImageGenerationToolConfig
 
 
 def test_image_gen_tool_enabled():
-    from blackcat.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
     mock_config = MagicMock()
     mock_config.image_generation.enabled = True
     ctx = ToolContext(config=mock_config, workspace="/tmp")
@@ -318,7 +313,7 @@ def test_image_gen_tool_enabled():
 
 
 def test_image_gen_tool_create():
-    from blackcat.agent.tools.image_generation import ImageGenerationTool
+    from nanobot.agent.tools.image_generation import ImageGenerationTool
     mock_config = MagicMock()
     mock_config.image_generation = MagicMock()
     ctx = ToolContext(
@@ -333,13 +328,13 @@ def test_image_gen_tool_create():
 
 
 def test_my_tool_config_cls():
-    from blackcat.agent.tools.self import MyTool, MyToolConfig
+    from nanobot.agent.tools.self import MyTool, MyToolConfig
     assert MyTool.config_key == "my"
     assert MyTool.config_cls() is MyToolConfig
 
 
 def test_my_tool_enabled():
-    from blackcat.agent.tools.self import MyTool
+    from nanobot.agent.tools.self import MyTool
     mock_config = MagicMock()
     mock_config.my.enable = True
     ctx = ToolContext(config=mock_config, workspace="/tmp")
@@ -349,7 +344,7 @@ def test_my_tool_enabled():
 
 
 def test_mcp_wrappers_not_discoverable():
-    from blackcat.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
+    from nanobot.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
     assert MCPToolWrapper._plugin_discoverable is False
     assert MCPResourceWrapper._plugin_discoverable is False
     assert MCPPromptWrapper._plugin_discoverable is False
@@ -360,12 +355,12 @@ def test_mcp_wrappers_not_discoverable():
 
 def test_config_round_trip():
     """Verify config serialization is unchanged after moving config classes."""
-    from blackcat.config.schema import Config
+    from nanobot.config.schema import Config
 
     config_dict = {
         "tools": {
             "web": {"enable": True, "search": {"provider": "brave", "api_key": "test"}},
-            "exec": {"enable": False, "timeout": 120, "pathPrepend": "/venv/bin"},
+            "exec": {"enable": False, "timeout": 120},
             "my": {"allowSet": True},
             "imageGeneration": {"enabled": True, "provider": "openrouter"},
         }
@@ -375,21 +370,18 @@ def test_config_round_trip():
 
     assert dumped["tools"]["my"]["allowSet"] is True
     assert dumped["tools"]["imageGeneration"]["enabled"] is True
-    assert dumped["tools"]["exec"]["pathPrepend"] == "/venv/bin"
     assert config.tools.exec.enable is False
     assert config.tools.exec.timeout == 120
-    assert config.tools.exec.path_prepend == "/venv/bin"
     assert config.tools.web.search.provider == "brave"
 
 
 def test_config_defaults():
     """Verify default values match the original hardcoded schema."""
-    from blackcat.config.schema import Config
+    from nanobot.config.schema import Config
 
     config = Config.model_validate({})
     assert config.tools.exec.enable is True
     assert config.tools.exec.timeout == 60
-    assert config.tools.exec.path_prepend == ""
     assert config.tools.web.enable is True
     assert config.tools.web.search.provider == "duckduckgo"
     assert config.tools.my.enable is True
@@ -404,14 +396,13 @@ def test_config_defaults():
 
 def test_loader_registers_same_tools_as_old_hardcoded():
     """Verify the loader produces the same tool set as the old _register_default_tools."""
-    from blackcat.agent.tools.loader import ToolLoader
-    from blackcat.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.loader import ToolLoader
+    from nanobot.agent.tools.registry import ToolRegistry
 
     mock_config = MagicMock()
     mock_config.exec.enable = True
     mock_config.exec.timeout = 60
     mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = ""
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
