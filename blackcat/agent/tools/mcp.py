@@ -21,7 +21,6 @@ from blackcat.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
-from blackcat.security.network import validate_url_target
 
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
@@ -88,21 +87,10 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
             timeout=timeout,
         )
         writer.close()
-        with suppress(OSError, asyncio.TimeoutError):
-            await asyncio.wait_for(writer.wait_closed(), timeout=0.2)
+        await writer.wait_closed()
         return True
     except (OSError, asyncio.TimeoutError):
         return False
-
-
-async def _validate_mcp_request_url(request: httpx.Request) -> None:
-    """Validate each outgoing MCP HTTP request, including redirect targets."""
-    ok, error = validate_url_target(str(request.url))
-    if not ok:
-        raise httpx.RequestError(
-            f"Blocked unsafe MCP URL {request.url} ({error})",
-            request=request,
-        )
 
 
 def _windows_command_basename(command: str) -> str:
@@ -526,13 +514,6 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 )
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
-                if await self._refresh_session_after_termination(
-                    exc,
-                    refreshed_session,
-                    "prompt",
-                ):
-                    refreshed_session = True
-                    continue
                 if _is_transient(exc):
                     if not retried_transient:
                         retried_transient = True
@@ -607,18 +588,6 @@ async def connect_mcp_servers(
                     await server_stack.aclose()
                     return name, None
 
-            if transport_type in {"sse", "streamableHttp"}:
-                ok, error = validate_url_target(cfg.url)
-                if not ok:
-                    logger.warning(
-                        "MCP server '{}': blocked unsafe URL {} ({})",
-                        name,
-                        cfg.url,
-                        error,
-                    )
-                    await server_stack.aclose()
-                    return name, None
-
             if transport_type == "stdio":
                 command, args, env = _normalize_windows_stdio_command(
                     cfg.command,
@@ -650,7 +619,6 @@ async def connect_mcp_servers(
                     }
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
@@ -668,7 +636,6 @@ async def connect_mcp_servers(
                 http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
                         follow_redirects=True,
                         timeout=None,
                     )
@@ -706,6 +673,7 @@ async def connect_mcp_servers(
                     continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
+                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
                 if enabled_tools:
                     if tool_def.name in enabled_tools:
@@ -1098,7 +1066,10 @@ def _server_signature(cfg: Any) -> Any:
 
 
 def _tool_prefix(server_name: str) -> str:
-    return _sanitize_name(f"mcp_{server_name}_")
+    safe_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in server_name)
+    while "__" in safe_name:
+        safe_name = safe_name.replace("__", "_")
+    return f"mcp_{safe_name}_"
 
 
 def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:

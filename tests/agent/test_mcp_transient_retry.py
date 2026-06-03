@@ -464,29 +464,3 @@ async def test_prompt_reconnects_on_session_terminated():
     assert output == "fresh prompt"
     assert old_session.get_prompt.call_count == 1
     assert new_session.get_prompt.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_prompt_reconnects_on_connection_closed_exception():
-    """Prompt should reconnect when the SDK reports a closed session as a generic exception."""
-    old_session = AsyncMock()
-    old_session.get_prompt = AsyncMock(side_effect=RuntimeError("Connection closed"))
-    new_session = AsyncMock()
-    new_session.get_prompt = AsyncMock(return_value=_make_prompt_result("fresh prompt"))
-
-    wrapper = MCPPromptWrapper(old_session, "test_server", _make_prompt_def())
-    replacement = MCPPromptWrapper(new_session, "test_server", _make_prompt_def())
-
-    async def reconnect(server_name: str, tool_name: str, stale_tool):
-        assert server_name == "test_server"
-        assert tool_name == "mcp_test_server_prompt_test_prompt"
-        assert stale_tool is wrapper
-        return replacement
-
-    wrapper.set_reconnect_handler(reconnect)
-
-    output = await wrapper.execute()
-
-    assert output == "fresh prompt"
-    assert old_session.get_prompt.call_count == 1
-    assert new_session.get_prompt.call_count == 1

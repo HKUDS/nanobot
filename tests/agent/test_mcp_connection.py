@@ -289,55 +289,6 @@ async def test_mcp_tool_reconnects_after_session_terminated(
 
 
 @pytest.mark.asyncio
-async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    loop = _make_loop(tmp_path, mcp_servers={"remote_": object()})
-    connect_count = 0
-
-    class _FakeSession:
-        def __init__(self, index: int) -> None:
-            self.index = index
-
-        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
-            assert arguments == {}
-            if self.index == 1:
-                raise McpError(ErrorData(code=-32000, message="Session terminated"))
-            return SimpleNamespace(
-                content=[mcp_types.TextContent(type="text", text="recovered")]
-            )
-
-    async def _fake_connect(servers, registry):
-        nonlocal connect_count
-        stacks = {}
-        for name in servers:
-            connect_count += 1
-            tool_def = SimpleNamespace(
-                name="quote",
-                description="quote tool",
-                inputSchema={"type": "object", "properties": {}},
-            )
-            registry.register(MCPToolWrapper(_FakeSession(connect_count), name, tool_def))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stacks[name] = stack
-        return stacks
-
-    monkeypatch.setattr("blackcat.agent.tools.mcp.connect_mcp_servers", _fake_connect)
-
-    await loop._connect_mcp()
-    old_tool = loop.tools.get("mcp_remote_quote")
-    assert isinstance(old_tool, MCPToolWrapper)
-
-    output = await old_tool.execute()
-
-    assert output == "recovered"
-    assert connect_count == 2
-    assert loop.tools.get("mcp_remote_quote") is not old_tool
-
-
-@pytest.mark.asyncio
 async def test_concurrent_mcp_reconnect_reuses_fresh_session(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
