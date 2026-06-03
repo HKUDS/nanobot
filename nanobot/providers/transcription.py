@@ -258,7 +258,15 @@ async def _post_xiaomi_asr_with_retry(
 
     # Determine MIME type from file extension
     suffix = path.suffix.lower()
-    mime_map = {".wav": "audio/wav", ".mp3": "audio/mpeg"}
+    mime_map = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
+        ".m4a": "audio/mp4",
+        ".webm": "audio/webm",
+        ".flac": "audio/flac",
+    }
     mime_type = mime_map.get(suffix, "audio/wav")
 
     headers = {
