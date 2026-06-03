@@ -295,6 +295,21 @@ async def test_execute_returns_text_blocks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_marks_mcp_is_error_as_runner_error() -> None:
+    async def call_tool(_name: str, arguments: dict) -> object:
+        return SimpleNamespace(
+            isError=True,
+            content=[_FakeTextContent("### Error\nError: server-side failure")],
+        )
+
+    wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
+
+    result = await wrapper.execute()
+
+    assert result == "Error: server-side failure"
+
+
+@pytest.mark.asyncio
 async def test_execute_returns_timeout_message() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         await asyncio.sleep(1)

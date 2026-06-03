@@ -174,6 +174,42 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
     return normalized
 
 
+def _extract_mcp_text(result: Any) -> str:
+    """Extract text from a call_tool result without assuming a concrete SDK class."""
+    try:
+        from mcp import types
+    except Exception:  # pragma: no cover - defensive fallback for import-time oddities
+        types = None
+
+    parts: list[str] = []
+    for block in getattr(result, "content", []) or []:
+        if types is not None and isinstance(block, types.TextContent):
+            parts.append(block.text)
+        elif hasattr(block, "text"):
+            parts.append(str(getattr(block, "text")))
+        else:
+            parts.append(str(block))
+    return "\n".join(parts) or "(no output)"
+
+
+def _is_mcp_error_result(result: Any) -> bool:
+    """MCP SDK models use isError; tolerate snake_case for tests/compat."""
+    return bool(getattr(result, "isError", False) or getattr(result, "is_error", False))
+
+
+def _as_runner_error(message: str) -> str:
+    """Return a tool failure string that nanobot runner/registry classify as error."""
+    text = message.strip() or "MCP tool call failed"
+    if text.startswith("Error"):
+        return text
+    if text.startswith("### Error"):
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for line in lines:
+            if line.startswith("Error"):
+                return line
+    return f"Error: {text}"
+
+
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
@@ -201,8 +237,6 @@ class MCPToolWrapper(Tool):
         return self._parameters
 
     async def execute(self, **kwargs: Any) -> str:
-        from mcp import types
-
         for attempt in range(2):  # At most 1 retry
             try:
                 result = await asyncio.wait_for(
@@ -247,14 +281,11 @@ class MCPToolWrapper(Tool):
                 )
                 return f"(MCP tool call failed: {type(exc).__name__})"
             else:
-                # Success — extract result
-                parts = []
-                for block in result.content:
-                    if isinstance(block, types.TextContent):
-                        parts.append(block.text)
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
+                text = _extract_mcp_text(result)
+                if _is_mcp_error_result(result):
+                    return _as_runner_error(text)
+
+                return text
 
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
