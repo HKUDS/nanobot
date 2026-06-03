@@ -1,6 +1,8 @@
-"""Voice transcription providers (Groq and OpenAI Whisper)."""
+"""Voice transcription providers (Groq, OpenAI Whisper, Xiaomi MiMo ASR)."""
 
 import asyncio
+import base64
+import json
 import os
 from pathlib import Path
 
@@ -8,6 +10,7 @@ import httpx
 from loguru import logger
 
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
+_CHAT_COMPLETIONS_PATH = "chat/completions"
 
 
 def _resolve_transcription_url(api_base: str | None, default_url: str) -> str:
@@ -217,5 +220,174 @@ class GroqTranscriptionProvider:
             path=path,
             model="whisper-large-v3",
             provider_label="Groq",
+            language=self.language,
+        )
+
+
+def _resolve_chat_completions_url(api_base: str | None, default_url: str) -> str:
+    """Resolve the chat completions endpoint URL for Xiaomi ASR."""
+    if not api_base:
+        return default_url
+    base = api_base.rstrip("/")
+    if base.endswith(_CHAT_COMPLETIONS_PATH):
+        return base
+    return f"{base}/{_CHAT_COMPLETIONS_PATH}"
+
+
+async def _post_xiaomi_asr_with_retry(
+    url: str,
+    *,
+    api_key: str | None,
+    path: Path,
+    model: str,
+    provider_label: str,
+    language: str | None = None,
+) -> str:
+    """POST audio to Xiaomi MiMo ASR endpoint via chat completions API.
+
+    Xiaomi MiMo ASR uses the /v1/chat/completions endpoint with base64-encoded
+    audio in input_audio format, rather than the standard Whisper multipart upload.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
+        return ""
+
+    audio_b64 = base64.b64encode(data).decode("ascii")
+
+    # Determine MIME type from file extension
+    suffix = path.suffix.lower()
+    mime_map = {".wav": "audio/wav", ".mp3": "audio/mpeg"}
+    mime_type = mime_map.get(suffix, "audio/wav")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    body: dict = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": f"data:{mime_type};base64,{audio_b64}",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    if language:
+        body["asr_options"] = {"language": language}
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = await client.post(
+                    url, headers=headers, content=json.dumps(body), timeout=60.0
+                )
+            except _RETRYABLE_EXCEPTIONS as e:
+                if attempt < _MAX_RETRIES:
+                    logger.warning(
+                        "{} transcription transient error (attempt {}/{}): {}",
+                        provider_label,
+                        attempt + 1,
+                        _MAX_RETRIES + 1,
+                        e,
+                    )
+                    await asyncio.sleep(_BACKOFF_S[attempt])
+                    continue
+                logger.exception(
+                    "{} transcription error after {} attempts: {}",
+                    provider_label,
+                    _MAX_RETRIES + 1,
+                    e,
+                )
+                return ""
+            except Exception as e:
+                logger.exception("{} transcription error: {}", provider_label, e)
+                return ""
+
+            if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                logger.warning(
+                    "{} transcription transient HTTP {} (attempt {}/{})",
+                    provider_label,
+                    response.status_code,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                )
+                await asyncio.sleep(_BACKOFF_S[attempt])
+                continue
+
+            try:
+                response.raise_for_status()
+            except Exception as e:
+                logger.exception("{} transcription error: {}", provider_label, e)
+                return ""
+
+            try:
+                payload = response.json()
+            except Exception as e:
+                logger.exception(
+                    "{} transcription error: malformed response body: {}",
+                    provider_label,
+                    e,
+                )
+                return ""
+
+            # Extract text from chat completions response format
+            try:
+                return payload["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                logger.error(
+                    "{} transcription error: unexpected response shape: {!r}",
+                    provider_label,
+                    payload,
+                )
+                return ""
+
+
+class XiaomiASRTranscriptionProvider:
+    """Voice transcription provider using Xiaomi MiMo ASR API.
+
+    Unlike Whisper-compatible providers, Xiaomi MiMo ASR uses the
+    /v1/chat/completions endpoint with base64-encoded audio input.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("MIMO_API_KEY")
+        self.api_url = _resolve_chat_completions_url(
+            api_base or os.environ.get("MIMO_API_BASE"),
+            "https://api.xiaomimimo.com/v1/chat/completions",
+        )
+        self.language = language or "zh"
+        logger.debug("Xiaomi ASR transcription endpoint: {}", self.api_url)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("Xiaomi API key not configured for transcription")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        return await _post_xiaomi_asr_with_retry(
+            self.api_url,
+            api_key=self.api_key,
+            path=path,
+            model="mimo-v2.5-asr",
+            provider_label="Xiaomi ASR",
             language=self.language,
         )

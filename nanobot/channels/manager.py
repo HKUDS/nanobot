@@ -148,6 +148,8 @@ class ChannelManager:
         try:
             if provider == "openai":
                 return self.config.providers.openai.api_key
+            if provider == "xiaomi":
+                return self.config.providers.xiaomi_mimo.api_key
             return self.config.providers.groq.api_key
         except AttributeError:
             return ""
@@ -157,6 +159,8 @@ class ChannelManager:
         try:
             if provider == "openai":
                 return self.config.providers.openai.api_base or ""
+            if provider == "xiaomi":
+                return self.config.providers.xiaomi_mimo.api_base or ""
             return self.config.providers.groq.api_base or ""
         except AttributeError:
             return ""

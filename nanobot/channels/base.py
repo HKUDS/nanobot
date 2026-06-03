@@ -50,13 +50,20 @@ class BaseChannel(ABC):
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
+        """Transcribe an audio file (Whisper or Xiaomi MiMo ASR). Returns empty string on failure."""
         if not self.transcription_api_key:
             return ""
         try:
             if self.transcription_provider == "openai":
                 from nanobot.providers.transcription import OpenAITranscriptionProvider
                 provider = OpenAITranscriptionProvider(
+                    api_key=self.transcription_api_key,
+                    api_base=self.transcription_api_base or None,
+                    language=self.transcription_language or None,
+                )
+            elif self.transcription_provider == "xiaomi":
+                from nanobot.providers.transcription import XiaomiASRTranscriptionProvider
+                provider = XiaomiASRTranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
                     language=self.transcription_language or None,
