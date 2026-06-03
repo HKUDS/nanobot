@@ -1354,6 +1354,26 @@ describe("App layout", () => {
     expect(createChatSpy).not.toHaveBeenCalled();
   });
 
+  it("starts a new chat from the keyboard shortcut", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Existing chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key: "O", shiftKey: true, metaKey: true });
+
+    expect(window.location.hash).toBe("#/new");
+  });
+
   it("keeps large sidebars light while search still covers every chat", async () => {
     mockSessions = Array.from({ length: 170 }, (_, index) => {
       const chatId = `chat-${index}`;
