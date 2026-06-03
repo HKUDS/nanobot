@@ -272,7 +272,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       aria-label={`Open link: ${label}`}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
-        "text-primary no-underline underline-offset-2 hover:underline",
+        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
       )}
     >
       <span
@@ -410,7 +410,7 @@ export default function MarkdownTextRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-primary underline underline-offset-2 hover:opacity-80"
+            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
             {...props}
           >
             {markdownChildren}
@@ -508,7 +508,7 @@ export default function MarkdownTextRenderer({
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-primary prose-a:underline-offset-2 hover:prose-a:opacity-80",
+        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",

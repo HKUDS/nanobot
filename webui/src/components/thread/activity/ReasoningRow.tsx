@@ -36,7 +36,7 @@ export function ReasoningRow({
             "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
             "prose-headings:text-muted-foreground/88 prose-strong:text-muted-foreground",
             "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-            "prose-a:text-muted-foreground/95 prose-a:underline hover:prose-a:opacity-90",
+            "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
             "prose-code:text-[0.92em]",
           )}
         >

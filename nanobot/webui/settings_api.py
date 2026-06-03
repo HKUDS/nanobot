@@ -73,6 +73,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "jina", "label": "Jina", "credential": "api_key"},
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -741,9 +742,6 @@ def settings_payload(
             },
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
-                "max_batch_size": defaults.dream.max_batch_size,
-                "max_iterations": defaults.dream.max_iterations,
-                "annotate_line_ages": defaults.dream.annotate_line_ages,
             },
             "unified_session": defaults.unified_session,
         },

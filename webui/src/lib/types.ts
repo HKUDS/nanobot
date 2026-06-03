@@ -349,9 +349,6 @@ export interface SettingsPayload {
     };
     dream: {
       schedule: string;
-      max_batch_size: number;
-      max_iterations: number;
-      annotate_line_ages: boolean;
     };
     unified_session: boolean;
   };

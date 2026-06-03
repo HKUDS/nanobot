@@ -18,8 +18,10 @@ import pytest
 
 from nanobot.channels.websocket import (
     WebSocketChannel,
+    WebSocketConfig,
     _extract_data_url_mime,
 )
+from nanobot.webui.gateway_services import build_gateway_services
 
 
 def _tiny_png_data_url() -> str:
@@ -41,10 +43,20 @@ def _data_url(mime: str, payload: bytes) -> str:
 def _make_channel() -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False},
-        bus,
+    cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
+    parsed = WebSocketConfig.model_validate(cfg)
+    gateway = build_gateway_services(
+        config=parsed,
+        bus=bus,
+        session_manager=None,
+        static_dist_path=None,
+        workspace_path=Path.cwd(),
+        default_restrict_to_workspace=False,
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
     )
+    channel = WebSocketChannel(cfg, bus, gateway=gateway)
     channel._handle_message = AsyncMock()  # type: ignore[method-assign]
     return channel
 

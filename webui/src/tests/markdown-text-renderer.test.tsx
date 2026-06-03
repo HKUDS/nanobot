@@ -4,6 +4,14 @@ import { describe, expect, it } from "vitest";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
 describe("MarkdownTextRenderer", () => {
+  it("renders clickable markdown links in blue", () => {
+    render(<MarkdownTextRenderer>[local server](http://127.0.0.1:7891/)</MarkdownTextRenderer>);
+
+    const link = screen.getByRole("link", { name: "local server" });
+    expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
+    expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+  });
+
   it("does not wrap complete fenced code blocks in an extra pre", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>

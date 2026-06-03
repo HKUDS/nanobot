@@ -84,6 +84,28 @@ def test_replay_infers_video_media_from_attachment_name() -> None:
     ]
 
 
+def test_replay_resigns_assistant_media_paths_before_stale_urls() -> None:
+    msgs = replay_transcript_to_ui_messages(
+        [
+            {"event": "user", "chat_id": "t-video-resign", "text": "render"},
+            {
+                "event": "message",
+                "chat_id": "t-video-resign",
+                "text": "video ready",
+                "media": ["/tmp/intro.mp4"],
+                "media_urls": [{"url": "/api/media/old-sig/old-payload", "name": "intro.mp4"}],
+            },
+        ],
+        augment_assistant_media=lambda paths: [
+            {"kind": "video", "url": f"/api/media/new-sig/{paths[0].split('/')[-1]}", "name": "intro.mp4"},
+        ],
+    )
+
+    assert msgs[1]["media"] == [
+        {"kind": "video", "url": "/api/media/new-sig/intro.mp4", "name": "intro.mp4"},
+    ]
+
+
 def test_replay_infers_svg_media_from_attachment_name() -> None:
     msgs = replay_transcript_to_ui_messages(
         [

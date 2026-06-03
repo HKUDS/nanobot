@@ -20,8 +20,9 @@ if sys.platform == "win32":
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-import typer
-from loguru import logger
+# Keep console encoding setup before importing CLI UI/logging libraries.
+import typer  # noqa: E402
+from loguru import logger  # noqa: E402
 
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
@@ -38,18 +39,28 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.formatted_text import ANSI, HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.text import Text
+from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
+from prompt_toolkit.application import run_in_terminal  # noqa: E402
+from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
+from prompt_toolkit.history import FileHistory  # noqa: E402
+from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.markdown import Markdown  # noqa: E402
+from rich.table import Table  # noqa: E402
+from rich.text import Text  # noqa: E402
 
-from nanobot import __logo__, __version__
-from nanobot.agent.loop import AgentLoop
+from nanobot import __logo__, __version__  # noqa: E402
+from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
+from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
+from nanobot.config.schema import Config  # noqa: E402
+from nanobot.utils.evaluator import evaluate_response  # noqa: E402
+from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
+from nanobot.utils.restart import (  # noqa: E402
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -73,17 +84,6 @@ class SafeFileHistory(FileHistory):
 
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
-from nanobot.utils.evaluator import evaluate_response
-from nanobot.utils.helpers import sync_workspace_templates
-from nanobot.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
-
 app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -991,11 +991,48 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
+            from nanobot.agent.memory import MemoryStore
+
+            dream_session_key = MemoryStore.dream_session_key
+            build_dream_commit_message = MemoryStore.build_dream_commit_message
+            prune_dream_sessions = MemoryStore.prune_dream_sessions
+
+            store = agent.context.memory
+            resp = None
             try:
-                await agent.dream.run()
-                logger.info("Dream cron job completed")
+                result = store.build_dream_prompt()
+                if result is None:
+                    logger.info("Dream: nothing to process")
+                    return None
+                prompt, last_cursor = result
+                key = dream_session_key()
+                resp = await agent.process_direct(
+                    prompt,
+                    session_key=key,
+                    ephemeral=True,
+                    tools=store.build_dream_tools(),
+                    on_progress=_silent,
+                )
+                if MemoryStore.dream_run_completed(resp):
+                    store.set_last_dream_cursor(last_cursor)
+                    logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
+                else:
+                    logger.warning(
+                        "Dream cron job did not complete; cursor remains at {}",
+                        store.get_last_dream_cursor(),
+                    )
             except Exception:
                 logger.exception("Dream cron job failed")
+            finally:
+                if store.git.is_initialized():
+                    msg = build_dream_commit_message(
+                        "dream: periodic memory consolidation", resp,
+                    )
+                    sha = store.git.auto_commit(msg)
+                    if sha:
+                        logger.info("Dream commit: {}", sha)
+                store.compact_history()
+                prune_dream_sessions(agent.sessions.sessions_dir)
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -1206,13 +1243,8 @@ def _run_gateway(
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)
-    dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model_override:
-        agent.dream.model = dream_cfg.model_override
-    agent.dream.max_batch_size = dream_cfg.max_batch_size
-    agent.dream.max_iterations = dream_cfg.max_iterations
-    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+    dream_cfg = config.agents.defaults.dream
     if dream_cfg.enabled:
         cron.register_system_job(CronJob(
             id="dream",

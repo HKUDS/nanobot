@@ -145,7 +145,17 @@ function closeReasoningStream(prev: UIMessage[]): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (!candidate.reasoningStreaming) continue;
-    const merged: UIMessage = { ...candidate, reasoningStreaming: false };
+    const latencyMs =
+      candidate.latencyMs === undefined
+      && Number.isFinite(candidate.createdAt)
+      && candidate.createdAt > 1_000_000_000_000
+        ? Math.max(0, Math.round(Date.now() - candidate.createdAt))
+        : candidate.latencyMs;
+    const merged: UIMessage = {
+      ...candidate,
+      reasoningStreaming: false,
+      ...(latencyMs !== undefined ? { latencyMs } : {}),
+    };
     return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
   }
   return prev;

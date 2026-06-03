@@ -111,17 +111,25 @@ class ChannelManager:
             try:
                 kwargs: dict[str, Any] = {}
                 if cls.name == "websocket":
-                    if self._session_manager is not None:
-                        kwargs["session_manager"] = self._session_manager
-                        static_path = _default_webui_dist() if self._webui_static_dist else None
-                        if static_path is not None:
-                            kwargs["static_dist_path"] = static_path
-                    kwargs["workspace_path"] = self.config.workspace_path
-                    kwargs["restrict_to_workspace"] = self.config.tools.restrict_to_workspace
-                    if self._webui_runtime_model_name is not None:
-                        kwargs["runtime_model_name"] = self._webui_runtime_model_name
-                    kwargs["runtime_surface"] = self._webui_runtime_surface
-                    kwargs["runtime_capabilities_overrides"] = self._webui_runtime_capabilities
+                    from nanobot.channels.websocket import WebSocketConfig
+                    from nanobot.webui.gateway_services import build_gateway_services
+
+                    parsed = WebSocketConfig.model_validate(section)
+                    static_path = _default_webui_dist() if self._webui_static_dist else None
+                    workspace = Path(self.config.workspace_path)
+                    gateway = build_gateway_services(
+                        config=parsed,
+                        bus=self.bus,
+                        session_manager=self._session_manager,
+                        static_dist_path=static_path,
+                        workspace_path=workspace,
+                        default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                        runtime_model_name=self._webui_runtime_model_name,
+                        runtime_surface=self._webui_runtime_surface,
+                        runtime_capabilities_overrides=self._webui_runtime_capabilities,
+                        logger=logger,
+                    )
+                    kwargs["gateway"] = gateway
                 channel = cls(section, self.bus, **kwargs)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key

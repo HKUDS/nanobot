@@ -1039,6 +1039,41 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].reasoningStreaming).toBe(false);
   });
 
+  it("stamps completed live Thought blocks with their own latency", async () => {
+    const dateNow = vi.spyOn(Date, "now");
+    let now = Date.UTC(2026, 5, 1, 0, 0, 0);
+    dateNow.mockImplementation(() => now);
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(() => useNanobotStream("chat-r5-lat", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+      await act(async () => {});
+
+      act(() => {
+        fake.emit("chat-r5-lat", {
+          event: "reasoning_delta",
+          chat_id: "chat-r5-lat",
+          text: "Thinking through the tests.",
+        });
+      });
+      await act(async () => {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
+
+      expect(result.current.messages[0].createdAt).toBe(now);
+      now += 2100;
+      act(() => {
+        fake.emit("chat-r5-lat", { event: "reasoning_end", chat_id: "chat-r5-lat" });
+      });
+
+      expect(result.current.messages[0].reasoningStreaming).toBe(false);
+      expect(result.current.messages[0].latencyMs).toBe(2100);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
   it("keeps alternating reasoning and answer deltas in separate ordered blocks", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-r5b", EMPTY_MESSAGES), {
