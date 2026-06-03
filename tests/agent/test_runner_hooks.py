@@ -16,7 +16,7 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 @pytest.mark.asyncio
 async def test_runner_calls_hooks_in_order():
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     call_count = {"n": 0}
@@ -92,7 +92,7 @@ async def test_runner_calls_hooks_in_order():
 @pytest.mark.asyncio
 async def test_runner_streaming_hook_receives_deltas_and_end_signal():
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     streamed: list[str] = []
@@ -138,7 +138,7 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
 async def test_runner_passes_cached_tokens_to_hook_context():
     """Hook context.usage should contain cached_tokens."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     captured_usage: list[dict] = []
@@ -170,3 +170,169 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 
     assert len(captured_usage) == 1
     assert captured_usage[0]["cached_tokens"] == 150
+
+
+@pytest.mark.asyncio
+async def test_runner_calls_run_level_hooks_on_success():
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    events: list[tuple] = []
+
+    async def chat_with_retry(**kwargs):
+        events.append(("request_messages", list(kwargs["messages"])))
+        return LLMResponse(
+            content="done",
+            tool_calls=[],
+            usage={"prompt_tokens": 3, "completion_tokens": 2},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class RunHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before_run", list(context.messages), context.stop_reason))
+            context.messages.append({"role": "user", "content": "hook-only"})
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append((
+                "after_run",
+                context.final_content,
+                context.stop_reason,
+                context.error,
+                dict(context.usage),
+                [msg["role"] for msg in context.messages],
+            ))
+
+        async def on_error(self, context: AgentRunHookContext) -> None:
+            events.append(("on_error", context.error))
+
+        async def on_finally(self, context: AgentRunHookContext) -> None:
+            events.append(("on_finally", context.stop_reason, context.exception))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=RunHook(),
+    ))
+
+    assert result.final_content == "done"
+    assert events == [
+        ("before_run", [{"role": "user", "content": "hi"}], None),
+        ("request_messages", [{"role": "user", "content": "hi"}]),
+        (
+            "after_run",
+            "done",
+            "completed",
+            None,
+            {"prompt_tokens": 3, "completion_tokens": 2},
+            ["user", "assistant"],
+        ),
+        ("on_finally", "completed", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_calls_on_error_for_model_error_result():
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    events: list[tuple] = []
+
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(content="model failed", finish_reason="error", tool_calls=[])
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class ErrorHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before_run", context.stop_reason))
+
+        async def on_error(self, context: AgentRunHookContext) -> None:
+            events.append(("on_error", context.stop_reason, context.error, context.exception))
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append(("after_run", context.stop_reason, context.error))
+
+        async def on_finally(self, context: AgentRunHookContext) -> None:
+            events.append(("on_finally", context.stop_reason, context.error))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=ErrorHook(),
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.error == "model failed"
+    assert events == [
+        ("before_run", None),
+        ("on_error", "error", "model failed", None),
+        ("after_run", "error", "model failed"),
+        ("on_finally", "error", "model failed"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_calls_on_error_and_finally_for_unhandled_exception():
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    events: list[tuple] = []
+
+    async def chat_with_retry(**kwargs):
+        raise RuntimeError("provider exploded")
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class ExceptionHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before_run", list(context.messages)))
+
+        async def on_error(self, context: AgentRunHookContext) -> None:
+            events.append((
+                "on_error",
+                context.stop_reason,
+                context.error,
+                type(context.exception).__name__ if context.exception else None,
+            ))
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append(("after_run", context.stop_reason))
+
+        async def on_finally(self, context: AgentRunHookContext) -> None:
+            events.append(("on_finally", context.stop_reason))
+
+    runner = AgentRunner(provider)
+    with pytest.raises(RuntimeError, match="provider exploded"):
+        await runner.run(AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=ExceptionHook(),
+        ))
+
+    assert events == [
+        ("before_run", [{"role": "user", "content": "hi"}]),
+        ("on_error", "error", "Error: RuntimeError: provider exploded", "RuntimeError"),
+        ("on_finally", "error"),
+    ]
