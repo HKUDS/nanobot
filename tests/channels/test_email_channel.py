@@ -396,6 +396,33 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
+    called = {"smtp": False}
+
+    def _smtp_factory(*_args, **_kwargs):
+        called["smtp"] = True
+        raise AssertionError("progress messages must not open an SMTP connection")
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="alice@example.com",
+            content="",
+            metadata={
+                "_progress": True,
+                "_tool_events": [{"phase": "end", "name": "exec"}],
+            },
+        )
+    )
+
+    assert called["smtp"] is False
+
+
+@pytest.mark.asyncio
 async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
     class FakeSMTP:
