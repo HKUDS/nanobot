@@ -283,6 +283,7 @@ def test_install_dispatches_safe_pip_and_installs_skill(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
     monkeypatch.setattr(
         manager,
         "_fetch_skill_content",
@@ -572,6 +573,7 @@ def test_uninstall_uses_safe_python_m_pip_uninstall_command(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
 
     payload = manager.uninstall("suno")
 
@@ -599,6 +601,7 @@ def test_uninstall_uses_recorded_pip_distribution(
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
 
     payload = manager.uninstall("gimp")
 
@@ -621,6 +624,7 @@ def test_uninstall_keeps_state_when_entry_point_still_available(
         "_run_argv",
         lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
     )
+    monkeypatch.setattr(manager, "_pip_available", staticmethod(lambda: True))
     monkeypatch.setattr(
         "blackcat.apps.cli.service.shutil.which",
         lambda command: "/usr/local/bin/cli-anything-gimp" if command == "cli-anything-gimp" else None,
