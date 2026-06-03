@@ -50,7 +50,7 @@ class BaseChannel(ABC):
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file (Whisper or Xiaomi MiMo ASR). Returns empty string on failure."""
+        """Transcribe an audio file via Whisper (OpenAI or Groq) or Xiaomi MiMo ASR. Returns empty string on failure."""
         if not self.transcription_api_key:
             return ""
         try:
