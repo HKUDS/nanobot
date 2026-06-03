@@ -1369,6 +1369,9 @@ def test_gateway_cron_job_streams_when_channel_supports_it(
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
     monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
 
+    async def _always_notify(*_args, **_kwargs) -> bool:
+        return True
+
     class _FakeStreamingChannel:
         supports_streaming = True
 
@@ -1434,6 +1437,10 @@ def test_gateway_cron_job_streams_when_channel_supports_it(
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr(
+        "nanobot.utils.evaluator.evaluate_response",
+        _always_notify,
+    )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
     assert result.exit_code == 0
@@ -1471,6 +1478,131 @@ def test_gateway_cron_job_streams_when_channel_supports_it(
     assert calls[3].args[0].content == "Hello world"
     # Fifth call is turn_end
     assert calls[4].args[0].metadata.get("_turn_end") is True
+
+
+def test_gateway_cron_job_streaming_respects_evaluator_rejection(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Streaming cron output must not reach the channel before evaluator approval."""
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda _config: _fake_provider())
+    monkeypatch.setattr(
+        "nanobot.providers.factory.build_provider_snapshot",
+        lambda _config: _test_provider_snapshot(object(), _config),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.factory.load_provider_snapshot",
+        lambda _config_path=None: _test_provider_snapshot(object(), config),
+    )
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    async def _reject(*_args, **_kwargs) -> bool:
+        seen["evaluated"] = True
+        return False
+
+    class _FakeStreamingChannel:
+        supports_streaming = True
+
+    class _FakeChannelManager:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.channels = {"websocket": _FakeStreamingChannel()}
+            self.enabled_channels = ["websocket"]
+
+        async def start_all(self):
+            pass
+
+        async def stop_all(self):
+            pass
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self):
+            return {"enabled": True, "jobs": 0, "next_wake_at_ms": None}
+
+        def register_system_job(self, job):
+            pass
+
+        def stop(self):
+            pass
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.tools = {}
+            self.dream = MagicMock()
+            self.sessions = MagicMock()
+
+        async def process_direct(self, *_args, on_stream=None, on_stream_end=None, **_kwargs):
+            seen["on_stream"] = on_stream
+            seen["on_stream_end"] = on_stream_end
+            if on_stream:
+                await on_stream("This should not leak")
+            if on_stream_end:
+                await on_stream_end(resuming=False)
+            return OutboundMessage(
+                channel="websocket",
+                chat_id="user-1",
+                content="This should not leak",
+            )
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr(
+        "nanobot.utils.evaluator.evaluate_response",
+        _reject,
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    assert result.exit_code == 0
+
+    cron = seen["cron"]
+    job = CronJob(
+        id="cron-stream-rejected-test",
+        name="test-stream-rejected",
+        payload=CronPayload(
+            message="Say something optional.",
+            deliver=True,
+            channel="websocket",
+            to="user-1",
+        ),
+    )
+    response = asyncio.run(cron.on_job(job))
+
+    assert response == "This should not leak"
+    assert seen["on_stream"] is not None
+    assert seen["on_stream_end"] is not None
+    assert seen["evaluated"] is True
+    bus.publish_outbound.assert_not_awaited()
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(

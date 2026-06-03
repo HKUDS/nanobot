@@ -754,24 +754,34 @@ def _run_gateway(
             target_channel = channels.channels.get(channel_name)
         except NameError:
             target_channel = None
-        wants_stream = target_channel is not None and target_channel.supports_streaming
+        wants_stream = bool(
+            job.payload.deliver
+            and job.payload.to
+            and target_channel is not None
+            and target_channel.supports_streaming
+        )
 
         stream_base_id = None
         stream_segment = 0
+        stream_had_delta = False
+        stream_events: list[OutboundMessage] = []
 
         def _current_stream_id() -> str:
             return f"{stream_base_id}:{stream_segment}"
 
         async def _on_stream(delta: str) -> None:
+            nonlocal stream_had_delta
             meta = dict(job.payload.channel_meta)
             meta["_stream_delta"] = True
             meta["_stream_id"] = _current_stream_id()
-            await bus.publish_outbound(OutboundMessage(
+            stream_events.append(OutboundMessage(
                 channel=channel_name,
                 chat_id=chat_id,
                 content=delta,
                 metadata=meta,
             ))
+            if delta:
+                stream_had_delta = True
 
         async def _on_stream_end(*, resuming: bool = False) -> None:
             nonlocal stream_segment
@@ -779,7 +789,7 @@ def _run_gateway(
             meta["_stream_end"] = True
             meta["_resuming"] = resuming
             meta["_stream_id"] = _current_stream_id()
-            await bus.publish_outbound(OutboundMessage(
+            stream_events.append(OutboundMessage(
                 channel=channel_name,
                 chat_id=chat_id,
                 content="",
@@ -789,6 +799,20 @@ def _run_gateway(
 
         if wants_stream:
             stream_base_id = f"cron:{job.id}:{time.time_ns()}"
+
+        async def _publish_buffered_stream() -> None:
+            for event in stream_events:
+                await bus.publish_outbound(event)
+
+        async def _publish_turn_end_if_needed() -> None:
+            if channel_name != "websocket" or not job.payload.to:
+                return
+            await bus.publish_outbound(OutboundMessage(
+                channel=channel_name,
+                chat_id=chat_id,
+                content="",
+                metadata={**job.payload.channel_meta, "_turn_end": True},
+            ))
 
         try:
             resp = await agent.process_direct(
@@ -809,22 +833,18 @@ def _run_gateway(
         response = resp.content if resp else ""
 
         if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            if wants_stream:
-                await bus.publish_outbound(OutboundMessage(
-                    channel=channel_name,
-                    chat_id=chat_id,
-                    content="",
-                    metadata={**job.payload.channel_meta, "_turn_end": True},
-                ))
+            await _publish_turn_end_if_needed()
             return response
 
+        delivered = False
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
                 response, reminder_note, agent.provider, agent.model,
             )
             if should_notify:
                 meta = dict(job.payload.channel_meta)
-                if wants_stream:
+                if wants_stream and stream_had_delta:
+                    await _publish_buffered_stream()
                     meta["_streamed"] = True
                 await _deliver_to_channel(
                     OutboundMessage(
@@ -836,13 +856,9 @@ def _run_gateway(
                     record=True,
                     session_key=job.payload.session_key,
                 )
-        if wants_stream:
-            await bus.publish_outbound(OutboundMessage(
-                channel=channel_name,
-                chat_id=chat_id,
-                content="",
-                metadata={**job.payload.channel_meta, "_turn_end": True},
-            ))
+                delivered = True
+        if delivered:
+            await _publish_turn_end_if_needed()
         return response
 
     cron.on_job = on_cron_job
