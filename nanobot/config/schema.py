@@ -47,7 +47,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: Literal["groq", "openai", "openrouter"] | None = None
+    provider: Literal["groq", "openai", "openrouter", "xiaomi_mimo"] | None = None
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
