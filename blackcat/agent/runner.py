@@ -16,6 +16,7 @@ from blackcat.agent.hook import AgentHook, AgentHookContext
 from blackcat.agent.tools.registry import ToolRegistry
 from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from blackcat.utils.file_edit_events import (
+from blackcat.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
     StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_error_event,
@@ -274,6 +275,42 @@ class AgentRunner:
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
+        context = AgentRunHookContext(messages=list(messages))
+
+        try:
+            await hook.before_run(context)
+            result = await self._run_core(spec, hook, messages)
+        except BaseException as exc:
+            context.messages = list(messages)
+            context.stop_reason = "error"
+            context.error = f"Error: {type(exc).__name__}: {exc}"
+            context.exception = exc
+            await hook.on_error(context)
+            raise
+        else:
+            context.messages = list(result.messages)
+            context.final_content = result.final_content
+            context.tools_used = list(result.tools_used)
+            context.usage = dict(result.usage)
+            context.stop_reason = result.stop_reason
+            context.error = result.error
+            context.tool_events = list(result.tool_events)
+            context.had_injections = result.had_injections
+            context.exception = None
+            if context.error is not None:
+                await hook.on_error(context)
+            await hook.after_run(context)
+            return result
+        finally:
+            context.messages = list(messages)
+            await hook.on_finally(context)
+
+    async def _run_core(
+        self,
+        spec: AgentRunSpec,
+        hook: AgentHook,
+        messages: list[dict[str, Any]],
+    ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
