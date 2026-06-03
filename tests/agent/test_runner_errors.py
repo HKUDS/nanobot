@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
 async def test_runner_returns_structured_tool_error():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -48,10 +48,10 @@ async def test_runner_returns_structured_tool_error():
 async def test_llm_error_not_appended_to_session_messages():
     """When LLM returns finish_reason='error', the error content must NOT be
     appended to the messages list (prevents polluting session history)."""
-    from nanobot.agent.runner import (
-        AgentRunSpec,
-        AgentRunner,
+    from blackcat.agent.runner import (
         _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+        AgentRunner,
+        AgentRunSpec,
     )
 
     provider = MagicMock(spec=LLMProvider)
@@ -81,7 +81,7 @@ async def test_llm_error_not_appended_to_session_messages():
 @pytest.mark.asyncio
 async def test_llm_arrearage_error_surfaces_clear_message():
     """Arrearage errors yield a clear user-facing message, not a raw dump (#3006)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _ARREARAGE_ERROR_MESSAGE
+    from blackcat.agent.runner import _ARREARAGE_ERROR_MESSAGE, AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -105,7 +105,7 @@ async def test_llm_arrearage_error_surfaces_clear_message():
 
 @pytest.mark.asyncio
 async def test_runner_tool_error_sets_final_content():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -139,7 +139,7 @@ async def test_runner_tool_error_sets_final_content():
 async def test_runner_tool_error_preserves_tool_results_in_messages():
     """When a tool raises a fatal error, its results must still be appended
     to messages so the session never contains orphan tool_calls (#2943)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
 

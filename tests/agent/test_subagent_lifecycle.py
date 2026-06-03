@@ -7,16 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.hook import AgentHookContext
-from nanobot.agent.runner import AgentRunResult
-from nanobot.agent.subagent import (
+from blackcat.agent.hook import AgentHookContext
+from blackcat.agent.runner import AgentRunResult
+from blackcat.agent.subagent import (
     SubagentManager,
     SubagentStatus,
     _SubagentHook,
 )
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
-
+from blackcat.bus.queue import MessageBus
+from blackcat.providers.base import LLMProvider
 
 # ---------------------------------------------------------------------------
 # Helpers

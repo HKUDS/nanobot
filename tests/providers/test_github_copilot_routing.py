@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import find_by_name
 
 
 def _make_copilot_provider() -> OpenAICompatProvider:
@@ -51,7 +51,7 @@ def test_build_responses_body_strips_github_copilot_prefix():
 @pytest.mark.asyncio
 async def test_github_copilot_does_not_fall_back_from_responses_error():
     """On /responses failure, github_copilot must re-raise instead of hitting /chat/completions."""
-    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+    from blackcat.providers.github_copilot_provider import GitHubCopilotProvider
 
     mock_client = MagicMock()
     mock_client.api_key = "no-key"
@@ -64,7 +64,7 @@ async def test_github_copilot_does_not_fall_back_from_responses_error():
     mock_client.responses.create = AsyncMock(side_effect=_CompatError("boom"))
     mock_client.chat.completions.create = AsyncMock()
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github_copilot/gpt-5.4-mini")
         await provider._ensure_client()
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")

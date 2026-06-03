@@ -1,4 +1,4 @@
-from nanobot.utils.helpers import extract_reasoning, extract_think, strip_think
+from blackcat.utils.helpers import extract_reasoning, extract_think, strip_think
 
 
 class TestStripThinkTag:

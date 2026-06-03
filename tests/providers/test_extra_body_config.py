@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-from nanobot.providers.openai_compat_provider import (
+from blackcat.providers.openai_compat_provider import (
     OpenAICompatProvider,
     _deep_merge,
 )
-from nanobot.providers.registry import find_by_name
+from blackcat.providers.registry import find_by_name
 
 # ---------------------------------------------------------------------------
 # _deep_merge unit tests
@@ -119,7 +119,7 @@ class TestBuildKwargsExtraBody:
 
     def test_extra_body_merges_with_thinking(self) -> None:
         """Config extra_body should merge with (and override) thinking params."""
-        from nanobot.providers.registry import ProviderSpec
+        from blackcat.providers.registry import ProviderSpec
 
         spec = MagicMock(spec=ProviderSpec)
         spec.thinking_style = "deepseek"
@@ -275,19 +275,19 @@ class TestSchemaConfig:
     """Verify ProviderConfig accepts extra_body."""
 
     def test_default_is_none(self) -> None:
-        from nanobot.config.schema import ProviderConfig
+        from blackcat.config.schema import ProviderConfig
 
         config = ProviderConfig()
         assert config.extra_body is None
 
     def test_accepts_dict(self) -> None:
-        from nanobot.config.schema import ProviderConfig
+        from blackcat.config.schema import ProviderConfig
 
         config = ProviderConfig(extra_body={"guided_json": {"type": "object"}})
         assert config.extra_body == {"guided_json": {"type": "object"}}
 
     def test_nested_dict(self) -> None:
-        from nanobot.config.schema import ProviderConfig
+        from blackcat.config.schema import ProviderConfig
 
         config = ProviderConfig(
             extra_body={"chat_template_kwargs": {"enable_thinking": False}}

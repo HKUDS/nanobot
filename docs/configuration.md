@@ -1,11 +1,11 @@
 # Configuration
 
-Config file: `~/.nanobot/config.json`
+Config file: `~/.blackcat/config.json`
 
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
-> run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
-> nanobot will merge in missing default fields and keep your current settings.
+> run `blackcat onboard`, then answer `N` when asked whether to overwrite the config.
+> blackcat will merge in missing default fields and keep your current settings.
 
 ## Environment Variables for Secrets
 
@@ -26,9 +26,9 @@ Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` 
 }
 ```
 
-Any string value in `config.json` can use `${VAR_NAME}`. Resolution runs once at startup, in memory only — resolved values are never written back to disk, so editing config through `nanobot onboard` or the WebUI preserves the placeholder.
+Any string value in `config.json` can use `${VAR_NAME}`. Resolution runs once at startup, in memory only — resolved values are never written back to disk, so editing config through `blackcat onboard` or the WebUI preserves the placeholder.
 
-If a referenced variable is unset, nanobot fails fast at startup with `ValueError: Environment variable 'NAME' referenced in config is not set`.
+If a referenced variable is unset, blackcat fails fast at startup with `ValueError: Environment variable 'NAME' referenced in config is not set`.
 
 ### More examples
 
@@ -69,20 +69,20 @@ If a referenced variable is unset, nanobot fails fast at startup with `ValueErro
 
 ### Loading variables at startup
 
-Pick whatever fits your deployment — nanobot only reads `os.environ` at startup, so any mechanism that populates the process environment works.
+Pick whatever fits your deployment — blackcat only reads `os.environ` at startup, so any mechanism that populates the process environment works.
 
 **systemd** — use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
 
 ```ini
-# /etc/systemd/system/nanobot.service (excerpt)
+# /etc/systemd/system/blackcat.service (excerpt)
 [Service]
-EnvironmentFile=/home/youruser/nanobot_secrets.env
-User=nanobot
+EnvironmentFile=/home/youruser/blackcat_secrets.env
+User=blackcat
 ExecStart=...
 ```
 
 ```bash
-# /home/youruser/nanobot_secrets.env (mode 600, owned by youruser)
+# /home/youruser/blackcat_secrets.env (mode 600, owned by youruser)
 TELEGRAM_TOKEN=your-token-here
 IMAP_PASSWORD=your-password-here
 ```
@@ -90,9 +90,9 @@ IMAP_PASSWORD=your-password-here
 **Docker** — pass an env file to the locally built image (one `KEY=VALUE` per line), or use `-e KEY=value`:
 
 ```bash
-docker run --rm --env-file=./nanobot.env \
-  -v ~/.nanobot:/home/nanobot/.nanobot \
-  nanobot agent -m "Hello"
+docker run --rm --env-file=./blackcat.env \
+  -v ~/.blackcat:/home/blackcat/.blackcat \
+  blackcat agent -m "Hello"
 ```
 
 **direnv** — drop a `.envrc` in your working directory and run `direnv allow`:
@@ -107,22 +107,22 @@ export ANTHROPIC_API_KEY=...
 
 ```bash
 # 1Password — references in .env.tpl look like `op://Vault/Item/field`
-op run --env-file=.env.tpl -- nanobot agent
+op run --env-file=.env.tpl -- blackcat agent
 
 # pass (passwordstore.org)
-ANTHROPIC_API_KEY="$(pass show api/anthropic)" nanobot agent
+ANTHROPIC_API_KEY="$(pass show api/anthropic)" blackcat agent
 
 # Bitwarden
-ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
+ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 ```
 
 ## Providers
 
 > [!TIP]
 > - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead, and optionally set `"transcriptionLanguage": "en"` (or another ISO-639-1 code) for more accurate transcription. The API key is picked from the matching provider config.
-> - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
+> - **MiniMax Coding Plan**: Exclusive discount links for the blackcat community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
-> - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
+> - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so blackcat keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
@@ -137,8 +137,8 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
-| `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
-| `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
+| `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=blackcat&utm_content=blackcat&utm_medium=devrel&utm_source=OWO&utm_term=blackcat) · [volcengine.com](https://www.volcengine.com) |
+| `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=blackcat&utm_content=blackcat&utm_medium=devrel&utm_source=OWO&utm_term=blackcat) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
@@ -164,14 +164,14 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
-| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
-| `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `openai_codex` | LLM (Codex, OAuth) | `blackcat provider login openai-codex` |
+| `github_copilot` | LLM (GitHub Copilot, OAuth) | `blackcat provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
 <details>
 <summary><b>OpenAI</b></summary>
 
-By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normally and routes GPT-5/o-series or explicit `reasoningEffort` requests through the Responses API when useful. You can force a specific API surface:
+By default, OpenAI uses `apiType: "auto"`: blackcat calls Chat Completions normally and routes GPT-5/o-series or explicit `reasoningEffort` requests through the Responses API when useful. You can force a specific API surface:
 
 ```json
 {
@@ -186,7 +186,7 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+`extraBody` follows the selected OpenAI API surface. With Chat Completions, blackcat passes it through as the SDK `extra_body` value. With Responses, configure it in Responses API body shape; blackcat merges ordinary top-level fields into the Responses request body, appends `extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
 
 ```json
 {
@@ -257,7 +257,7 @@ Use the normal AWS credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KE
 }
 ```
 
-You can also set `providers.bedrock.apiKey` to a Bedrock API key; nanobot exports it as `AWS_BEARER_TOKEN_BEDROCK` for the AWS SDK.
+You can also set `providers.bedrock.apiKey` to a Bedrock API key; blackcat exports it as `AWS_BEARER_TOKEN_BEDROCK` for the AWS SDK.
 
 Credential options:
 
@@ -348,13 +348,13 @@ With a named AWS profile:
 
 For regional routing, use one of Bedrock's inference IDs, for example `bedrock/us.anthropic.claude-opus-4-7`, `bedrock/eu.anthropic.claude-opus-4-7`, or `bedrock/jp.anthropic.claude-opus-4-7`.
 
-Claude Opus 4.7 does not accept `temperature`, `top_p`, or `top_k`; nanobot omits `temperature` automatically for this model. If `reasoningEffort` is set to `low`, `medium`, `high`, `max`, or `adaptive`, nanobot sends Bedrock's adaptive thinking parameter.
+Claude Opus 4.7 does not accept `temperature`, `top_p`, or `top_k`; blackcat omits `temperature` automatically for this model. If `reasoningEffort` is set to `low`, `medium`, `high`, `max`, or `adaptive`, blackcat sends Bedrock's adaptive thinking parameter.
 
 Anthropic models on Bedrock can also require Anthropic use-case registration and are subject to Anthropic-supported country/region restrictions. If Claude fails with a `ValidationException` about unsupported countries or regions, try a non-Anthropic Bedrock model such as Amazon Nova to verify the provider setup.
 
 **4. Model IDs**
 
-Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in nanobot config. nanobot removes the prefix before calling AWS.
+Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in blackcat config. blackcat removes the prefix before calling AWS.
 
 Examples:
 
@@ -370,7 +370,7 @@ Check the Bedrock console for the exact model ID and region availability. Some m
 
 **5. Advanced model fields**
 
-Model-specific fields can be supplied with `extraBody`; nanobot merges it into Converse `additionalModelRequestFields`:
+Model-specific fields can be supplied with `extraBody`; blackcat merges it into Converse `additionalModelRequestFields`:
 
 ```json
 {
@@ -391,7 +391,7 @@ Model-specific fields can be supplied with `extraBody`; nanobot merges it into C
 
 Use `apiBase` only for a custom Bedrock Runtime endpoint URL, such as a VPC endpoint or proxy. It is not needed for normal AWS regions.
 
-Current scope: nanobot passes `messages`, `system`, `inferenceConfig`, `toolConfig`, and `additionalModelRequestFields`. Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not first-class config fields yet.
+Current scope: blackcat passes `messages`, `system`, `inferenceConfig`, `toolConfig`, and `additionalModelRequestFields`. Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not first-class config fields yet.
 
 **6. Quick checks**
 
@@ -407,7 +407,7 @@ export AWS_REGION="us-east-1"
 Then run:
 
 ```bash
-nanobot agent -m "Reply with one short sentence."
+blackcat agent -m "Reply with one short sentence."
 ```
 
 </details>
@@ -417,14 +417,14 @@ nanobot agent -m "Reply with one short sentence."
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
 Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
-No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+No `providers.openaiCodex` block is needed in `config.json`; `blackcat provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
-nanobot provider login openai-codex
+blackcat provider login openai-codex
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+**2. Set model** (merge into `~/.blackcat/config.json`):
 ```json
 {
   "agents": {
@@ -437,13 +437,13 @@ nanobot provider login openai-codex
 
 **3. Chat:**
 ```bash
-nanobot agent -m "Hello!"
+blackcat agent -m "Hello!"
 
 # Target a specific workspace/config locally
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+blackcat agent -c ~/.blackcat-telegram/config.json -m "Hello!"
 
 # One-off workspace override on top of that config
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+blackcat agent -c ~/.blackcat-telegram/config.json -w /tmp/blackcat-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -455,14 +455,14 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
-No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+No `providers.githubCopilot` block is needed in `config.json`; `blackcat provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
-nanobot provider login github-copilot
+blackcat provider login github-copilot
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+**2. Set model** (merge into `~/.blackcat/config.json`):
 ```json
 {
   "agents": {
@@ -475,13 +475,13 @@ nanobot provider login github-copilot
 
 **3. Chat:**
 ```bash
-nanobot agent -m "Hello!"
+blackcat agent -m "Hello!"
 
 # Target a specific workspace/config locally
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+blackcat agent -c ~/.blackcat-telegram/config.json -m "Hello!"
 
 # One-off workspace override on top of that config
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+blackcat agent -c ~/.blackcat-telegram/config.json -w /tmp/blackcat-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -491,7 +491,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>LongCat (OpenAI-compatible)</b></summary>
 
-LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
+LongCat is available through blackcat's built-in OpenAI-compatible provider flow.
 The default API base already points to `https://api.longcat.chat/openai/v1`, so you
 usually only need to set `apiKey`.
 
@@ -581,7 +581,7 @@ Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and
 <details>
 <summary><b>Ant Ling (OpenAI-compatible)</b></summary>
 
-Ant Ling is available through nanobot's built-in OpenAI-compatible provider flow.
+Ant Ling is available through blackcat's built-in OpenAI-compatible provider flow.
 The default API base points to `https://api.ant-ling.com/v1`, so you usually
 only need to set `apiKey`.
 
@@ -653,7 +653,7 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
 >
 > In short: **chat-completions-compatible endpoint → `custom`**; **Responses-compatible endpoint → `azure_openai`**.
 
-Some OpenAI-compatible gateways expose request-body extensions such as vLLM guided decoding or local sampling controls. Put those under `extraBody`; nanobot merges them into the chat-completions request body after its provider defaults:
+Some OpenAI-compatible gateways expose request-body extensions such as vLLM guided decoding or local sampling controls. Put those under `extraBody`; blackcat merges them into the chat-completions request body after its provider defaults:
 
 ```json
 {
@@ -686,7 +686,7 @@ Run a local model with Ollama, then add to config:
 ollama run llama3.2
 ```
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.blackcat/config.json`):
 ```json
 {
   "providers": {
@@ -718,7 +718,7 @@ ollama run llama3.2
 - Load a model (e.g., Llama, Mistral, Qwen)
 - Click "Start Server" (default port: 1234)
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.blackcat/config.json`):
 ```json
 {
   "providers": {
@@ -745,7 +745,7 @@ ollama run llama3.2
 <details>
 <summary><b>Atomic Chat (local)</b></summary>
 
-[Atomic Chat](https://atomic.chat/) is a local-first desktop app that exposes an **OpenAI-compatible** HTTP API (default `http://localhost:1337/v1`). Use it when you want to run nanobot against a model on your own machine instead of a hosted API provider.
+[Atomic Chat](https://atomic.chat/) is a local-first desktop app that exposes an **OpenAI-compatible** HTTP API (default `http://localhost:1337/v1`). Use it when you want to run blackcat against a model on your own machine instead of a hosted API provider.
 
 **1. Start Atomic Chat**
 
@@ -753,7 +753,7 @@ ollama run llama3.2
 - Open Atomic Chat, download a model, and keep the app running. The local API is enabled by default.
 - Copy the model ID exposed by the local API. For example, the model ID for `Qwen 3 32B` might be `qwen3-32b`.
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.blackcat/config.json`):
 
 ```json
 {
@@ -831,7 +831,7 @@ docker run -d \
   --target_device GPU
 ```
 
-**3. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**3. Add to config** (partial — merge into `~/.blackcat/config.json`):
 
 ```json
 {
@@ -864,7 +864,7 @@ Run your own model with vLLM or any OpenAI-compatible server, then add to config
 vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 ```
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.blackcat/config.json`):
 
 *Provider (set API key to null for local servers):*
 ```json
@@ -894,22 +894,22 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
 
-nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
+blackcat uses a **Provider Registry** (`blackcat/providers/registry.py`) as the single source of truth.
 Adding a new provider only takes **2 steps** — no if-elif chains to touch.
 
-**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
+**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `blackcat/providers/registry.py`:
 
 ```python
 ProviderSpec(
     name="myprovider",                   # config field name
     keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
     env_key="MYPROVIDER_API_KEY",        # env var name
-    display_name="My Provider",          # shown in `nanobot status`
+    display_name="My Provider",          # shown in `blackcat status`
     default_api_base="https://api.myprovider.com/v1",  # OpenAI-compatible endpoint
 )
 ```
 
-**Step 2.** Add a field to `ProvidersConfig` in `nanobot/config/schema.py`:
+**Step 2.** Add a field to `ProvidersConfig` in `blackcat/config/schema.py`:
 
 ```python
 class ProvidersConfig(BaseModel):
@@ -917,7 +917,7 @@ class ProvidersConfig(BaseModel):
     myprovider: ProviderConfig = ProviderConfig()
 ```
 
-That's it! Environment variables, model routing, config matching, and `nanobot status` display will all work automatically.
+That's it! Environment variables, model routing, config matching, and `blackcat status` display will all work automatically.
 
 **Common `ProviderSpec` options:**
 
@@ -938,7 +938,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`.
 
-Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, nanobot keeps using `agents.defaults.*` exactly as before.
+Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, blackcat keeps using `agents.defaults.*` exactly as before.
 
 ```json
 {
@@ -1018,7 +1018,7 @@ String entries are preset names, not raw model names. If you want to use a model
 
 Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
 
-If fallback candidates use smaller `contextWindowTokens` values, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt.
+If fallback candidates use smaller `contextWindowTokens` values, blackcat builds context using the smallest window in the active chain so every candidate can receive the same prompt.
 
 Set `agents.defaults.modelPreset` to start with a named preset:
 
@@ -1036,7 +1036,7 @@ When `modelPreset` is `null` or omitted, startup uses the implicit `default` pre
 
 ## Channel Settings
 
-Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
+Global settings that apply to all channels. Configure under the `channels` section in `~/.blackcat/config.json`:
 
 ```json
 {
@@ -1086,7 +1086,7 @@ global values stay as defaults for channels that do not set their own value:
 
 Retry is intentionally simple.
 
-When a channel `send()` raises, nanobot retries at the channel-manager layer. By default, `channels.sendMaxRetries` is `3`, and that count includes the initial send.
+When a channel `send()` raises, blackcat retries at the channel-manager layer. By default, `channels.sendMaxRetries` is `3`, and that count includes the initial send.
 
 - **Attempt 1**: Send immediately
 - **Attempt 2**: Retry after `1s`
@@ -1100,11 +1100,11 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 >
 > Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
 >
-> If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
+> If a channel is completely unreachable, blackcat cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
 ## Web Tools
 
-nanobot incorporates basic tools for accessing the web. These include searching via APIs, and fetching arbitrary web pages in Markdown format. They are enabled by default, and can be configured in `~/.nanobot/config.json` under `tools.web`.
+blackcat incorporates basic tools for accessing the web. These include searching via APIs, and fetching arbitrary web pages in Markdown format. They are enabled by default, and can be configured in `~/.blackcat/config.json` under `tools.web`.
 
 If you want to disable them, which removes both `web_search` and `web_fetch` from the tool list sent to the LLM, set `tools.web.enable` to `false`:
 
@@ -1144,7 +1144,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 
 ### Web Search
 
-nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+blackcat supports multiple web search providers. Configure in `~/.blackcat/config.json` under `tools.web.search`.
 
 By default, web search uses `duckduckgo`, and it works out of the box without an API key.
 
@@ -1294,7 +1294,7 @@ Volcengine Ark keys are separate and do not work for this search provider.
 > { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
 > ```
 
-nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
+blackcat by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
 
 If you want to always use the local conversion, you can force it using:
 
@@ -1327,7 +1327,7 @@ See [Image Generation](./image-generation.md) for WebUI usage, provider examples
 > [!TIP]
 > The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
 
-nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
+blackcat supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
 
 Add MCP servers to your `config.json`:
 
@@ -1388,7 +1388,7 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 }
 ```
 
-`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
+`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped blackcat tool name (for example `mcp_filesystem_write_file`).
 
 - Omit `enabledTools`, or set it to `["*"]`, to register all tools.
 - Set `enabledTools` to `[]` to register no tools from that server.
@@ -1415,7 +1415,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
-**Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+**Docker security**: The official Docker image runs as a non-root user (`blackcat`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 
 ## Pairing
@@ -1478,14 +1478,14 @@ You can find user IDs in the output of `/pairing list`.
 From the terminal:
 
 ```bash
-nanobot agent -m "/pairing list"
-nanobot agent -m "/pairing approve ABCD-EFGH"
+blackcat agent -m "/pairing list"
+blackcat agent -m "/pairing approve ABCD-EFGH"
 ```
 
 
 ## Subagent Concurrency
 
-By default, nanobot only allows one spawned subagent at a time. When the limit is
+By default, blackcat only allows one spawned subagent at a time. When the limit is
 reached, the `spawn` tool returns an error so the agent can decide to wait or
 rearrange its work. This protects local LLM servers from loading multiple KV caches
 at once. If your provider can handle more parallel work, raise the limit:
@@ -1507,7 +1507,7 @@ at once. If your provider can handle more parallel work, raise the limit:
 
 ## Auto Compact
 
-When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+When a user is idle for longer than a configured threshold, blackcat **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
 
 ```json
 {
@@ -1542,7 +1542,7 @@ How it works:
 
 Time is context. Context should be precise.
 
-By default, nanobot uses `UTC` for runtime time context. If you want the agent to think in your local time, set `agents.defaults.timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
+By default, blackcat uses `UTC` for runtime time context. If you want the agent to think in your local time, set `agents.defaults.timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
 
 ```json
 {
@@ -1562,7 +1562,7 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 ## Unified Session
 
-By default, each channel × chat ID combination gets its own session. If you use nanobot across multiple channels (e.g. Telegram + Discord + CLI) and want them to share the same conversation, enable `unifiedSession`:
+By default, each channel × chat ID combination gets its own session. If you use blackcat across multiple channels (e.g. Telegram + Discord + CLI) and want them to share the same conversation, enable `unifiedSession`:
 
 ```json
 {
@@ -1588,7 +1588,7 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 
 ## Disabled Skills
 
-nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+blackcat ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
 
 ```json
 {

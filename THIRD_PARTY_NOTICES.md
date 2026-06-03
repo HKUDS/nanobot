@@ -1,14 +1,14 @@
 # Third-Party Notices
 
 The following third-party components are redistributed as part of the packaged
-nanobot Python distribution (`pip install nanobot-ai`).
+blackcat Python distribution (`pip install blackcat-ai`).
 
 ---
 
 ## KaTeX — math rendering (MIT)
 
 - **Source**: https://github.com/KaTeX/KaTeX
-- **Bundled**: `nanobot/web/dist/assets/index-*.{js,css}`
+- **Bundled**: `blackcat/web/dist/assets/index-*.{js,css}`
 
 ```
 The MIT License (MIT)
@@ -39,7 +39,7 @@ SOFTWARE.
 ## KaTeX Fonts — math typography (SIL OFL 1.1)
 
 - **Source**: https://github.com/KaTeX/KaTeX/tree/main/src/fonts
-- **Bundled**: `nanobot/web/dist/assets/KaTeX_*.{woff2,woff,ttf}`
+- **Bundled**: `blackcat/web/dist/assets/KaTeX_*.{woff2,woff,ttf}`
 
 The fonts are redistributed unmodified.
 

@@ -3,7 +3,7 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/home/nanobot/.nanobot
+    - ~/.blackcat:/home/blackcat/.blackcat
   cap_drop:
     - ALL
   cap_add:
@@ -13,8 +13,8 @@ x-common-config: &common-config
     - seccomp=unconfined
 
 services:
-  nanobot-gateway:
-    container_name: nanobot-gateway
+  blackcat-gateway:
+    container_name: blackcat-gateway
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
@@ -30,11 +30,11 @@ services:
           cpus: "0.25"
           memory: 256M
 
-  nanobot-api:
-    container_name: nanobot-api
+  blackcat-api:
+    container_name: blackcat-api
     <<: *common-config
     command:
-      ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
+      ["serve", "--host", "0.0.0.0", "-w", "/home/blackcat/.blackcat/api-workspace"]
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900
@@ -47,7 +47,7 @@ services:
           cpus: "0.25"
           memory: 256M
 
-  nanobot-cli:
+  blackcat-cli:
     <<: *common-config
     profiles:
       - cli

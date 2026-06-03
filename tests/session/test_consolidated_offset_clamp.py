@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from nanobot.session.manager import Session, SessionManager
+from blackcat.session.manager import Session, SessionManager
 
 
 def _session(count: int, last_consolidated: object) -> Session:

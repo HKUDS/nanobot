@@ -10,21 +10,21 @@
 **Install from source** (latest features, experimental changes may land here first; recommended for development)
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
+git clone https://github.com/HKUDS/blackcat.git
+cd blackcat
 pip install -e .
 ```
 
 **Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
 
 ```bash
-uv tool install nanobot-ai
+uv tool install blackcat-ai
 ```
 
 **Install from PyPI** (stable release)
 
 ```bash
-pip install nanobot-ai
+pip install blackcat-ai
 ```
 
 ### Update to latest version
@@ -32,28 +32,28 @@ pip install nanobot-ai
 **PyPI / pip**
 
 ```bash
-pip install -U nanobot-ai
-nanobot --version
+pip install -U blackcat-ai
+blackcat --version
 ```
 
 **uv**
 
 ```bash
-uv tool upgrade nanobot-ai
-nanobot --version
+uv tool upgrade blackcat-ai
+blackcat --version
 ```
 
 **Using WhatsApp?** Rebuild the local bridge after upgrading:
 
 ```bash
-rm -rf ~/.nanobot/bridge
-nanobot channels login whatsapp
+rm -rf ~/.blackcat/bridge
+blackcat channels login whatsapp
 ```
 
 ## Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
+> Set your API key in `~/.blackcat/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
 >
 > For other LLM providers, please see [`configuration.md`](./configuration.md).
@@ -63,12 +63,12 @@ nanobot channels login whatsapp
 **1. Initialize**
 
 ```bash
-nanobot onboard
+blackcat onboard
 ```
 
-Use `nanobot onboard --wizard` if you want the interactive setup wizard.
+Use `blackcat onboard --wizard` if you want the interactive setup wizard.
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure** (`~/.blackcat/config.json`)
 
 Configure these **two parts** in your config (other options have defaults).
 
@@ -98,7 +98,7 @@ Configure these **two parts** in your config (other options have defaults).
 **3. Chat**
 
 ```bash
-nanobot agent
+blackcat agent
 ```
 
 That's it! You have a working AI agent in 2 minutes.

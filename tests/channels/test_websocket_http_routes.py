@@ -11,9 +11,9 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 
-from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
-from nanobot.session.manager import Session, SessionManager
-from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
+from blackcat.channels.websocket import WebSocketChannel, WebSocketConfig
+from blackcat.session.manager import Session, SessionManager
+from blackcat.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
 
@@ -168,7 +168,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.cli_apps_payload",
+        "blackcat.webui.settings_routes.cli_apps_payload",
         lambda: {
             "apps": [
                 {
@@ -193,7 +193,7 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         },
     )
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.cli_apps_action",
+        "blackcat.webui.settings_routes.cli_apps_action",
         lambda action, query: {
             "apps": [],
             "installed_count": 1,
@@ -237,7 +237,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.mcp_presets_payload",
+        "blackcat.webui.mcp_presets_api.mcp_presets_payload",
         lambda: {
             "presets": [
                 {
@@ -288,11 +288,11 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         }
 
     monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.mcp_presets_action",
+        "blackcat.webui.mcp_presets_api.mcp_presets_action",
         _mcp_preset_action,
     )
     monkeypatch.setattr(
-        "nanobot.webui.mcp_presets_api.custom_mcp_action",
+        "blackcat.webui.mcp_presets_api.custom_mcp_action",
         _custom_action,
     )
 
@@ -300,7 +300,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
         return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}
 
     monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_mcp_reload",
+        "blackcat.webui.settings_routes.request_mcp_reload",
         _hot_reload,
     )
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)
@@ -325,7 +325,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"browserbase_api_key": "bb_live_secret"}
                 ),
             },
@@ -340,7 +340,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         bad_header = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
-            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
+            headers={**auth, "X-Blackcat-MCP-Values": "[]"},
         )
         assert bad_header.status_code == 400
 
@@ -348,7 +348,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"name": "docs", "command": "npx"}
                 ),
             },
@@ -359,7 +359,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         imported = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/import",
-            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
+            headers={**auth, "X-Blackcat-MCP-Values": json.dumps({"config": "{}"})},
         )
         assert imported.status_code == 200
         assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
@@ -368,7 +368,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"name": "docs", "enabled_tools": []}
                 ),
             },
@@ -421,7 +421,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 async def test_webui_sidebar_state_routes_are_config_dir_scoped(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:sidebar")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
@@ -470,9 +470,9 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 async def test_session_delete_removes_file(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.webui.transcript import append_transcript_object
 
     append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
@@ -538,9 +538,9 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
 async def test_webui_thread_resigns_assistant_media_urls(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     media_root = tmp_path / "media"
     websocket_media = media_root / "websocket"
     websocket_media.mkdir(parents=True)
@@ -550,7 +550,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
     def fake_media_dir(channel: str | None = None) -> Path:
         return websocket_media if channel == "websocket" else media_root
 
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    monkeypatch.setattr("blackcat.channels.websocket.get_media_dir", fake_media_dir)
 
     append_transcript_object(
         "websocket:video-replay",
@@ -799,7 +799,7 @@ def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
 def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 
@@ -819,11 +819,11 @@ def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1", port=29931)
     resp = channel.gateway.http._handle_bootstrap(
         _LOCAL,
-        _FakeReq({"Host": "nanobot.example", "X-Forwarded-Proto": "https"}),
+        _FakeReq({"Host": "blackcat.example", "X-Forwarded-Proto": "https"}),
     )
     assert resp.status_code == 200
     body = json.loads(resp.body)
-    assert body["ws_url"] == "wss://nanobot.example/"
+    assert body["ws_url"] == "wss://blackcat.example/"
 
 
 def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
@@ -834,7 +834,7 @@ def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
 
 def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.ws_http._default_model_name_from_config",
+        "blackcat.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
@@ -846,7 +846,7 @@ def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytes
 
 def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.ws_http._default_model_name_from_config",
+        "blackcat.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
     channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
@@ -858,7 +858,7 @@ def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeyp
 
 def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "nanobot.webui.ws_http._default_model_name_from_config",
+        "blackcat.webui.ws_http._default_model_name_from_config",
         lambda: "from-disk",
     )
 
@@ -890,10 +890,10 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
     assert body["token"].startswith("nbwt_")
 
 
-def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
+def test_bootstrap_accepts_x_blackcat_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 

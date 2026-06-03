@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from blackcat.bus.events import OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.channels.base import BaseChannel
 
 
 class _DummyChannel(BaseChannel):
@@ -60,7 +60,7 @@ def test_is_allowed_star_allows_all() -> None:
 def test_is_allowed_pairing_fallback(monkeypatch) -> None:
     channel = _DummyChannel({"allowFrom": []}, MessageBus())
     monkeypatch.setattr(
-        "nanobot.channels.base.is_approved", lambda _ch, sid: sid == "paired"
+        "blackcat.channels.base.is_approved", lambda _ch, sid: sid == "paired"
     )
     assert channel.is_allowed("paired") is True
     assert channel.is_allowed("unknown") is False
@@ -70,7 +70,7 @@ def test_is_allowed_pairing_fallback(monkeypatch) -> None:
 async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
     channel = _DummyChannel({"allowFrom": []}, MessageBus())
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, sid: "ABCD-EFGH"
+        "blackcat.channels.base.generate_code", lambda _ch, sid: "ABCD-EFGH"
     )
 
     await channel._handle_message(

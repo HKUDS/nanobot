@@ -1,8 +1,8 @@
 # Image Generation
 
-nanobot can generate and edit images through the `generate_image` tool. In the WebUI, users can enable **Image Generation** from the composer, choose an aspect ratio, and keep iterating on generated images inside the same chat.
+blackcat can generate and edit images through the `generate_image` tool. In the WebUI, users can enable **Image Generation** from the composer, choose an aspect ratio, and keep iterating on generated images inside the same chat.
 
-The feature is disabled by default. Enable it in `~/.nanobot/config.json`, configure a supported image provider, then restart the gateway.
+The feature is disabled by default. Enable it in `~/.blackcat/config.json`, configure a supported image provider, then restart the gateway.
 
 ## Quick Setup
 
@@ -26,7 +26,7 @@ The feature is disabled by default. Enable it in `~/.nanobot/config.json`, confi
 See [Provider Notes](#provider-notes) for AIHubMix, MiniMax, Gemini, Ollama, StepFun, and Zhipu configuration examples.
 
 > [!TIP]
-> Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
+> Prefer environment variables for API keys. blackcat resolves `${VAR_NAME}` values from the environment at startup.
 
 ## WebUI Usage
 
@@ -51,7 +51,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
 | `tools.imageGeneration.maxImagesPerTurn` | number | `4` | Maximum `count` accepted by one tool call. Valid range: `1` to `8` |
-| `tools.imageGeneration.saveDir` | string | `"generated"` | Relative directory under nanobot's media directory for generated artifacts |
+| `tools.imageGeneration.saveDir` | string | `"generated"` | Relative directory under blackcat's media directory for generated artifacts |
 
 Provider settings reuse normal provider config fields:
 
@@ -86,7 +86,7 @@ Use a model that supports image generation and image editing if you want referen
 
 ### AIHubMix
 
-AIHubMix `gpt-image-2-free` is supported through AIHubMix's unified predictions API. Internally nanobot calls:
+AIHubMix `gpt-image-2-free` is supported through AIHubMix's unified predictions API. Internally blackcat calls:
 
 ```text
 /v1/models/openai/gpt-image-2-free/predictions
@@ -140,7 +140,7 @@ MiniMax `image-01` supports text-to-image and reference-image (subject reference
 
 ### Gemini
 
-nanobot supports two Gemini image generation model families via Google's Generative Language API:
+blackcat supports two Gemini image generation model families via Google's Generative Language API:
 
 | Model | Endpoint | Reference images |
 |-------|----------|-----------------|
@@ -247,7 +247,7 @@ StepPlan is StepFun's subscription tier and uses a different API base URL. The i
 
 ### Zhipu
 
-Zhipu (智谱) `glm-image` model supports text-to-image generation. The API returns temporary image URLs (valid for 30 days); nanobot downloads and re-encodes them as base64 data URLs.
+Zhipu (智谱) `glm-image` model supports text-to-image generation. The API returns temporary image URLs (valid for 30 days); blackcat downloads and re-encodes them as base64 data URLs.
 
 Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`. Sizes can be specified as `WIDTHxHEIGHT` (e.g. `1280x1280`, `1728x960`) or using aspect ratio presets.
 
@@ -272,11 +272,11 @@ Other supported models: `cogview-4`, `cogview-4-250304`, `cogview-3-flash`. Refe
 
 ## Artifacts
 
-Generated images are stored under the active nanobot instance's media directory:
+Generated images are stored under the active blackcat instance's media directory:
 
 ```text
-~/.nanobot/media/generated/YYYY-MM-DD/img_<id>.<ext>
-~/.nanobot/media/generated/YYYY-MM-DD/img_<id>.json
+~/.blackcat/media/generated/YYYY-MM-DD/img_<id>.<ext>
+~/.blackcat/media/generated/YYYY-MM-DD/img_<id>.json
 ```
 
 For non-default config locations, the media directory is relative to the active config file's directory.
@@ -309,7 +309,7 @@ Good image prompts include:
 Example:
 
 ```text
-A minimal app icon for nanobot: friendly robot head, rounded square, soft blue and white palette, clean vector style, no text
+A minimal app icon for blackcat: friendly robot head, rounded square, soft blue and white palette, clean vector style, no text
 ```
 
 For edits, describe what should change and what must stay fixed:
@@ -325,6 +325,6 @@ Use the reference image. Keep the same robot and composition, change the palette
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
 | `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
-| AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
+| AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; blackcat expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
-| Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |
+| Reference image rejected | Reference image paths must be inside the workspace or blackcat media directory and must be valid image files |

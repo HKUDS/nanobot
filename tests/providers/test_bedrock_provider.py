@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from nanobot.config.schema import Config, ProvidersConfig
-from nanobot.providers.bedrock_provider import BedrockProvider
-from nanobot.providers.registry import find_by_name
+from blackcat.config.schema import Config, ProvidersConfig
+from blackcat.providers.bedrock_provider import BedrockProvider
+from blackcat.providers.registry import find_by_name
 
 
 class FakeClient:
@@ -190,7 +190,7 @@ def test_build_kwargs_keeps_tool_config_for_historical_tool_blocks_without_tools
 
     assert any("toolUse" in block for msg in kwargs["messages"] for block in msg["content"])
     assert any("toolResult" in block for msg in kwargs["messages"] for block in msg["content"])
-    assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "nanobot_noop"
+    assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "blackcat_noop"
     assert "toolChoice" not in kwargs["toolConfig"]
 
 

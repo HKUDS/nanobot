@@ -1,6 +1,6 @@
-# nanobot Docs
+# blackcat Docs
 
-For the latest documentation, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
+For the latest documentation, visit [blackcat.wiki](https://blackcat.wiki/docs/latest/getting-started/blackcat-overview).
 
 The pages in this directory track the current repository and may move faster than the published website.
 
@@ -11,8 +11,8 @@ Start here for setup, everyday usage, and deployment.
 | Topic | Repo docs | What it covers |
 |---|---|---|
 | Install and quick start | [`quick-start.md`](./quick-start.md) | Installation, onboarding, and first-run setup |
-| Chat apps | [`chat-apps.md`](./chat-apps.md) | Connect nanobot to Telegram, Discord, WeChat, and more |
-| Agent social network | [`agent-social-network.md`](./agent-social-network.md) | Join external agent communities from nanobot |
+| Chat apps | [`chat-apps.md`](./chat-apps.md) | Connect blackcat to Telegram, Discord, WeChat, and more |
+| Agent social network | [`agent-social-network.md`](./agent-social-network.md) | Join external agent communities from blackcat |
 | Configuration | [`configuration.md`](./configuration.md) | Providers, tools, channels, MCP, and runtime settings |
 | Image generation | [`image-generation.md`](./image-generation.md) | Configure image providers, WebUI image mode, and generated artifacts |
 | WebUI | [`../webui/README.md`](../webui/README.md) | Open the bundled browser UI; LAN access; Vite dev server for contributors |
@@ -28,8 +28,8 @@ Use these when you want deeper customization, integration, or extension details.
 
 | Topic | Repo docs | What it covers |
 |---|---|---|
-| Memory | [`memory.md`](./memory.md) | How nanobot stores, consolidates, and restores memory |
-| Python SDK | [`python-sdk.md`](./python-sdk.md) | Use nanobot programmatically from Python |
+| Memory | [`memory.md`](./memory.md) | How blackcat stores, consolidates, and restores memory |
+| Python SDK | [`python-sdk.md`](./python-sdk.md) | Use blackcat programmatically from Python |
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
 | Custom tools | [`my-tool.md`](./my-tool.md) | Inspect and tune runtime state with the `my` tool |

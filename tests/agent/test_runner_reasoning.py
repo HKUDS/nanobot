@@ -13,9 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from blackcat.agent.hook import AgentHook, AgentHookContext
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -38,7 +38,7 @@ class _RecordingHook(AgentHook):
 async def test_runner_preserves_reasoning_fields_in_assistant_history():
     """Reasoning fields ride along on the persisted assistant message so
     follow-up provider calls retain the model's prior thinking context."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -86,7 +86,7 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
 
 @pytest.mark.asyncio
 async def test_runner_emits_anthropic_thinking_blocks():
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -126,7 +126,7 @@ async def test_runner_emits_anthropic_thinking_blocks():
 async def test_runner_emits_inline_think_content_as_reasoning():
     """Models embedding reasoning in <think>...</think> blocks should have
     that content extracted and emitted, and stripped from the answer."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -161,7 +161,7 @@ async def test_runner_emits_inline_think_content_as_reasoning():
 async def test_runner_prefers_reasoning_content_over_inline_think():
     """Fallback priority: dedicated reasoning_content wins; inline <think>
     is still scrubbed from the answer content."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -197,7 +197,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
     """`reasoning_content` arrives only on the final response; streaming the
     answer must not suppress it (the answer stream and the reasoning channel
     are independent — only the reasoning-already-emitted bit matters)."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.supports_progress_deltas = True
@@ -244,7 +244,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
 async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     """Inline `<think>` blocks streamed incrementally during the answer
     stream must not be re-emitted from the final response."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.supports_progress_deltas = True
@@ -289,7 +289,7 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
     """A non-streaming response carrying ``reasoning_content`` must emit
     both a reasoning delta and an end marker so channels can finalize the
     in-place bubble."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -333,7 +333,7 @@ class _StreamRecordingHook(_RecordingHook):
 async def test_runner_streams_native_thinking_deltas_without_post_hoc_dup():
     """Anthropic-style ``on_thinking_delta`` should fan out to ``emit_reasoning``;
     final ``thinking_blocks`` must not emit again when already streamed."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 

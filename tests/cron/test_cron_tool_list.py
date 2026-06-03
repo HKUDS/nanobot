@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nanobot.agent.tools.context import RequestContext
-from nanobot.agent.tools.cron import CronTool
-from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
+from blackcat.agent.tools.context import RequestContext
+from blackcat.agent.tools.cron import CronTool
+from blackcat.cron.service import CronService
+from blackcat.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:

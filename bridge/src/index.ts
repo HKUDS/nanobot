@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * nanobot WhatsApp Bridge
+ * blackcat WhatsApp Bridge
  * 
- * This bridge connects WhatsApp Web to nanobot's Python backend
+ * This bridge connects WhatsApp Web to blackcat's Python backend
  * via WebSocket. It handles authentication, message forwarding,
  * and reconnection logic.
  * 
@@ -10,7 +10,7 @@
  *   npm run build && npm start
  *   
  * Or with custom settings:
- *   BRIDGE_PORT=3001 AUTH_DIR=~/.nanobot/whatsapp npm start
+ *   BRIDGE_PORT=3001 AUTH_DIR=~/.blackcat/whatsapp npm start
  */
 
 // Polyfill crypto for Baileys in ESM
@@ -19,20 +19,20 @@ if (!globalThis.crypto) {
   (globalThis as any).crypto = webcrypto;
 }
 
-import { BridgeServer } from './server.js';
 import { homedir } from 'os';
 import { join } from 'path';
+import { BridgeServer } from './server.js';
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
-const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.nanobot', 'whatsapp-auth');
+const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.blackcat', 'whatsapp-auth');
 const TOKEN = process.env.BRIDGE_TOKEN?.trim();
 
 if (!TOKEN) {
-  console.error('BRIDGE_TOKEN is required. Start the bridge via nanobot so it can provision a local secret automatically.');
+  console.error('BRIDGE_TOKEN is required. Start the bridge via blackcat so it can provision a local secret automatically.');
   process.exit(1);
 }
 
-console.log('🐈 nanobot WhatsApp Bridge');
+console.log('🐈 blackcat WhatsApp Bridge');
 console.log('========================\n');
 
 const server = new BridgeServer(PORT, AUTH_DIR, TOKEN);

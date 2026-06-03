@@ -2,7 +2,7 @@
 import time
 from datetime import datetime
 
-from nanobot.agent.memory import MemoryStore
+from blackcat.agent.memory import MemoryStore
 
 
 class TestDreamSessionKey:

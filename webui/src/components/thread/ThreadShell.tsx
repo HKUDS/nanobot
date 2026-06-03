@@ -1,36 +1,36 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
-import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
-import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
+import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useBlackcatStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
 import {
-  CLI_APPS_CHANGED_EVENT,
-  installedCliAppsFromPayload,
-  isCliAppsPayload,
+    CLI_APPS_CHANGED_EVENT,
+    installedCliAppsFromPayload,
+    isCliAppsPayload,
 } from "@/lib/cli-app-events";
 import {
-  MCP_PRESETS_CHANGED_EVENT,
-  installedMcpPresetsFromPayload,
-  isMcpPresetsPayload,
+    MCP_PRESETS_CHANGED_EVENT,
+    installedMcpPresetsFromPayload,
+    isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import type {
-  ChatSummary,
-  CliAppInfo,
-  McpPresetInfo,
-  SettingsPayload,
-  SlashCommand,
-  UIMessage,
-  WorkspaceScopePayload,
-  WorkspacesPayload,
-} from "@/lib/types";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
+import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import type {
+    ChatSummary,
+    CliAppInfo,
+    McpPresetInfo,
+    SettingsPayload,
+    SlashCommand,
+    UIMessage,
+    WorkspaceScopePayload,
+    WorkspacesPayload,
+} from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {

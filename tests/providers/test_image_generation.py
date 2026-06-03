@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from nanobot.providers.image_generation import (
+from blackcat.providers.image_generation import (
     AIHubMixImageGenerationClient,
     CodexImageGenerationClient,
     GeminiImageGenerationClient,
@@ -203,7 +203,7 @@ async def test_aihubmix_image_generation_payload_and_response() -> None:
     client = AIHubMixImageGenerationClient(
         api_key="sk-ahm-test",
         api_base="https://aihubmix.com/v1/",
-        extra_headers={"APP-Code": "nanobot"},
+        extra_headers={"APP-Code": "blackcat"},
         extra_body={"quality": "low"},
         client=fake,  # type: ignore[arg-type]
     )
@@ -219,7 +219,7 @@ async def test_aihubmix_image_generation_payload_and_response() -> None:
     call = fake.calls[0]
     assert call["url"] == "https://aihubmix.com/v1/models/openai/gpt-image-2-free/predictions"
     assert call["headers"]["Authorization"] == "Bearer sk-ahm-test"
-    assert call["headers"]["APP-Code"] == "nanobot"
+    assert call["headers"]["APP-Code"] == "blackcat"
     assert call["json"] == {
         "input": {
             "prompt": "draw a logo",

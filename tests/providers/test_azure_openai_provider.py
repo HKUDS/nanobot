@@ -4,9 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
-from nanobot.providers.base import LLMResponse
-
+from blackcat.providers.azure_openai_provider import AzureOpenAIProvider
+from blackcat.providers.base import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Init & validation

@@ -9,10 +9,10 @@ pytest.importorskip("nh3")
 pytest.importorskip("mistune")
 from nio import RoomSendResponse, SyncError
 
-import nanobot.channels.matrix as matrix_module
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.matrix import (
+import blackcat.channels.matrix as matrix_module
+from blackcat.bus.events import OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.channels.matrix import (
     MATRIX_HTML_FORMAT,
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
@@ -282,14 +282,14 @@ async def test_start_skips_load_store_when_device_id_missing(
         coro.close()
         return _DummyTask()
 
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.AsyncClientConfig",
+        "blackcat.channels.matrix.AsyncClientConfig",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
-    monkeypatch.setattr("nanobot.channels.matrix.AsyncClient", _fake_client)
+    monkeypatch.setattr("blackcat.channels.matrix.AsyncClient", _fake_client)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
+        "blackcat.channels.matrix.asyncio.create_task", _fake_create_task
     )
 
     channel = MatrixChannel(_make_config(device_id=""), MessageBus())
@@ -452,14 +452,14 @@ async def test_start_disables_e2ee_when_configured(
         coro.close()
         return _DummyTask()
 
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.AsyncClientConfig",
+        "blackcat.channels.matrix.AsyncClientConfig",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
-    monkeypatch.setattr("nanobot.channels.matrix.AsyncClient", _fake_client)
+    monkeypatch.setattr("blackcat.channels.matrix.AsyncClient", _fake_client)
     monkeypatch.setattr(
-        "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
+        "blackcat.channels.matrix.asyncio.create_task", _fake_create_task
     )
 
     channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=False), MessageBus())
@@ -891,7 +891,7 @@ async def test_on_message_sets_thread_metadata_when_threaded_event() -> None:
 async def test_on_media_message_downloads_attachment_and_sets_metadata(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -951,7 +951,7 @@ async def test_on_media_message_downloads_attachment_and_sets_metadata(
 async def test_on_media_message_sets_thread_metadata_when_threaded_event(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -996,7 +996,7 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
 async def test_on_media_message_respects_declared_size_limit(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(max_media_bytes=3), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -1031,7 +1031,7 @@ async def test_on_media_message_respects_declared_size_limit(
 async def test_on_media_message_uses_server_limit_when_smaller_than_local_limit(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(max_media_bytes=10), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -1065,7 +1065,7 @@ async def test_on_media_message_uses_server_limit_when_smaller_than_local_limit(
 
 @pytest.mark.asyncio
 async def test_on_media_message_handles_download_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -1104,7 +1104,7 @@ async def test_on_media_message_handles_download_error(monkeypatch, tmp_path) ->
 
 @pytest.mark.asyncio
 async def test_on_media_message_decrypts_encrypted_media(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         matrix_module,
         "decrypt_attachment",
@@ -1154,7 +1154,7 @@ async def test_on_media_message_decrypts_encrypted_media(monkeypatch, tmp_path) 
 
 @pytest.mark.asyncio
 async def test_on_media_message_handles_decrypt_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_data_dir", lambda: tmp_path)
 
     def _raise(*args, **kwargs):
         raise matrix_module.EncryptionError("boom")
@@ -2011,7 +2011,7 @@ async def test_fetch_media_rejects_missing_declared_size(monkeypatch, tmp_path) 
     channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
     client = _FakeAsyncClient("https://matrix.org", "", "", None)
     channel.client = client
-    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_media_dir", lambda _name: tmp_path)
 
     async def _download_should_not_run(*_args, **_kwargs):
         raise AssertionError("download should be rejected before fetching bytes")
@@ -2039,7 +2039,7 @@ async def test_fetch_media_rejects_bool_declared_size(monkeypatch, tmp_path) -> 
     channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
     client = _FakeAsyncClient("https://matrix.org", "", "", None)
     channel.client = client
-    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_media_dir", lambda _name: tmp_path)
 
     async def _download_should_not_run(*_args, **_kwargs):
         raise AssertionError("bool size should be rejected before fetching bytes")
@@ -2067,7 +2067,7 @@ async def test_fetch_media_rejects_declared_oversized_before_download(monkeypatc
     channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
     client = _FakeAsyncClient("https://matrix.org", "", "", None)
     channel.client = client
-    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_media_dir", lambda _name: tmp_path)
 
     async def _download_should_not_run(*_args, **_kwargs):
         raise AssertionError("download should be rejected before fetching bytes")
@@ -2095,7 +2095,7 @@ async def test_fetch_media_maps_streaming_cap_to_too_large(monkeypatch, tmp_path
     channel = MatrixChannel(_make_config(max_media_bytes=8), MessageBus())
     client = _FakeAsyncClient("https://matrix.org", "", "", None)
     channel.client = client
-    monkeypatch.setattr("nanobot.channels.matrix.get_media_dir", lambda _name: tmp_path)
+    monkeypatch.setattr("blackcat.channels.matrix.get_media_dir", lambda _name: tmp_path)
 
     async def _download_too_large(_mxc_url: str, _limit_bytes: int):
         raise matrix_module._MediaTooLargeError

@@ -58,13 +58,13 @@ const HOST_WS_CLOSED = 3;
 
 declare global {
   interface Window {
-    nanobotHost?: NanobotHostApi;
+    blackcatHost?: NanobotHostApi;
   }
 }
 
 export function getHostApi(): NanobotHostApi | null {
   if (typeof window === "undefined") return null;
-  return window.nanobotHost ?? null;
+  return window.blackcatHost ?? null;
 }
 
 export function toRuntimeSurface(surface: string | null | undefined): RuntimeSurface {

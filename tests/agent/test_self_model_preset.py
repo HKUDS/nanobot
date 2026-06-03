@@ -3,11 +3,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.self import MyTool
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ModelPresetConfig
-from nanobot.providers.factory import ProviderSnapshot
+from blackcat.agent.loop import AgentLoop
+from blackcat.agent.tools.self import MyTool
+from blackcat.bus.queue import MessageBus
+from blackcat.config.schema import ModelPresetConfig
+from blackcat.providers.factory import ProviderSnapshot
 
 
 def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
@@ -262,12 +262,12 @@ def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
 def test_from_config_injects_default_preset(tmp_path) -> None:
     from unittest.mock import patch
 
-    from nanobot.config.schema import Config
+    from blackcat.config.schema import Config
     config = Config.model_validate({
         "agents": {"defaults": {"model": "openai/gpt-4.1", "workspace": str(tmp_path)}},
     })
     fake_provider = _provider("openai/gpt-4.1")
-    with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
+    with patch("blackcat.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
     assert loop.model == "openai/gpt-4.1"
     assert loop.model_preset is None
@@ -278,13 +278,13 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
 def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -> None:
     from unittest.mock import patch
 
-    from nanobot.config.schema import Config
+    from blackcat.config.schema import Config
     config = Config.model_validate({
         "agents": {"defaults": {"model": "openai/gpt-4.1", "workspace": str(tmp_path)}},
         "model_presets": {"fast": {"model": "openai/gpt-4.1-mini"}},
     })
     fake_provider = _provider("openai/gpt-4.1")
-    with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
+    with patch("blackcat.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
     assert loop._provider_snapshot_loader is None
     assert loop._preset_snapshot_loader is not None

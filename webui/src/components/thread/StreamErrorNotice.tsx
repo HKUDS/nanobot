@@ -2,8 +2,8 @@ import { AlertTriangle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import type { StreamError } from "@/lib/blackcat-client";
 import { cn } from "@/lib/utils";
-import type { StreamError } from "@/lib/nanobot-client";
 
 interface StreamErrorNoticeProps {
   error: StreamError;

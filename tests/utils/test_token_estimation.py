@@ -1,4 +1,4 @@
-from nanobot.utils.helpers import estimate_prompt_tokens_chain
+from blackcat.utils.helpers import estimate_prompt_tokens_chain
 
 
 class _NoCounterProvider:

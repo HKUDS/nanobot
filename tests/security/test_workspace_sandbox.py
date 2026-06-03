@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from nanobot.security.workspace_access import workspace_sandbox_status
+from blackcat.security.workspace_access import workspace_sandbox_status
 
 
 def test_workspace_sandbox_disabled(tmp_path: Path) -> None:

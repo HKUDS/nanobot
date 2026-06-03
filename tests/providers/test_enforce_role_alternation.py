@@ -1,6 +1,6 @@
 """Tests for LLMProvider._enforce_role_alternation."""
 
-from nanobot.providers.base import LLMProvider, _SYNTHETIC_USER_CONTENT
+from blackcat.providers.base import _SYNTHETIC_USER_CONTENT, LLMProvider
 
 
 class TestEnforceRoleAlternation:

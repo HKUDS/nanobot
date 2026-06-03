@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.webui.transcript import (
+from blackcat.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_transcript_object,
     read_transcript_lines,
@@ -11,7 +11,7 @@ from nanobot.webui.transcript import (
 
 
 def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t1"
     append_transcript_object(key, {"event": "user", "chat_id": "t1", "text": "hello"})
     lines = read_transcript_lines(key)
@@ -20,7 +20,7 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
 
 
 def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t2"
     for ev in (
         {"event": "user", "chat_id": "t2", "text": "q"},
@@ -143,7 +143,7 @@ def test_replay_infers_file_media_from_attachment_name() -> None:
 
 
 def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file"
     for ev in (
         {"event": "user", "chat_id": "t-file", "text": "edit"},
@@ -387,7 +387,7 @@ def test_replay_tool_events_keeps_phase_update_when_trace_is_deduped() -> None:
 
 
 def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file-progress"
     for ev in (
         {"event": "user", "chat_id": "t-file-progress", "text": "edit"},
@@ -460,7 +460,7 @@ def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, m
 
 
 def test_replay_file_edit_pending_placeholder_upgrades_to_path(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file-pending"
     for ev in (
         {"event": "user", "chat_id": "t-file-pending", "text": "write"},
@@ -522,7 +522,7 @@ def test_replay_file_edit_pending_placeholder_upgrades_to_path(tmp_path, monkeyp
 
 
 def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-file-order"
     for ev in (
         {"event": "user", "chat_id": "t-file-order", "text": "edit"},
@@ -582,9 +582,9 @@ def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypat
 
 
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
-    from nanobot.webui.transcript import build_webui_thread_response
+    from blackcat.webui.transcript import build_webui_thread_response
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t3"
     append_transcript_object(key, {"event": "user", "chat_id": "t3", "text": "x"})
     out = build_webui_thread_response(key, augment_user_media=None)

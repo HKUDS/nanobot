@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Menu, Moon, Sun } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
-import { Sidebar } from "@/components/Sidebar";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
+import { Sidebar } from "@/components/Sidebar";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Menu, Moon, Sun } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
-import { useSessions } from "@/hooks/useSessions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
+import { useSessions } from "@/hooks/useSessions";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
-import { cn } from "@/lib/utils";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   clearSavedSecret,
   deriveWsUrl,
@@ -22,8 +24,10 @@ import {
   saveSecret,
 } from "@/lib/bootstrap";
 import { deriveTitle } from "@/lib/format";
-import { NanobotClient } from "@/lib/nanobot-client";
-import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import {
+  createRuntimeHost,
+  toRuntimeSurface,
+} from "@/lib/runtime";
 import type {
   ChatSummary,
   RuntimeSurface,
@@ -31,14 +35,10 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
-import {
-  createRuntimeHost,
-  toRuntimeSurface,
-} from "@/lib/runtime";
+import { cn } from "@/lib/utils";
 import { projectNameFromPath } from "@/lib/workspace";
+import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { BlackcatClient } from "./lib/blackcat-client";
 
 type BootState =
   | { status: "loading" }
@@ -46,16 +46,16 @@ type BootState =
   | { status: "auth"; failed?: boolean }
   | {
       status: "ready";
-      client: NanobotClient;
+      client: BlackcatClient;
       token: string;
       tokenExpiresAt: number;
       modelName: string | null;
       runtimeSurface: RuntimeSurface;
     };
 
-const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
-const COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
-const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
+const SIDEBAR_STORAGE_KEY = "blackcat-webui.sidebar";
+const COMPLETED_RUNS_STORAGE_KEY = "blackcat-webui.sidebar.completed-runs.v1";
+const RESTART_STARTED_KEY = "blackcat-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
@@ -330,7 +330,7 @@ export default function App() {
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
           const runtimeSurface = toRuntimeSurface(boot.runtime_surface);
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-          const client = new NanobotClient({
+          const client = new BlackcatClient({
             url,
             socketFactory: runtimeHost.socketFactory,
             onReauth: async () => {

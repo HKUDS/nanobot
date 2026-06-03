@@ -1,8 +1,8 @@
+import { Check } from "lucide-react";
 import { Children, isValidElement, useMemo, type ReactNode } from "react";
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
-import { Check } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -56,7 +56,7 @@ function markdownAttachmentKind(source: string, label: string): "image" | "video
 
 function safeHtmlNode(tagName: string, children: MarkdownAstNode[]): MarkdownAstNode {
   return {
-    type: `nanobotSafeHtml${tagName}`,
+    type: `blackcatSafeHtml${tagName}`,
     data: { hName: tagName },
     children,
   };
@@ -149,11 +149,11 @@ function normalizeSafeDetails(children: MarkdownAstNode[]): MarkdownAstNode[] {
       normalizeSafeDetails(children.slice(index + 1, closeIndex)),
     );
     next.push({
-      type: "nanobotSafeHtmlDetails",
+      type: "blackcatSafeHtmlDetails",
       data: { hName: "details" },
       children: [
         {
-          type: "nanobotSafeHtmlSummary",
+          type: "blackcatSafeHtmlSummary",
           data: { hName: "summary" },
           children: [safeText(open.summary)],
         },

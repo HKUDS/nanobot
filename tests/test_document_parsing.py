@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from nanobot.utils.document import (
+from blackcat.utils.document import (
     SUPPORTED_EXTENSIONS,
     _is_text_extension,
     extract_text,

@@ -1,8 +1,8 @@
 import pytest
 
-from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.loader import ToolLoader
+from blackcat.agent.tools.base import Tool
+from blackcat.agent.tools.context import ToolContext
+from blackcat.agent.tools.loader import ToolLoader
 
 
 class _CoreOnlyTool(Tool):
@@ -64,7 +64,7 @@ class _UniversalTool(Tool):
 
 @pytest.mark.asyncio
 async def test_loader_filters_by_scope():
-    from nanobot.agent.tools.registry import ToolRegistry
+    from blackcat.agent.tools.registry import ToolRegistry
 
     loader = ToolLoader(test_classes=[_CoreOnlyTool, _SubagentOnlyTool, _UniversalTool])
 

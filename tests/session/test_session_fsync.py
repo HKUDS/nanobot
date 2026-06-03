@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.session.manager import SessionManager
+from blackcat.session.manager import SessionManager
 
 _IS_WINDOWS = sys.platform == "win32"
 

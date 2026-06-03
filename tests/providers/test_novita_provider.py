@@ -2,9 +2,9 @@
 
 from unittest.mock import patch
 
-from nanobot.config.schema import Config, ProvidersConfig
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from blackcat.config.schema import Config, ProvidersConfig
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import PROVIDERS, find_by_name
 
 
 def test_novita_config_field_exists() -> None:
@@ -75,7 +75,7 @@ def test_novita_gateway_routes_unprefixed_models_when_configured() -> None:
 
 def test_novita_preserves_model_api_id() -> None:
     spec = find_by_name("novita")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="novita-key",
             default_model="deepseek-v4-pro",

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -20,7 +20,7 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     we now hand the error back to the LLM as a recoverable tool result and
     rely on ``repeated_workspace_violation_error`` to throttle bypass loops.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(side_effect=[
@@ -64,7 +64,7 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
 
 def test_is_ssrf_violation_recognizes_private_url_blocks():
     """SSRF rejections are classified separately from workspace boundaries."""
-    from nanobot.agent.runner import AgentRunner
+    from blackcat.agent.runner import AgentRunner
 
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
     assert AgentRunner._is_ssrf_violation(ssrf_msg) is True
@@ -88,7 +88,7 @@ def test_is_ssrf_violation_recognizes_private_url_blocks():
 @pytest.mark.asyncio
 async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
     """SSRF stays blocked, but the runtime gives the LLM a final chance to recover."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(side_effect=[
@@ -141,7 +141,7 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
     turn (silent hang on Telegram per #3605); now the LLM gets the soft
     error back and can finalize on the next iteration.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -195,7 +195,7 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
     the runner replaces the tool result with a hard "stop trying" message
     so the model finally gives up and surfaces the boundary to the user.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     bypass_attempts = [
         ToolCallRequest(

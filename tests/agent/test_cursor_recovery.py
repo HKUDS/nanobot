@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from blackcat.agent.memory import MemoryStore
 
 
 @pytest.fixture
@@ -159,6 +159,7 @@ class TestCursorValidationInvariant:
         warning, subsequent reads on the same store stay quiet.  Without
         this, a poisoned file produces one warning per agent turn."""
         import logging
+
         from loguru import logger as loguru_logger
 
         store.history_file.write_text(

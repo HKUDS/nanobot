@@ -3,12 +3,12 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import find_by_name
 
 
 def test_custom_provider_parse_handles_empty_choices() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
     response = SimpleNamespace(choices=[])
 
@@ -19,7 +19,7 @@ def test_custom_provider_parse_handles_empty_choices() -> None:
 
 
 def test_custom_provider_parse_accepts_plain_string_response() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     result = provider._parse("hello from backend")
@@ -29,7 +29,7 @@ def test_custom_provider_parse_accepts_plain_string_response() -> None:
 
 
 def test_custom_provider_parse_accepts_dict_response() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     result = provider._parse({
@@ -87,7 +87,7 @@ def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> N
 
 def test_local_provider_502_error_includes_reachability_hint() -> None:
     spec = find_by_name("ollama")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(api_base="http://localhost:11434/v1", spec=spec)
 
     result = provider._handle_error(

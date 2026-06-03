@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from nanobot.agent.tools.self import MyTool
+from blackcat.agent.tools.self import MyTool
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -615,7 +615,7 @@ class TestSubagentStatusFormatting:
 
     def test_format_single_status(self):
         """_format_value should produce a rich multi-line display for a SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         status = SubagentStatus(
             task_id="abc12345",
@@ -642,7 +642,7 @@ class TestSubagentStatusFormatting:
 
     def test_format_status_dict(self):
         """_format_value should handle dict[str, SubagentStatus] with rich display."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         statuses = {
             "abc12345": SubagentStatus(
@@ -666,7 +666,7 @@ class TestSubagentStatusFormatting:
 
     def test_format_status_with_error(self):
         """Status with error should include the error message."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         status = SubagentStatus(
             task_id="err00001",
@@ -688,8 +688,8 @@ class TestSubagentHookStatus:
     @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
         """after_iteration should copy iteration, tool_events, usage to status."""
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import SubagentStatus, _SubagentHook
+        from blackcat.agent.hook import AgentHookContext
+        from blackcat.agent.subagent import SubagentStatus, _SubagentHook
 
         status = SubagentStatus(
             task_id="test",
@@ -715,8 +715,8 @@ class TestSubagentHookStatus:
     @pytest.mark.asyncio
     async def test_after_iteration_with_error(self):
         """after_iteration should set status.error when context has an error."""
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import SubagentStatus, _SubagentHook
+        from blackcat.agent.hook import AgentHookContext
+        from blackcat.agent.subagent import SubagentStatus, _SubagentHook
 
         status = SubagentStatus(
             task_id="test",
@@ -738,8 +738,8 @@ class TestSubagentHookStatus:
     @pytest.mark.asyncio
     async def test_after_iteration_no_status_is_noop(self):
         """after_iteration with no status should be a no-op."""
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import _SubagentHook
+        from blackcat.agent.hook import AgentHookContext
+        from blackcat.agent.subagent import _SubagentHook
 
         hook = _SubagentHook("test")
         context = AgentHookContext(iteration=1, messages=[])
@@ -756,7 +756,7 @@ class TestCheckpointCallback:
     async def test_checkpoint_updates_phase_and_iteration(self):
         """The _on_checkpoint callback should update status.phase and iteration."""
 
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         status = SubagentStatus(
             task_id="cp",
@@ -781,7 +781,7 @@ class TestCheckpointCallback:
     @pytest.mark.asyncio
     async def test_checkpoint_preserves_phase_on_missing_key(self):
         """If payload doesn't have 'phase', status.phase should stay unchanged."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         status = SubagentStatus(
             task_id="cp",
@@ -811,7 +811,7 @@ class TestInspectTaskStatuses:
     @pytest.mark.asyncio
     async def test_inspect_task_statuses_accessible(self):
         """subagents is READ_ONLY — check should show subagent statuses."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         loop = _make_mock_loop()
         loop.subagents._task_statuses = {
@@ -834,7 +834,7 @@ class TestInspectTaskStatuses:
     @pytest.mark.asyncio
     async def test_inspect_single_subagent_status_accessible(self):
         """subagents._task_statuses.<id> should return individual SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
+        from blackcat.agent.subagent import SubagentStatus
 
         loop = _make_mock_loop()
         status = SubagentStatus(
@@ -902,9 +902,9 @@ class TestRuntimeVarsInspectFallback:
     @pytest.mark.asyncio
     async def test_inspect_runtime_var_string(self):
         tool = _make_tool()
-        await tool.execute(action="set", key="current_project", value="nanobot")
+        await tool.execute(action="set", key="current_project", value="blackcat")
         result = await tool.execute(action="check", key="current_project")
-        assert "nanobot" in result
+        assert "blackcat" in result
 
     @pytest.mark.asyncio
     async def test_inspect_runtime_var_dict(self):
@@ -1118,7 +1118,7 @@ class TestLastUsageInSummary:
 class TestSetContext:
 
     def test_set_context_stores_channel_and_chat_id(self):
-        from nanobot.agent.tools.context import RequestContext
+        from blackcat.agent.tools.context import RequestContext
         tool = _make_tool()
         tool.set_context(RequestContext(channel="feishu", chat_id="oc_abc123"))
         assert tool._channel == "feishu"

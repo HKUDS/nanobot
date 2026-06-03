@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.providers.anthropic_provider import AnthropicProvider
+from blackcat.providers.anthropic_provider import AnthropicProvider
 
 
 def _final_message_stub(text: str = "Hi") -> SimpleNamespace:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from nanobot.utils.restart import (
+from blackcat.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
     format_restart_completed_message,
@@ -63,7 +63,7 @@ def test_restart_notice_clears_stale_metadata(monkeypatch):
 
 
 def test_format_restart_completed_message_with_elapsed(monkeypatch):
-    monkeypatch.setattr("nanobot.utils.restart.time.time", lambda: 102.0)
+    monkeypatch.setattr("blackcat.utils.restart.time.time", lambda: 102.0)
     assert format_restart_completed_message("100.0") == "Restart completed in 2.0s."
 
 

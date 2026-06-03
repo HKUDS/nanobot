@@ -535,8 +535,8 @@ describe("AgentActivityCluster", () => {
             id: "t-search",
             role: "tool",
             kind: "trace",
-            content: 'web_search({"query":"nanobot architecture"})',
-            traces: ['web_search({"query":"nanobot architecture"})'],
+            content: 'web_search({"query":"blackcat architecture"})',
+            traces: ['web_search({"query":"blackcat architecture"})'],
             createdAt: 1,
           },
           {
@@ -881,7 +881,7 @@ describe("AgentActivityCluster", () => {
           fileEdits: [{
             call_id: "call-write",
             tool: "write_file",
-            path: "/Users/renxubin/.nanobot/workspace/agent-research-video/composition.html",
+            path: "/Users/renxubin/.blackcat/workspace/agent-research-video/composition.html",
             phase: "error",
             added: 0,
             deleted: 0,

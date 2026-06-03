@@ -21,11 +21,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
-from nanobot.channels.manager import ChannelManager
-from nanobot.config.schema import Config
+from blackcat.bus.events import OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.channels.base import BaseChannel
+from blackcat.channels.manager import ChannelManager
+from blackcat.config.schema import Config
 
 
 class _MockChannel(BaseChannel):
@@ -67,7 +67,7 @@ def manager() -> ChannelManager:
 
 def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "nanobot.webui.workspaces.read_webui_default_access_mode",
+        "blackcat.webui.workspaces.read_webui_default_access_mode",
         lambda: "default",
     )
     config = Config.model_validate(

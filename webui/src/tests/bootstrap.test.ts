@@ -15,8 +15,8 @@ describe("bootstrap helpers", () => {
   });
 
   it("preserves the host socket bridge URL", () => {
-    expect(deriveWsUrl("/", "tok en", "nanobot-host://engine/")).toBe(
-      "nanobot-host://engine/?token=tok%20en",
+    expect(deriveWsUrl("/", "tok en", "blackcat-host://engine/")).toBe(
+      "blackcat-host://engine/?token=tok%20en",
     );
   });
 

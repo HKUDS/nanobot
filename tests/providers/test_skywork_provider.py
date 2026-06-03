@@ -2,9 +2,9 @@
 
 from unittest.mock import patch
 
-from nanobot.config.schema import Config, ProvidersConfig
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from blackcat.config.schema import Config, ProvidersConfig
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import PROVIDERS, find_by_name
 
 
 def test_skywork_config_field_exists() -> None:
@@ -58,7 +58,7 @@ def test_skywork_model_auto_matches_with_default_api_base() -> None:
 
 def test_skywork_preserves_model_id_and_uses_chat_completion_max_tokens() -> None:
     spec = find_by_name("skywork")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="sky-key",
             default_model="skywork-ai/skyclaw-v1",

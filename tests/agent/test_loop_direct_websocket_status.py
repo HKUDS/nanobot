@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings, LLMResponse
-from nanobot.session.webui_turns import WebuiTurnCoordinator
+from blackcat.agent.loop import AgentLoop
+from blackcat.bus.events import OutboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.providers.base import GenerationSettings, LLMResponse
+from blackcat.session.webui_turns import WebuiTurnCoordinator
 
 
 def _make_loop(tmp_path):

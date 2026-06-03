@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.agent.tools.web import WebFetchTool, _validate_url
+from blackcat.agent.tools.web import WebFetchTool, _validate_url
 
 
 def _fake_resolve_public(hostname, port, family=0, type_=0):
@@ -42,8 +42,8 @@ class FakeClient:
 
 
 def _patch_env():
-    return patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public), \
-           patch("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    return patch("blackcat.security.network.socket.getaddrinfo", _fake_resolve_public), \
+           patch("blackcat.agent.tools.web.httpx.AsyncClient", FakeClient)
 
 
 # --- urlparse / _validate_url level tests ---

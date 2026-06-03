@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from blackcat.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -197,7 +197,7 @@ def test_payload_uses_anygen_official_domain_for_logo(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://www.google.com/s2/favicons?domain=anygen.io&sz=64"
 
 
-def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
+def test_payload_includes_blackcat_extension_registry(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     _write_cache(manager._cache_path("harness"), {"meta": {"updated": "2026-04-16"}, "clis": []})
     _write_cache(manager._cache_path("public"), {"meta": {"updated": "2026-04-18"}, "clis": []})
@@ -233,8 +233,8 @@ def test_payload_includes_nanobot_extension_registry(tmp_path: Path) -> None:
     assert app["logo_url"] == "https://raw.githubusercontent.com/heygen-com/hyperframes/main/assets/logo.png"
     assert app["brand_color"] == "#111827"
     assert app["install_supported"] is True
-    assert app["manifest"]["source"] == "nanobot-extension"
-    assert app["manifest"]["trust"]["registry"] == "nanobot-extension"
+    assert app["manifest"]["source"] == "blackcat-extension"
+    assert app["manifest"]["trust"]["registry"] == "blackcat-extension"
 
 
 def test_optional_extension_registry_failure_does_not_break_payload(
@@ -262,7 +262,7 @@ def test_optional_extension_registry_failure_does_not_break_payload(
     def fail_get(*args, **kwargs):
         raise RuntimeError("network unavailable")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fail_get)
 
     payload = manager.payload()
 
@@ -317,7 +317,7 @@ def test_install_records_available_cli_without_reinstalling(
 
     monkeypatch.setattr(manager, "_run_argv", fail_run)
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda command: str(resolved) if command == "lark-cli" else None,
     )
 
@@ -383,7 +383,7 @@ def test_install_recovers_stale_npm_global_directory(
 
     monkeypatch.setattr(manager, "_run_argv", fake_run)
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda command: npm if command == "npm" else None,
     )
 
@@ -418,11 +418,11 @@ def test_install_records_entry_point_path_and_pip_distribution(
         lambda app: "---\nname: cli-anything-gimp\ndescription: GIMP\n---\n# GIMP\n",
     )
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda command: str(resolved) if command == "cli-anything-gimp" else None,
     )
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.importlib_metadata.distributions",
+        "blackcat.apps.cli.service.importlib_metadata.distributions",
         lambda: [
             SimpleNamespace(
                 entry_points=[
@@ -460,7 +460,7 @@ def test_fetch_skill_content_rejects_untrusted_urls(
     def fail_get(*args, **kwargs):
         raise AssertionError("untrusted skill URL should not be fetched")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fail_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fail_get)
 
     assert manager._fetch_skill_content({
         "name": "evil",
@@ -490,7 +490,7 @@ def test_fetch_skill_content_allows_cli_anything_raw_skill_url(
         seen.append(url)
         return Response()
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fake_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fake_get)
 
     content = manager._fetch_skill_content({
         "name": "gimp",
@@ -521,17 +521,17 @@ def test_fetch_skill_content_uses_extension_raw_base_for_relative_skills(
         seen.append(url)
         return Response()
 
-    monkeypatch.setattr("nanobot.apps.cli.service.httpx.get", fake_get)
+    monkeypatch.setattr("blackcat.apps.cli.service.httpx.get", fake_get)
 
     content = manager._fetch_skill_content({
         "name": "hyperframes",
         "skill_md": "skills/hyperframes/SKILL.md",
-        "_raw_base": "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main",
+        "_raw_base": "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main",
     })
 
     assert content and "# HyperFrames" in content
     assert seen == [
-        "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/skills/hyperframes/SKILL.md"
+        "https://raw.githubusercontent.com/Re-bin/blackcat-extension/main/skills/hyperframes/SKILL.md"
     ]
 
 
@@ -622,7 +622,7 @@ def test_uninstall_keeps_state_when_entry_point_still_available(
         lambda argv, *, timeout: subprocess.CompletedProcess(argv, 0, stdout="ok", stderr=""),
     )
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda command: "/usr/local/bin/cli-anything-gimp" if command == "cli-anything-gimp" else None,
     )
 
@@ -712,7 +712,7 @@ def test_run_installed_cli_uses_argv_without_shell(
     _seed_catalog(manager)
     resolved = str(tmp_path / "bin" / "cli-anything-gimp")
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
@@ -725,7 +725,7 @@ def test_run_installed_cli_uses_argv_without_shell(
             stderr="",
         )
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("blackcat.apps.cli.service.subprocess.run", fake_run)
     manager._save_installed(
         {
             "gimp": {
@@ -751,7 +751,7 @@ def test_run_reports_created_artifacts(
     _seed_catalog(manager)
     resolved = str(tmp_path / "bin" / "cli-anything-gimp")
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
@@ -760,7 +760,7 @@ def test_run_reports_created_artifacts(
         (cwd / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
         return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("blackcat.apps.cli.service.subprocess.run", fake_run)
     manager._save_installed({"gimp": {"entry_point": "cli-anything-gimp"}})
 
     result = manager.run("gimp", ["render"])

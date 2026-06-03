@@ -1,117 +1,117 @@
 import {
-  useCallback,
-  useEffect,
-  forwardRef,
-  useMemo,
-  useState,
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-} from "react";
-import {
-  Activity,
-  Bot,
-  Brain,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Cloud,
-  Cpu,
-  Database,
-  Eye,
-  EyeOff,
-  Gem,
-  Globe2,
-  Grid3X3,
-  HardDrive,
-  Hexagon,
-  ImageIcon,
-  Layers,
-  Loader2,
-  LogOut,
-  Moon,
-  PlayCircle,
-  Plus,
-  Orbit,
-  Palette,
-  Pencil,
-  RotateCcw,
-  Search,
-  Server,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  Trash2,
-  Triangle,
-  Waves,
-  X,
-  Zap,
-  type LucideIcon,
+    Activity,
+    Bot,
+    Brain,
+    Check,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Cloud,
+    Cpu,
+    Database,
+    Eye,
+    EyeOff,
+    Gem,
+    Globe2,
+    Grid3X3,
+    HardDrive,
+    Hexagon,
+    ImageIcon,
+    Layers,
+    Loader2,
+    LogOut,
+    Moon,
+    Orbit,
+    Palette,
+    Pencil,
+    PlayCircle,
+    Plus,
+    RotateCcw,
+    Search,
+    Server,
+    ShieldCheck,
+    SlidersHorizontal,
+    Sparkles,
+    Trash2,
+    Triangle,
+    Waves,
+    X,
+    Zap,
+    type LucideIcon,
 } from "lucide-react";
+import {
+    forwardRef,
+    useCallback,
+    useEffect,
+    useMemo,
+    useState,
+    type Dispatch,
+    type ReactNode,
+    type SetStateAction,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createModelConfiguration,
-  fetchSettings,
-  fetchCliApps,
-  fetchMcpPresets,
-  fetchProviderModels,
-  importMcpConfig,
-  loginProviderOAuth,
-  logoutProviderOAuth,
-  runCliAppAction,
-  runMcpPresetAction,
-  saveCustomMcpServer,
-  updateImageGenerationSettings,
-  updateMcpServerTools,
-  updateModelConfiguration,
-  updateNetworkSafetySettings,
-  updateProviderSettings,
-  updateSettings,
-  updateWebSearchSettings,
+    createModelConfiguration,
+    fetchCliApps,
+    fetchMcpPresets,
+    fetchProviderModels,
+    fetchSettings,
+    importMcpConfig,
+    loginProviderOAuth,
+    logoutProviderOAuth,
+    runCliAppAction,
+    runMcpPresetAction,
+    saveCustomMcpServer,
+    updateImageGenerationSettings,
+    updateMcpServerTools,
+    updateModelConfiguration,
+    updateNetworkSafetySettings,
+    updateProviderSettings,
+    updateSettings,
+    updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
-import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import {
-  logoFallbackUrls,
-  providerBrand,
-  providerDisplayLabel,
+    logoFallbackUrls,
+    providerBrand,
+    providerDisplayLabel,
 } from "@/lib/provider-brand";
+import { getHostApi } from "@/lib/runtime";
+import type {
+    CliAppInfo,
+    CliAppsPayload,
+    ImageGenerationSettingsUpdate,
+    McpPresetInfo,
+    McpPresetsPayload,
+    NetworkSafetySettingsUpdate,
+    ProviderModelsPayload,
+    SettingsPayload,
+    WebSearchSettingsUpdate,
+    WebuiDefaultAccessMode,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
-import type {
-  CliAppInfo,
-  CliAppsPayload,
-  ImageGenerationSettingsUpdate,
-  McpPresetInfo,
-  McpPresetsPayload,
-  NetworkSafetySettingsUpdate,
-  ProviderModelsPayload,
-  SettingsPayload,
-  WebSearchSettingsUpdate,
-  WebuiDefaultAccessMode,
-} from "@/lib/types";
 
 export type SettingsSectionKey =
   | "overview"
@@ -167,7 +167,7 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
+const NANOBOT_ICON_SRC = "/brand/blackcat_icon.png";
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
@@ -222,7 +222,7 @@ interface CustomMcpForm {
   toolTimeout: string;
 }
 
-const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
+const LOCAL_PREFS_STORAGE_KEY = "blackcat-webui.settings-preferences";
 
 const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
@@ -411,7 +411,7 @@ export function SettingsView({
     presetLabel: "Default",
     contextWindowTokens: 65_536,
     timezone: "UTC",
-    botName: "nanobot",
+    botName: "blackcat",
     botIcon: "",
     toolHintMaxLength: 40,
   });
@@ -1521,9 +1521,9 @@ function OverviewSettings({
         <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
           <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
-              <NanobotBrandLogo size="lg" testId="overview-nanobot-logo" />
+              <NanobotBrandLogo size="lg" testId="overview-blackcat-logo" />
               <div className="min-w-0">
-                <div className="text-[12px] font-medium text-muted-foreground">nanobot</div>
+                <div className="text-[12px] font-medium text-muted-foreground">blackcat</div>
                 <div className="mt-0.5 truncate text-[18px] font-semibold leading-6 text-foreground">
                   {settings.agent.model}
                 </div>
@@ -2882,7 +2882,7 @@ function AppsCatalogSettings({
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
               "settings.apps.description",
-              "Add local app adapters and connected tool servers that nanobot can use from chat.",
+              "Add local app adapters and connected tool servers that blackcat can use from chat.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
@@ -2938,7 +2938,7 @@ function AppsCatalogSettings({
 
       {requiresRestartPending ? (
         <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-          <span>{tx("settings.mcp.restartRequired", "Restart nanobot to connect updated MCP tools.")}</span>
+          <span>{tx("settings.mcp.restartRequired", "Restart blackcat to connect updated MCP tools.")}</span>
           {onRestart ? (
             <Button
               type="button"
@@ -3939,7 +3939,7 @@ function RuntimeSettings({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
+          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever blackcat uses a display name.")}>
             <Input
               value={form.botName}
               onChange={(event) => setForm((prev) => ({ ...prev, botName: event.target.value }))}
@@ -3965,7 +3965,7 @@ function RuntimeSettings({
             pendingRestart={requiresRestartPending}
             dirtyMessage={
               isNativeHost
-                ? tx("settings.status.hostRestartAfterSaving", "Save changes and nanobot will restart its engine.")
+                ? tx("settings.status.hostRestartAfterSaving", "Save changes and blackcat will restart its engine.")
                 : tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
             }
             pendingMessage={

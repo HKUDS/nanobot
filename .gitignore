@@ -6,7 +6,7 @@
 .env
 .web
 .orion
-nanobot-desktop/
+blackcat-desktop/
 desktop/
 
 # Claude / AI assistant artifacts

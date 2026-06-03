@@ -5,13 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.agent.tools.cli_apps import CliAppsTool
-from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
-from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.security.workspace_access import (
+from blackcat.agent.tools.cli_apps import CliAppsTool
+from blackcat.agent.tools.filesystem import ReadFileTool
+from blackcat.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
+from blackcat.agent.tools.message import MessageTool
+from blackcat.agent.tools.shell import ExecTool
+from blackcat.agent.tools.spawn import SpawnTool
+from blackcat.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
+from blackcat.config.schema import ImageGenerationToolConfig, ProviderConfig
+from blackcat.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
     bind_workspace_scope,
@@ -20,8 +22,6 @@ from nanobot.security.workspace_access import (
     validate_workspace_scope_payload,
     workspace_scope_from_metadata,
 )
-from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
@@ -268,9 +268,9 @@ async def test_cli_app_scope_controls_working_dir(
     CliAppManager(workspace=project, data_dir=data_dir)._save_installed(
         {"demo": {"entry_point": "demo-cli"}}
     )
-    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
+    monkeypatch.setattr("blackcat.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda entry: "/usr/bin/demo-cli" if entry == "demo-cli" else None,
     )
 
@@ -280,7 +280,7 @@ async def test_cli_app_scope_controls_working_dir(
         seen["cwd"] = kwargs["cwd"]
         return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("blackcat.apps.cli.service.subprocess.run", fake_run)
     tool = CliAppsTool(
         workspace=tmp_path,
         restrict_to_workspace=True,

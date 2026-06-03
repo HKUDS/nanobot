@@ -1,4 +1,4 @@
-"""Tests for the Nanobot programmatic facade."""
+"""Tests for the Blackcat programmatic facade."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.nanobot import Nanobot, RunResult
+from blackcat.blackcat import Blackcat, RunResult
 
 
 def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
@@ -25,35 +25,35 @@ def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
 
 def test_from_config_missing_file():
     with pytest.raises(FileNotFoundError):
-        Nanobot.from_config("/nonexistent/config.json")
+        Blackcat.from_config("/nonexistent/config.json")
 
 
 def test_from_config_creates_instance(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     assert bot._loop is not None
     assert bot._loop.workspace == tmp_path
 
 
 def test_from_config_default_path():
-    from nanobot.config.schema import Config
+    from blackcat.config.schema import Config
 
-    with patch("nanobot.config.loader.load_config") as mock_load, \
-         patch("nanobot.providers.factory.make_provider") as mock_prov:
+    with patch("blackcat.config.loader.load_config") as mock_load, \
+         patch("blackcat.providers.factory.make_provider") as mock_prov:
         mock_load.return_value = Config()
         mock_prov.return_value = MagicMock()
         mock_prov.return_value.get_default_model.return_value = "test"
         mock_prov.return_value.generation.max_tokens = 4096
-        Nanobot.from_config()
+        Blackcat.from_config()
         mock_load.assert_called_once_with(None)
 
 
 @pytest.mark.asyncio
 async def test_run_returns_result(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.bus.events import OutboundMessage
 
     mock_response = OutboundMessage(
         channel="cli", chat_id="direct", content="Hello back!"
@@ -69,11 +69,11 @@ async def test_run_returns_result(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_with_hooks(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.agent.hook import AgentHook, AgentHookContext
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     class TestHook(AgentHook):
         async def before_iteration(self, context: AgentHookContext) -> None:
@@ -93,9 +93,9 @@ async def test_run_with_hooks(tmp_path):
 @pytest.mark.asyncio
 async def test_run_hooks_restored_on_error(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
-    from nanobot.agent.hook import AgentHook
+    from blackcat.agent.hook import AgentHook
 
     bot._loop.process_direct = AsyncMock(side_effect=RuntimeError("boom"))
     original_hooks = bot._loop._extra_hooks
@@ -109,7 +109,7 @@ async def test_run_hooks_restored_on_error(tmp_path):
 @pytest.mark.asyncio
 async def test_run_none_response(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock(return_value=None)
 
     result = await bot.run("hi")
@@ -121,13 +121,13 @@ def test_workspace_override(tmp_path):
     custom_ws = tmp_path / "custom_workspace"
     custom_ws.mkdir()
 
-    bot = Nanobot.from_config(config_path, workspace=custom_ws)
+    bot = Blackcat.from_config(config_path, workspace=custom_ws)
     assert bot._loop.workspace == custom_ws
 
 
 def test_sdk_make_provider_uses_github_copilot_backend():
-    from nanobot.config.schema import Config
-    from nanobot.providers.factory import make_provider
+    from blackcat.config.schema import Config
+    from blackcat.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -140,7 +140,7 @@ def test_sdk_make_provider_uses_github_copilot_backend():
         }
     )
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
@@ -148,10 +148,10 @@ def test_sdk_make_provider_uses_github_copilot_backend():
 
 @pytest.mark.asyncio
 async def test_run_custom_session_key(tmp_path):
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     mock_response = OutboundMessage(
         channel="cli", chat_id="direct", content="ok"
@@ -163,10 +163,10 @@ async def test_run_custom_session_key(tmp_path):
 
 
 def test_import_from_top_level():
-    import nanobot
+    import blackcat
 
-    assert nanobot.Nanobot is Nanobot
-    assert nanobot.RunResult is RunResult
+    assert blackcat.Blackcat is Blackcat
+    assert blackcat.RunResult is RunResult
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +176,12 @@ def test_import_from_top_level():
 @pytest.mark.asyncio
 async def test_run_populates_tools_used_across_iterations(tmp_path):
     """tools_used collects every tool name fired across all iterations, in order."""
-    from nanobot.agent.hook import AgentHookContext
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.providers.base import ToolCallRequest
+    from blackcat.agent.hook import AgentHookContext
+    from blackcat.bus.events import OutboundMessage
+    from blackcat.providers.base import ToolCallRequest
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(message, *, session_key):
         # Whatever hooks the SDK installed are now on the loop.
@@ -210,11 +210,11 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
 @pytest.mark.asyncio
 async def test_run_populates_final_messages(tmp_path):
     """messages reflects the agent's message list at the last iteration."""
-    from nanobot.agent.hook import AgentHookContext
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.agent.hook import AgentHookContext
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(message, *, session_key):
         extras = bot._loop._extra_hooks
@@ -238,10 +238,10 @@ async def test_run_populates_final_messages(tmp_path):
 @pytest.mark.asyncio
 async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     """If process_direct never triggers after_iteration, tools_used/messages stay []."""
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock(
         return_value=OutboundMessage(channel="cli", chat_id="direct", content="noop"),
     )
@@ -253,11 +253,11 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
 @pytest.mark.asyncio
 async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
     """Capture hook must not displace user-provided hooks."""
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.agent.hook import AgentHook, AgentHookContext
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     seen_iterations: list[int] = []
 
@@ -281,11 +281,11 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
 @pytest.mark.asyncio
 async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
     """Previously-installed _extra_hooks must be restored regardless of capture state."""
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.bus.events import OutboundMessage
+    from blackcat.agent.hook import AgentHook, AgentHookContext
+    from blackcat.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
 
     sentinel_hook = AgentHook()
     bot._loop._extra_hooks = [sentinel_hook]

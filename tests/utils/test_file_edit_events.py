@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from nanobot.utils.file_edit_events import (
+from blackcat.utils.file_edit_events import (
     StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_start_event,

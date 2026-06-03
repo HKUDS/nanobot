@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.loader import ToolLoader
+from blackcat.agent.tools.base import Tool
+from blackcat.agent.tools.loader import ToolLoader
 
 
 def test_loader_discovers_entry_point_tools():
@@ -39,7 +39,7 @@ def test_loader_discovers_entry_point_tools():
 
     mock_ep.load.return_value = _FakeTool
 
-    with patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]):
+    with patch("blackcat.agent.tools.loader.entry_points", return_value=[mock_ep]):
         loader = ToolLoader()
         discovered = loader._discover_plugins()
 
@@ -69,7 +69,7 @@ def test_loader_skips_abstract_entry_point_tools():
 
     mock_ep.load.return_value = _AbstractTool
 
-    with patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]):
+    with patch("blackcat.agent.tools.loader.entry_points", return_value=[mock_ep]):
         loader = ToolLoader()
         discovered = loader._discover_plugins()
 

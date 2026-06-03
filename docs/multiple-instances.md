@@ -1,6 +1,6 @@
 # Multiple Instances
 
-Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
+Run multiple blackcat instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint. Optionally pass `--workspace` during `onboard` when you want to initialize or update the saved workspace for a specific instance.
 
 ## Quick Start
 
@@ -10,50 +10,50 @@ If you want each instance to have its own dedicated workspace from the start, pa
 
 ```bash
 # Create separate instance configs and workspaces
-nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
-nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
+blackcat onboard --config ~/.blackcat-telegram/config.json --workspace ~/.blackcat-telegram/workspace
+blackcat onboard --config ~/.blackcat-discord/config.json --workspace ~/.blackcat-discord/workspace
+blackcat onboard --config ~/.blackcat-feishu/config.json --workspace ~/.blackcat-feishu/workspace
 ```
 
 **Configure each instance:**
 
-Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
+Edit `~/.blackcat-telegram/config.json`, `~/.blackcat-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
 
 **Run instances:**
 
 ```bash
 # Instance A - Telegram bot
-nanobot gateway --config ~/.nanobot-telegram/config.json
+blackcat gateway --config ~/.blackcat-telegram/config.json
 
 # Instance B - Discord bot
-nanobot gateway --config ~/.nanobot-discord/config.json
+blackcat gateway --config ~/.blackcat-discord/config.json
 
 # Instance C - Feishu bot with custom port
-nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
+blackcat gateway --config ~/.blackcat-feishu/config.json --port 18792
 ```
 
 ## Path Resolution
 
-When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+When using `--config`, blackcat derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
 
 To open a CLI session against one of these instances locally:
 
 ```bash
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
-nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
+blackcat agent -c ~/.blackcat-telegram/config.json -m "Hello from Telegram instance"
+blackcat agent -c ~/.blackcat-discord/config.json -m "Hello from Discord instance"
 
 # Optional one-off workspace override
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
+blackcat agent -c ~/.blackcat-telegram/config.json -w /tmp/blackcat-telegram-test
 ```
 
-> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+> `blackcat agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `blackcat gateway` process.
 
 | Component | Resolved From | Example |
 |-----------|---------------|---------|
-| **Config** | `--config` path | `~/.nanobot-A/config.json` |
-| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
-| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
+| **Config** | `--config` path | `~/.blackcat-A/config.json` |
+| **Workspace** | `--workspace` or config | `~/.blackcat-A/workspace/` |
+| **Cron Jobs** | config directory | `~/.blackcat-A/cron/` |
+| **Media / runtime state** | config directory | `~/.blackcat-A/media/` |
 
 ## How It Works
 
@@ -73,7 +73,7 @@ Example config:
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace",
+      "workspace": "~/.blackcat-telegram/workspace",
       "model": "anthropic/claude-sonnet-4-6"
     }
   },
@@ -93,8 +93,8 @@ Example config:
 Start separate instances:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json
-nanobot gateway --config ~/.nanobot-discord/config.json
+blackcat gateway --config ~/.blackcat-telegram/config.json
+blackcat gateway --config ~/.blackcat-discord/config.json
 ```
 
 Each gateway instance also exposes a lightweight HTTP health endpoint on
@@ -108,7 +108,7 @@ public or LAN-facing address.
 Override workspace for one-off runs when needed:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+blackcat gateway --config ~/.blackcat-telegram/config.json --workspace /tmp/blackcat-telegram-test
 ```
 
 ## Common Use Cases

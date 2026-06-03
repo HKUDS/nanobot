@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
-from nanobot.agent.tools import file_state
+from blackcat.agent.tools import file_state
+from blackcat.agent.tools.filesystem import ReadFileTool, WriteFileTool
 
 
 @pytest.fixture(autouse=True)
@@ -322,7 +322,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="Title\n\nParagraph 1"):
+        with patch("blackcat.utils.document.extract_text", return_value="Title\n\nParagraph 1"):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -332,7 +332,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_xlsx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"):
+        with patch("blackcat.utils.document.extract_text", return_value="--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"):
             f = tmp_path / "test.xlsx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -341,7 +341,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_pptx_returns_extracted_text(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
+        with patch("blackcat.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
             f = tmp_path / "test.pptx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -350,7 +350,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_missing_library(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: python-docx not installed]"):
+        with patch("blackcat.utils.document.extract_text", return_value="[error: python-docx not installed]"):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -359,7 +359,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_docx_corrupt_file(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: bad zip]"):
+        with patch("blackcat.utils.document.extract_text", return_value="[error: failed to extract DOCX: bad zip]"):
             f = tmp_path / "test.docx"
             f.write_bytes(b"not-a-zip")
             result = await tool.execute(path=str(f))
@@ -368,7 +368,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_unsupported_extension(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value=None):
+        with patch("blackcat.utils.document.extract_text", return_value=None):
             f = tmp_path / "test.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -377,7 +377,7 @@ class TestReadOfficeDocuments:
 
     @pytest.mark.asyncio
     async def test_empty_document_returns_descriptive_message(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value=""):
+        with patch("blackcat.utils.document.extract_text", return_value=""):
             f = tmp_path / "empty.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -392,7 +392,7 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_large_document_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="x" * 200_000):
+        with patch("blackcat.utils.document.extract_text", return_value="x" * 200_000):
             f = tmp_path / "large.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -401,7 +401,7 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_small_document_not_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="Hello world"):
+        with patch("blackcat.utils.document.extract_text", return_value="Hello world"):
             f = tmp_path / "small.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))
@@ -410,7 +410,7 @@ class TestOfficeDocTruncation:
 
     @pytest.mark.asyncio
     async def test_error_response_not_truncated(self, tool, tmp_path):
-        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: something went wrong]"):
+        with patch("blackcat.utils.document.extract_text", return_value="[error: failed to extract DOCX: something went wrong]"):
             f = tmp_path / "bad.docx"
             f.write_bytes(b"PK")
             result = await tool.execute(path=str(f))

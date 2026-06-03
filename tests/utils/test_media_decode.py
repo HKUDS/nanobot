@@ -1,4 +1,4 @@
-"""Tests for ``nanobot.utils.media_decode``."""
+"""Tests for ``blackcat.utils.media_decode``."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import base64
 
 import pytest
 
-from nanobot.utils.media_decode import (
+from blackcat.utils.media_decode import (
     DEFAULT_MAX_BYTES,
-    FileSizeExceeded,
     MAX_FILE_SIZE,
+    FileSizeExceeded,
     save_base64_data_url,
 )
 
@@ -67,8 +67,8 @@ def test_saved_file_lives_under_media_dir(tmp_path) -> None:
 
 def test_legacy_symbols_reexported_from_api_server() -> None:
     """Existing tests import ``_save_base64_data_url`` / ``_FileSizeExceeded``
-    from ``nanobot.api.server`` — keep the aliases working."""
-    from nanobot.api import server
+    from ``blackcat.api.server`` — keep the aliases working."""
+    from blackcat.api import server
 
     assert server._save_base64_data_url is save_base64_data_url
     assert server._FileSizeExceeded is FileSizeExceeded

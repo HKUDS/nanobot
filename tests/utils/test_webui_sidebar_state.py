@@ -1,6 +1,6 @@
 import json
 
-from nanobot.webui.sidebar_state import (
+from blackcat.webui.sidebar_state import (
     default_webui_sidebar_state,
     read_webui_sidebar_state,
     webui_sidebar_state_path,
@@ -9,7 +9,7 @@ from nanobot.webui.sidebar_state import (
 
 
 def test_sidebar_state_defaults_when_file_missing(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
 
     state = read_webui_sidebar_state()
 
@@ -18,7 +18,7 @@ def test_sidebar_state_defaults_when_file_missing(tmp_path, monkeypatch) -> None
 
 
 def test_sidebar_state_normalizes_old_or_partial_payload(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     path = webui_sidebar_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -55,7 +55,7 @@ def test_sidebar_state_normalizes_old_or_partial_payload(tmp_path, monkeypatch) 
 
 
 def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
 
     state = write_webui_sidebar_state(
         {

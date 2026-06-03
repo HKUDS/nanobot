@@ -1,7 +1,7 @@
 from unittest.mock import patch, sentinel
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import ProviderSpec
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import ProviderSpec
 
 
 def _assert_openai_compat_timeout(timeout) -> None:
@@ -9,7 +9,7 @@ def _assert_openai_compat_timeout(timeout) -> None:
 
 
 async def test_openai_compat_provider_defers_sdk_client_until_first_use() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
         mock_async_openai.assert_not_called()
         await provider._ensure_client()
@@ -29,7 +29,7 @@ async def test_openai_compat_provider_sets_timeout_on_local_http_client() -> Non
     )
 
     with (
-        patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai,
+        patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai,
         patch(
             "httpx.AsyncClient",
             return_value=sentinel.http_client,
@@ -51,7 +51,7 @@ async def test_openai_compat_provider_sets_timeout_on_local_http_client() -> Non
 async def test_openai_compat_provider_timeout_can_be_overridden_by_env(monkeypatch) -> None:
     monkeypatch.setenv("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", "45")
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")
         await provider._ensure_client()
 

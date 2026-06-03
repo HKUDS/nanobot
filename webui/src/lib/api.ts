@@ -1,23 +1,23 @@
-import type {
-  ChatSummary,
-  CliAppsPayload,
-  ImageGenerationSettingsUpdate,
-  McpPresetsPayload,
-  ModelConfigurationCreate,
-  ModelConfigurationUpdate,
-  NetworkSafetySettingsUpdate,
-  ProviderModelsPayload,
-  ProviderSettingsUpdate,
-  SettingsPayload,
-  SettingsUpdate,
-  SidebarStatePayload,
-  SlashCommand,
-  WebSearchSettingsUpdate,
-  WorkspacesPayload,
-  WebuiThreadPersistedPayload,
-  WorkspaceScopePayload,
-} from "./types";
 import { fetchWithTimeout } from "./http";
+import type {
+    ChatSummary,
+    CliAppsPayload,
+    ImageGenerationSettingsUpdate,
+    McpPresetsPayload,
+    ModelConfigurationCreate,
+    ModelConfigurationUpdate,
+    NetworkSafetySettingsUpdate,
+    ProviderModelsPayload,
+    ProviderSettingsUpdate,
+    SettingsPayload,
+    SettingsUpdate,
+    SidebarStatePayload,
+    SlashCommand,
+    WebSearchSettingsUpdate,
+    WebuiThreadPersistedPayload,
+    WorkspaceScopePayload,
+    WorkspacesPayload,
+} from "./types";
 
 const API_READ_TIMEOUT_MS = 20_000;
 
@@ -59,7 +59,7 @@ async function request<T>(
     throw new ApiError(
       res.status,
       isHtml
-        ? "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again."
+        ? "Gateway returned WebUI HTML instead of JSON. Restart blackcat gateway and try again."
         : "Gateway returned a non-JSON response.",
     );
   }
@@ -78,7 +78,7 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
     payload[key] = value;
   });
   if (!Object.keys(payload).length) return undefined;
-  return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
+  return { "X-Blackcat-MCP-Values": JSON.stringify(payload) };
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {

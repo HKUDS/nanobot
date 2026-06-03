@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.autocompact import AutoCompact
-from nanobot.session.manager import Session, SessionManager
+from blackcat.agent.autocompact import AutoCompact
+from blackcat.session.manager import Session, SessionManager
 
 
 def _make_session(

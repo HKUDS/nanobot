@@ -1,6 +1,6 @@
-# nanobot webui
+# blackcat webui
 
-The browser front-end for the nanobot gateway. It is built with Vite + React 18 +
+The browser front-end for the blackcat gateway. It is built with Vite + React 18 +
 TypeScript + Tailwind 3 + shadcn/ui, talks to the gateway over the WebSocket
 multiplex protocol, and reads session metadata from the embedded REST surface
 on the same port.
@@ -10,7 +10,7 @@ For the project overview, install guide, and general docs map, see the root
 
 ## Just want to use the WebUI?
 
-If you installed nanobot via `pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
+If you installed blackcat via `pip install blackcat-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.blackcat/config.json` and run `blackcat gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
 
 This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
 
@@ -18,12 +18,12 @@ This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, ne
 
 ```text
 webui/                 source tree (this directory)
-nanobot/web/dist/      build output served by the gateway
+blackcat/web/dist/      build output served by the gateway
 ```
 
 ## Develop the WebUI (Vite HMR)
 
-### 1. Install nanobot from source
+### 1. Install blackcat from source
 
 From the repository root:
 
@@ -35,7 +35,7 @@ pip install -e .
 
 ### 2. Enable the WebSocket channel
 
-In `~/.nanobot/config.json`:
+In `~/.blackcat/config.json`:
 
 ```json
 { "channels": { "websocket": { "enabled": true } } }
@@ -46,7 +46,7 @@ In `~/.nanobot/config.json`:
 In one terminal:
 
 ```bash
-nanobot gateway
+blackcat gateway
 ```
 
 ### 4. Start the WebUI dev server
@@ -71,7 +71,7 @@ NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 
 ### Access from another device (LAN)
 
-To use the WebUI from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.nanobot/config.json`:
+To use the WebUI from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.blackcat/config.json`:
 
 ```json
 {
@@ -98,7 +98,7 @@ If you want to preview the production bundle locally without rebuilding the whee
 
 ```bash
 cd webui
-bun run build          # writes to ../nanobot/web/dist
+bun run build          # writes to ../blackcat/web/dist
 ```
 
 The gateway picks up the new bundle on the next restart.

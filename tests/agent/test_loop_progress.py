@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import nanobot.agent.runner as runner_module
-from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.session.webui_turns import WebuiTurnCoordinator
-from nanobot.utils.progress_events import (
+import blackcat.agent.runner as runner_module
+from blackcat.agent.loop import AgentLoop
+from blackcat.bus.events import InboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.providers.base import LLMResponse, ToolCallRequest
+from blackcat.session.webui_turns import WebuiTurnCoordinator
+from blackcat.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
 )
@@ -695,7 +695,7 @@ class TestToolEventProgress:
             return False
 
         monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+            "blackcat.session.webui_turns.maybe_generate_webui_title_after_turn",
             fake_title_after_turn,
         )
         scheduled_title: list[object] = []
@@ -743,7 +743,7 @@ class TestToolEventProgress:
             raise AssertionError("command-only turns should not generate titles")
 
         monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+            "blackcat.session.webui_turns.maybe_generate_webui_title_after_turn",
             fake_title_after_turn,
         )
         scheduled: list[object] = []

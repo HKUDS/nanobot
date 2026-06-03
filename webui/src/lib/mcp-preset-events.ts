@@ -1,6 +1,6 @@
 import type { McpPresetInfo, McpPresetsPayload } from "@/lib/types";
 
-export const MCP_PRESETS_CHANGED_EVENT = "nanobot:mcp-presets-changed";
+export const MCP_PRESETS_CHANGED_EVENT = "blackcat:mcp-presets-changed";
 
 export function isMcpPresetsPayload(value: unknown): value is McpPresetsPayload {
   return !!value

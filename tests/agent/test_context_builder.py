@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
-from nanobot.session.goal_state import GOAL_STATE_KEY
+from blackcat.agent.context import ContextBuilder
+from blackcat.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -164,7 +164,7 @@ class TestIsTemplateContent:
 
     def test_content_matching_template(self):
         from importlib.resources import files as pkg_files
-        tpl = pkg_files("nanobot") / "templates" / "memory" / "MEMORY.md"
+        tpl = pkg_files("blackcat") / "templates" / "memory" / "MEMORY.md"
         if not tpl.is_file():
             pytest.skip("MEMORY.md template not bundled")
         original = tpl.read_text(encoding="utf-8")
@@ -172,7 +172,7 @@ class TestIsTemplateContent:
 
     def test_modified_content_returns_false(self):
         from importlib.resources import files as pkg_files
-        tpl = pkg_files("nanobot") / "templates" / "memory" / "MEMORY.md"
+        tpl = pkg_files("blackcat") / "templates" / "memory" / "MEMORY.md"
         if not tpl.is_file():
             pytest.skip("MEMORY.md template not bundled")
         assert ContextBuilder._is_template_content("totally different", "memory/MEMORY.md") is False
@@ -187,7 +187,7 @@ class TestBundledToolContract:
     def test_tool_contract_balances_general_and_coding_workflows(self):
         from importlib.resources import files as pkg_files
 
-        tpl = pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
+        tpl = pkg_files("blackcat") / "templates" / "agent" / "tool_contract.md"
         content = tpl.read_text(encoding="utf-8")
 
         assert "## General Tool Contract" in content

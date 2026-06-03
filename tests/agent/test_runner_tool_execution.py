@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from blackcat.agent.tools.base import Tool
+from blackcat.agent.tools.registry import ToolRegistry
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -59,7 +59,7 @@ class _DelayTool(Tool):
 
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -98,7 +98,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_batch_exclusive_read_only_tools():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -141,7 +141,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
 
 @pytest.mark.asyncio
 async def test_runner_blocks_repeated_external_fetches():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_final_call: list[dict] = []

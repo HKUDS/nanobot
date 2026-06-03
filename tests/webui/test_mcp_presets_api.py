@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from nanobot.config.loader import load_config
-from nanobot.webui.mcp_presets_api import (
+from blackcat.config.loader import load_config
+from blackcat.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
     mcp_presets_action,
@@ -16,7 +16,7 @@ from nanobot.webui.mcp_presets_api import (
 
 
 def _use_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", tmp_path / "config.json")
 
 
 def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,7 +203,7 @@ def test_test_mcp_preset_reports_missing_dependency(
 ) -> None:
     _use_config(tmp_path, monkeypatch)
     mcp_presets_action("enable", {"name": ["playwright"]})
-    monkeypatch.setattr("nanobot.webui.mcp_presets_api.shutil.which", lambda _command: None)
+    monkeypatch.setattr("blackcat.webui.mcp_presets_api.shutil.which", lambda _command: None)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
 
@@ -234,7 +234,7 @@ def test_test_mcp_preset_connects_and_reports_tools(
         registry.register(FakeTool())
         return {"playwright": FakeStack()}
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+    monkeypatch.setattr("blackcat.agent.tools.mcp.connect_mcp_servers", fake_connect)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
 
@@ -259,7 +259,7 @@ def test_test_mcp_preset_scrubs_connection_errors(
     async def fake_connect(_servers, _registry):
         raise RuntimeError("failed https://mcp.browserbase.com/mcp?browserbaseApiKey=bb_live_secret")
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+    monkeypatch.setattr("blackcat.agent.tools.mcp.connect_mcp_servers", fake_connect)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["browserbase"]}))
 

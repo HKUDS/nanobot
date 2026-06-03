@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from nanobot.channels.feishu import FeishuChannel
+from blackcat.channels.feishu import FeishuChannel
 
 
 def _mention(key: str, name: str, open_id: str = "", user_id: str = ""):

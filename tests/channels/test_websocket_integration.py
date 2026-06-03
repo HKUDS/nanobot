@@ -15,9 +15,9 @@ import pytest
 import websockets
 from ws_test_client import WsTestClient, issue_token, issue_token_ok
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
-from nanobot.webui.gateway_services import build_gateway_services
+from blackcat.bus.events import OutboundMessage
+from blackcat.channels.websocket import WebSocketChannel, WebSocketConfig
+from blackcat.webui.gateway_services import build_gateway_services
 
 
 def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:

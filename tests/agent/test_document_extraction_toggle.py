@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop, TurnContext, TurnState
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ChannelsConfig
-from nanobot.providers.base import LLMResponse
-from nanobot.utils.document import reference_non_image_attachments
+from blackcat.agent.loop import AgentLoop, TurnContext, TurnState
+from blackcat.bus.events import InboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.config.schema import ChannelsConfig
+from blackcat.providers.base import LLMResponse
+from blackcat.utils.document import reference_non_image_attachments
 
 
 def _make_loop(tmp_path: Path, channels_config: ChannelsConfig | None = None) -> AgentLoop:
@@ -40,7 +40,7 @@ async def test_state_restore_extracts_documents_by_default(
         calls.append((content, media))
         return f"{content}\n\n[File: report.txt]\nQuarterly revenue is $5M", []
 
-    monkeypatch.setattr("nanobot.agent.loop.extract_documents", fake_extract_documents)
+    monkeypatch.setattr("blackcat.agent.loop.extract_documents", fake_extract_documents)
 
     ctx = TurnContext(
         msg=InboundMessage(
@@ -74,7 +74,7 @@ async def test_state_restore_references_documents_when_extraction_disabled(
     def fail_extract_documents(content: str, media: list[str]) -> tuple[str, list[str]]:
         raise AssertionError("document extraction should be disabled")
 
-    monkeypatch.setattr("nanobot.agent.loop.extract_documents", fail_extract_documents)
+    monkeypatch.setattr("blackcat.agent.loop.extract_documents", fail_extract_documents)
 
     ctx = TurnContext(
         msg=InboundMessage(
@@ -118,7 +118,7 @@ async def test_pending_followup_references_documents_when_extraction_disabled(
     def fail_extract_documents(content: str, media: list[str]) -> tuple[str, list[str]]:
         raise AssertionError("document extraction should be disabled")
 
-    monkeypatch.setattr("nanobot.agent.loop.extract_documents", fail_extract_documents)
+    monkeypatch.setattr("blackcat.agent.loop.extract_documents", fail_extract_documents)
 
     pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
     await pending_queue.put(

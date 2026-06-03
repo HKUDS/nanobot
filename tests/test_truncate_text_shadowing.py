@@ -14,7 +14,7 @@ def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
     This test asserts the fixed API exists and truncation works without raising.
     """
 
-    from nanobot.agent.loop import AgentLoop
+    from blackcat.agent.loop import AgentLoop
 
     sig = inspect.signature(AgentLoop._sanitize_persisted_blocks)
     assert "should_truncate_text" in sig.parameters

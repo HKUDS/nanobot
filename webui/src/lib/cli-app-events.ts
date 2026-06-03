@@ -1,6 +1,6 @@
 import type { CliAppInfo, CliAppsPayload } from "@/lib/types";
 
-export const CLI_APPS_CHANGED_EVENT = "nanobot:cli-apps-changed";
+export const CLI_APPS_CHANGED_EVENT = "blackcat:cli-apps-changed";
 
 export function isCliAppsPayload(value: unknown): value is CliAppsPayload {
   return (

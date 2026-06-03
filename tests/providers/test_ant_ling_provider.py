@@ -2,9 +2,9 @@
 
 from unittest.mock import patch
 
-from nanobot.config.schema import Config, ProvidersConfig
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from blackcat.config.schema import Config, ProvidersConfig
+from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.providers.registry import PROVIDERS, find_by_name
 
 
 def test_ant_ling_config_field_exists() -> None:
@@ -53,7 +53,7 @@ def test_ant_ling_model_auto_matches_with_default_api_base() -> None:
 
 def test_ant_ling_preserves_official_model_name() -> None:
     spec = find_by_name("ant_ling")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="ling-key",
             default_model="Ling-2.6-flash",

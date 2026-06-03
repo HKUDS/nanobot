@@ -1,1 +1,0 @@
-"""CLI module for nanobot."""

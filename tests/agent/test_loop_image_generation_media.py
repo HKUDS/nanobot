@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.loader import set_config_path
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
-from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.providers.image_generation import GeneratedImageResponse
+from blackcat.agent.loop import AgentLoop
+from blackcat.bus.events import InboundMessage
+from blackcat.bus.queue import MessageBus
+from blackcat.config.loader import set_config_path
+from blackcat.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
+from blackcat.providers.base import LLMResponse, ToolCallRequest
+from blackcat.providers.image_generation import GeneratedImageResponse
 
 PNG_DATA_URL = (
     "data:image/png;base64,"
@@ -36,7 +36,7 @@ async def test_outbound_no_longer_carries_generated_media(
     """Media delivery is now the LLM's responsibility via the message tool."""
     set_config_path(tmp_path / "config.json")
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        "blackcat.agent.tools.image_generation.get_image_gen_provider",
         lambda name: FakeImageClient if name == "openrouter" else None,
     )
     provider = MagicMock()

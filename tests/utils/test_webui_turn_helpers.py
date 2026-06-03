@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import InboundMessage
-from nanobot.session import webui_turns as wth
+from blackcat.bus.events import InboundMessage
+from blackcat.session import webui_turns as wth
 
 
 @pytest.fixture(autouse=True)

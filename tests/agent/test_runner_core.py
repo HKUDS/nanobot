@@ -9,16 +9,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from blackcat.agent.tools.registry import ToolRegistry
+from blackcat.config.schema import AgentDefaults
+from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     captured_second_call: list[dict] = []
@@ -75,7 +75,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 
 @pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -106,7 +106,7 @@ async def test_runner_returns_max_iterations_fallback():
 
 @pytest.mark.asyncio
 async def test_runner_times_out_hung_llm_request():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -135,8 +135,8 @@ async def test_runner_times_out_hung_llm_request():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.hook import AgentHook, AgentHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     streamed: list[str] = []
@@ -179,7 +179,7 @@ async def test_runner_does_not_apply_outer_wall_timeout_to_streaming_requests():
 
 @pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     captured_second_call: list[dict] = []
@@ -218,7 +218,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
     """Empty responses get 2 silent retries before finalization kicks in."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
@@ -263,8 +263,8 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
     """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
-    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -295,7 +295,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
     Sequence: tool_call -> empty -> tool_call -> final text.
     The runner should recover via silent retry and complete normally.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     call_count = 0
@@ -352,7 +352,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
 async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     """Runner should accumulate prompt/completion tokens across iterations
     and preserve cached_tokens from provider responses."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     call_count = {"n": 0}
@@ -399,7 +399,7 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
     internal retry diagnostics like "Model request failed, retry in 1s"
     to leak to end-user channels as normal progress updates.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     captured: dict = {}
 
@@ -441,7 +441,7 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
 @pytest.mark.asyncio
 async def test_runner_passes_temperature_to_provider():
     """temperature from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     captured: dict = {}
 
@@ -470,7 +470,7 @@ async def test_runner_passes_temperature_to_provider():
 @pytest.mark.asyncio
 async def test_runner_passes_max_tokens_to_provider():
     """max_tokens from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     captured: dict = {}
 
@@ -499,7 +499,7 @@ async def test_runner_passes_max_tokens_to_provider():
 @pytest.mark.asyncio
 async def test_runner_passes_reasoning_effort_to_provider():
     """reasoning_effort from AgentRunSpec should reach provider.chat_with_retry."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     captured: dict = {}
 

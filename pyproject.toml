@@ -1,5 +1,5 @@
 [project]
-name = "nanobot-ai"
+name = "blackcat-ai"
 version = "0.2.1"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Xubin Ren"},
-    {name = "the nanobot contributors"}
+    {name = "the blackcat contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -108,11 +108,11 @@ dev = [
 ]
 
 [project.scripts]
-nanobot = "nanobot.cli.commands:app"
+blackcat = "blackcat.cli.commands:app"
 
 # Third-party tool plugins register here.  Built-in tools are discovered
 # automatically via pkgutil scanning in ToolLoader.discover().
-# [project.entry-points."nanobot.tools"]
+# [project.entry-points."blackcat.tools"]
 # my_plugin = "my_package.plugins:MyTool"
 
 [build-system]
@@ -127,32 +127,32 @@ allow-direct-references = true
 
 [tool.hatch.build]
 include = [
-    "nanobot/**/*.py",
-    "nanobot/templates/**/*.md",
-    "nanobot/skills/**/*.md",
-    "nanobot/skills/**/*.sh",
-    "nanobot/web/dist/**/*",
+    "blackcat/**/*.py",
+    "blackcat/templates/**/*.md",
+    "blackcat/skills/**/*.md",
+    "blackcat/skills/**/*.sh",
+    "blackcat/web/dist/**/*",
 ]
-# nanobot/web/dist/ is produced by `cd webui && bun run build` and is
+# blackcat/web/dist/ is produced by `cd webui && bun run build` and is
 # git-ignored. List it as an artifact so hatch ships it in both wheel and
 # sdist even though VCS does not track it.
 artifacts = [
-    "nanobot/web/dist/**/*",
+    "blackcat/web/dist/**/*",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["nanobot"]
+packages = ["blackcat"]
 
 [tool.hatch.build.targets.wheel.sources]
-"nanobot" = "nanobot"
+"blackcat" = "blackcat"
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
+"bridge" = "blackcat/bridge"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "nanobot/",
-    "nanobot/web/dist/",
+    "blackcat/",
+    "blackcat/web/dist/",
     "bridge/",
     "hatch_build.py",
     "README.md",
@@ -174,7 +174,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["nanobot"]
+source = ["blackcat"]
 omit = ["tests/*", "**/tests/*"]
 
 [tool.coverage.report]

@@ -1,6 +1,6 @@
 # Check optional Feishu dependencies before running tests
 try:
-    from nanobot.channels import feishu
+    from blackcat.channels import feishu
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
 except ImportError:
     FEISHU_AVAILABLE = False
@@ -9,7 +9,7 @@ if not FEISHU_AVAILABLE:
     import pytest
     pytest.skip("Feishu dependencies not installed (lark-oapi)", allow_module_level=True)
 
-from nanobot.channels.feishu import FeishuChannel
+from blackcat.channels.feishu import FeishuChannel
 
 
 def test_parse_md_table_strips_markdown_formatting_in_headers_and_cells() -> None:
