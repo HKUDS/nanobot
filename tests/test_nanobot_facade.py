@@ -299,3 +299,30 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
     bot._loop.process_direct = fake_process_direct
     await bot.run("hello")
     assert bot._loop._extra_hooks == [sentinel_hook]
+
+
+@pytest.mark.asyncio
+async def test_sdk_capture_prefers_run_level_snapshot():
+    from nanobot.agent.hook import AgentHookContext, AgentRunHookContext, SDKCaptureHook
+    from nanobot.providers.base import ToolCallRequest
+
+    hook = SDKCaptureHook()
+    iter_messages = [{"role": "user", "content": "work"}]
+    iter_context = AgentHookContext(iteration=0, messages=iter_messages)
+    iter_context.tool_calls = [
+        ToolCallRequest(id="call_1", name="read_file", arguments={}),
+        ToolCallRequest(id="call_2", name="grep", arguments={}),
+    ]
+    await hook.after_iteration(iter_context)
+
+    final_messages = [
+        {"role": "user", "content": "work"},
+        {"role": "assistant", "content": "done"},
+    ]
+    await hook.after_run(AgentRunHookContext(
+        messages=final_messages,
+        tools_used=["read_file"],
+    ))
+
+    assert hook.tools_used == ["read_file"]
+    assert hook.messages == final_messages
