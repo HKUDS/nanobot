@@ -336,3 +336,55 @@ async def test_runner_calls_on_error_and_finally_for_unhandled_exception():
         ("on_error", "error", "Error: RuntimeError: provider exploded", "RuntimeError"),
         ("on_finally", "error"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_report_cancellation_as_error():
+    import asyncio
+
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    events: list[tuple] = []
+
+    async def chat_with_retry(**kwargs):
+        raise asyncio.CancelledError()
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class CancellationHook(AgentHook):
+        async def before_run(self, context: AgentRunHookContext) -> None:
+            events.append(("before_run", context.stop_reason))
+
+        async def on_error(self, context: AgentRunHookContext) -> None:
+            events.append(("on_error", context.stop_reason, context.error))
+
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            events.append(("after_run", context.stop_reason))
+
+        async def on_finally(self, context: AgentRunHookContext) -> None:
+            events.append((
+                "on_finally",
+                context.stop_reason,
+                context.error,
+                type(context.exception).__name__ if context.exception else None,
+            ))
+
+    runner = AgentRunner(provider)
+    with pytest.raises(asyncio.CancelledError):
+        await runner.run(AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=CancellationHook(),
+        ))
+
+    assert events == [
+        ("before_run", None),
+        ("on_finally", "cancelled", None, "CancelledError"),
+    ]
