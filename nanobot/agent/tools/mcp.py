@@ -514,6 +514,13 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 )
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
+                if await self._refresh_session_after_termination(
+                    exc,
+                    refreshed_session,
+                    "prompt",
+                ):
+                    refreshed_session = True
+                    continue
                 if _is_transient(exc):
                     if not retried_transient:
                         retried_transient = True
@@ -1066,10 +1073,7 @@ def _server_signature(cfg: Any) -> Any:
 
 
 def _tool_prefix(server_name: str) -> str:
-    safe_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in server_name)
-    while "__" in safe_name:
-        safe_name = safe_name.replace("__", "_")
-    return f"mcp_{safe_name}_"
+    return _sanitize_name(f"mcp_{server_name}_")
 
 
 def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
