@@ -14,16 +14,20 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 RUNTIME_CONTROL_ACK = "_ack"
 RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
+RUNTIME_CONTROL_MCP_TOOLS_CHANGED = "mcp_tools_changed"
+
+# Metadata key carrying the server name that sent the tools/list_changed notification.
+RUNTIME_CONTROL_MCP_SERVER_NAME = "_mcp_server_name"
 
 
 @dataclass
 class InboundMessage:
-    """Message received from a chat channel."""
+    """Message received from a chat channel (or system runtime control)."""
 
-    channel: str  # telegram, discord, slack, whatsapp
-    sender_id: str  # User identifier
-    chat_id: str  # Chat/channel identifier
-    content: str  # Message text
+    channel: str  # telegram, discord, slack, whatsapp, system
+    sender_id: str  # User identifier or system source
+    chat_id: str  # Chat/channel identifier, or "runtime" for control messages
+    content: str  # Message text or runtime control signal
     timestamp: datetime = field(default_factory=datetime.now)
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data

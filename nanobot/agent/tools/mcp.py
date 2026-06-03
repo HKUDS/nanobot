@@ -18,6 +18,8 @@ from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     RUNTIME_CONTROL_ACK,
     RUNTIME_CONTROL_MCP_RELOAD,
+    RUNTIME_CONTROL_MCP_SERVER_NAME,
+    RUNTIME_CONTROL_MCP_TOOLS_CHANGED,
     InboundMessage,
 )
 
@@ -179,14 +181,16 @@ class MCPToolWrapper(Tool):
 
     _plugin_discoverable = False
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30, *, on_disconnected=None):
         self._session = session
+        self._server_name = server_name
         self._original_name = tool_def.name
         self._name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._on_disconnected = on_disconnected
 
     @property
     def name(self) -> str:
@@ -224,15 +228,21 @@ class MCPToolWrapper(Tool):
                 return "(MCP tool call was cancelled)"
             except Exception as exc:
                 if _is_transient(exc):
+                    # Mark server disconnected so it reconnects on the next turn.
+                    # Don't retry with the stale session — it will fail again.
+                    if self._on_disconnected:
+                        try:
+                            self._on_disconnected(self._server_name)
+                        except Exception:
+                            logger.debug("on_disconnected callback error (ignored)")
                     if attempt == 0:
                         logger.warning(
-                            "MCP tool '{}' hit transient error ({}), retrying once...",
+                            "MCP tool '{}' hit transient error ({}), "
+                            "server marked disconnected for reconnection",
                             self._name,
                             type(exc).__name__,
                         )
-                        await asyncio.sleep(1)  # Brief backoff before retry
-                        continue
-                    # Second transient failure — give up with retry-specific message
+                        return "(MCP server connection lost, reconnecting. Please try again.)"
                     logger.exception(
                         "MCP tool '{}' failed after retry: {}",
                         self._name,
@@ -264,8 +274,9 @@ class MCPResourceWrapper(Tool):
 
     _plugin_discoverable = False
 
-    def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
+    def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30, *, on_disconnected=None):
         self._session = session
+        self._server_name = server_name
         self._uri = resource_def.uri
         self._name = _sanitize_name(f"mcp_{server_name}_resource_{resource_def.name}")
         desc = resource_def.description or resource_def.name
@@ -276,6 +287,7 @@ class MCPResourceWrapper(Tool):
             "required": [],
         }
         self._resource_timeout = resource_timeout
+        self._on_disconnected = on_disconnected
 
     @property
     def name(self) -> str:
@@ -315,14 +327,19 @@ class MCPResourceWrapper(Tool):
                 return "(MCP resource read was cancelled)"
             except Exception as exc:
                 if _is_transient(exc):
+                    if self._on_disconnected:
+                        try:
+                            self._on_disconnected(self._server_name)
+                        except Exception:
+                            logger.debug("on_disconnected callback error (ignored)")
                     if attempt == 0:
                         logger.warning(
-                            "MCP resource '{}' hit transient error ({}), retrying once...",
+                            "MCP resource '{}' hit transient error ({}), "
+                            "server marked disconnected for reconnection",
                             self._name,
                             type(exc).__name__,
                         )
-                        await asyncio.sleep(1)
-                        continue
+                        return "(MCP server connection lost, reconnecting. Please try again.)"
                     logger.exception(
                         "MCP resource '{}' failed after retry: {}",
                         self._name,
@@ -355,8 +372,9 @@ class MCPPromptWrapper(Tool):
 
     _plugin_discoverable = False
 
-    def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
+    def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30, *, on_disconnected=None):
         self._session = session
+        self._server_name = server_name
         self._prompt_name = prompt_def.name
         self._name = _sanitize_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
         desc = prompt_def.description or prompt_def.name
@@ -365,6 +383,7 @@ class MCPPromptWrapper(Tool):
             "Returns a filled prompt template that can be used as a workflow guide."
         )
         self._prompt_timeout = prompt_timeout
+        self._on_disconnected = on_disconnected
 
         # Build parameters from prompt arguments
         properties: dict[str, Any] = {}
@@ -429,14 +448,19 @@ class MCPPromptWrapper(Tool):
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
                 if _is_transient(exc):
+                    if self._on_disconnected:
+                        try:
+                            self._on_disconnected(self._server_name)
+                        except Exception:
+                            logger.debug("on_disconnected callback error (ignored)")
                     if attempt == 0:
                         logger.warning(
-                            "MCP prompt '{}' hit transient error ({}), retrying once...",
+                            "MCP prompt '{}' hit transient error ({}), "
+                            "server marked disconnected for reconnection",
                             self._name,
                             type(exc).__name__,
                         )
-                        await asyncio.sleep(1)
-                        continue
+                        return "(MCP server connection lost, reconnecting. Please try again.)"
                     logger.exception(
                         "MCP prompt '{}' failed after retry: {}",
                         self._name,
@@ -470,13 +494,21 @@ class MCPPromptWrapper(Tool):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry
+    mcp_servers: dict, registry: ToolRegistry, *, on_disconnected=None, bus=None,
 ) -> dict[str, AsyncExitStack]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
     Returns a dict mapping server name -> its dedicated AsyncExitStack.
     Each server gets its own stack to prevent cancel scope conflicts
     when multiple MCP servers are configured.
+
+    If *on_disconnected* is provided, wrappers receive it as a callback to
+    invoke when a transient connection error is detected so the server can be
+    marked for reconnection on the next turn.
+
+    If *bus* is provided, a notification handler is installed on each
+    ClientSession so that ``tools/list_changed`` notifications from MCP
+    servers are forwarded as runtime-control messages to the agent loop.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
@@ -561,7 +593,9 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
-            session = await server_stack.enter_async_context(ClientSession(read, write))
+            session = await server_stack.enter_async_context(
+                ClientSession(read, write, message_handler=_make_notification_handler(name, bus=bus, registry_ref=registry))
+            )
             await session.initialize()
 
             tools = await session.list_tools()
@@ -584,7 +618,7 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout, on_disconnected=on_disconnected)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                 registered_count += 1
@@ -610,7 +644,7 @@ async def connect_mcp_servers(
                 resources_result = await session.list_resources()
                 for resource in resources_result.resources:
                     wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
+                        session, name, resource, resource_timeout=cfg.tool_timeout, on_disconnected=on_disconnected
                     )
                     registry.register(wrapper)
                     registered_count += 1
@@ -624,7 +658,7 @@ async def connect_mcp_servers(
                 prompts_result = await session.list_prompts()
                 for prompt in prompts_result.prompts:
                     wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                        session, name, prompt, prompt_timeout=cfg.tool_timeout, on_disconnected=on_disconnected
                     )
                     registry.register(wrapper)
                     registered_count += 1
@@ -736,6 +770,43 @@ def runtime_lines(
     return lines
 
 
+def mark_server_disconnected(state: Any, registry: ToolRegistry, server_name: str) -> None:
+    """Mark an MCP server as disconnected so it will be reconnected on the next turn.
+
+    Called by wrapper ``on_disconnected`` callbacks when a transient error
+    indicates the underlying session is dead.  This:
+    1. Closes the server's ``AsyncExitStack`` and removes it from ``_mcp_stacks``.
+    2. Unregisters all tools/resources/prompts for that server.
+    3. Resets ``_mcp_connected`` so ``connect_missing_servers`` will attempt reconnection.
+    """
+    stack = state._mcp_stacks.pop(server_name, None)
+    if stack is not None:
+        # Schedule the async cleanup; we can't await here (called from sync callback context)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_close_server_stack(stack, server_name))
+        except RuntimeError:
+            # No running loop — best-effort sync close
+            with suppress(Exception):
+                import asyncio as _aio
+                _aio.run(_close_server_stack(stack, server_name))
+    removed = _unregister_server_tools(state, registry, server_name)
+    state._mcp_connected = bool(state._mcp_stacks)
+    logger.info(
+        "MCP server '{}' marked disconnected ({} tools unregistered), will reconnect next turn",
+        server_name,
+        removed,
+    )
+
+
+async def _close_server_stack(stack: AsyncExitStack, server_name: str) -> None:
+    """Close an MCP server exit stack, swallowing cleanup errors."""
+    try:
+        await stack.aclose()
+    except (RuntimeError, BaseExceptionGroup):
+        logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
+
+
 async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     """Connect configured MCP servers that are not currently live."""
     missing_servers = {
@@ -745,7 +816,11 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         return
     state._mcp_connecting = True
     try:
-        connected = await connect_mcp_servers(missing_servers, registry)
+        connected = await connect_mcp_servers(
+            missing_servers, registry,
+            on_disconnected=lambda server_name: mark_server_disconnected(state, registry, server_name),
+            bus=getattr(state, 'bus', None),
+        )
         state._mcp_stacks.update(connected)
         state._mcp_connected = bool(state._mcp_stacks)
         if connected:
@@ -760,6 +835,51 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         state._mcp_connected = bool(state._mcp_stacks)
     finally:
         state._mcp_connecting = False
+
+
+def _make_notification_handler(server_name: str, bus: Any, registry_ref: Any) -> Any:
+    """Create a message_handler for ClientSession that publishes tools/list_changed notifications.
+
+    The handler intercepts ``ToolListChangedNotification`` from the MCP server
+    and publishes a ``RUNTIME_CONTROL_MCP_TOOLS_CHANGED`` inbound message so
+    the agent loop can reload that server's tools without dropping the connection.
+    All other notifications fall through to the default handler.
+    """
+    from mcp.types import ToolListChangedNotification as _ToolListChangedNotification
+
+    # Resolve the default handler once at handler-creation time
+    _default_fn: Any = None
+    try:
+        from mcp.client.session import _default_message_handler as _resolved_default
+        _default_fn = _resolved_default
+    except ImportError:
+        pass
+
+    async def _handler(message: Any) -> None:
+        if isinstance(message, _ToolListChangedNotification):
+            logger.info("MCP server '{}' sent ToolListChangedNotification", server_name)
+            if bus is not None:
+                try:
+                    await bus.publish_inbound(
+                        InboundMessage(
+                            channel="system",
+                            sender_id=f"mcp-server-{server_name}",
+                            chat_id="runtime",
+                            content=RUNTIME_CONTROL_MCP_TOOLS_CHANGED,
+                            metadata={
+                                INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_MCP_TOOLS_CHANGED,
+                                RUNTIME_CONTROL_MCP_SERVER_NAME: server_name,
+                            },
+                        )
+                    )
+                    return
+                except Exception:
+                    logger.debug("Failed to publish tools/list_changed for '{}'", server_name, exc_info=True)
+        # Not a ToolListChangedNotification, or bus publish failed — delegate to default
+        if _default_fn is not None:
+            await _default_fn(message)
+
+    return _handler
 
 
 async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
@@ -806,7 +926,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, AsyncExitStack] = {}
         if to_connect:
-            connected = await connect_mcp_servers(to_connect, registry)
+            connected = await connect_mcp_servers(
+                to_connect, registry,
+                on_disconnected=lambda server_name: mark_server_disconnected(state, registry, server_name),
+                bus=getattr(state, 'bus', None),
+            )
             state._mcp_stacks.update(connected)
 
         state._mcp_connected = bool(state._mcp_stacks)
@@ -881,9 +1005,39 @@ async def request_mcp_reload(bus: Any, *, timeout: float = 15.0) -> dict[str, An
 async def handle_runtime_control(state: Any, msg: InboundMessage, registry: ToolRegistry) -> bool:
     metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
     control = metadata.get(INBOUND_META_RUNTIME_CONTROL)
-    if control != RUNTIME_CONTROL_MCP_RELOAD:
+    if control not in (RUNTIME_CONTROL_MCP_RELOAD, RUNTIME_CONTROL_MCP_TOOLS_CHANGED):
         return False
 
+    if control == RUNTIME_CONTROL_MCP_TOOLS_CHANGED:
+        server_name = metadata.get(RUNTIME_CONTROL_MCP_SERVER_NAME)
+        if server_name and server_name in state._mcp_stacks:
+            logger.info("MCP server '{}' sent tools/list_changed, reloading tools", server_name)
+            try:
+                result = await reload_server_tools(state, registry, server_name)
+            except Exception as exc:
+                logger.exception("MCP tools/list_changed reload failed for '{}'", server_name)
+                result = {"ok": False, "error": str(exc)}
+            ack = metadata.get(RUNTIME_CONTROL_ACK)
+            if isinstance(ack, asyncio.Future) and not ack.done():
+                ack.set_result(result)
+        else:
+            logger.warning("MCP tools/list_changed for unknown server '{}', performing full reload", server_name)
+            try:
+                result = await reload_servers(state, registry)
+            except Exception as exc:
+                logger.exception("MCP hot reload failed")
+                result = {
+                    "ok": False,
+                    "message": "MCP hot reload failed. Restart nanobot to pick up changes.",
+                    "requires_restart": True,
+                    "error": str(exc),
+                }
+            ack = metadata.get(RUNTIME_CONTROL_ACK)
+            if isinstance(ack, asyncio.Future) and not ack.done():
+                ack.set_result(result)
+        return True
+
+    # Original MCP_RELOAD path
     ack = metadata.get(RUNTIME_CONTROL_ACK)
     try:
         result = await reload_servers(state, registry)
@@ -930,6 +1084,122 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
             registry.unregister(tool_name)
             removed += 1
     return removed
+
+
+def _find_session_in_stack(state: Any, server_name: str) -> Any:
+    """Locate the ClientSession for a connected server by inspecting its exit stack.
+
+    Returns the session object, or None if the server is not connected or the
+    session cannot be located in the stack's internal callbacks.
+    """
+    from mcp import ClientSession
+
+    stack = state._mcp_stacks.get(server_name)
+    if stack is None:
+        return None
+
+    # Try the common attribute name used by CPython's AsyncExitStack
+    callbacks = getattr(stack, '_exit_callbacks', None) or getattr(stack, "_callbacks", None) or []
+    for ctx in callbacks:
+        # Inspect closure vars for a ClientSession instance
+        for cell in getattr(ctx[0] if isinstance(ctx, tuple) else ctx, '__closure__', None) or []:
+            try:
+                if isinstance(cell.cell_contents, ClientSession):
+                    return cell.cell_contents
+            except ValueError:
+                # cell_contents can be empty for some cells
+                continue
+    return None
+
+
+async def reload_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> dict[str, Any]:
+    """Reload tools for a single MCP server after a tools/list_changed notification.
+
+    Keeps the existing session alive (it's still connected) — just re-fetches
+    the tool list and re-registers wrappers with the current session.
+    """
+    # Find the live session for this server from its exit stack
+    session = _find_session_in_stack(state, server_name)
+    if session is None:
+        logger.warning("Could not find session for MCP server '{}', marking disconnected", server_name)
+        mark_server_disconnected(state, registry, server_name)
+        return {"ok": False, "message": f"Server '{server_name}' not connected or session not found.", "requires_reconnect": True}
+
+    # Unregister old tools first
+    tools_removed = _unregister_server_tools(state, registry, server_name)
+
+    # Re-fetch tools
+    cfg = state._mcp_servers.get(server_name)
+    enabled_tools = set(cfg.enabled_tools) if cfg else set()
+    allow_all_tools = "*" in enabled_tools
+    registered_count = 0
+    matched_enabled_tools: set[str] = set()
+    on_disconnected = lambda sn=server_name: mark_server_disconnected(state, registry, sn)
+
+    try:
+        tools = await session.list_tools()
+    except Exception as exc:
+        logger.warning("MCP server '{}' list_tools failed after tools/list_changed: {}", server_name, exc)
+        mark_server_disconnected(state, registry, server_name)
+        return {"ok": False, "message": f"list_tools failed: {exc}", "requires_reconnect": True}
+
+    for tool_def in tools.tools:
+        wrapped_name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
+        if (
+            not allow_all_tools
+            and tool_def.name not in enabled_tools
+            and wrapped_name not in enabled_tools
+        ):
+            continue
+        wrapper = MCPToolWrapper(session, server_name, tool_def, tool_timeout=cfg.tool_timeout if cfg else 30, on_disconnected=on_disconnected)
+        registry.register(wrapper)
+        registered_count += 1
+        if enabled_tools:
+            if tool_def.name in enabled_tools:
+                matched_enabled_tools.add(tool_def.name)
+            if wrapped_name in enabled_tools:
+                matched_enabled_tools.add(wrapped_name)
+
+    # Also re-fetch resources and prompts
+    try:
+        resources_result = await session.list_resources()
+        for resource in resources_result.resources:
+            wrapper = MCPResourceWrapper(
+                session, server_name, resource,
+                resource_timeout=cfg.tool_timeout if cfg else 30,
+                on_disconnected=on_disconnected,
+            )
+            registry.register(wrapper)
+            registered_count += 1
+    except Exception as e:
+        logger.debug("MCP server '{}': resources not supported or failed: {}", server_name, e)
+
+    try:
+        prompts_result = await session.list_prompts()
+        for prompt in prompts_result.prompts:
+            wrapper = MCPPromptWrapper(
+                session, server_name, prompt,
+                prompt_timeout=cfg.tool_timeout if cfg else 30,
+                on_disconnected=on_disconnected,
+            )
+            registry.register(wrapper)
+            registered_count += 1
+    except Exception as e:
+        logger.debug("MCP server '{}': prompts not supported or failed: {}", server_name, e)
+
+    logger.info(
+        "MCP server '{}': tools/list_changed reload complete (removed={}, registered={})",
+        server_name,
+        tools_removed,
+        registered_count,
+    )
+    return {
+        "ok": True,
+        "server_name": server_name,
+        "tools_removed": tools_removed,
+        "tools_registered": registered_count,
+        "message": f"MCP server '{server_name}' tools reloaded ({tools_removed} removed, {registered_count} registered).",
+    }
 
 
 async def _close_server(state: Any, server_name: str) -> None:

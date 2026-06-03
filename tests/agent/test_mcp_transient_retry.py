@@ -1,8 +1,14 @@
-"""Tests for MCP tool/resource/prompt transient error retry."""
+"""Tests for MCP tool/resource/prompt transient error handling.
+
+When a transient connection error is detected, wrappers now:
+1. Call the ``on_disconnected`` callback to mark the server for reconnection.
+2. Return a reconnect message immediately (no retry with stale session).
+3. On the next turn, ``connect_missing_servers`` reconnects the server.
+"""
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp import types as mcp_types
@@ -35,7 +41,7 @@ class _FakeEndOfStreamError(Exception):
 _FakeEndOfStreamError.__name__ = "EndOfStream"
 
 
-def test_is_transient_recognizes_closed_resource():
+def test_is_transient_recognized_closed_resource():
     assert _is_transient(_FakeClosedResourceError("gone"))
 
 
@@ -68,7 +74,7 @@ def test_is_transient_rejects_timeout():
 
 
 # ---------------------------------------------------------------------------
-# MCPToolWrapper retry behaviour
+# MCPToolWrapper transient error handling
 # ---------------------------------------------------------------------------
 
 
@@ -86,38 +92,72 @@ def _make_tool_result(text):
 
 
 @pytest.mark.asyncio
-async def test_tool_retries_on_transient_error():
-    """Tool should retry once when a transient error occurs, then succeed."""
+async def test_tool_calls_on_disconnected_on_transient_error():
+    """On transient error, wrapper calls on_disconnected instead of retrying with stale session."""
     session = AsyncMock()
-    result = _make_tool_result("ok")
     exc = _FakeClosedResourceError("connection lost")
-    session.call_tool = AsyncMock(side_effect=[exc, result])
+    session.call_tool = AsyncMock(side_effect=exc)
 
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    on_disconnected = MagicMock()
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute(foo="bar")
+    wrapper = MCPToolWrapper(
+        session, "test_server", _make_tool_def(), tool_timeout=5,
+        on_disconnected=on_disconnected,
+    )
+    output = await wrapper.execute(foo="bar")
 
-    assert output == "ok"
-    assert session.call_tool.call_count == 2
+    assert "reconnecting" in output
+    on_disconnected.assert_called_once_with("test_server")
+    # Should NOT retry with the stale session
+    assert session.call_tool.call_count == 1
 
 
 @pytest.mark.asyncio
-async def test_tool_fails_after_retry_exhausted():
-    """Tool should fail with retry message when both attempts hit transient errors."""
+async def test_tool_reconnect_message_on_transient_error():
+    """Wrapper returns reconnection message on transient error."""
     session = AsyncMock()
-    exc1 = _FakeClosedResourceError("still dead")
-    exc2 = _FakeClosedResourceError("still dead again")
-    session.call_tool = AsyncMock(side_effect=[exc1, exc2])
+    exc = _FakeClosedResourceError("connection lost")
+    session.call_tool = AsyncMock(side_effect=exc)
+
+    wrapper = MCPToolWrapper(
+        session, "test_server", _make_tool_def(), tool_timeout=5,
+        on_disconnected=MagicMock(),
+    )
+    output = await wrapper.execute()
+
+    assert "MCP server connection lost" in output
+    assert "reconnecting" in output.lower() or "reconnect" in output.lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_no_on_disconnected_without_callback():
+    """Without on_disconnected callback, wrapper still returns reconnection message."""
+    session = AsyncMock()
+    exc = _FakeClosedResourceError("connection lost")
+    session.call_tool = AsyncMock(side_effect=exc)
 
     wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+    output = await wrapper.execute()
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
+    assert "reconnecting" in output
 
-    assert "failed after retry" in output
-    assert "ClosedResourceError" in output
-    assert session.call_tool.call_count == 2
+
+@pytest.mark.asyncio
+async def test_tool_on_disconnected_callback_error_suppressed():
+    """If on_disconnected callback raises, wrapper still returns reconnection message."""
+    session = AsyncMock()
+    exc = _FakeClosedResourceError("connection lost")
+    session.call_tool = AsyncMock(side_effect=exc)
+
+    failing_callback = MagicMock(side_effect=RuntimeError("callback boom"))
+
+    wrapper = MCPToolWrapper(
+        session, "test_server", _make_tool_def(), tool_timeout=5,
+        on_disconnected=failing_callback,
+    )
+    output = await wrapper.execute()
+
+    assert "reconnecting" in output
 
 
 @pytest.mark.asyncio
@@ -148,7 +188,7 @@ async def test_tool_no_retry_on_timeout():
 
 
 @pytest.mark.asyncio
-async def test_tool_success_on_first_try_no_retry():
+async def test_tool_success_on_first_try():
     """Normal success path — no retry logic involved."""
     session = AsyncMock()
     result = _make_tool_result("hello")
@@ -163,7 +203,7 @@ async def test_tool_success_on_first_try_no_retry():
 
 @pytest.mark.asyncio
 async def test_tool_does_not_retry_on_cancelled_error():
-    """`asyncio.CancelledError` must short-circuit the retry loop.
+    """``asyncio.CancelledError`` must short-circuit the retry loop.
 
     Regression guard: the retry branch lives under ``except Exception``,
     but ``CancelledError`` inherits from ``BaseException``, not
@@ -177,50 +217,14 @@ async def test_tool_does_not_retry_on_cancelled_error():
 
     wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        output = await wrapper.execute()
+    output = await wrapper.execute()
 
     assert "cancelled" in output
     assert session.call_tool.call_count == 1
-    mock_sleep.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_tool_retry_on_connection_reset():
-    """ConnectionResetError (a stdlib exception) should also trigger retry."""
-    session = AsyncMock()
-    result = _make_tool_result("recovered")
-    session.call_tool = AsyncMock(
-        side_effect=[ConnectionResetError("reset by peer"), result]
-    )
-
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
-
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
-
-    assert output == "recovered"
-    assert session.call_tool.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_tool_retry_on_end_of_stream():
-    """EndOfStream (anyio) should trigger retry."""
-    session = AsyncMock()
-    result = _make_tool_result("back")
-    session.call_tool = AsyncMock(side_effect=[_FakeEndOfStreamError("eof"), result])
-
-    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
-
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
-
-    assert output == "back"
-    assert session.call_tool.call_count == 2
 
 
 # ---------------------------------------------------------------------------
-# MCPResourceWrapper retry behaviour
+# MCPResourceWrapper transient error handling
 # ---------------------------------------------------------------------------
 
 
@@ -239,36 +243,23 @@ def _make_resource_result(text):
 
 
 @pytest.mark.asyncio
-async def test_resource_retries_on_transient_error():
-    """Resource should retry once on transient connection error."""
+async def test_resource_calls_on_disconnected_on_transient_error():
+    """On transient error, resource wrapper calls on_disconnected instead of retrying."""
     session = AsyncMock()
-    result = _make_resource_result("data")
     exc = _FakeClosedResourceError("gone")
-    session.read_resource = AsyncMock(side_effect=[exc, result])
+    session.read_resource = AsyncMock(side_effect=exc)
 
-    wrapper = MCPResourceWrapper(session, "test_server", _make_resource_def())
+    on_disconnected = MagicMock()
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
+    wrapper = MCPResourceWrapper(
+        session, "test_server", _make_resource_def(),
+        on_disconnected=on_disconnected,
+    )
+    output = await wrapper.execute()
 
-    assert output == "data"
-    assert session.read_resource.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_resource_fails_after_retry_exhausted():
-    """Resource should fail with retry message when both attempts fail."""
-    session = AsyncMock()
-    exc = _FakeClosedResourceError("dead")
-    session.read_resource = AsyncMock(side_effect=[exc, exc])
-
-    wrapper = MCPResourceWrapper(session, "test_server", _make_resource_def())
-
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
-
-    assert "failed after retry" in output
-    assert session.read_resource.call_count == 2
+    assert "reconnecting" in output
+    on_disconnected.assert_called_once_with("test_server")
+    assert session.read_resource.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -285,7 +276,7 @@ async def test_resource_no_retry_on_non_transient():
 
 
 # ---------------------------------------------------------------------------
-# MCPPromptWrapper retry behaviour
+# MCPPromptWrapper transient error handling
 # ---------------------------------------------------------------------------
 
 
@@ -308,36 +299,23 @@ def _make_prompt_result(text):
 
 
 @pytest.mark.asyncio
-async def test_prompt_retries_on_transient_error():
-    """Prompt should retry once on transient connection error."""
+async def test_prompt_calls_on_disconnected_on_transient_error():
+    """On transient error, prompt wrapper calls on_disconnected instead of retrying."""
     session = AsyncMock()
-    result = _make_prompt_result("prompt text")
     exc = _FakeClosedResourceError("gone")
-    session.get_prompt = AsyncMock(side_effect=[exc, result])
+    session.get_prompt = AsyncMock(side_effect=exc)
 
-    wrapper = MCPPromptWrapper(session, "test_server", _make_prompt_def())
+    on_disconnected = MagicMock()
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
+    wrapper = MCPPromptWrapper(
+        session, "test_server", _make_prompt_def(),
+        on_disconnected=on_disconnected,
+    )
+    output = await wrapper.execute()
 
-    assert output == "prompt text"
-    assert session.get_prompt.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_prompt_fails_after_retry_exhausted():
-    """Prompt should fail with retry message when both attempts fail."""
-    session = AsyncMock()
-    exc = _FakeClosedResourceError("dead")
-    session.get_prompt = AsyncMock(side_effect=[exc, exc])
-
-    wrapper = MCPPromptWrapper(session, "test_server", _make_prompt_def())
-
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
-        output = await wrapper.execute()
-
-    assert "failed after retry" in output
-    assert session.get_prompt.call_count == 2
+    assert "reconnecting" in output
+    on_disconnected.assert_called_once_with("test_server")
+    assert session.get_prompt.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -366,3 +344,37 @@ async def test_prompt_no_retry_on_non_transient():
 
     assert "RuntimeError" in output
     assert session.get_prompt.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# mark_server_disconnected integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mark_server_disconnected_removes_stack_and_unregisters_tools():
+    """mark_server_disconnected pops the stack, unregisters tools, resets _mcp_connected."""
+    from nanobot.agent.tools.mcp import mark_server_disconnected
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    # Register a fake tool for the server
+    registry.register(MCPToolWrapper(
+        AsyncMock(), "my_server", _make_tool_def(), tool_timeout=5,
+    ))
+
+    state = SimpleNamespace(
+        _mcp_stacks={"my_server": AsyncExitStack()},
+        _mcp_servers={"my_server": SimpleNamespace()},
+        _mcp_connected=True,
+    )
+
+    mark_server_disconnected(state, registry, "my_server")
+
+    assert "my_server" not in state._mcp_stacks
+    assert state._mcp_connected is False
+    # The tool should be unregistered
+    assert not any(t.startswith("mcp_my_server_") for t in registry.tool_names)
+
+
+from contextlib import AsyncExitStack
