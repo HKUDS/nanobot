@@ -5245,6 +5245,7 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   ant_ling: Sparkles,
   azure_openai: Cloud,
   bedrock: Database,
+  bocha: Search,
   brave: Search,
   duckduckgo: Search,
   exa: Search,

@@ -132,6 +132,70 @@ async def test_tavily_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bocha_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.bochaai.com/v1/web-search"
+        assert kw["headers"]["Authorization"] == "Bearer bocha-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {
+            "query": "MAI-THINKING-1 model",
+            "freshness": "noLimit",
+            "summary": True,
+            "count": 2,
+        }
+        return _response(json={
+            "webPages": {
+                "value": [
+                    {
+                        "name": "MAI-THINKING-1 - Microsoft Research",
+                        "url": "https://www.microsoft.com/research/maithinking-1",
+                        "summary": "MAI-THINKING-1 is a 35B-active MoE model with strong reasoning capabilities.",
+                        "snippet": "MAI-THINKING-1 achieves 97.0% on AIME 2025 and 52.8% on SWE-Bench Pro.",
+                    }
+                ]
+            }
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="bocha", api_key="bocha-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="MAI-THINKING-1 model", count=2)
+
+    assert "MAI-THINKING-1" in result
+    assert "https://www.microsoft.com/research/maithinking-1" in result
+    assert "35B-active MoE" in result
+
+
+@pytest.mark.asyncio
+async def test_bocha_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("BOCHA_API_KEY", raising=False)
+
+    tool = _tool(provider="bocha")
+    result = await tool.execute(query="test")
+
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_bocha_rate_limited(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=429, json={"error": "rate limit"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="bocha", api_key="bocha-key")
+    result = await tool.execute(query="test")
+
+    assert "429" in result
+
+
+@pytest.mark.asyncio
 async def test_volcengine_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://open.feedcoopapi.com/search_api/web_search"

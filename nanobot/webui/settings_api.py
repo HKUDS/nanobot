@@ -80,6 +80,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
     {"name": "exa", "label": "Exa", "credential": "api_key"},
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {

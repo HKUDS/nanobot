@@ -1451,6 +1451,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `kagi` | `apiKey` | `KAGI_API_KEY` | No |
 | `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
+| `bocha` | `apiKey` | `BOCHA_API_KEY` | Free tier (1M calls for startups) |
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
@@ -1527,6 +1528,24 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 
 You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
 
+**Bocha** (AI-optimized search, free tier available):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "bocha",
+        "apiKey": "${BOCHA_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Create your API key at [open.bochaai.com](https://open.bochaai.com).
+Bocha returns structured results optimized for AI consumption, with optional summaries.
+You can set `BOCHA_API_KEY` in the environment instead of storing it in config.
+
 **Volcengine Search:**
 ```json
 {
@@ -1574,7 +1593,7 @@ You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `volcengine`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
