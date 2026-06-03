@@ -843,6 +843,5 @@ def test_uninstall_uses_uv_pip_when_pip_unavailable(
         "uninstall",
         "--python",
         sys.executable,
-        "-y",
         "suno-cli",
     ]

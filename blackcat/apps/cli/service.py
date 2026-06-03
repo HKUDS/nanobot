@@ -734,7 +734,7 @@ class CliAppManager:
         if self._pip_available():
             prefix = [sys.executable, "-m", "pip", "uninstall", "-y"]
         elif shutil.which("uv"):
-            prefix = ["uv", "pip", "uninstall", "--python", sys.executable, "-y"]
+            prefix = ["uv", "pip", "uninstall", "--python", sys.executable]
         else:
             raise CliAppError("pip is not available and uv is not installed")
         distribution = str((installed_entry or {}).get("pip_distribution") or "").strip()
