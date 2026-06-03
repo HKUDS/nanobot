@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import os
 from contextlib import suppress
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -26,14 +25,17 @@ from blackcat.utils.file_edit_events import (
 from blackcat.utils.file_edit_events import (
     prepare_file_edit_tracker as _prepare_file_edit_tracker,
 )
-from blackcat.utils.formatting import (
+from blackcat.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
     extract_reasoning,
+    find_legal_message_start,
+    maybe_persist_tool_result,
     strip_think,
     truncate_text,
 )
-from blackcat.utils.helpers import find_legal_message_start
 from blackcat.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -49,11 +51,6 @@ from blackcat.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
-from blackcat.utils.tokens import (
-    estimate_message_tokens,
-    estimate_prompt_tokens_chain,
-)
-from blackcat.utils.tools import maybe_persist_tool_result
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -275,32 +272,26 @@ class AgentRunner:
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
-        context = AgentRunHookContext(messages=deepcopy(messages))
+        context = AgentRunHookContext(messages=list(messages))
 
         try:
             await hook.before_run(context)
             result = await self._run_core(spec, hook, messages)
-        except asyncio.CancelledError as exc:
-            context.messages = deepcopy(messages)
-            context.stop_reason = "cancelled"
-            context.error = None
-            context.exception = exc
-            raise
-        except Exception as exc:
-            context.messages = deepcopy(messages)
+        except BaseException as exc:
+            context.messages = list(messages)
             context.stop_reason = "error"
             context.error = f"Error: {type(exc).__name__}: {exc}"
             context.exception = exc
             await hook.on_error(context)
             raise
         else:
-            context.messages = deepcopy(result.messages)
+            context.messages = list(result.messages)
             context.final_content = result.final_content
             context.tools_used = list(result.tools_used)
             context.usage = dict(result.usage)
             context.stop_reason = result.stop_reason
             context.error = result.error
-            context.tool_events = deepcopy(result.tool_events)
+            context.tool_events = list(result.tool_events)
             context.had_injections = result.had_injections
             context.exception = None
             if context.error is not None:
@@ -308,17 +299,8 @@ class AgentRunner:
             await hook.after_run(context)
             return result
         finally:
-            context.messages = deepcopy(messages)
-            if context.exception is None:
-                await hook.on_finally(context)
-            else:
-                try:
-                    await hook.on_finally(context)
-                except Exception:
-                    logger.exception(
-                        "AgentHook.on_finally error after {}",
-                        context.stop_reason or "run exception",
-                    )
+            context.messages = list(messages)
+            await hook.on_finally(context)
 
     async def _run_core(
         self,
@@ -365,15 +347,14 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(
-                iteration=iteration,
-                messages=messages,
-                session_key=spec.session_key,
-            )
+            context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
+            raw_usage = self._usage_dict(response.usage)
             context.response = response
+            context.usage = dict(raw_usage)
             context.tool_calls = list(response.tool_calls)
+            self._accumulate_usage(usage, raw_usage)
 
             reasoning_text, cleaned_content = extract_reasoning(
                 response.reasoning_content,
@@ -381,9 +362,6 @@ class AgentRunner:
                 response.content,
             )
             response.content = cleaned_content
-            raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
-            context.usage = dict(raw_usage)
-            self._accumulate_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -401,6 +379,7 @@ class AgentRunner:
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
+                tools_used.extend(tc.name for tc in response.tool_calls)
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -422,11 +401,6 @@ class AgentRunner:
                     workspace_violation_counts,
                 )
                 tool_events.extend(new_events)
-                tools_used.extend(
-                    tool_call.name
-                    for tool_call, event in zip(response.tool_calls, new_events)
-                    if event.get("status") == "ok"
-                )
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
@@ -514,9 +488,8 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
-                retry_messages = self._finalization_retry_messages(messages_for_model)
                 response = await self._request_finalization_retry(spec, messages_for_model)
-                retry_usage = self._usage_or_estimate(spec, retry_messages, response)
+                retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
@@ -700,8 +673,8 @@ class AgentRunner:
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
             # request hangs indefinitely (e.g. gateway/network stall).
-            # Set BLACKCAT_LLM_TIMEOUT_S=0 to disable.
-            raw = os.environ.get("BLACKCAT_LLM_TIMEOUT_S", "300").strip()
+            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
+            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
             try:
                 timeout_s = float(raw)
             except (TypeError, ValueError):
@@ -754,15 +727,11 @@ class AgentRunner:
                 context.streamed_reasoning = True
                 await hook.emit_reasoning(delta)
 
-            async def _stream_recover() -> None:
-                await hook.on_stream_end(context, resuming=True)
-
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
                 on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
-                on_stream_recover=_stream_recover,
             )
         elif wants_progress_streaming:
             stream_buf = ""
@@ -798,9 +767,9 @@ class AgentRunner:
             coro = self.provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
-        # (BLACKCAT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
+        # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
         # LLM timeout here, or healthy long reasoning streams can be killed just
-        # because total elapsed time exceeded BLACKCAT_LLM_TIMEOUT_S.
+        # because total elapsed time exceeded NANOBOT_LLM_TIMEOUT_S.
         outer_timeout_s = None if (wants_streaming or wants_progress_streaming) else timeout_s
         try:
             response = (
@@ -836,59 +805,10 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ):
-        retry_messages = self._finalization_retry_messages(messages)
-        kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
-
-    @staticmethod
-    def _finalization_retry_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
-        return retry_messages
-
-    def _usage_or_estimate(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-        response: LLMResponse,
-    ) -> dict[str, int]:
-        usage = self._usage_dict(response.usage)
-        total = self._usage_total(usage)
-        if total > 0:
-            usage["total_tokens"] = total
-            usage.setdefault("provider_tokens", total)
-            return usage
-        if response.finish_reason == "error":
-            return {}
-        return self._estimate_response_usage(spec, messages, response)
-
-    def _estimate_response_usage(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
-        response: LLMResponse,
-    ) -> dict[str, int]:
-        try:
-            tools = spec.tools.get_definitions()
-        except Exception:
-            tools = None
-        prompt_tokens, _ = estimate_prompt_tokens_chain(self.provider, spec.model, messages, tools)
-        assistant_message = build_assistant_message(
-            response.content or "",
-            tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
-            reasoning_content=response.reasoning_content,
-            thinking_blocks=response.thinking_blocks,
-        )
-        completion_tokens = estimate_message_tokens(assistant_message)
-        total_tokens = max(0, prompt_tokens) + max(0, completion_tokens)
-        if total_tokens <= 0:
-            return {}
-        return {
-            "prompt_tokens": max(0, prompt_tokens),
-            "completion_tokens": max(0, completion_tokens),
-            "total_tokens": total_tokens,
-            "estimated_tokens": total_tokens,
-        }
+        kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
+        return await self.provider.chat_with_retry(**kwargs)
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
@@ -901,12 +821,6 @@ class AgentRunner:
             except (TypeError, ValueError):
                 continue
         return result
-
-    @staticmethod
-    def _usage_total(usage: dict[str, int]) -> int:
-        return max(0, usage.get("total_tokens", 0) or (
-            usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-        ))
 
     @staticmethod
     def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:

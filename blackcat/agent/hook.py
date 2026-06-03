@@ -44,6 +44,21 @@ class AgentRunHookContext:
     exception: BaseException | None = None
 
 
+@dataclass(slots=True)
+class AgentRunHookContext:
+    """Run-level state snapshot exposed to runner hooks."""
+
+    messages: list[dict[str, Any]]
+    final_content: str | None = None
+    tools_used: list[str] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
+    stop_reason: str | None = None
+    error: str | None = None
+    tool_events: list[dict[str, str]] = field(default_factory=list)
+    had_injections: bool = False
+    exception: BaseException | None = None
+
+
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
