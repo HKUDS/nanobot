@@ -209,7 +209,7 @@ nanobot gateway
 Install Matrix dependencies first:
 
 ```bash
-pip install nanobot-ai[matrix]
+python -m pip install "nanobot-ai[matrix]"
 ```
 
 > [!NOTE]
@@ -629,7 +629,7 @@ Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. 
 **1. Install with WeChat support**
 
 ```bash
-pip install "nanobot-ai[weixin]"
+python -m pip install "nanobot-ai[weixin]"
 ```
 
 **2. Configure**
@@ -681,7 +681,7 @@ nanobot gateway
 **1. Install the optional dependency**
 
 ```bash
-pip install nanobot-ai[wecom]
+python -m pip install "nanobot-ai[wecom]"
 ```
 
 **2. Create a WeCom AI Bot**
@@ -720,7 +720,7 @@ nanobot gateway
 **1. Install the optional dependency**
 
 ```bash
-pip install nanobot-ai[msteams]
+python -m pip install "nanobot-ai[msteams]"
 ```
 
 **2. Create a Teams / Azure bot app registration**

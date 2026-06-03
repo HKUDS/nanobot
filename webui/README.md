@@ -10,7 +10,9 @@ For the project overview, install guide, and general docs map, see the root
 
 ## Just want to use the WebUI?
 
-If you installed nanobot via `pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
+If you installed nanobot via `python -m pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
+
+Merge the WebSocket snippet into your existing config instead of replacing the whole file. By default, the browser UI opens on `http://127.0.0.1:8765`; the gateway's `18790` port is only the health endpoint.
 
 This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
 
@@ -28,14 +30,14 @@ nanobot/web/dist/      build output served by the gateway
 From the repository root:
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
 > Editable installs intentionally **skip** the WebUI bundle step — Vite HMR is faster than rebuilding `dist/` on every change.
 
 ### 2. Enable the WebSocket channel
 
-In `~/.nanobot/config.json`:
+In `~/.nanobot/config.json`, merge:
 
 ```json
 { "channels": { "websocket": { "enabled": true } } }

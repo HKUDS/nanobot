@@ -3,7 +3,7 @@
 nanobot can expose a minimal OpenAI-compatible endpoint for local integrations:
 
 ```bash
-pip install "nanobot-ai[api]"
+python -m pip install "nanobot-ai[api]"
 nanobot serve
 ```
 

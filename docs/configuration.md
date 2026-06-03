@@ -2,6 +2,15 @@
 
 Config file: `~/.nanobot/config.json`
 
+If this is your first install, start with [`quick-start.md`](./quick-start.md)
+and come back here when you need a specific provider, channel, tool, or runtime
+option. The JSON examples below are usually partial snippets to merge into your
+existing config, not full replacement files.
+
+The generated `config.json` uses camelCase keys such as `apiKey` and
+`intervalS`. snake_case keys are also accepted for compatibility, but the docs
+prefer camelCase because that is what nanobot writes back to disk.
+
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
 > run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
@@ -1570,6 +1579,41 @@ From the terminal:
 nanobot agent -m "/pairing list"
 nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
+
+
+## Gateway Heartbeat
+
+The gateway can run a protected heartbeat cron job that periodically checks
+`HEARTBEAT.md` in the active workspace. This is enabled by default when you run
+`nanobot gateway`.
+
+```json
+{
+  "gateway": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800,
+      "keepRecentMessages": 8
+    }
+  }
+}
+```
+
+If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and
+delivers useful results to the most recently active chat target. If the file has
+no active tasks, the heartbeat is skipped silently.
+
+The heartbeat job is backed by the same cron service as user-created reminders.
+It is stored under the active workspace (`<workspace>/cron/jobs.json`) and shows
+up in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot
+be removed with the `cron` tool. Disable it through config and restart the
+gateway if you do not want periodic heartbeat checks.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
+| `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
+| `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
 
 
 ## Subagent Concurrency

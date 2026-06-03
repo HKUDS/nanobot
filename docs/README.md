@@ -4,6 +4,11 @@ For the latest documentation, visit [nanobot.wiki](https://nanobot.wiki/docs/lat
 
 The pages in this directory track the current repository and may move faster than the published website.
 
+New to nanobot? Start with [`quick-start.md`](./quick-start.md), get one local
+`nanobot agent -m "Hello!"` reply working, then come back here for WebUI, chat
+apps, or deployment. Most JSON examples in these docs are snippets to merge
+into `~/.nanobot/config.json`, not full replacement files.
+
 ## Core Docs
 
 Start here for setup, everyday usage, and deployment.

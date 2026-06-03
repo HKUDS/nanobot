@@ -2,7 +2,7 @@
 
 Build a custom nanobot channel in three steps: subclass, package, install.
 
-> **Note:** We recommend developing channel plugins against a source checkout of nanobot (`pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
+> **Note:** We recommend developing channel plugins against a source checkout of nanobot (`python -m pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
 
 ## How It Works
 
@@ -153,7 +153,7 @@ The key (`webhook`) becomes the config section name. The value points to your `B
 ### 3. Install & Configure
 
 ```bash
-pip install -e .
+python -m pip install -e .
 nanobot plugins list      # verify "Webhook" shows as "plugin"
 nanobot onboard           # auto-adds default config for detected plugins
 ```
@@ -533,7 +533,7 @@ If not overridden, the base class returns `{"enabled": false}`.
 ```bash
 git clone https://github.com/you/nanobot-channel-webhook
 cd nanobot-channel-webhook
-pip install -e .
+python -m pip install -e .
 nanobot plugins list    # should show "Webhook" as "plugin"
 nanobot gateway         # test end-to-end
 ```
