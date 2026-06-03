@@ -490,13 +490,23 @@ class QQChannel(BaseChannel):
 
             content = (data.content or "").strip()
 
-            if not self.is_allowed(user_id):
-                return
-
             if data.id in self._processed_ids:
                 return
             self._processed_ids.append(data.id)
             self._chat_type_cache[chat_id] = chat_type
+
+            # Early permission check — avoid attachment downloads and ack side effects
+            # for unauthorized users. C2C messages can receive pairing codes;
+            # group messages remain silently ignored.
+            if not self.is_allowed(user_id):
+                if not is_group:
+                    await self._handle_message(
+                        sender_id=user_id,
+                        chat_id=chat_id,
+                        content="",
+                        is_dm=True,
+                    )
+                return
 
             # the data used by tests don't contain attachments property
             # so we use getattr with a default of [] to avoid AttributeError in tests
@@ -538,6 +548,7 @@ class QQChannel(BaseChannel):
                     "message_id": data.id,
                     "attachments": att_meta,
                 },
+                is_dm=not is_group,
             )
         except Exception:
             self.logger.exception("Error handling inbound message id={}", getattr(data, "id", "?"))
