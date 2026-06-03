@@ -349,7 +349,7 @@ class EmailChannel(BaseChannel):
             smtp.send_message(msg)
 
     def _fetch_new_messages(self) -> tuple[list[dict[str, Any]], set[str]]:
-        """Poll IMAP and return parsed unread messages."""
+        """Poll IMAP and return parsed unread messages plus skipped message UIDs."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
             mark_seen=self.config.mark_seen,
