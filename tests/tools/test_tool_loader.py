@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
 
 
 class _MinimalTool(Tool):
@@ -49,8 +52,6 @@ def test_tool_plugin_discoverable_default_is_true():
 
 # --- ToolContext tests ---
 
-from nanobot.agent.tools.context import ToolContext
-
 
 def test_tool_context_has_required_fields():
     field_names = {f.name for f in fields(ToolContext)}
@@ -73,8 +74,6 @@ def test_tool_context_defaults():
 
 
 # --- ToolLoader tests ---
-
-from nanobot.agent.tools.loader import ToolLoader, _SKIP_MODULES
 
 
 def test_skip_modules_excludes_infrastructure():
@@ -139,8 +138,6 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
 
 
 # --- Task 4: _FsTool.create() ---
-
-from pathlib import Path
 
 
 def test_fs_tool_create_builds_from_context():
@@ -258,7 +255,7 @@ def test_exec_tool_create():
 
 
 def test_web_tools_config_cls():
-    from nanobot.agent.tools.web import WebSearchTool, WebFetchTool, WebToolsConfig
+    from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, WebToolsConfig
     assert WebSearchTool.config_key == "web"
     assert WebSearchTool.config_cls() is WebToolsConfig
     assert WebFetchTool.config_key == "web"
@@ -347,7 +344,7 @@ def test_my_tool_enabled():
 
 
 def test_mcp_wrappers_not_discoverable():
-    from nanobot.agent.tools.mcp import MCPToolWrapper, MCPResourceWrapper, MCPPromptWrapper
+    from nanobot.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
     assert MCPToolWrapper._plugin_discoverable is False
     assert MCPResourceWrapper._plugin_discoverable is False
     assert MCPPromptWrapper._plugin_discoverable is False
