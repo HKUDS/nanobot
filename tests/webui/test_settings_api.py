@@ -282,6 +282,23 @@ def test_settings_payload_exposes_openrouter_transcription_provider(
     assert providers["openrouter"]["configured"] is True
 
 
+def test_settings_payload_exposes_xiaomi_mimo_transcription_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.xiaomi_mimo.api_key = "mimo-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    providers = {provider["name"]: provider for provider in payload["transcription"]["providers"]}
+    assert providers["xiaomi_mimo"]["label"] == "Xiaomi MIMO"
+    assert providers["xiaomi_mimo"]["configured"] is True
+
+
 def test_update_transcription_settings_writes_top_level_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -339,6 +356,32 @@ def test_update_transcription_settings_accepts_openrouter(
     assert saved.transcription.provider == "openrouter"
     assert saved.transcription.model == "nvidia/parakeet-tdt-0.6b-v3"
     assert payload["transcription"]["provider"] == "openrouter"
+    assert payload["transcription"]["provider_configured"] is True
+
+
+def test_update_transcription_settings_accepts_xiaomi_mimo(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.xiaomi_mimo.api_key = "mimo-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_transcription_settings(
+        {
+            "provider": ["xiaomi_mimo"],
+            "model": ["mimo-v2.5-asr"],
+            "language": ["zh"],
+        }
+    )
+
+    saved = load_config(config_path)
+    assert saved.transcription.provider == "xiaomi_mimo"
+    assert saved.transcription.model == "mimo-v2.5-asr"
+    assert saved.transcription.language == "zh"
+    assert payload["transcription"]["provider"] == "xiaomi_mimo"
     assert payload["transcription"]["provider_configured"] is True
 
 
