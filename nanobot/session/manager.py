@@ -101,7 +101,11 @@ class Session:
 
     def __post_init__(self) -> None:
         # An out-of-range offset (corrupt metadata) would hide all history; reset it.
-        if not 0 <= self.last_consolidated <= len(self.messages):
+        if (
+            isinstance(self.last_consolidated, bool)
+            or not isinstance(self.last_consolidated, int)
+            or not 0 <= self.last_consolidated <= len(self.messages)
+        ):
             self.last_consolidated = 0
 
     @staticmethod
