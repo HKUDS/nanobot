@@ -19,7 +19,9 @@ from blackcat.providers.transcription import (
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
     OpenRouterTranscriptionProvider,
+    XiaomiMiMoTranscriptionProvider,
     _audio_format,
+    _resolve_chat_completions_url,
     _resolve_transcription_url,
 )
 
@@ -95,6 +97,37 @@ def test_resolver_supports_openrouter_transcription_provider() -> None:
     assert resolved.api_base == "https://openrouter.ai/api/v1"
 
 
+def test_resolver_supports_xiaomi_mimo_transcription_provider() -> None:
+    config = Config()
+    config.transcription.provider = "xiaomi_mimo"
+    config.transcription.model = "mimo-v2.5-asr"
+    config.transcription.language = "zh"
+    config.providers.xiaomi_mimo.api_key = "mimo-test"
+    config.providers.xiaomi_mimo.api_base = "https://api.xiaomimimo.com/v1"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "xiaomi_mimo"
+    assert resolved.model == "mimo-v2.5-asr"
+    assert resolved.language == "zh"
+    assert resolved.api_key == "mimo-test"
+    assert resolved.api_base == "https://api.xiaomimimo.com/v1"
+
+
+def test_resolver_accepts_legacy_xiaomi_transcription_alias() -> None:
+    config = Config()
+    config.channels.transcription_provider = "xiaomi"
+    config.channels.transcription_language = "zh"
+    config.providers.xiaomi_mimo.api_key = "mimo-test"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "xiaomi_mimo"
+    assert resolved.model == "mimo-v2.5-asr"
+    assert resolved.language == "zh"
+    assert resolved.api_key == "mimo-test"
+
+
 @pytest.mark.asyncio
 async def test_transcribe_audio_file_routes_openrouter_provider(audio_file: Path) -> None:
     captured: dict[str, object] = {}
@@ -127,6 +160,42 @@ async def test_transcribe_audio_file_routes_openrouter_provider(audio_file: Path
         "api_base": "https://openrouter.ai/api/v1",
         "language": "en",
         "model": "nvidia/parakeet-tdt-0.6b-v3",
+        "file_path": audio_file,
+    }
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_file_routes_xiaomi_mimo_provider(audio_file: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class StubXiaomiMiMo:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def transcribe(self, file_path: str | Path) -> str:
+            captured["file_path"] = Path(file_path)
+            return "mimo ok"
+
+    config = EffectiveTranscriptionConfig(
+        enabled=True,
+        provider="xiaomi_mimo",
+        model="mimo-v2.5-asr",
+        language="zh",
+        api_key="mimo-test",
+        api_base="https://api.xiaomimimo.com/v1",
+        max_duration_sec=120,
+        max_upload_mb=25,
+    )
+
+    with patch("nanobot.providers.transcription.XiaomiMiMoTranscriptionProvider", StubXiaomiMiMo):
+        result = await transcribe_audio_file(audio_file, config)
+
+    assert result == "mimo ok"
+    assert captured == {
+        "api_key": "mimo-test",
+        "api_base": "https://api.xiaomimimo.com/v1",
+        "language": "zh",
+        "model": "mimo-v2.5-asr",
         "file_path": audio_file,
     }
 
@@ -493,6 +562,69 @@ async def test_openrouter_shares_retry_contract(audio_file: Path) -> None:
     post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "recovered"})])
     with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
         assert await provider.transcribe(audio_file) == "recovered"
+    assert post.await_count == 2
+
+
+def test_resolve_chat_completions_url_appends_path_to_base() -> None:
+    default = "https://api.xiaomimimo.com/v1/chat/completions"
+    assert _resolve_chat_completions_url(None, default) == default
+    assert (
+        _resolve_chat_completions_url("https://api.xiaomimimo.com/v1", default)
+        == "https://api.xiaomimimo.com/v1/chat/completions"
+    )
+    assert _resolve_chat_completions_url(default, "https://x/chat/completions") == default
+
+
+def test_xiaomi_mimo_defaults_and_base_normalization() -> None:
+    provider = XiaomiMiMoTranscriptionProvider(api_key="k")
+    assert provider.api_url == "https://api.xiaomimimo.com/v1/chat/completions"
+    assert provider.model == "mimo-v2.5-asr"
+
+    custom = XiaomiMiMoTranscriptionProvider(
+        api_key="k",
+        api_base="https://token-plan-sgp.xiaomimimo.com/v1",
+        model="custom-asr",
+    )
+    assert custom.api_url == "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"
+    assert custom.model == "custom-asr"
+
+
+@pytest.mark.asyncio
+async def test_xiaomi_mimo_sends_chat_completion_audio_payload(audio_file: Path) -> None:
+    provider = XiaomiMiMoTranscriptionProvider(api_key="k", language="zh")
+    post = AsyncMock(
+        return_value=_response(
+            200,
+            {"choices": [{"message": {"content": "你好"}}]},
+        )
+    )
+
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "你好"
+
+    call = post.await_args_list[0].kwargs
+    assert "files" not in call
+    body = call["json"]
+    assert body["model"] == "mimo-v2.5-asr"
+    assert body["asr_options"] == {"language": "zh"}
+    audio = body["messages"][0]["content"][0]["input_audio"]["data"]
+    assert audio.startswith("data:audio/ogg;base64,")
+    assert base64.b64decode(audio.split(",", 1)[1]) == audio_file.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_xiaomi_mimo_shares_retry_contract(audio_file: Path) -> None:
+    provider = XiaomiMiMoTranscriptionProvider(api_key="k")
+    post = AsyncMock(
+        side_effect=[
+            _response(503),
+            _response(200, {"choices": [{"message": {"content": "ok"}}]}),
+        ]
+    )
+
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        assert await provider.transcribe(audio_file) == "ok"
+
     assert post.await_count == 2
 
 

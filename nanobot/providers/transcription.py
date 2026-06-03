@@ -1,8 +1,9 @@
 """Provider-specific voice transcription adapters.
 
 This module only knows how to call external transcription APIs such as Groq,
-OpenAI Whisper, and OpenRouter. Product-level config fallback, WebUI upload
-validation, and channel integration live in ``blackcat.audio.transcription``.
+OpenAI Whisper, OpenRouter, and Xiaomi MiMo ASR. Product-level config fallback,
+WebUI upload validation, and channel integration live in
+``blackcat.audio.transcription``.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
+_CHAT_COMPLETIONS_PATH = "chat/completions"
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
 _AUDIO_MIME_OVERRIDES = {
     ".m4a": "audio/mp4",
@@ -49,6 +51,16 @@ def _resolve_transcription_url(api_base: str | None, default_url: str) -> str:
     if base.endswith(_TRANSCRIPTIONS_PATH):
         return base
     return f"{base}/{_TRANSCRIPTIONS_PATH}"
+
+
+def _resolve_chat_completions_url(api_base: str | None, default_url: str) -> str:
+    """Resolve a chat-completions endpoint for ASR providers using chat payloads."""
+    if not api_base:
+        return default_url
+    base = api_base.rstrip("/")
+    if base.endswith(_CHAT_COMPLETIONS_PATH):
+        return base
+    return f"{base}/{_CHAT_COMPLETIONS_PATH}"
 
 
 def _audio_mime_type(path: Path) -> str:
@@ -116,7 +128,7 @@ async def _post_transcription_with_retry(
             files["language"] = (None, language)
         return {"url": url, "headers": headers, "files": files, "timeout": 60.0}
 
-    return await _post_with_retry(build_request, provider_label)
+    return await _post_with_retry(build_request, provider_label, _text_from_transcription_payload)
 
 
 async def _post_json_transcription_with_retry(
@@ -151,12 +163,61 @@ async def _post_json_transcription_with_retry(
             body["language"] = language
         return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
 
-    return await _post_with_retry(build_request, provider_label)
+    return await _post_with_retry(build_request, provider_label, _text_from_transcription_payload)
+
+
+async def _post_xiaomi_mimo_asr_with_retry(
+    url: str,
+    *,
+    api_key: str | None,
+    path: Path,
+    model: str,
+    provider_label: str,
+    language: str | None = None,
+) -> str:
+    """POST audio to Xiaomi MiMo ASR's chat-completions transcription API."""
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
+        return ""
+
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": (
+                                f"data:{_audio_mime_type(path)};base64,"
+                                f"{base64.b64encode(data).decode('ascii')}"
+                            ),
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    if language:
+        body["asr_options"] = {"language": language}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def build_request() -> dict[str, Any]:
+        return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
+
+    return await _post_with_retry(build_request, provider_label, _text_from_chat_payload)
 
 
 async def _post_with_retry(
     build_request: Callable[[], dict[str, Any]],
     provider_label: str,
+    extract_text: Callable[[dict[str, Any]], str],
 ) -> str:
     async with httpx.AsyncClient() as client:
         for attempt in range(_MAX_RETRIES + 1):
@@ -227,8 +288,21 @@ async def _post_with_retry(
                     type(payload).__name__,
                 )
                 return ""
-            return payload.get("text", "")
+            return extract_text(payload)
     return ""
+
+
+def _text_from_transcription_payload(payload: dict[str, Any]) -> str:
+    text = payload.get("text")
+    return text if isinstance(text, str) else ""
+
+
+def _text_from_chat_payload(payload: dict[str, Any]) -> str:
+    try:
+        text = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    return text if isinstance(text, str) else ""
 
 
 class OpenAITranscriptionProvider:
@@ -355,5 +429,44 @@ class OpenRouterTranscriptionProvider:
             path=path,
             model=self.model,
             provider_label="OpenRouter",
+            language=self.language,
+        )
+
+
+class XiaomiMiMoTranscriptionProvider:
+    """Voice transcription provider using Xiaomi MiMo ASR."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+        model: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("MIMO_API_KEY")
+        self.api_url = _resolve_chat_completions_url(
+            api_base or os.environ.get("MIMO_API_BASE"),
+            "https://api.xiaomimimo.com/v1/chat/completions",
+        )
+        self.language = language or None
+        self.model = model or "mimo-v2.5-asr"
+        logger.debug("Xiaomi MiMo transcription endpoint: {}", self.api_url)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("Xiaomi MiMo API key not configured for transcription")
+            return ""
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        return await _post_xiaomi_mimo_asr_with_retry(
+            self.api_url,
+            api_key=self.api_key,
+            path=path,
+            model=self.model,
+            provider_label="Xiaomi MiMo",
             language=self.language,
         )

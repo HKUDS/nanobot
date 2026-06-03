@@ -119,7 +119,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 ## Providers
 
 > [!TIP]
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper or `"openrouter"` for OpenRouter speech-to-text models. API keys still live in the matching `providers.<provider>` config.
+> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, or `"xiaomi_mimo"` for Xiaomi MiMo ASR. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the blackcat community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so blackcat keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
@@ -1122,8 +1122,8 @@ Configure transcription under the top-level `transcription` section:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI/desktop microphone input. |
-| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, or `"openrouter"`. |
-| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, and `openai/whisper-1` for OpenRouter. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. |
+| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, or `"xiaomi_mimo"`. |
+| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, and `mimo-v2.5-asr` for Xiaomi MiMo ASR. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. |
 | `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
 | `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
 | `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |

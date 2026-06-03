@@ -18,13 +18,18 @@ from loguru import logger
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
-TranscriptionProviderName = Literal["groq", "openai", "openrouter"]
+TranscriptionProviderName = Literal["groq", "openai", "openrouter", "xiaomi_mimo"]
 
 _DEFAULT_PROVIDER: TranscriptionProviderName = "groq"
 _DEFAULT_MODELS: dict[TranscriptionProviderName, str] = {
     "groq": "whisper-large-v3",
     "openai": "whisper-1",
     "openrouter": "openai/whisper-1",
+    "xiaomi_mimo": "mimo-v2.5-asr",
+}
+_PROVIDER_ALIASES: dict[str, TranscriptionProviderName] = {
+    "mimo": "xiaomi_mimo",
+    "xiaomi": "xiaomi_mimo",
 }
 _MAX_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
 _AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
@@ -69,6 +74,8 @@ class TranscriptionIngressError(Exception):
 def _as_provider(value: Any) -> TranscriptionProviderName | None:
     if isinstance(value, str):
         name = value.strip().lower()
+        if name in _PROVIDER_ALIASES:
+            return _PROVIDER_ALIASES[name]
         if name in _DEFAULT_MODELS:
             return name  # type: ignore[return-value]
     return None
@@ -176,6 +183,15 @@ async def transcribe_audio_file(
         from nanobot.providers.transcription import OpenRouterTranscriptionProvider
 
         provider = OpenRouterTranscriptionProvider(
+            api_key=config.api_key,
+            api_base=config.api_base or None,
+            language=config.language,
+            model=config.model,
+        )
+    elif config.provider == "xiaomi_mimo":
+        from nanobot.providers.transcription import XiaomiMiMoTranscriptionProvider
+
+        provider = XiaomiMiMoTranscriptionProvider(
             api_key=config.api_key,
             api_base=config.api_base or None,
             language=config.language,
