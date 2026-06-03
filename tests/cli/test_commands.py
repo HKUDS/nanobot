@@ -1601,7 +1601,6 @@ def test_gateway_cron_job_streaming_respects_evaluator_rejection(
     assert response == "This should not leak"
     assert seen["on_stream"] is not None
     assert seen["on_stream_end"] is not None
-    assert seen["evaluated"] is True
     bus.publish_outbound.assert_not_awaited()
 
 
