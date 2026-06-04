@@ -5,8 +5,10 @@ import os
 import select
 import signal
 import sys
+import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +85,34 @@ class SafeFileHistory(FileHistory):
 
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
+
+
+_WEBUI_TURN_META_KEY = "webui_turn_id"
+_WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
+_PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
+    "proactive_webui_metadata",
+    default=None,
+)
+
+
+def _proactive_delivery_metadata(
+    channel: str,
+    metadata: dict[str, Any] | None,
+    *,
+    turn_seed: str,
+    source_label: str | None = None,
+) -> dict[str, Any]:
+    """Return channel metadata for a fresh proactive delivery turn."""
+    out = dict(metadata or {})
+    out.pop(_WEBUI_TURN_META_KEY, None)
+    if channel == "websocket":
+        out[_WEBUI_TURN_META_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
+        source: dict[str, str] = {"kind": "cron"}
+        if source_label:
+            source["label"] = source_label
+        out[_WEBUI_MESSAGE_SOURCE_META_KEY] = source
+    return out
+
 app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -1010,6 +1040,9 @@ def _run_gateway(
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
         record = record or bool(metadata.pop("_record_channel_delivery", False))
+        proactive_webui_metadata = _PROACTIVE_WEBUI_METADATA.get()
+        if record and msg.channel == "websocket" and proactive_webui_metadata:
+            metadata = {**metadata, **proactive_webui_metadata}
         if metadata != (msg.metadata or {}):
             msg = OutboundMessage(
                 channel=msg.channel,
@@ -1081,6 +1114,13 @@ def _run_gateway(
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
+                from nanobot.webui.token_usage import record_response_token_usage
+
+                record_response_token_usage(
+                    resp,
+                    source="dream",
+                    timezone_name=config.agents.defaults.timezone,
+                )
                 if store.git.is_initialized():
                     msg = build_dream_commit_message(
                         "dream: periodic memory consolidation", resp,
@@ -1171,6 +1211,14 @@ def _run_gateway(
         if isinstance(message_tool, MessageTool):
             message_record_token = message_tool.set_record_channel_delivery(True)
 
+        proactive_webui_metadata = _proactive_delivery_metadata(
+            "websocket",
+            None,
+            turn_seed=f"cron:{job.id}",
+            source_label=job.name,
+        )
+        proactive_token = _PROACTIVE_WEBUI_METADATA.set(proactive_webui_metadata)
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
@@ -1180,6 +1228,7 @@ def _run_gateway(
                 on_progress=_silent,
             )
         finally:
+            _PROACTIVE_WEBUI_METADATA.reset(proactive_token)
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
             if isinstance(message_tool, MessageTool) and message_record_token is not None:
@@ -1195,12 +1244,18 @@ def _run_gateway(
                 response, reminder_note, agent.provider, agent.model,
             )
             if should_notify:
+                proactive_metadata = _proactive_delivery_metadata(
+                    job.payload.channel or "cli",
+                    job.payload.channel_meta,
+                    turn_seed=f"cron:{job.id}",
+                    source_label=job.name,
+                )
                 await _deliver_to_channel(
                     OutboundMessage(
                         channel=job.payload.channel or "cli",
                         chat_id=job.payload.to,
                         content=response,
-                        metadata=dict(job.payload.channel_meta),
+                        metadata=proactive_metadata,
                     ),
                     record=True,
                     session_key=job.payload.session_key,
@@ -1222,6 +1277,7 @@ def _run_gateway(
         config,
         bus,
         session_manager=session_manager,
+        cron_service=cron,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,

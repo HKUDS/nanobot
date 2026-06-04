@@ -75,6 +75,19 @@ def _clean_source(value: str | None) -> str:
     return value if value in _SOURCE_KEYS else "system"
 
 
+def _source_from_session_key(session_key: str | None) -> str:
+    key = session_key or ""
+    if key.startswith("dream:"):
+        return "dream"
+    if key == "heartbeat" or key.startswith("cron:"):
+        return "cron"
+    if key.startswith("api:"):
+        return "api"
+    if key.startswith("system:"):
+        return "system"
+    return "user"
+
+
 def _normalize_usage(raw: dict[str, Any] | None) -> dict[str, int]:
     if not isinstance(raw, dict):
         return {}
@@ -249,6 +262,22 @@ def record_token_usage(
         return write_token_usage_state(state)
 
 
+def record_response_token_usage(
+    response: Any,
+    *,
+    source: str,
+    timezone_name: str | None = None,
+) -> None:
+    try:
+        record_token_usage(
+            getattr(response, "usage", None),
+            source=source,
+            timezone_name=timezone_name,
+        )
+    except Exception:
+        logger.exception("failed to record {} token usage", source)
+
+
 def token_usage_payload(
     *,
     days: int = 371,
@@ -317,14 +346,11 @@ class TokenUsageHook(AgentHook):
         super().__init__()
         self._timezone_name = timezone_name
 
-    def include_ephemeral(self) -> bool:
-        return True
-
     async def after_iteration(self, context: AgentHookContext) -> None:
         try:
             record_token_usage(
                 context.usage,
-                source=context.usage_source,
+                source=_source_from_session_key(context.session_key),
                 timezone_name=self._timezone_name,
             )
         except Exception:

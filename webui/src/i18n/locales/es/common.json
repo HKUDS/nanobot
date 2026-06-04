@@ -54,7 +54,10 @@
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Habilidades"
+    }
   },
   "settings": {
     "backToChat": "Volver al chat",
@@ -75,7 +78,8 @@
       "advanced": "Seguridad",
       "cliApps": "Apps CLI",
       "mcp": "MCP",
-      "apps": "Aplicaciones"
+      "apps": "Aplicaciones",
+      "skills": "Habilidades"
     },
     "sections": {
       "interface": "Interfaz",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sesión iniciada",
       "notSignedIn": "Sin sesión"
+    },
+    "skills": {
+      "description": "Revisa las habilidades de instrucciones que este agente puede cargar durante una conversación.",
+      "caption": "{{available}} disponibles · {{total}} en total",
+      "featured": "Habilidades del agente",
+      "empty": "No hay habilidades disponibles.",
+      "sourceWorkspace": "Personalizada",
+      "sourceBuiltin": "Integradas",
+      "statusAvailable": "Disponible",
+      "statusUnavailable": "No disponible",
+      "unavailableReason": "Falta: {{reason}}",
+      "openDetails": "Abrir detalles de {{name}}",
+      "loadingDetail": "Cargando detalles de la habilidad...",
+      "loadFailed": "No se pudieron cargar los detalles.",
+      "descriptionTitle": "Descripción",
+      "source": "Origen",
+      "status": "Estado",
+      "requirements": "Requisitos",
+      "noRequirements": "Sin requisitos explícitos.",
+      "commands": "Comandos",
+      "environment": "Variables de entorno",
+      "missingCommands": "Falta CLI",
+      "missingEnvironment": "Falta ENV",
+      "unavailableReasonLabel": "Motivo de indisponibilidad",
+      "rawInstructions": "SKILL.md original",
+      "rawInstructionsEmpty": "No hay instrucciones originales.",
+      "detailDescription": "Detalles de {{name}}."
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "Mostrar u ocultar la barra lateral",
       "newChat": "Iniciar un chat nuevo",
       "toggleTheme": "Cambiar tema desde el encabezado",
-      "settings": "Abrir configuración"
+      "settings": "Abrir configuración",
+      "sessionInfo": "Detalles de la sesión"
+    },
+    "sessionInfo": {
+      "title": "Sesión",
+      "untitled": "Chat sin título",
+      "automations": "Automatizaciones",
+      "count": "{{count}}",
+      "loading": "Cargando automatizaciones...",
+      "loadFailed": "No se pudieron cargar las automatizaciones.",
+      "empty": "Esta sesión aún no tiene automatizaciones.",
+      "disabled": "Desactivado",
+      "schedule": {
+        "at": "A las {{time}}",
+        "every": "Cada {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Programación personalizada"
+      },
+      "next": {
+        "label": "Siguiente {{time}}",
+        "disabled": "En pausa",
+        "none": "Sin próxima ejecución"
+      }
     },
     "composer": {
       "placeholderThread": "Escribe tu mensaje…",
@@ -754,7 +808,9 @@
     "cliActivityFailedMany": "Fallaron {{count}} apps CLI",
     "cliRunRunning": "Usando",
     "cliRunRan": "Usado",
-    "cliRunFailed": "Falló"
+    "cliRunFailed": "Falló",
+    "automationSourceFallback": "Automatización",
+    "automationTriggered": "Activada automáticamente"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

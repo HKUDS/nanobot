@@ -53,6 +53,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -118,6 +119,7 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   SettingsPayload,
+  SkillSummary,
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
 } from "@/lib/types";
@@ -129,6 +131,7 @@ export type SettingsSectionKey =
   | "image"
   | "browser"
   | "apps"
+  | "skills"
   | "runtime"
   | "advanced";
 
@@ -279,6 +282,7 @@ interface SettingsViewProps {
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
+  skills?: SkillSummary[];
   onWorkspaceSettingsChange?: () => void | Promise<void>;
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
@@ -449,6 +453,7 @@ export function SettingsView({
   onBackToChat,
   onModelNameChange,
   onSettingsChange,
+  skills = [],
   onWorkspaceSettingsChange,
   onSectionChange,
   onLogout,
@@ -1398,6 +1403,8 @@ export function SettingsView({
             isRestarting={isRestarting || hostEngineApplying}
           />
         );
+      case "skills":
+        return <SkillsCatalogSettings skills={skills} />;
       case "runtime":
         return (
           <RuntimeSettings
@@ -1462,6 +1469,16 @@ export function SettingsView({
           )}
         >
           <div className="mb-7">
+            {!showSidebar ? (
+              <button
+                type="button"
+                onClick={onBackToChat}
+                className="mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                {t("settings.backToChat")}
+              </button>
+            ) : null}
             <p className="mb-2 text-[12px] font-normal text-muted-foreground">
               {t("settings.sidebar.title")}
             </p>
@@ -3170,9 +3187,11 @@ function AppsCatalogSettings({
   const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
   const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
-  const caption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
-    .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
-    .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0));
+  const caption = t("settings.apps.caption", {
+    cli: cliApps?.installed_count ?? 0,
+    mcp: mcpPresets?.installed_count ?? 0,
+    defaultValue: "{{cli}} CLI · {{mcp}} MCP",
+  });
 
   return (
     <div className="space-y-7">
@@ -3554,7 +3573,10 @@ function McpAppsCatalogRow({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-[12.5px] font-semibold text-foreground">
-                {tx("settings.mcp.connectTitle", "Connect {{name}}").replace("{{name}}", preset.display_name)}
+                {t("settings.mcp.connectTitle", {
+                  name: preset.display_name,
+                  defaultValue: "Connect {{name}}",
+                })}
               </div>
               <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                 {tx("settings.mcp.connectHint", "Add the key from your account settings.")}

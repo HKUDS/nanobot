@@ -7,8 +7,11 @@ import {
   fetchCliApps,
   fetchMcpPresets,
   fetchProviderModels,
+  fetchSessionAutomations,
   fetchSettingsUsage,
   fetchSidebarState,
+  fetchSkillDetail,
+  fetchSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
@@ -65,6 +68,39 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys when fetching session automations", async () => {
+    await fetchSessionAutomations("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches the WebUI skill summary", async () => {
+    await fetchSkills("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("percent-encodes skill names when fetching skill details", async () => {
+    await fetchSkillDetail("tok", "current web");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/current%20web",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
       }),
     );
   });

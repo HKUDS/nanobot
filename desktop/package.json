@@ -25,7 +25,7 @@
     "typescript": "^5.7.2"
   },
   "build": {
-    "appId": "ai.nanobot.desktop",
+    "appId": "wiki.nanobot.desktop",
     "productName": "nanobot",
     "asar": true,
     "files": [

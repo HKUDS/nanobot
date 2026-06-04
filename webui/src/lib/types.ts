@@ -32,6 +32,8 @@ export interface UIMediaAttachment {
   name?: string;
 }
 
+export interface UIMessageSource { kind: "cron"; label?: string; }
+
 export interface UIMessage {
   id: string;
   role: Role;
@@ -66,6 +68,8 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+  /** Lightweight provenance for proactive assistant messages. */
+  source?: UIMessageSource;
   /** Stable protocol metadata for grouping all activity emitted by one user turn. */
   turnId?: string;
   turnPhase?: UITurnPhase;
@@ -91,6 +95,50 @@ export interface UIMcpPresetAttachment {
   logo_url?: string | null;
   brand_color?: string | null;
 }
+
+export interface SessionAutomationJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: {
+    kind: "at" | "every" | "cron" | string;
+    at_ms?: number | null;
+    every_ms?: number | null;
+    expr?: string | null;
+    tz?: string | null;
+  };
+  payload: {
+    message: string;
+  };
+  state: {
+    next_run_at_ms?: number | null;
+    last_status?: "ok" | "error" | "skipped" | string | null;
+  };
+}
+
+export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  source: "workspace" | "builtin" | string;
+  available: boolean;
+  unavailable_reason?: string;
+}
+
+export interface SkillRequirements {
+  bins: string[];
+  env: string[];
+  missing_bins: string[];
+  missing_env: string[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  requirements: SkillRequirements;
+  raw_markdown: string;
+}
+
+export interface SkillsPayload { skills: SkillSummary[]; }
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
@@ -670,6 +718,8 @@ export type InboundEvent =
       kind?: "tool_hint" | "progress" | "reasoning";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
+      /** Lightweight provenance for proactive assistant messages. */
+      source?: UIMessageSource;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)

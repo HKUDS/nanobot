@@ -54,7 +54,10 @@
       "label": "语言",
       "ariaLabel": "切换语言"
     },
-    "apps": "应用"
+    "apps": "应用",
+    "skills": {
+      "title": "技能"
+    }
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -75,7 +78,8 @@
       "mcp": "MCP",
       "runtime": "系统",
       "advanced": "安全",
-      "apps": "应用"
+      "apps": "应用",
+      "skills": "技能"
     },
     "sections": {
       "interface": "界面",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "将此 OAuth 提供商设为当前模型提供商前，请先登录。",
       "signedIn": "已登录",
       "notSignedIn": "未登录"
+    },
+    "skills": {
+      "description": "查看此 agent 在对话中可以加载的指令技能。",
+      "caption": "{{available}} 个可用 · 共 {{total}} 个",
+      "featured": "Agent 技能",
+      "empty": "暂无可用技能。",
+      "sourceWorkspace": "自定义",
+      "sourceBuiltin": "内置",
+      "statusAvailable": "可用",
+      "statusUnavailable": "不可用",
+      "unavailableReason": "缺少：{{reason}}",
+      "openDetails": "查看 {{name}} 详情",
+      "loadingDetail": "正在加载技能详情...",
+      "loadFailed": "无法加载技能详情。",
+      "descriptionTitle": "完整描述",
+      "source": "来源",
+      "status": "状态",
+      "requirements": "需求",
+      "noRequirements": "没有显式需求。",
+      "commands": "命令",
+      "environment": "环境变量",
+      "missingCommands": "缺 CLI",
+      "missingEnvironment": "缺 ENV",
+      "unavailableReasonLabel": "不可用原因",
+      "rawInstructions": "原始 SKILL.md",
+      "rawInstructionsEmpty": "没有原始说明。",
+      "detailDescription": "{{name}} 的详情。"
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "切换侧边栏",
       "newChat": "从顶部新建对话",
       "toggleTheme": "从顶部切换主题",
-      "settings": "打开设置"
+      "settings": "打开设置",
+      "sessionInfo": "会话详情"
+    },
+    "sessionInfo": {
+      "title": "会话",
+      "untitled": "未命名对话",
+      "automations": "自动任务",
+      "count": "{{count}}",
+      "loading": "正在加载自动任务...",
+      "loadFailed": "无法加载自动任务。",
+      "empty": "这个会话暂时没有自动任务。",
+      "disabled": "已关闭",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "自定义计划"
+      },
+      "next": {
+        "label": "下次 {{time}}",
+        "disabled": "已暂停",
+        "none": "没有下次运行"
+      }
     },
     "composer": {
       "placeholderThread": "输入消息…",
@@ -752,6 +806,8 @@
     "cliRunRan": "已使用",
     "cliRunFailed": "失败",
     "imageAttachment": "图片附件",
+    "automationSourceFallback": "自动化",
+    "automationTriggered": "自动触发",
     "copyReply": "复制回复",
     "copiedReply": "已复制回复",
     "turnLatencyTitle": "本轮耗时（端到端）"

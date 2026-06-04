@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, ChevronRight, Copy, ImageIcon, Sparkles, Wrench } from "lucide-react";
+import { Check, ChevronRight, Clock3, Copy, ImageIcon, Sparkles, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -131,6 +131,10 @@ export function MessageBubble({
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
+  const automationSourceLabel = message.source?.kind === "cron"
+    ? (message.source.label?.trim() || t("message.automationSourceFallback"))
+    : "";
+  const automationTriggeredLabel = t("message.automationTriggered");
 
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
   const showCopyButton = showAssistantCopyAction && showAssistantActions;
@@ -155,6 +159,12 @@ export function MessageBubble({
         <TypingDots />
       ) : empty && message.isStreaming ? null : (
         <>
+          {automationSourceLabel ? (
+            <AutomationSourceBadge
+              label={automationSourceLabel}
+              triggerLabel={automationTriggeredLabel}
+            />
+          ) : null}
           <MarkdownText
             streaming={!!message.isStreaming}
             onOpenFilePreview={onOpenFilePreview}
@@ -195,6 +205,25 @@ export function MessageBubble({
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+function AutomationSourceBadge({ label, triggerLabel }: { label: string; triggerLabel: string }) {
+  return (
+    <div
+      className={cn(
+        "mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1",
+        "border border-sky-500/15 bg-sky-500/[0.06]",
+        "text-[11px] font-medium leading-none text-sky-700",
+        "dark:border-sky-300/15 dark:bg-sky-300/[0.08] dark:text-sky-200/80",
+      )}
+      title={triggerLabel}
+    >
+      <Clock3 className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">{label}</span>
+      <span className="text-current/45" aria-hidden>·</span>
+      <span className="shrink-0">{triggerLabel}</span>
     </div>
   );
 }

@@ -92,6 +92,55 @@ def test_replay_preserves_turn_metadata(tmp_path, monkeypatch) -> None:
     assert msgs[1]["turnSeq"] == 3
 
 
+def test_replay_reused_turn_id_after_turn_end_starts_new_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-reused-turn"
+
+    def event(
+        event: str,
+        phase: str,
+        seq: int,
+        text: str | None = None,
+        source: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        out = {
+            "event": event,
+            "chat_id": "t-reused-turn",
+            "turn_id": "turn-1",
+            "turn_phase": phase,
+            "turn_seq": seq,
+        }
+        if text is not None:
+            out["text"] = text
+        if source is not None:
+            out["source"] = source
+        return out
+
+    for record in (
+        event("user", "user", 1, "remind me later"),
+        event("message", "answer", 2, "Reminder set."),
+        event("turn_end", "complete", 3),
+        event(
+            "message", "answer", 1, "Time to drink water.",
+            {"kind": "cron", "label": "drink water"},
+        ),
+        event("turn_end", "complete", 2),
+    ):
+        append_transcript_object(key, record)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert [m["content"] for m in msgs] == [
+        "remind me later",
+        "Reminder set.",
+        "Time to drink water.",
+    ]
+    assert msgs[1]["turnId"] == "turn-1"
+    assert msgs[2]["turnId"].startswith("turn-1:replay:")
+    assert msgs[2]["turnId"] != msgs[1]["turnId"]
+    assert msgs[2]["source"] == {"kind": "cron", "label": "drink water"}
+
+
 def test_build_response_restores_session_users_for_legacy_transcript(
     tmp_path,
     monkeypatch,

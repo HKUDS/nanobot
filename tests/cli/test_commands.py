@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import app
+from nanobot.cli.commands import _proactive_delivery_metadata, app
 from nanobot.config.schema import Config
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.factory import ProviderSnapshot, make_provider
@@ -17,6 +17,27 @@ from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
+
+
+def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
+    metadata = {
+        "webui": True,
+        "webui_turn_id": "turn-that-created-the-reminder",
+        "workspace_scope": {"mode": "default"},
+    }
+
+    out = _proactive_delivery_metadata(
+        "websocket",
+        metadata,
+        turn_seed="cron:drink-water",
+        source_label="drink water",
+    )
+
+    assert out["webui"] is True
+    assert out["workspace_scope"] == {"mode": "default"}
+    assert out["webui_turn_id"].startswith("cron:drink-water:")
+    assert out["webui_turn_id"] != metadata["webui_turn_id"]
+    assert out["_webui_message_source"] == {"kind": "cron", "label": "drink water"}
 
 
 def _fake_provider():
@@ -1315,6 +1336,41 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             "_channel_delivery": True,
         }
     ]
+
+    bus.publish_outbound.reset_mock()
+    old_turn_id = "turn-that-created-the-reminder"
+    websocket_job = CronJob(
+        id="drink-water",
+        name="drink water",
+        payload=CronPayload(
+            message="Remind me to drink water.",
+            deliver=True,
+            channel="websocket",
+            to="chat-1",
+            channel_meta={
+                "webui": True,
+                "webui_turn_id": old_turn_id,
+                "workspace_scope": {"mode": "default"},
+            },
+            session_key="websocket:chat-1",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(websocket_job))
+
+    assert response == "Time to stretch."
+    bus.publish_outbound.assert_awaited_once()
+    delivered = bus.publish_outbound.await_args.args[0]
+    assert delivered.channel == "websocket"
+    assert delivered.chat_id == "chat-1"
+    assert delivered.metadata["webui"] is True
+    assert delivered.metadata["workspace_scope"] == {"mode": "default"}
+    assert delivered.metadata["webui_turn_id"].startswith("cron:drink-water:")
+    assert delivered.metadata["webui_turn_id"] != old_turn_id
+    assert delivered.metadata["_webui_message_source"] == {
+        "kind": "cron",
+        "label": "drink water",
+    }
 
 
 def test_gateway_cron_job_suppresses_intermediate_progress(

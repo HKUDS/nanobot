@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
+import pytest
+
+from nanobot.agent.hook import AgentHookContext
 from nanobot.webui.token_usage import (
+    TokenUsageHook,
+    record_response_token_usage,
     record_token_usage,
     token_usage_payload,
 )
@@ -107,3 +113,36 @@ def test_record_token_usage_keeps_source_breakdown(tmp_path, monkeypatch) -> Non
     assert row["sources"]["user"]["requests"] == 1
     assert row["sources"]["dream"]["total_tokens"] == 25
     assert row["sources"]["dream"]["requests"] == 1
+
+
+def test_record_response_token_usage_uses_response_usage(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("nanobot.webui.token_usage._local_day", lambda *_, **__: "2026-06-03")
+
+    record_response_token_usage(
+        SimpleNamespace(usage={"prompt_tokens": 20, "completion_tokens": 5}),
+        source="dream",
+    )
+
+    payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
+    assert payload["days"][0]["sources"]["dream"]["total_tokens"] == 25
+
+
+@pytest.mark.asyncio
+async def test_token_usage_hook_classifies_source_from_session_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("nanobot.webui.token_usage._local_day", lambda *_, **__: "2026-06-03")
+
+    hook = TokenUsageHook()
+    await hook.after_iteration(
+        AgentHookContext(
+            iteration=0,
+            messages=[],
+            session_key="cron:drink-water",
+            usage={"prompt_tokens": 10, "completion_tokens": 5},
+        )
+    )
+
+    payload = token_usage_payload(now=datetime(2026, 6, 3, tzinfo=timezone.utc))
+
+    assert payload["days"][0]["sources"]["cron"]["total_tokens"] == 15

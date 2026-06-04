@@ -45,7 +45,6 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
-from nanobot.webui.transcript import append_transcript_object, build_user_transcript_event
 from nanobot.webui.websocket_logging import websockets_server_logger
 
 
@@ -237,8 +236,6 @@ _VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
 _UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
 
 _DATA_URL_MIME_RE = re.compile(r"^data:([^;]+);base64,", re.DOTALL)
-_WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_WEBUI_TURN_META_KEY = "webui_turn_id"
 
 
 def _extract_data_url_mime(url: str) -> str | None:
@@ -260,14 +257,6 @@ def _is_websocket_upgrade(request: WsRequest) -> bool:
     if not connection or "upgrade" not in connection.lower():
         return False
     return True
-
-
-def _normalize_webui_turn_id(value: Any) -> str:
-    if isinstance(value, str):
-        candidate = value.strip()
-        if _WEBUI_TURN_ID_RE.fullmatch(candidate):
-            return candidate
-    return str(uuid.uuid4())
 
 
 class WebSocketChannel(BaseChannel):
@@ -300,10 +289,10 @@ class WebSocketChannel(BaseChannel):
         self._http_router = gateway.http
         self._tokens = gateway.tokens
         self._media = gateway.media
+        self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
-        self._webui_turn_sequences: dict[tuple[str, str], int] = {}
 
     # -- Subscription bookkeeping -------------------------------------------
 
@@ -762,9 +751,9 @@ class WebSocketChannel(BaseChannel):
             self._attach(connection, cid)
             await self._hydrate_after_subscribe(cid)
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
-            metadata[_WEBUI_TURN_META_KEY] = _normalize_webui_turn_id(envelope.get("turn_id"))
             if envelope.get("webui") is True:
                 metadata["webui"] = True
+                metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -781,13 +770,13 @@ class WebSocketChannel(BaseChannel):
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
             if metadata.get("webui") is True and self.is_allowed(client_id):
-                self._try_append_webui_user_transcript(
+                self._transcripts.append_user_message(
                     cid,
                     content,
                     metadata=metadata,
-                    media_paths=media_paths,
-                    cli_apps=cli_apps,
-                    mcp_presets=mcp_presets,
+                    media_paths=media_paths or None,
+                    cli_apps=cli_apps or None,
+                    mcp_presets=mcp_presets or None,
                 )
             await self._handle_message(
                 sender_id=client_id,
@@ -848,59 +837,6 @@ class WebSocketChannel(BaseChannel):
         except Exception:
             self.logger.exception("send failed{}", label)
             raise
-
-    def _try_append_webui_transcript(self, chat_id: str, wire: dict[str, Any]) -> None:
-        sk = f"websocket:{chat_id}"
-        try:
-            dup = json.loads(json.dumps(wire, ensure_ascii=False))
-            append_transcript_object(sk, dup)
-        except (OSError, ValueError, TypeError) as e:
-            self.logger.warning("webui transcript append failed: {}", e)
-
-    def _try_append_webui_user_transcript(
-        self,
-        chat_id: str,
-        content: str,
-        *,
-        metadata: dict[str, Any] | None,
-        media_paths: list[str],
-        cli_apps: list[dict[str, Any]],
-        mcp_presets: list[dict[str, Any]],
-    ) -> None:
-        if content.strip() == "/stop" and not media_paths:
-            return
-        payload = build_user_transcript_event(
-            chat_id,
-            content,
-            media_paths=media_paths,
-            cli_apps=cli_apps,
-            mcp_presets=mcp_presets,
-        )
-        if payload is None:
-            return
-        self._annotate_webui_turn(payload, chat_id, metadata, "user")
-        self._try_append_webui_transcript(chat_id, payload)
-
-    def _next_webui_turn_seq(self, chat_id: str, turn_id: str) -> int:
-        key = (chat_id, turn_id)
-        seq = self._webui_turn_sequences.get(key, 0) + 1
-        self._webui_turn_sequences[key] = seq
-        return seq
-
-    def _annotate_webui_turn(
-        self,
-        payload: dict[str, Any],
-        chat_id: str,
-        metadata: dict[str, Any] | None,
-        phase: str,
-    ) -> None:
-        meta = metadata or {}
-        turn_id = meta.get(_WEBUI_TURN_META_KEY)
-        if not isinstance(turn_id, str) or not turn_id:
-            return
-        payload["turn_id"] = turn_id
-        payload["turn_phase"] = phase
-        payload["turn_seq"] = self._next_webui_turn_seq(chat_id, turn_id)
 
     async def send(self, msg: OutboundMessage) -> None:
         if msg.metadata.get("_runtime_model_updated"):
@@ -1001,10 +937,14 @@ class WebSocketChannel(BaseChannel):
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
         phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
-        self._annotate_webui_turn(payload, msg.chat_id, msg.metadata, phase)
-        transcript_payload = dict(payload)
-        transcript_payload["text"] = text
-        self._try_append_webui_transcript(msg.chat_id, transcript_payload)
+        self._transcripts.prepare_and_append(
+            msg.chat_id,
+            payload,
+            metadata=msg.metadata,
+            phase=phase,
+            include_source=True,
+            transcript_overrides={"text": text},
+        )
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
@@ -1032,8 +972,12 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._annotate_webui_turn(body, chat_id, meta, "reasoning")
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="reasoning",
+        )
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning ")
@@ -1055,8 +999,12 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._annotate_webui_turn(body, chat_id, meta, "reasoning")
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="reasoning",
+        )
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning_end ")
@@ -1075,8 +1023,12 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "edits": edits,
         }
-        self._annotate_webui_turn(payload, chat_id, metadata, "activity")
-        self._try_append_webui_transcript(chat_id, payload)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            payload,
+            metadata=metadata,
+            phase="activity",
+        )
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" file_edit ")
@@ -1110,8 +1062,12 @@ class WebSocketChannel(BaseChannel):
             self._stream_text_buffers.setdefault(stream_key, []).append(delta)
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
-        self._annotate_webui_turn(body, chat_id, meta, "answer")
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="answer",
+        )
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
@@ -1133,14 +1089,15 @@ class WebSocketChannel(BaseChannel):
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
-        self._annotate_webui_turn(body, chat_id, metadata, "complete")
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=metadata,
+            phase="complete",
+        )
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
-        turn_id = body.get("turn_id")
-        if isinstance(turn_id, str):
-            self._webui_turn_sequences.pop((chat_id, turn_id), None)
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
         """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""

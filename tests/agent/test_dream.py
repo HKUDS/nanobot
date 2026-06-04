@@ -356,18 +356,6 @@ class TestEphemeralHooks:
         await loop.process_direct("test", session_key="cli:normal")
         spy.before_iteration.assert_called()
 
-    async def test_extra_hooks_can_opt_into_ephemeral(self, tmp_path, _make_loop_with_spy):
-        """Usage telemetry can opt into Dream without enabling all hooks."""
-        loop, spy = _make_loop_with_spy
-        spy.include_ephemeral.return_value = True
-
-        await loop.process_direct(
-            "test", session_key="dream:hook-test", ephemeral=True,
-        )
-
-        spy.before_iteration.assert_called()
-
-
 class TestDreamCommitMessage:
     async def test_commit_includes_response_summary(self, tmp_path):
         """Git auto-commit after Dream should include the LLM response in the body."""

@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useSessions } from "@/hooks/useSessions";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
+import { useSkills } from "@/hooks/useSkills";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import {
@@ -60,7 +61,7 @@ const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps";
+type ShellView = "chat" | "settings" | "apps" | "skills";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -74,6 +75,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "image",
   "browser",
   "apps",
+  "skills",
   "runtime",
   "advanced",
 ];
@@ -84,6 +86,11 @@ function isSettingsSectionKey(value: string | null): value is SettingsSectionKey
 
 function defaultShellRoute(): ShellRoute {
   return { view: "chat", activeKey: null, settingsSection: "overview" };
+}
+
+function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
+  if (section === "apps" || section === "skills") return section;
+  return "settings";
 }
 
 function readShellRoute(): ShellRoute {
@@ -102,10 +109,17 @@ function readShellRoute(): ShellRoute {
   const activeKey = params.get("chat")?.trim() || null;
 
   if (path === "/settings") {
-    return { view: "settings", activeKey, settingsSection };
+    return {
+      view: shellViewForSettingsSection(settingsSection),
+      activeKey,
+      settingsSection,
+    };
   }
   if (path === "/apps") {
     return { view: "apps", activeKey, settingsSection: "apps" };
+  }
+  if (path === "/skills") {
+    return { view: "skills", activeKey, settingsSection: "skills" };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -562,6 +576,7 @@ function Shell({
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(readCompletedRunChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
+  const skills = useSkills(token);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [draftWorkspaceScope, setDraftWorkspaceScope] =
@@ -1128,10 +1143,16 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenSkills = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "skills", activeKey, settingsSection: "skills" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
-        view: section === "apps" ? "apps" : "settings",
+        view: shellViewForSettingsSection(section),
         activeKey,
         settingsSection: section,
       });
@@ -1283,6 +1304,12 @@ function Shell({
       });
       return;
     }
+    if (view === "skills") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.skills", { defaultValue: "Skills" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1304,8 +1331,9 @@ function Shell({
     onNewChatInProject,
     onOpenSettings,
     onOpenApps,
+    onOpenSkills,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" ? "apps" as const : null,
+    activeUtility: view === "apps" || view === "skills" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -1486,6 +1514,7 @@ function Shell({
                   onBackToChat={onBackToChat}
                   onModelNameChange={onModelNameChange}
                   onSettingsChange={setSettingsSnapshot}
+                  skills={skills}
                   onWorkspaceSettingsChange={refreshWorkspaces}
                   onSectionChange={onSettingsSectionChange}
                   onLogout={onLogout}

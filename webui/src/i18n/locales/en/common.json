@@ -54,7 +54,10 @@
       "label": "Language",
       "ariaLabel": "Change language"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Skills"
+    }
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -75,7 +78,8 @@
       "mcp": "MCP",
       "runtime": "System",
       "advanced": "Security",
-      "apps": "Apps"
+      "apps": "Apps",
+      "skills": "Skills"
     },
     "sections": {
       "interface": "Interface",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in"
+    },
+    "skills": {
+      "description": "Review the instruction skills this agent can load during a conversation.",
+      "caption": "{{available}} available · {{total}} total",
+      "featured": "Agent skills",
+      "empty": "No skills are available.",
+      "sourceWorkspace": "Custom",
+      "sourceBuiltin": "Built-in",
+      "statusAvailable": "Available",
+      "statusUnavailable": "Unavailable",
+      "unavailableReason": "Missing: {{reason}}",
+      "openDetails": "Open details for {{name}}",
+      "loadingDetail": "Loading skill details...",
+      "loadFailed": "Could not load skill details.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Status",
+      "requirements": "Requirements",
+      "noRequirements": "No explicit requirements.",
+      "commands": "Commands",
+      "environment": "Environment variables",
+      "missingCommands": "Missing CLI",
+      "missingEnvironment": "Missing ENV",
+      "unavailableReasonLabel": "Unavailable reason",
+      "rawInstructions": "Raw SKILL.md",
+      "rawInstructionsEmpty": "No raw instructions.",
+      "detailDescription": "Details for {{name}}."
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "Toggle sidebar",
       "newChat": "Start a new chat",
       "toggleTheme": "Toggle theme from header",
-      "settings": "Open settings"
+      "settings": "Open settings",
+      "sessionInfo": "Session details"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Untitled chat",
+      "automations": "Automations",
+      "count": "{{count}}",
+      "loading": "Loading automations...",
+      "loadFailed": "Could not load automations.",
+      "empty": "No automations in this session yet.",
+      "disabled": "Off",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "Every {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Custom schedule"
+      },
+      "next": {
+        "label": "{{time}}",
+        "disabled": "Paused",
+        "none": "No next run"
+      }
     },
     "composer": {
       "placeholderThread": "Type your message…",
@@ -752,6 +806,8 @@
     "cliRunRan": "Used",
     "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
+    "automationSourceFallback": "Automation",
+    "automationTriggered": "Triggered automatically",
     "copyReply": "Copy reply",
     "copiedReply": "Copied reply",
     "turnLatencyTitle": "Response time (end-to-end)"

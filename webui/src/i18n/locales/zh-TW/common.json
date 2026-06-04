@@ -54,7 +54,10 @@
       "label": "語言",
       "ariaLabel": "切換語言"
     },
-    "apps": "應用"
+    "apps": "應用",
+    "skills": {
+      "title": "技能"
+    }
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -75,7 +78,8 @@
       "advanced": "安全",
       "cliApps": "CLI 應用",
       "mcp": "MCP",
-      "apps": "應用"
+      "apps": "應用",
+      "skills": "技能"
     },
     "sections": {
       "interface": "介面",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "將此 OAuth 供應商設為目前模型供應商前，請先登入。",
       "signedIn": "已登入",
       "notSignedIn": "未登入"
+    },
+    "skills": {
+      "description": "查看此 agent 在對話中可以載入的指令技能。",
+      "caption": "{{available}} 個可用 · 共 {{total}} 個",
+      "featured": "Agent 技能",
+      "empty": "暫無可用技能。",
+      "sourceWorkspace": "自訂",
+      "sourceBuiltin": "內建",
+      "statusAvailable": "可用",
+      "statusUnavailable": "不可用",
+      "unavailableReason": "缺少：{{reason}}",
+      "openDetails": "查看 {{name}} 詳情",
+      "loadingDetail": "正在載入技能詳情...",
+      "loadFailed": "無法載入技能詳情。",
+      "descriptionTitle": "完整描述",
+      "source": "來源",
+      "status": "狀態",
+      "requirements": "需求",
+      "noRequirements": "沒有明確需求。",
+      "commands": "命令",
+      "environment": "環境變數",
+      "missingCommands": "缺 CLI",
+      "missingEnvironment": "缺 ENV",
+      "unavailableReasonLabel": "不可用原因",
+      "rawInstructions": "原始 SKILL.md",
+      "rawInstructionsEmpty": "沒有原始說明。",
+      "detailDescription": "{{name}} 的詳細資訊。"
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "切換側邊欄",
       "newChat": "開始新對話",
       "toggleTheme": "從頂部切換主題",
-      "settings": "開啟設定"
+      "settings": "開啟設定",
+      "sessionInfo": "會話詳情"
+    },
+    "sessionInfo": {
+      "title": "會話",
+      "untitled": "未命名對話",
+      "automations": "自動任務",
+      "count": "{{count}}",
+      "loading": "正在載入自動任務...",
+      "loadFailed": "無法載入自動任務。",
+      "empty": "這個會話暫時沒有自動任務。",
+      "disabled": "已關閉",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "自訂計畫"
+      },
+      "next": {
+        "label": "下次 {{time}}",
+        "disabled": "已暫停",
+        "none": "沒有下次執行"
+      }
     },
     "composer": {
       "placeholderThread": "輸入訊息…",
@@ -754,7 +808,9 @@
     "cliActivityFailedMany": "{{count}} 個 CLI 應用失敗",
     "cliRunRunning": "使用中",
     "cliRunRan": "已使用",
-    "cliRunFailed": "失敗"
+    "cliRunFailed": "失敗",
+    "automationSourceFallback": "自動化",
+    "automationTriggered": "自動觸發"
   },
   "lightbox": {
     "title": "圖片預覽",

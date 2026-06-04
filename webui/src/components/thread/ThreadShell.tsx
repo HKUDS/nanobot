@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -713,6 +714,9 @@ export function ThreadShell({
       </h1>
     </div>
   );
+  const sessionInfoAction = historyKey ? (
+    <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
+  ) : undefined;
 
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -727,6 +731,7 @@ export function ThreadShell({
             hostChromeTitleInset={hostChromeTitleInset}
             hideThemeButton={hideThemeButton}
             minimal={!session && !loading}
+            sessionInfoAction={sessionInfoAction}
           />
         ) : null}
         <ThreadViewport

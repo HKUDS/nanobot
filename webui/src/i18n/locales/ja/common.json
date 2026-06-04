@@ -54,7 +54,10 @@
       "label": "言語",
       "ariaLabel": "言語を変更"
     },
-    "apps": "アプリ"
+    "apps": "アプリ",
+    "skills": {
+      "title": "スキル"
+    }
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -75,7 +78,8 @@
       "advanced": "セキュリティ",
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
-      "apps": "アプリ"
+      "apps": "アプリ",
+      "skills": "スキル"
     },
     "sections": {
       "interface": "インターフェース",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
       "signedIn": "サインイン済み",
       "notSignedIn": "未サインイン"
+    },
+    "skills": {
+      "description": "このエージェントが会話中に読み込める指示スキルを確認します。",
+      "caption": "{{available}} 利用可能 · 合計 {{total}}",
+      "featured": "エージェントスキル",
+      "empty": "利用可能なスキルはありません。",
+      "sourceWorkspace": "カスタム",
+      "sourceBuiltin": "組み込み",
+      "statusAvailable": "利用可能",
+      "statusUnavailable": "利用不可",
+      "unavailableReason": "不足: {{reason}}",
+      "openDetails": "{{name}} の詳細を開く",
+      "loadingDetail": "スキル詳細を読み込み中...",
+      "loadFailed": "スキル詳細を読み込めませんでした。",
+      "descriptionTitle": "説明",
+      "source": "ソース",
+      "status": "状態",
+      "requirements": "要件",
+      "noRequirements": "明示的な要件はありません。",
+      "commands": "コマンド",
+      "environment": "環境変数",
+      "missingCommands": "CLI 不足",
+      "missingEnvironment": "ENV 不足",
+      "unavailableReasonLabel": "利用不可の理由",
+      "rawInstructions": "元の SKILL.md",
+      "rawInstructionsEmpty": "元の説明はありません。",
+      "detailDescription": "{{name}} の詳細。"
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "サイドバーを切り替える",
       "newChat": "新しいチャットを開始",
       "toggleTheme": "ヘッダーからテーマを切り替える",
-      "settings": "設定を開く"
+      "settings": "設定を開く",
+      "sessionInfo": "セッション詳細"
+    },
+    "sessionInfo": {
+      "title": "セッション",
+      "untitled": "無題のチャット",
+      "automations": "自動タスク",
+      "count": "{{count}}",
+      "loading": "自動タスクを読み込み中...",
+      "loadFailed": "自動タスクを読み込めませんでした。",
+      "empty": "このセッションにはまだ自動タスクがありません。",
+      "disabled": "オフ",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}}ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "カスタムスケジュール"
+      },
+      "next": {
+        "label": "次回 {{time}}",
+        "disabled": "一時停止",
+        "none": "次回実行なし"
+      }
     },
     "composer": {
       "placeholderThread": "メッセージを入力…",
@@ -754,7 +808,9 @@
     "cliActivityFailedMany": "{{count}} 個の CLI アプリが失敗しました",
     "cliRunRunning": "使用中",
     "cliRunRan": "使用済み",
-    "cliRunFailed": "失敗"
+    "cliRunFailed": "失敗",
+    "automationSourceFallback": "自動化",
+    "automationTriggered": "自動実行"
   },
   "lightbox": {
     "title": "画像プレビュー",

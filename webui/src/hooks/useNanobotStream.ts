@@ -945,6 +945,7 @@ export function useNanobotStream(
             content,
             ...(hasMedia ? { media } : {}),
             ...(lat !== undefined ? { latencyMs: lat } : {}),
+            ...(ev.source ? { source: ev.source } : {}),
             ...turnFieldsFromEvent(ev, "answer"),
           });
         });

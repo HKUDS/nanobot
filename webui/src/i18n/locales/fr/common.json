@@ -54,7 +54,10 @@
       "label": "Langue",
       "ariaLabel": "Changer de langue"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Compétences"
+    }
   },
   "settings": {
     "backToChat": "Retour au chat",
@@ -75,7 +78,8 @@
       "advanced": "Sécurité",
       "cliApps": "Apps CLI",
       "mcp": "MCP",
-      "apps": "Applications"
+      "apps": "Applications",
+      "skills": "Compétences"
     },
     "sections": {
       "interface": "Interface utilisateur",
@@ -455,6 +459,33 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Connecté",
       "notSignedIn": "Non connecté"
+    },
+    "skills": {
+      "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",
+      "caption": "{{available}} disponibles · {{total}} au total",
+      "featured": "Compétences agent",
+      "empty": "Aucune compétence disponible.",
+      "sourceWorkspace": "Personnalisée",
+      "sourceBuiltin": "Intégrée",
+      "statusAvailable": "Disponible",
+      "statusUnavailable": "Indisponible",
+      "unavailableReason": "Manquant : {{reason}}",
+      "openDetails": "Ouvrir les détails de {{name}}",
+      "loadingDetail": "Chargement des détails...",
+      "loadFailed": "Impossible de charger les détails.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Statut",
+      "requirements": "Prérequis",
+      "noRequirements": "Aucun prérequis explicite.",
+      "commands": "Commandes",
+      "environment": "Variables d’environnement",
+      "missingCommands": "CLI manquant",
+      "missingEnvironment": "ENV manquant",
+      "unavailableReasonLabel": "Raison d’indisponibilité",
+      "rawInstructions": "SKILL.md brut",
+      "rawInstructionsEmpty": "Aucune instruction brute.",
+      "detailDescription": "Détails de {{name}}."
     }
   },
   "chat": {
@@ -576,7 +607,30 @@
       "toggleSidebar": "Afficher ou masquer la barre latérale",
       "newChat": "Démarrer un nouveau chat",
       "toggleTheme": "Changer le thème depuis l’en-tête",
-      "settings": "Ouvrir les paramètres"
+      "settings": "Ouvrir les paramètres",
+      "sessionInfo": "Détails de la session"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Chat sans titre",
+      "automations": "Automatisations",
+      "count": "{{count}}",
+      "loading": "Chargement des automatisations...",
+      "loadFailed": "Impossible de charger les automatisations.",
+      "empty": "Aucune automatisation dans cette session pour le moment.",
+      "disabled": "Désactivé",
+      "schedule": {
+        "at": "À {{time}}",
+        "every": "Toutes les {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Planification personnalisée"
+      },
+      "next": {
+        "label": "Prochaine {{time}}",
+        "disabled": "En pause",
+        "none": "Aucune prochaine exécution"
+      }
     },
     "composer": {
       "placeholderThread": "Saisissez votre message…",
@@ -754,7 +808,9 @@
     "cliActivityFailedMany": "Échec de {{count}} apps CLI",
     "cliRunRunning": "Utilisation",
     "cliRunRan": "Utilisé",
-    "cliRunFailed": "Échec"
+    "cliRunFailed": "Échec",
+    "automationSourceFallback": "Automatisation",
+    "automationTriggered": "Déclenché automatiquement"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
