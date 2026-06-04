@@ -340,8 +340,8 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     # With sub-agents running and an empty queue, it should block
     drain_task = asyncio.create_task(injection_callback())
 
-    # Give it a moment to enter the blocking wait
-    await asyncio.sleep(0.05)
+    # Let the task enter the blocking queue wait.
+    await asyncio.sleep(0)
 
     # Should still be running (blocked on pending_queue.get())
     assert not drain_task.done(), "drain should block while sub-agents are running"
@@ -470,6 +470,12 @@ async def test_drain_pending_timeout(tmp_path):
     # Patch the timeout to be very short for testing
     with patch("blackcat.agent.loop.asyncio.wait_for") as mock_wait:
         mock_wait.side_effect = asyncio.TimeoutError
+    # Patch the timeout path without leaking the queue.get() coroutine.
+    async def _timeout(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with patch("blackcat.agent.loop.asyncio.wait_for", side_effect=_timeout):
         results = await injection_callback()
         assert results == []
 

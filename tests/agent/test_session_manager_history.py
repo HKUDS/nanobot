@@ -110,6 +110,7 @@ def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
 
     history = session.get_history(max_messages=100)
     _assert_no_orphans(history)
+    assert history[-1]["content"] == "new telegram question"
 
 
 # --- Positive test: legitimate pairs survive trimming ---
@@ -363,6 +364,7 @@ def test_window_cuts_mid_tool_group():
     # leaving orphan tool results for split_a at the front.
     history = session.get_history(max_messages=6)
     _assert_no_orphans(history)
+    assert history[0]["role"] == "user"
 
 
 # --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
@@ -599,8 +601,6 @@ def test_enforce_file_cap_no_duplicate_archive_in_else_branch():
     archive_fn = MagicMock()
     session.enforce_file_cap(on_archive=archive_fn, limit=6)
 
-    # Verify retained messages
-    retained_contents = [m["content"] for m in session.messages]
     assert len(session.messages) <= 6
 
     # Verify archived messages have NO overlap with retained

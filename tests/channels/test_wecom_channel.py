@@ -420,7 +420,7 @@ async def test_send_exception_caught_not_raised() -> None:
     await channel.send(
         OutboundMessage(channel="wecom", chat_id="chat1", content="fail test")
     )
-    # No exception — test passes if we reach here.
+    client.reply_stream.assert_called_once()
 
 
 # ── _process_message() ──────────────────────────────────────────────

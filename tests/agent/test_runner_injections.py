@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,6 +36,8 @@ def _make_loop(tmp_path):
          patch("blackcat.agent.loop.SessionManager"), \
          patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
 
@@ -607,16 +608,12 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
     await loop.bus.publish_inbound(msg)
 
-    deadline = time.time() + 2
-    while pending.empty() and time.time() < deadline:
-        await asyncio.sleep(0.01)
+    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
 
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
 
     assert loop._dispatch.await_count == 0
-    assert not pending.empty()
-    queued_msg = pending.get_nowait()
     assert queued_msg.content == "follow-up"
     assert queued_msg.session_key == UNIFIED_SESSION_KEY
 
@@ -680,7 +677,12 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
     from blackcat.bus.events import InboundMessage
 
     loop = _make_loop(tmp_path)
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+    dispatched = asyncio.Event()
+
+    async def _dispatch(_msg):
+        dispatched.set()
+
+    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
 
     pending = asyncio.Queue(maxsize=1)
     pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="already queued"))
@@ -690,9 +692,7 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
     msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up")
     await loop.bus.publish_inbound(msg)
 
-    deadline = time.time() + 2
-    while loop._dispatch.await_count == 0 and time.time() < deadline:
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(dispatched.wait(), timeout=2)
 
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)

@@ -235,10 +235,14 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 @pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
 
     async def slow_process(content, session_key="", channel="", chat_id="", **kwargs):
         order.append(f"start:{content}")
-        await asyncio.sleep(0.1)
+        if content == "first":
+            first_started.set()
+            await release_first.wait()
         order.append(f"end:{content}")
         return content
 
@@ -256,14 +260,17 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
             json={"messages": [{"role": "user", "content": msg}]},
         )
 
-    r1, r2 = await asyncio.gather(send("first"), send("second"))
+    first = asyncio.create_task(send("first"))
+    await asyncio.wait_for(first_started.wait(), timeout=1.0)
+    second = asyncio.create_task(send("second"))
+    await asyncio.sleep(0)
+    assert order == ["start:first"]
+
+    release_first.set()
+    r1, r2 = await asyncio.gather(first, second)
     assert r1.status == 200
     assert r2.status == 200
-    # Verify serialization: one process must fully finish before the other starts
-    if order[0] == "start:first":
-        assert order.index("end:first") < order.index("start:second")
-    else:
-        assert order.index("end:second") < order.index("start:first")
+    assert order == ["start:first", "end:first", "start:second", "end:second"]
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")

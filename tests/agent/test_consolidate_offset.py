@@ -604,9 +604,10 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
 
         archived = asyncio.Event()
+        release_archive = asyncio.Event()
 
         async def _slow_summarize(_messages) -> bool:
-            await asyncio.sleep(0.1)
+            await release_archive.wait()
             archived.set()
             return True
 
@@ -616,5 +617,6 @@ class TestNewCommandArchival:
         await loop._process_message(new_msg)
 
         assert not archived.is_set()
+        release_archive.set()
         await loop.close_mcp()
         assert archived.is_set()

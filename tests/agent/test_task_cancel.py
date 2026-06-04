@@ -29,6 +29,8 @@ def _make_loop(*, tools_config=None):
          patch("blackcat.agent.loop.SessionManager"), \
          patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
     return loop, bus
 
@@ -166,10 +168,14 @@ class TestDispatch:
 
         loop, bus = _make_loop()
         order = []
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
 
         async def mock_process(m, **kwargs):
             order.append(f"start-{m.content}")
-            await asyncio.sleep(0.05)
+            if m.content == "a":
+                first_started.set()
+                await release_first.wait()
             order.append(f"end-{m.content}")
             return OutboundMessage(channel="test", chat_id="c1", content=m.content)
 
@@ -178,7 +184,12 @@ class TestDispatch:
         msg2 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="b")
 
         t1 = asyncio.create_task(loop._dispatch(msg1))
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
         t2 = asyncio.create_task(loop._dispatch(msg2))
+        await asyncio.sleep(0)
+        assert order == ["start-a"]
+
+        release_first.set()
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
