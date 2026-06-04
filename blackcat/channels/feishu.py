@@ -485,9 +485,7 @@ class FeishuChannel(BaseChannel):
             key = mention.key or None
             if not key:
                 continue
-            # Feishu placeholders are numbered keys like @_user_1. Keep
-            # punctuation-adjacent mentions valid without matching @_user_10.
-            pattern = rf"{re.escape(key)}(?![A-Za-z0-9_])"
+            pattern = rf"{re.escape(key)}(?=\s|$)"
             if not re.search(pattern, text):
                 continue
 
@@ -534,7 +532,7 @@ class FeishuChannel(BaseChannel):
         candidate = text.lstrip()
         for mention in mentions:
             key = getattr(mention, "key", None) or ""
-            if not key or not re.match(rf"{re.escape(key)}(?![A-Za-z0-9_])", candidate):
+            if not key or not re.match(rf"{re.escape(key)}(?=\s|$)", candidate):
                 continue
             if not self._is_bot_mention_event(mention):
                 continue
@@ -1421,7 +1419,7 @@ class FeishuChannel(BaseChannel):
             return False
 
     async def send_delta(
-        self, chat_id: str, content: str, metadata: dict[str, Any] | None = None
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
@@ -1510,7 +1508,7 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[stream_key] = buf
-        buf.text += content
+        buf.text += delta
         if not buf.text.strip():
             return
 
@@ -1543,7 +1541,7 @@ class FeishuChannel(BaseChannel):
             )
             buf.last_edit = now
 
-    async def _send_impl(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
             self.logger.warning("client not initialized")
