@@ -813,6 +813,7 @@ function Shell({
     navigate(defaultShellRoute());
     setDraftWorkspaceScope(null);
     setWorkspaceError(null);
+    setSessionSearchOpen(false);
     setMobileSidebarOpen(false);
   }, [navigate]);
 
@@ -1007,6 +1008,13 @@ function Shell({
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const commandShiftO =
+        (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
+      if (commandShiftO && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        onNewChat();
+        return;
+      }
       const plainCommandK =
         (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
       if (!plainCommandK) return;
@@ -1017,7 +1025,7 @@ function Shell({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onOpenSessionSearch]);
+  }, [onNewChat, onOpenSessionSearch]);
 
   const onSelectSearchResult = useCallback(
     (key: string) => {

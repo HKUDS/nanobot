@@ -15,6 +15,13 @@ let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
+function setNavigatorPlatform(platform: string): void {
+  Object.defineProperty(window.navigator, "platform", {
+    configurable: true,
+    value: platform,
+  });
+}
+
 function jsonResponse(body: unknown): Response {
   return {
     ok: true,
@@ -200,6 +207,7 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
+    setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
@@ -1352,6 +1360,85 @@ describe("App layout", () => {
       expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
     );
     expect(createChatSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Command", { metaKey: true }],
+    ["Control", { ctrlKey: true }],
+  ])("starts a new chat from the %s keyboard shortcut", async (_label, modifier) => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Existing chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key: "O", shiftKey: true, ...modifier });
+
+    expect(window.location.hash).toBe("#/new");
+  });
+
+  it("closes search when starting a new chat from the keyboard shortcut", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Existing chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(await screen.findByRole("dialog", { name: "Search" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "O", shiftKey: true, metaKey: true });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
+    );
+    expect(window.location.hash).toBe("#/new");
+  });
+
+  it("exposes the new chat keyboard shortcut in the sidebar title", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
+    expect(newChatButton).toHaveAttribute(
+      "title",
+      "New chat (Ctrl+Shift+O)",
+    );
+    expect(newChatButton).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Meta+Shift+O Control+Shift+O",
+    );
+  });
+
+  it("uses macOS shortcut glyphs in the sidebar title", async () => {
+    setNavigatorPlatform("MacIntel");
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    expect(within(sidebar).getByRole("button", { name: "New chat" })).toHaveAttribute(
+      "title",
+      "New chat (⌘⇧O)",
+    );
   });
 
   it("keeps large sidebars light while search still covers every chat", async () => {
