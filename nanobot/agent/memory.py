@@ -44,7 +44,7 @@ _OPENAI_KEY_RE = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")
 _GITHUB_TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b")
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password)\b(\s*[:=]\s*)([\"']?)"
-    r"[^\"'\s,;]{8,}([\"']?)"
+    r"[^\"'\s,;]{4,}([\"']?)"
 )
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _CHINA_ID_RE = re.compile(
@@ -142,7 +142,7 @@ class MemoryStore:
                 os.fsync(f.fileno())
             os.replace(tmp_path, path)
             MemoryStore._fsync_parent(path)
-        except BaseException:
+        except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
 
@@ -315,30 +315,34 @@ class MemoryStore:
         large writes (e.g. an LLM echoing its input back as a "summary").
         """
         limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
-        cursor = self._next_cursor()
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        raw = entry.rstrip()
-        if len(raw) > limit:
-            if not self._oversize_logged:
-                self._oversize_logged = True
-                logger.warning(
-                    "history entry exceeds {} chars ({}); truncating. "
-                    "Usually means a caller forgot its own cap; "
-                    "further occurrences suppressed.",
-                    limit, len(raw),
+        # Cursor allocation, JSONL append, and cursor file write must be
+        # atomic: concurrent writers could otherwise read the same cursor
+        # and emit duplicate entries.
+        with self._lock:
+            cursor = self._next_cursor()
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            raw = entry.rstrip()
+            if len(raw) > limit:
+                if not self._oversize_logged:
+                    self._oversize_logged = True
+                    logger.warning(
+                        "history entry exceeds {} chars ({}); truncating. "
+                        "Usually means a caller forgot its own cap; "
+                        "further occurrences suppressed.",
+                        limit, len(raw),
+                    )
+                raw = truncate_text(raw, limit)
+            content = redact_memory_text(strip_think(raw))
+            if raw and not content:
+                logger.debug(
+                    "history entry {} stripped to empty (likely template leak); "
+                    "persisting empty content to avoid re-polluting context",
+                    cursor,
                 )
-            raw = truncate_text(raw, limit)
-        content = redact_memory_text(strip_think(raw))
-        if raw and not content:
-            logger.debug(
-                "history entry {} stripped to empty (likely template leak); "
-                "persisting empty content to avoid re-polluting context",
-                cursor,
-            )
-        record = {"cursor": cursor, "timestamp": ts, "content": content}
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._write_text_atomic(self._cursor_file, str(cursor))
+            record = {"cursor": cursor, "timestamp": ts, "content": content}
+            with open(self.history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._write_text_atomic(self._cursor_file, str(cursor))
         return cursor
 
     @staticmethod
@@ -922,10 +926,14 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            probe.retain_recent_legal_suffix(max_suffix)
+            # Use the return value for identity-based dropped-message detection.
+            # When the tail contains no user turn, retain_recent_legal_suffix
+            # anchors to the latest user elsewhere in the full session — the
+            # retained window is then NOT a contiguous suffix of tail, so
+            # position-based slicing (tail[:cut]) would archive wrong messages.
+            dropped, _ = probe.retain_recent_legal_suffix(max_suffix)
             kept = probe.messages
-            cut = len(tail) - len(kept)
-            archive_msgs = tail[:cut]
+            archive_msgs = dropped
 
             if not archive_msgs and not kept:
                 session.updated_at = datetime.now()
@@ -1017,7 +1025,12 @@ class Dream:
     # -- tool registry -------------------------------------------------------
 
     def _build_tools(self) -> ToolRegistry:
-        """Build a minimal tool registry for the Dream agent."""
+        """Build a restricted tool registry for the Dream agent.
+
+        Edit scope is locked to memory_dir + SOUL.md + USER.md + skills/
+        so prompt injection in conversation history cannot escalate to
+        arbitrary workspace writes.
+        """
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
@@ -1029,13 +1042,21 @@ class Dream:
         # Dream gets its own FileStates so its caches stay isolated from the
         # main loop's sessions (issue #3571).
         file_states = FileStates()
+        # Dream only needs to read memory/, SOUL.md, USER.md and builtin skills.
+        # Restricting allowed_dir prevents arbitrary workspace reads.
+        editable_roots = [self.store.soul_file, self.store.user_file, workspace / "skills"]
         tools.register(ReadFileTool(
             workspace=workspace,
-            allowed_dir=workspace,
-            extra_allowed_dirs=extra_read,
+            allowed_dir=self.store.memory_dir,
+            extra_allowed_dirs=[workspace, BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else [workspace],
             file_states=file_states,
         ))
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
+        tools.register(EditFileTool(
+            workspace=workspace,
+            allowed_dir=self.store.memory_dir,
+            extra_allowed_dirs=editable_roots,
+            file_states=file_states,
+        ))
         # write_file resolves relative paths from workspace root, but can only
         # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
@@ -1245,7 +1266,10 @@ class Dream:
                 if event["status"] == "ok":
                     changelog.append(f"{event['name']}: {event['detail']}")
 
-        # Only advance cursor on successful completion to prevent silent loss
+        # Only advance cursor AND commit on successful completion.  Partial runs
+        # (max_iterations, tool_error, etc.) are NOT committed — otherwise the
+        # next Dream cycle would re-read the same history entries, see the
+        # already-applied partial edits, and produce duplicate/conflicting changes.
         if result and result.stop_reason == "completed":
             new_cursor = batch[-1]["cursor"]
             self.store.set_last_dream_cursor(new_cursor)
@@ -1253,22 +1277,22 @@ class Dream:
                 "Dream done: {} change(s), cursor advanced to {}",
                 len(changelog), new_cursor,
             )
+            # Git auto-commit only after successful cursor advance
+            if changelog and self.store.git.is_initialized():
+                ts = batch[-1]["timestamp"]
+                summary = f"dream: {ts}, {len(changelog)} change(s)"
+                commit_msg = f"{summary}\n\n{analysis.strip()}"
+                sha = self.store.git.auto_commit(commit_msg)
+                if sha:
+                    logger.info("Dream commit: {}", sha)
         else:
             reason = result.stop_reason if result else "exception"
             logger.warning(
-                "Dream incomplete ({}): cursor NOT advanced, will retry next cron cycle",
+                "Dream incomplete ({}): cursor NOT advanced, changes NOT committed; "
+                "will retry next cron cycle",
                 reason,
             )
 
         self.store.compact_history()
-
-        # Git auto-commit (only when there are actual changes)
-        if changelog and self.store.git.is_initialized():
-            ts = batch[-1]["timestamp"]
-            summary = f"dream: {ts}, {len(changelog)} change(s)"
-            commit_msg = f"{summary}\n\n{analysis.strip()}"
-            sha = self.store.git.auto_commit(commit_msg)
-            if sha:
-                logger.info("Dream commit: {}", sha)
 
         return True

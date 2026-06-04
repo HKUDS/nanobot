@@ -152,29 +152,50 @@ class TestIsExpired:
 
 
 # ---------------------------------------------------------------------------
-# _format_summary
+# session_summary_text (was _format_summary)
 # ---------------------------------------------------------------------------
 
 
-class TestFormatSummary:
-    """Test AutoCompact._format_summary static method."""
+class TestSessionSummaryText:
+    """Test session_summary_text for legacy _last_summary format compatibility."""
 
-    def test_contains_isoformat_timestamp(self):
-        """Output should contain last_active as isoformat."""
-        last_active = datetime(2026, 5, 13, 14, 30, 0)
-        result = AutoCompact._format_summary("Some text", last_active)
+    def test_legacy_dict_format_contains_timestamp(self):
+        """session_summary_text with legacy _last_summary dict should include isoformat."""
+        from nanobot.agent.memory import session_summary_text
+
+        session = _make_session(metadata={
+            "_last_summary": {
+                "text": "Some text",
+                "last_active": "2026-05-13T14:30:00",
+            },
+        })
+        result = session_summary_text(session)
+        assert result is not None
         assert "2026-05-13T14:30:00" in result
 
-    def test_contains_summary_text(self):
-        """Output should contain the provided text verbatim."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("User discussed Python.", last_active)
+    def test_legacy_dict_format_contains_summary_text(self):
+        """session_summary_text should contain the provided text verbatim."""
+        from nanobot.agent.memory import session_summary_text
+
+        session = _make_session(metadata={
+            "_last_summary": {
+                "text": "User discussed Python.",
+                "last_active": "2026-01-01T00:00:00",
+            },
+        })
+        result = session_summary_text(session)
+        assert result is not None
         assert "User discussed Python." in result
 
-    def test_output_starts_with_label(self):
-        """Output should start with the standard prefix."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("text", last_active)
+    def test_legacy_dict_format_starts_with_label(self):
+        """session_summary_text with legacy _last_summary dict should start with prefix."""
+        from nanobot.agent.memory import session_summary_text
+
+        session = _make_session(metadata={
+            "_last_summary": {"text": "text", "last_active": "2026-01-01T00:00:00"},
+        })
+        result = session_summary_text(session)
+        assert result is not None
         assert result.startswith("Previous conversation summary (last active ")
 
 
@@ -257,8 +278,8 @@ class TestCheckExpired:
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 
-    def test_dream_session_skips(self):
-        """Internal Dream sessions should not be scheduled for idle compact."""
+    def test_dream_key_is_now_archived_normally(self):
+        """Dream sessions are no longer internal; they should be scheduled like any session."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
@@ -270,8 +291,7 @@ class TestCheckExpired:
 
         ac.check_expired(scheduler)
 
-        scheduler.assert_not_called()
-        assert "dream:20260602-155256" not in ac._archiving
+        scheduler.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -296,15 +316,19 @@ class TestArchiveDelegates:
         )
 
     @pytest.mark.asyncio
-    async def test_dream_session_is_ignored(self):
+    async def test_dream_key_is_archived_normally(self):
+        """Dream sessions are no longer special-cased; they archive like any session."""
         ac = _make_autocompact()
+        mock_sm = MagicMock(spec=SessionManager)
+        session = _make_session()
+        mock_sm.get_or_create.return_value = session
+        ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
         ac._archiving.add("dream:20260602-155256")
 
         await ac._archive("dream:20260602-155256")
 
-        ac.consolidator.compact_idle_session.assert_not_awaited()
-        assert "dream:20260602-155256" not in ac._archiving
+        ac.consolidator.compact_idle_session.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_populates_summaries_from_metadata(self):
@@ -321,7 +345,7 @@ class TestArchiveDelegates:
 
         entry = ac._summaries.get("cli:test")
         assert entry is not None
-        assert entry[0] == "Hello."
+        assert "Hello." in entry
 
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
@@ -399,15 +423,13 @@ class TestPrepareSession:
         """Summary from _summaries dict should be returned (hot path)."""
         ac = _make_autocompact()
         session = _make_session()
-        last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = "Hot summary (pre-rendered)."
 
         result_session, summary = ac.prepare_session(session, "cli:test")
 
         assert result_session is session
         assert summary is not None
-        assert "Hot summary." in summary
-        assert "Previous conversation summary" in summary
+        assert "Hot summary" in summary
 
     def test_hot_path_pops_summary_one_shot(self):
         """Hot path should pop the summary (one-shot; second call returns None)."""
@@ -449,14 +471,14 @@ class TestPrepareSession:
         assert result_session is session
         assert summary is None
 
-    def test_dream_session_skips_reload_and_summaries(self):
-        """Internal Dream sessions should not reload or receive compact summaries."""
+    def test_dream_key_is_not_special_in_prepare(self):
+        """Dream sessions are no longer internal; prepare_session treats them normally."""
         ac = _make_autocompact(ttl=15)
         mock_sm = MagicMock(spec=SessionManager)
         ac.sessions = mock_sm
         key = "dream:20260602-155256"
         ac._archiving.add(key)
-        ac._summaries[key] = ("Hot summary.", datetime(2026, 6, 2, 15, 52, 56))
+        ac._summaries[key] = "Hot summary."
         session = _make_session(
             key=key,
             updated_at=datetime.now() - timedelta(minutes=20),
@@ -470,21 +492,18 @@ class TestPrepareSession:
 
         result_session, summary = ac.prepare_session(session, key)
 
-        mock_sm.get_or_create.assert_not_called()
-        assert result_session is session
-        assert summary is None
-        assert key not in ac._archiving
-        assert key not in ac._summaries
+        # Dream sessions now reload when expired, just like any other session
+        mock_sm.get_or_create.assert_called_once_with(key)
 
-    def test_cold_path_metadata_not_dict_returns_none(self):
-        """If metadata _last_summary is not a dict, should return None summary."""
+    def test_cold_path_legacy_string_metadata(self):
+        """If metadata _last_summary is a plain string, session_summary_text returns it as-is."""
         ac = _make_autocompact()
-        session = _make_session(metadata={"_last_summary": "not a dict"})
+        session = _make_session(metadata={"_last_summary": "legacy plain string summary"})
 
         result_session, summary = ac.prepare_session(session, "cli:test")
 
         assert result_session is session
-        assert summary is None
+        assert "legacy plain string summary" in summary
 
     def test_hot_path_takes_priority_over_metadata(self):
         """Hot path (_summaries) should take priority over metadata."""
@@ -495,8 +514,7 @@ class TestPrepareSession:
                 "last_active": datetime(2026, 1, 1).isoformat(),
             },
         })
-        last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = "Hot summary."
 
         _, summary = ac.prepare_session(session, "cli:test")
         assert "Hot summary." in summary
