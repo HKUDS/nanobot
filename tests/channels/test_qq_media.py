@@ -118,11 +118,13 @@ async def test_send_exception_caught_not_raised() -> None:
     channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
     channel._client = _FakeClient()
 
-    with patch.object(channel, "_send_text_only", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+    with patch.object(
+        channel, "_send_text_only", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+    ) as send_text:
         await channel.send(
             OutboundMessage(channel="qq", chat_id="user1", content="hello")
         )
-    # No exception raised — test passes if we get here.
+    send_text.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -260,6 +262,8 @@ async def test_on_message_exception_caught_not_raised() -> None:
     bad_data = SimpleNamespace(id="x1", content="hi")
     # Should not raise
     await channel._on_message(bad_data, is_group=False)
+    assert channel._client.api.c2c_calls == []
+    assert channel._client.api.group_calls == []
 
 
 @pytest.mark.asyncio

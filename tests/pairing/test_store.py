@@ -1,5 +1,3 @@
-import time
-
 import pytest
 
 from nanobot.pairing import __all__ as pairing_all
@@ -32,12 +30,15 @@ class TestGenerateCode:
         codes = {store.generate_code("telegram", str(i)) for i in range(20)}
         assert len(codes) == 20
 
-    def test_ttl_expiration(self) -> None:
+    def test_ttl_expiration(self, monkeypatch) -> None:
+        clock = {"now": 1_000.0}
+        monkeypatch.setattr(store.time, "time", lambda: clock["now"])
+
         code = store.generate_code("telegram", "123", ttl=1)
-        assert store.approve_code(code) is not None
+        assert store.approve_code(code) == ("telegram", "123")
 
         code2 = store.generate_code("telegram", "456", ttl=0)
-        time.sleep(0.1)
+        clock["now"] += 0.1
         assert store.approve_code(code2) is None
 
 
@@ -59,9 +60,12 @@ class TestApproveDeny:
     def test_deny_unknown_returns_false(self) -> None:
         assert store.deny_code("UNKNOWN") is False
 
-    def test_approve_expired_returns_none(self) -> None:
+    def test_approve_expired_returns_none(self, monkeypatch) -> None:
+        clock = {"now": 1_000.0}
+        monkeypatch.setattr(store.time, "time", lambda: clock["now"])
+
         code = store.generate_code("telegram", "123", ttl=0)
-        time.sleep(0.1)
+        clock["now"] += 0.1
         assert store.approve_code(code) is None
 
 
@@ -91,9 +95,12 @@ class TestListPending:
         channels = {p["channel"] for p in pending}
         assert channels == {"telegram", "discord"}
 
-    def test_expired_not_listed(self) -> None:
+    def test_expired_not_listed(self, monkeypatch) -> None:
+        clock = {"now": 1_000.0}
+        monkeypatch.setattr(store.time, "time", lambda: clock["now"])
+
         store.generate_code("telegram", "123", ttl=0)
-        time.sleep(0.1)
+        clock["now"] += 0.1
         assert store.list_pending() == []
 
 

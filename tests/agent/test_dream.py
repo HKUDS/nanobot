@@ -134,9 +134,7 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=MagicMock(
-                content="done", finish_reason="stop", tool_calls=[], usage={},
-            )
+            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
         )
 
         with (
@@ -168,9 +166,13 @@ class TestEphemeralDirect:
             mock_archive.assert_not_called()
 
     async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
-        """Without ephemeral, the normal path is untouched — no crash."""
+        """Without ephemeral, the normal path returns the model response."""
         loop, store = _make_loop
-        await loop.process_direct("test", session_key="cli:normal")
+        response = await loop.process_direct("test", session_key="cli:normal")
+
+        assert response is not None
+        assert response.content == "done"
+        loop.provider.chat_with_retry.assert_awaited()
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""
