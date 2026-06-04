@@ -295,6 +295,9 @@
       "disabled": "已禁用",
       "restartPending": "等待重启",
       "ready": "就绪",
+      "privateEngine": "私有引擎",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "默认工作区",
       "comfortable": "舒适",
       "compact": "紧凑",
       "auto": "自动",
@@ -385,6 +388,31 @@
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
       "workspace": "工作区"
+    },
+    "usage": {
+      "title": "Token 活动",
+      "shortTitle": "Token Usage",
+      "subtitle": "最近 12 个月由提供商上报的 token 用量。",
+      "empty": "新的模型回复产生后，这里会显示 token 活动。",
+      "totalTokens": "累计 Token 数",
+      "peakTokens": "峰值 Token 数",
+      "thirtyDayTokens": "30 天 Token 数",
+      "currentStreak": "当前连续天数",
+      "longestStreak": "最长连续天数",
+      "daysValue": "{{count}} 天",
+      "last30": "30 天",
+      "activeDays": "活跃天数",
+      "requests": "请求数",
+      "estimated": "估算",
+      "includesEstimates": "包含估算",
+      "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次请求",
+      "sources": {
+        "user": "对话",
+        "api": "API",
+        "cron": "自动任务",
+        "dream": "记忆整理",
+        "system": "系统"
+      }
     },
     "providers": {
       "searchPlaceholder": "搜索提供商",
@@ -564,6 +592,8 @@
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
+      "modelNotConfigured": "模型未配置",
+      "configureModel": "配置模型",
       "queued": {
         "label": "待引导提示",
         "guide": "引导",
@@ -732,6 +762,15 @@
     "prev": "上一张",
     "next": "下一张",
     "close": "关闭预览"
+  },
+  "filePreview": {
+    "aria": "文件预览",
+    "close": "关闭文件预览",
+    "loading": "正在加载预览...",
+    "failed": "无法预览这个文件。",
+    "routeMissing": "文件预览需要最新的 gateway。请重启 nanobot gateway 后再试。",
+    "resize": "调整文件预览宽度",
+    "truncated": "文件较大，当前只显示前半部分预览。"
   },
   "code": {
     "fallbackLanguage": "代码",

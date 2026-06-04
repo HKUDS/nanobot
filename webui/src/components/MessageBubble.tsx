@@ -33,6 +33,7 @@ interface MessageBubbleProps {
   showAssistantCopyAction?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 /**
@@ -49,6 +50,7 @@ export function MessageBubble({
   showAssistantCopyAction = true,
   cliApps = [],
   mcpPresets = [],
+  onOpenFilePreview,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -142,13 +144,23 @@ export function MessageBubble({
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
-        <ReasoningBubble text={reasoning} streaming={reasoningStreaming} hasBodyBelow={!empty} />
+        <ReasoningBubble
+          text={reasoning}
+          streaming={reasoningStreaming}
+          hasBodyBelow={!empty}
+          onOpenFilePreview={onOpenFilePreview}
+        />
       ) : null}
       {empty && message.isStreaming && !hasReasoning ? (
         <TypingDots />
       ) : empty && message.isStreaming ? null : (
         <>
-          <MarkdownText streaming={!!message.isStreaming}>{message.content}</MarkdownText>
+          <MarkdownText
+            streaming={!!message.isStreaming}
+            onOpenFilePreview={onOpenFilePreview}
+          >
+            {message.content}
+          </MarkdownText>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
             <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
@@ -488,6 +500,7 @@ interface ReasoningBubbleProps {
   hasBodyBelow: boolean;
   /** When true, skip the slide-in wrapper (used inside ``AgentActivityCluster``). */
   embeddedInCluster?: boolean;
+  onOpenFilePreview?: (path: string) => void;
 }
 
 /**
@@ -509,6 +522,7 @@ export function ReasoningBubble({
   streaming,
   hasBodyBelow,
   embeddedInCluster = false,
+  onOpenFilePreview,
 }: ReasoningBubbleProps) {
   const { t } = useTranslation();
   const [userToggled, setUserToggled] = useState(false);
@@ -567,6 +581,7 @@ export function ReasoningBubble({
         >
           <MarkdownText
             streaming={streaming}
+            onOpenFilePreview={onOpenFilePreview}
             className={cn(
               "text-[12.5px] italic text-muted-foreground/88",
               "prose-p:my-1.5 prose-li:my-0.5",

@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
@@ -10,6 +10,43 @@ describe("MarkdownTextRenderer", () => {
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+  });
+
+  it("renders local file links as previewable file references", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
+      </MarkdownTextRenderer>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    expect(reference).toHaveTextContent("hook.py");
+    expect(reference).toHaveAttribute(
+      "aria-label",
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).toHaveBeenCalledWith(
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+  });
+
+  it("does not treat non-file hrefs as previews just because the label looks like a file", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Download [index.html](/api/media/sig/html)"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "index.html" })).toHaveAttribute(
+      "href",
+      "/api/media/sig/html",
+    );
   });
 
   it("does not wrap complete fenced code blocks in an extra pre", () => {

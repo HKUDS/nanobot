@@ -34,14 +34,16 @@ interface PromptMarker {
 }
 
 const MIN_PROMPTS_FOR_RAIL = 3;
-const RAIL_MIN_SCROLL_RANGE_PX = 240;
+const RAIL_MIN_SCROLL_RANGE_PX = 80;
 const DENSE_PROMPT_THRESHOLD = 30;
 const DENSE_BUCKET_HEIGHT_PX = 12;
 const DENSE_BUCKET_FALLBACK_COUNT = 32;
 const DENSE_BUCKET_MAX_COUNT = 42;
 const MARKER_MIN_GAP_PX = 9;
-const MARKER_BASE_WIDTH_PX = 26;
-const MARKER_MAX_WIDTH_PX = 42;
+const MARKER_BASE_WIDTH_PX = 16;
+const MARKER_MAX_WIDTH_PX = 28;
+const MEASURE_RETRY_FRAMES = 4;
+const RAIL_REVEAL_MS = 1400;
 
 export function PromptRail({
   bottomOffset,
@@ -52,6 +54,19 @@ export function PromptRail({
   const promptAnchors = useMemo(() => userPromptAnchors(messages), [messages]);
   const [markers, setMarkers] = useState<PromptMarker[]>([]);
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const revealTimeoutRef = useRef<number | null>(null);
+
+  const revealTemporarily = useCallback(() => {
+    setRevealed(true);
+    if (revealTimeoutRef.current !== null) {
+      window.clearTimeout(revealTimeoutRef.current);
+    }
+    revealTimeoutRef.current = window.setTimeout(() => {
+      setRevealed(false);
+      revealTimeoutRef.current = null;
+    }, RAIL_REVEAL_MS);
+  }, []);
 
   const updateMarkers = useCallback(() => {
     const scrollEl = scrollRef.current;
@@ -74,8 +89,18 @@ export function PromptRail({
   }, [promptAnchors, scrollRef]);
 
   useEffect(() => {
-    updateMarkers();
-  }, [updateMarkers]);
+    let frame = 0;
+    let remainingFrames = MEASURE_RETRY_FRAMES;
+    const measure = () => {
+      updateMarkers();
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        frame = window.requestAnimationFrame(measure);
+      }
+    };
+    measure();
+    return () => window.cancelAnimationFrame(frame);
+  }, [bottomOffset, updateMarkers]);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -84,6 +109,7 @@ export function PromptRail({
     let frame = 0;
     const schedule = () => {
       window.cancelAnimationFrame(frame);
+      revealTemporarily();
       frame = window.requestAnimationFrame(updateMarkers);
     };
 
@@ -94,7 +120,7 @@ export function PromptRail({
       scrollEl.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
     };
-  }, [scrollRef, updateMarkers]);
+  }, [revealTemporarily, scrollRef, updateMarkers]);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -105,22 +131,36 @@ export function PromptRail({
     return () => observer.disconnect();
   }, [scrollRef, updateMarkers]);
 
+  useEffect(() => {
+    return () => {
+      if (revealTimeoutRef.current !== null) {
+        window.clearTimeout(revealTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (markers.length === 0) return null;
 
   const maxMarkerCount = Math.max(...markers.map((marker) => marker.count));
+  const activeMarkerIndex = markers.findIndex((marker) =>
+    marker.ids.includes(activePromptId ?? ""),
+  );
 
   return (
     <div
       ref={railRef}
       aria-label="User prompt navigation"
       className={cn(
-        "pointer-events-none absolute right-6 top-12 z-20 hidden w-12 md:block",
+        "group pointer-events-auto absolute right-4 top-14 z-20 hidden w-8 opacity-70 md:block",
+        "transition-opacity duration-200 hover:opacity-100",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
       )}
       style={{ bottom: Math.max(80, bottomOffset) }}
     >
       {markers.map((marker) => {
+        const index = markers.indexOf(marker);
         const active = marker.ids.includes(activePromptId ?? "");
+        const nearActive = activeMarkerIndex < 0 || Math.abs(index - activeMarkerIndex) <= 1;
         return (
           <button
             key={marker.ids.join("|")}
@@ -129,12 +169,16 @@ export function PromptRail({
             aria-label={`Jump to prompt: ${marker.label}`}
             onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
             className={cn(
-              "pointer-events-auto absolute right-0 h-1.5 -translate-y-1/2 rounded-full",
-              "bg-muted-foreground/30 transition-all duration-150",
-              "hover:bg-blue-500/80 focus-visible:bg-blue-500",
+              "absolute right-0 h-[3px] -translate-y-1/2 rounded-full",
+              "bg-foreground/20 transition-[background-color,opacity,transform,width] duration-200",
+              "hover:bg-blue-500/70 hover:opacity-100 hover:scale-x-110",
+              "focus-visible:bg-blue-500 focus-visible:opacity-100 focus-visible:scale-x-110",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
-              marker.count > 1 && "bg-muted-foreground/45",
-              active && "bg-foreground shadow-sm",
+              marker.count > 1 && "bg-foreground/30",
+              active && "h-1 bg-foreground/65 opacity-80 shadow-sm",
+              !active && nearActive && "opacity-25 group-hover:opacity-55",
+              !active && !nearActive && !revealed && "opacity-0 group-hover:opacity-40",
+              !active && !nearActive && revealed && "opacity-35",
             )}
             style={{
               top: `${marker.topPercent}%`,

@@ -187,6 +187,9 @@
       "disabled": "Đã tắt",
       "restartPending": "Chờ khởi động lại",
       "ready": "Sẵn sàng",
+      "privateEngine": "Bộ máy riêng",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Workspace mặc định",
       "comfortable": "Thoải mái",
       "compact": "Gọn",
       "auto": "Tự động",
@@ -277,6 +280,31 @@
       "webSearch": "Tìm kiếm web",
       "imageGeneration": "Tạo hình ảnh",
       "workspace": "Không gian làm việc"
+    },
+    "usage": {
+      "title": "Hoạt động token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Mức dùng do nhà cung cấp báo cáo trong 12 tháng gần nhất.",
+      "empty": "Hoạt động token sẽ xuất hiện sau các phản hồi mô hình mới.",
+      "totalTokens": "Tổng token",
+      "peakTokens": "Đỉnh token",
+      "thirtyDayTokens": "Token 30 ngày",
+      "currentStreak": "Chuỗi hiện tại",
+      "longestStreak": "Chuỗi dài nhất",
+      "daysValue": "{{count}} ngày",
+      "last30": "30 ngày",
+      "activeDays": "Ngày hoạt động",
+      "requests": "Yêu cầu",
+      "estimated": "ước tính",
+      "includesEstimates": "bao gồm ước tính",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} yêu cầu",
+      "sources": {
+        "user": "Trò chuyện",
+        "api": "API",
+        "cron": "Tự động hóa",
+        "dream": "Bộ nhớ",
+        "system": "Hệ thống"
+      }
     },
     "providers": {
       "searchPlaceholder": "Tìm nhà cung cấp",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "Đóng mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "modelNotConfigured": "Chưa cấu hình mô hình",
+      "configureModel": "Cấu hình mô hình",
       "queued": {
         "label": "Hướng dẫn đang chờ",
         "guide": "Hướng dẫn",
@@ -732,6 +762,15 @@
     "prev": "Ảnh trước",
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
+  },
+  "filePreview": {
+    "aria": "Xem trước tệp",
+    "close": "Đóng xem trước tệp",
+    "loading": "Đang tải bản xem trước...",
+    "failed": "Không thể xem trước tệp này.",
+    "routeMissing": "Xem trước tệp cần gateway mới nhất. Hãy khởi động lại nanobot gateway rồi thử lại.",
+    "resize": "Đổi kích thước bản xem trước tệp",
+    "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },
   "code": {
     "fallbackLanguage": "mã",

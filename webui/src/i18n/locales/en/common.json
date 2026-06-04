@@ -295,6 +295,9 @@
       "disabled": "Disabled",
       "restartPending": "Restart pending",
       "ready": "Ready",
+      "privateEngine": "Private engine",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "Default workspace",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -385,6 +388,31 @@
       "webSearch": "Web search",
       "imageGeneration": "Image generation",
       "workspace": "Workspace"
+    },
+    "usage": {
+      "title": "Token activity",
+      "shortTitle": "Token Usage",
+      "subtitle": "Provider-reported usage over the last 12 months.",
+      "empty": "Token activity will appear after new model replies.",
+      "totalTokens": "Total tokens",
+      "peakTokens": "Peak tokens",
+      "thirtyDayTokens": "30-day tokens",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "daysValue": "{{count}}d",
+      "last30": "30 days",
+      "activeDays": "Active days",
+      "requests": "Requests",
+      "estimated": "estimated",
+      "includesEstimates": "includes estimates",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automations",
+        "dream": "Memory",
+        "system": "System"
+      }
     },
     "providers": {
       "searchPlaceholder": "Search providers",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
+      "modelNotConfigured": "Model not configured",
+      "configureModel": "Configure model",
       "queued": {
         "label": "Queued guidance",
         "guide": "Guide",
@@ -732,6 +762,15 @@
     "prev": "Previous image",
     "next": "Next image",
     "close": "Close image preview"
+  },
+  "filePreview": {
+    "aria": "File preview",
+    "close": "Close file preview",
+    "loading": "Loading preview...",
+    "failed": "Could not preview this file.",
+    "routeMissing": "File preview needs the latest gateway. Restart nanobot gateway and try again.",
+    "resize": "Resize file preview",
+    "truncated": "Preview is truncated because this file is large."
   },
   "code": {
     "fallbackLanguage": "code",

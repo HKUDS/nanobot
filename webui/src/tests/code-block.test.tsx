@@ -51,6 +51,25 @@ describe("CodeBlock", () => {
     expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
   });
 
+  it("can render without chat-style chrome for file previews", () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock
+          language="html"
+          code="<main />"
+          chrome="none"
+          highlight={false}
+          showLineNumbers
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByText("html")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
+  });
+
   it("falls back to 'text' language when language is undefined", async () => {
     render(
       <ThemeProvider theme="dark">

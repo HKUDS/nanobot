@@ -187,6 +187,9 @@
       "disabled": "Nonaktif",
       "restartPending": "Menunggu mulai ulang",
       "ready": "Siap",
+      "privateEngine": "Mesin privat",
+      "unixSocket": "Soket Unix",
+      "defaultWorkspace": "Workspace default",
       "comfortable": "Nyaman",
       "compact": "Ringkas",
       "auto": "Otomatis",
@@ -277,6 +280,31 @@
       "webSearch": "Pencarian web",
       "imageGeneration": "Pembuatan gambar",
       "workspace": "Ruang kerja"
+    },
+    "usage": {
+      "title": "Aktivitas token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Penggunaan yang dilaporkan penyedia selama 12 bulan terakhir.",
+      "empty": "Aktivitas token akan muncul setelah balasan model baru.",
+      "totalTokens": "Total token",
+      "peakTokens": "Puncak token",
+      "thirtyDayTokens": "Token 30 hari",
+      "currentStreak": "Rentetan saat ini",
+      "longestStreak": "Rentetan terpanjang",
+      "daysValue": "{{count}} h",
+      "last30": "30 hari",
+      "activeDays": "Hari aktif",
+      "requests": "Permintaan",
+      "estimated": "perkiraan",
+      "includesEstimates": "termasuk perkiraan",
+      "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Otomasi",
+        "dream": "Memori",
+        "system": "Sistem"
+      }
     },
     "providers": {
       "searchPlaceholder": "Cari penyedia",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "modelNotConfigured": "Model belum dikonfigurasi",
+      "configureModel": "Konfigurasi model",
       "queued": {
         "label": "Panduan antrean",
         "guide": "Pandu",
@@ -732,6 +762,15 @@
     "prev": "Gambar sebelumnya",
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
+  },
+  "filePreview": {
+    "aria": "Pratinjau file",
+    "close": "Tutup pratinjau file",
+    "loading": "Memuat pratinjau...",
+    "failed": "Tidak dapat mempratinjau file ini.",
+    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang nanobot gateway lalu coba lagi.",
+    "resize": "Ubah ukuran pratinjau file",
+    "truncated": "Pratinjau dipotong karena file ini besar."
   },
   "code": {
     "fallbackLanguage": "kode",

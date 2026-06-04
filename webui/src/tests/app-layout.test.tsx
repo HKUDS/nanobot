@@ -208,6 +208,7 @@ describe("App layout", () => {
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
     setNavigatorPlatform("Linux x86_64");
+    localStorage.removeItem("nanobot-webui.sidebar");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
@@ -241,6 +242,60 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it("fully collapses the native host sidebar and previews it on hover", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Desktop chat",
+      },
+    ];
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "native",
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const flowSidebar = screen.getByTestId("host-sidebar-flow");
+    const toggle = screen.getByTestId("host-sidebar-toggle");
+    expect(flowSidebar).toHaveStyle({ width: "272px" });
+    expect(
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "0px" }));
+    expect(
+      screen.queryByRole("navigation", { name: "Sidebar navigation" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(toggle);
+    const previewSidebar = await screen.findByTestId("host-sidebar-preview");
+    expect(flowSidebar).toHaveStyle({ width: "0px" });
+    expect(previewSidebar).toHaveStyle({ width: "272px" });
+    expect(
+      within(previewSidebar).getByRole("navigation", {
+        name: "Sidebar navigation",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(screen.queryByTestId("host-sidebar-preview")).not.toBeInTheDocument(),
+    );
+    expect(flowSidebar).toHaveStyle({ width: "272px" });
+    expect(
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
+    ).toBeInTheDocument();
   });
 
   it("switches to the next session when deleting the active chat", async () => {
@@ -907,7 +962,6 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(document.title).toBe("Settings · nanobot");
-    expect(screen.getByTestId("overview-nanobot-logo")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();

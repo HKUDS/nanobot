@@ -215,6 +215,42 @@ describe("ThreadViewport", () => {
     });
   });
 
+  it("renders the prompt rail for compact scroll ranges", async () => {
+    const promptMessages = makeLongMessages(3);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 700 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    expect(promptEls).toHaveLength(3);
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 50,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
+  });
+
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
     const promptMessages = makeLongMessages(100);
     const { container } = render(

@@ -1342,6 +1342,8 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe("user");
     expect(result.current.messages[0].content).toBe("fine");
+    expect(result.current.messages[0].turnId).toEqual(expect.any(String));
+    expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
   it("attaches assistant media_urls to complete messages", () => {
@@ -1482,7 +1484,10 @@ describe("useNanobotStream", () => {
       "chat-img",
       "draw a square icon",
       undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "1:1" } },
+      expect.objectContaining({
+        imageGeneration: { enabled: true, aspect_ratio: "1:1" },
+        turnId: expect.any(String),
+      }),
     );
   });
 

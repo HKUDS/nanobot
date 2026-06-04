@@ -10,6 +10,7 @@ interface ThreadHeaderProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   minimal?: boolean;
 }
@@ -20,6 +21,7 @@ export function ThreadHeader({
   theme,
   onToggleTheme,
   hideSidebarToggleForHostChrome = false,
+  hostChromeTitleInset = false,
   hideThemeButton = false,
   minimal = false,
 }: ThreadHeaderProps) {
@@ -52,7 +54,12 @@ export function ThreadHeader({
   }
 
   return (
-    <div className="relative z-10 flex items-center justify-between gap-3 px-3 py-2">
+    <div
+      className={cn(
+        "relative z-10 flex items-center justify-between gap-3 px-3 py-2",
+        hostChromeTitleInset && "lg:pl-[128px]",
+      )}
+    >
       <div className="relative flex min-w-0 items-center gap-2">
         <Button
           variant="ghost"

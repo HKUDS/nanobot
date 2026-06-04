@@ -187,6 +187,9 @@
       "disabled": "無効",
       "restartPending": "再起動待ち",
       "ready": "準備完了",
+      "privateEngine": "プライベートエンジン",
+      "unixSocket": "Unix ソケット",
+      "defaultWorkspace": "デフォルトワークスペース",
       "comfortable": "標準",
       "compact": "コンパクト",
       "auto": "自動",
@@ -277,6 +280,31 @@
       "webSearch": "Web 検索",
       "imageGeneration": "画像生成",
       "workspace": "ワークスペース"
+    },
+    "usage": {
+      "title": "Token アクティビティ",
+      "shortTitle": "Token Usage",
+      "subtitle": "直近 12 か月にプロバイダーが報告した使用量。",
+      "empty": "新しいモデル返信の後に token アクティビティが表示されます。",
+      "totalTokens": "累計 Token 数",
+      "peakTokens": "ピーク Token 数",
+      "thirtyDayTokens": "30 日 Token 数",
+      "currentStreak": "現在の連続日数",
+      "longestStreak": "最長連続日数",
+      "daysValue": "{{count}} 日",
+      "last30": "30 日",
+      "activeDays": "アクティブ日数",
+      "requests": "リクエスト",
+      "estimated": "推定",
+      "includesEstimates": "推定を含む",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} 件のリクエスト",
+      "sources": {
+        "user": "チャット",
+        "api": "API",
+        "cron": "自動タスク",
+        "dream": "メモリ整理",
+        "system": "システム"
+      }
     },
     "providers": {
       "searchPlaceholder": "プロバイダーを検索",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
+      "modelNotConfigured": "モデルが未設定です",
+      "configureModel": "モデルを設定",
       "queued": {
         "label": "保留中のガイド",
         "guide": "ガイド",
@@ -732,6 +762,15 @@
     "prev": "前の画像",
     "next": "次の画像",
     "close": "プレビューを閉じる"
+  },
+  "filePreview": {
+    "aria": "ファイルプレビュー",
+    "close": "ファイルプレビューを閉じる",
+    "loading": "プレビューを読み込み中...",
+    "failed": "このファイルをプレビューできませんでした。",
+    "routeMissing": "ファイルプレビューには最新の gateway が必要です。nanobot gateway を再起動してから再試行してください。",
+    "resize": "ファイルプレビューの幅を変更",
+    "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
   "code": {
     "fallbackLanguage": "コード",

@@ -1,6 +1,7 @@
 import type {
   ChatSummary,
   CliAppsPayload,
+  FilePreviewPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   ModelConfigurationCreate,
@@ -134,6 +135,22 @@ export async function fetchWebuiThread(
   return (await res.json()) as WebuiThreadPersistedPayload;
 }
 
+export async function fetchFilePreview(
+  token: string,
+  key: string,
+  path: string,
+  base: string = "",
+): Promise<FilePreviewPayload> {
+  const query = new URLSearchParams();
+  query.set("path", path);
+  return request<FilePreviewPayload>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function deleteSession(
   token: string,
   key: string,
@@ -152,6 +169,18 @@ export async function fetchSettings(
 ): Promise<SettingsPayload> {
   return request<SettingsPayload>(
     `${base}/api/settings`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchSettingsUsage(
+  token: string,
+  base: string = "",
+): Promise<NonNullable<SettingsPayload["usage"]>> {
+  return request<NonNullable<SettingsPayload["usage"]>>(
+    `${base}/api/settings/usage`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

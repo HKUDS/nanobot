@@ -27,6 +27,7 @@ interface ThreadViewportProps {
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -58,6 +59,7 @@ export function ThreadViewport({
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
+  onOpenFilePreview,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -256,6 +258,7 @@ export function ThreadViewport({
                   onLoadEarlier={loadEarlierMessages}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
                 />
               </div>
             </div>

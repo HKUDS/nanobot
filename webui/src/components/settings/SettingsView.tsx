@@ -13,6 +13,7 @@ import {
   Bot,
   Brain,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -71,8 +72,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   createModelConfiguration,
   fetchSettings,
+  fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
   fetchProviderModels,
@@ -99,6 +107,7 @@ import {
   providerDisplayLabel,
 } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
+import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 import type {
   CliAppInfo,
@@ -167,7 +176,6 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const NANOBOT_ICON_SRC = "/brand/nanobot_icon.png";
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
@@ -265,6 +273,7 @@ const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 interface SettingsViewProps {
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
+  initialSettings?: SettingsPayload | null;
   showSidebar?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
@@ -311,9 +320,130 @@ function editableDefaultProvider(payload: SettingsPayload): string {
   return base?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "";
 }
 
+function settingsProviderRow(
+  payload: SettingsPayload,
+  provider: string | null | undefined,
+): SettingsPayload["providers"][number] | null {
+  if (!provider) return null;
+  return payload.providers.find((row) => row.name === provider) ?? null;
+}
+
+function settingsProviderConfigured(
+  payload: SettingsPayload,
+  provider: string | null | undefined,
+): boolean {
+  const row = settingsProviderRow(payload, provider);
+  if (row) return row.configured;
+  return payload.agent.has_api_key;
+}
+
+const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
+  model: "",
+  provider: "",
+  modelPreset: "default",
+  presetLabel: "Default",
+  contextWindowTokens: 65_536,
+  timezone: "UTC",
+  botName: "nanobot",
+  botIcon: "",
+  toolHintMaxLength: 40,
+};
+
+const DEFAULT_WEB_SEARCH_FORM: WebSearchSettingsUpdate = {
+  provider: "duckduckgo",
+  apiKey: "",
+  baseUrl: "",
+  maxResults: 5,
+  timeout: 30,
+  useJinaReader: true,
+};
+
+const DEFAULT_IMAGE_GENERATION_FORM: ImageGenerationSettingsUpdate = {
+  enabled: false,
+  provider: "openrouter",
+  model: "openai/gpt-5.4-image-2",
+  defaultAspectRatio: "1:1",
+  defaultImageSize: "1K",
+  maxImagesPerTurn: 4,
+};
+
+const DEFAULT_NETWORK_SAFETY_FORM: NetworkSafetySettingsUpdate = {
+  webuiAllowLocalServiceAccess: true,
+  webuiDefaultAccessMode: "default",
+};
+
+function agentDraftFromPayload(payload: SettingsPayload): AgentSettingsDraft {
+  const fallbackDefault = defaultPreset(payload);
+  const activePresetName = modelPresetValue(payload);
+  const activePreset =
+    payload.model_presets.find((preset) => preset.name === activePresetName) ?? fallbackDefault;
+  return {
+    model: activePreset?.model ?? payload.agent.model,
+    provider: activePreset?.is_default
+      ? editableDefaultProvider(payload)
+      : activePreset?.provider ?? editableDefaultProvider(payload),
+    modelPreset: activePresetName,
+    presetLabel: activePreset?.label ?? activePresetName,
+    contextWindowTokens: normalizeContextWindowTokens(
+      activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
+    ),
+    timezone: payload.agent.timezone,
+    botName: payload.agent.bot_name,
+    botIcon: payload.agent.bot_icon,
+    toolHintMaxLength: payload.agent.tool_hint_max_length,
+  };
+}
+
+function webSearchFormFromPayload(
+  payload: SettingsPayload,
+  previous?: WebSearchSettingsUpdate,
+): WebSearchSettingsUpdate {
+  return {
+    provider: payload.web_search.provider,
+    apiKey: previous?.provider === payload.web_search.provider ? previous.apiKey ?? "" : "",
+    baseUrl: payload.web_search.base_url ?? "",
+    maxResults: payload.web_search.max_results,
+    timeout: payload.web_search.timeout,
+    useJinaReader: payload.web.fetch.use_jina_reader,
+  };
+}
+
+function imageGenerationFormFromPayload(payload: SettingsPayload): ImageGenerationSettingsUpdate {
+  return {
+    enabled: payload.image_generation.enabled,
+    provider: payload.image_generation.provider,
+    model: payload.image_generation.model,
+    defaultAspectRatio: payload.image_generation.default_aspect_ratio,
+    defaultImageSize: payload.image_generation.default_image_size,
+    maxImagesPerTurn: payload.image_generation.max_images_per_turn,
+  };
+}
+
+function networkSafetyFormFromPayload(payload: SettingsPayload): NetworkSafetySettingsUpdate {
+  return {
+    webuiAllowLocalServiceAccess:
+      payload.advanced.webui_allow_local_service_access ??
+      payload.advanced.allow_local_preview_access ??
+      true,
+    webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(
+      payload.advanced.webui_default_access_mode,
+    ),
+  };
+}
+
+function pendingRestartSectionsFromPayload(payload: SettingsPayload): PendingRestartSections {
+  const sections = payload.restart_required_sections ?? [];
+  return {
+    runtime: sections.includes("runtime"),
+    browser: sections.includes("browser"),
+    image: sections.includes("image"),
+  };
+}
+
 export function SettingsView({
   theme,
   initialSection = "overview",
+  initialSettings = null,
   showSidebar = true,
   onToggleTheme,
   onBackToChat,
@@ -328,10 +458,10 @@ export function SettingsView({
 }: SettingsViewProps) {
   const { t } = useTranslation();
   const { token } = useClient();
-  const [settings, setSettings] = useState<SettingsPayload | null>(null);
+  const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => initialSettings === null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -370,26 +500,18 @@ export function SettingsView({
     EMPTY_PENDING_RESTART_SECTIONS,
   );
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
-  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>({
-    provider: "duckduckgo",
-    apiKey: "",
-    baseUrl: "",
-    maxResults: 5,
-    timeout: 30,
-    useJinaReader: true,
-  });
-  const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>({
-    enabled: false,
-    provider: "openrouter",
-    model: "openai/gpt-5.4-image-2",
-    defaultAspectRatio: "1:1",
-    defaultImageSize: "1K",
-    maxImagesPerTurn: 4,
-  });
-  const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>({
-    webuiAllowLocalServiceAccess: true,
-    webuiDefaultAccessMode: "default",
-  });
+  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>(() =>
+    initialSettings ? webSearchFormFromPayload(initialSettings) : DEFAULT_WEB_SEARCH_FORM,
+  );
+  const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>(
+    () =>
+      initialSettings
+        ? imageGenerationFormFromPayload(initialSettings)
+        : DEFAULT_IMAGE_GENERATION_FORM,
+  );
+  const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>(() =>
+    initialSettings ? networkSafetyFormFromPayload(initialSettings) : DEFAULT_NETWORK_SAFETY_FORM,
+  );
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -404,17 +526,9 @@ export function SettingsView({
   );
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
-  const [form, setForm] = useState<AgentSettingsDraft>({
-    model: "",
-    provider: "",
-    modelPreset: "default",
-    presetLabel: "Default",
-    contextWindowTokens: 65_536,
-    timezone: "UTC",
-    botName: "nanobot",
-    botIcon: "",
-    toolHintMaxLength: 40,
-  });
+  const [form, setForm] = useState<AgentSettingsDraft>(() =>
+    initialSettings ? agentDraftFromPayload(initialSettings) : DEFAULT_AGENT_SETTINGS_DRAFT,
+  );
 
   const text = useCallback(
     (key: string, fallback: string, options?: Record<string, unknown>) =>
@@ -423,59 +537,27 @@ export function SettingsView({
   );
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
-    const fallbackDefault = defaultPreset(payload);
-    const activePresetName = modelPresetValue(payload);
-    const activePreset =
-      payload.model_presets.find((preset) => preset.name === activePresetName) ?? fallbackDefault;
     setSettings(payload);
-    setForm({
-      model: activePreset?.model ?? payload.agent.model,
-      provider: activePreset?.is_default
-        ? editableDefaultProvider(payload)
-        : activePreset?.provider ?? editableDefaultProvider(payload),
-      modelPreset: activePresetName,
-      presetLabel: activePreset?.label ?? activePresetName,
-      contextWindowTokens: normalizeContextWindowTokens(
-        activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
-      ),
-      timezone: payload.agent.timezone,
-      botName: payload.agent.bot_name,
-      botIcon: payload.agent.bot_icon,
-      toolHintMaxLength: payload.agent.tool_hint_max_length,
-    });
-    setWebSearchForm((prev) => ({
-      provider: payload.web_search.provider,
-      apiKey: prev.provider === payload.web_search.provider ? prev.apiKey ?? "" : "",
-      baseUrl: payload.web_search.base_url ?? "",
-      maxResults: payload.web_search.max_results,
-      timeout: payload.web_search.timeout,
-      useJinaReader: payload.web.fetch.use_jina_reader,
-    }));
-    setImageGenerationForm({
-      enabled: payload.image_generation.enabled,
-      provider: payload.image_generation.provider,
-      model: payload.image_generation.model,
-      defaultAspectRatio: payload.image_generation.default_aspect_ratio,
-      defaultImageSize: payload.image_generation.default_image_size,
-      maxImagesPerTurn: payload.image_generation.max_images_per_turn,
-    });
-    setNetworkSafetyForm({
-      webuiAllowLocalServiceAccess: payload.advanced.webui_allow_local_service_access ?? payload.advanced.allow_local_preview_access ?? true,
-      webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(payload.advanced.webui_default_access_mode),
-    });
+    setForm(agentDraftFromPayload(payload));
+    setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
+    setImageGenerationForm(imageGenerationFormFromPayload(payload));
+    setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
     if (payload.restart_required_sections) {
-      setPendingRestartSections({
-        runtime: payload.restart_required_sections.includes("runtime"),
-        browser: payload.restart_required_sections.includes("browser"),
-        image: payload.restart_required_sections.includes("image"),
-      });
+      setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
     }
     onSettingsChange?.(payload);
   }, [onSettingsChange]);
 
   useEffect(() => {
+    if (!initialSettings || settings !== null) return;
+    applyPayload(initialSettings);
+    setLoading(false);
+  }, [applyPayload, initialSettings, settings]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const showLoading = settings === null;
+    if (showLoading) setLoading(true);
     fetchSettings(token)
       .then((payload) => {
         if (!cancelled) {
@@ -484,7 +566,7 @@ export function SettingsView({
         }
       })
       .catch((err) => {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled && showLoading) setError((err as Error).message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -493,6 +575,34 @@ export function SettingsView({
       cancelled = true;
     };
   }, [applyPayload, token]);
+
+  const hasSettings = settings !== null;
+  useEffect(() => {
+    if (activeSection !== "overview" || !hasSettings) return;
+    let cancelled = false;
+    const refresh = () => {
+      fetchSettingsUsage(token)
+        .then((usage) => {
+          if (cancelled) return;
+          setSettings((current) => (current ? { ...current, usage } : current));
+        })
+        .catch(() => {});
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 5000);
+    const onFocus = () => refresh();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [activeSection, hasSettings, token]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -1135,8 +1245,6 @@ export function SettingsView({
           <OverviewSettings
             settings={settings}
             requiresRestart={hasPendingRestart}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
           />
@@ -1354,10 +1462,10 @@ export function SettingsView({
           )}
         >
           <div className="mb-7">
-            <p className="mb-2 text-[13px] font-medium text-muted-foreground">
+            <p className="mb-2 text-[12px] font-normal text-muted-foreground">
               {t("settings.sidebar.title")}
             </p>
-            <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[34px]">
+            <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
               {text(`settings.nav.${activeSection}`, titleForSection(activeSection))}
             </h1>
           </div>
@@ -1437,7 +1545,7 @@ function SettingsSidebar({
         {t("settings.backToChat")}
       </button>
       <div className="mb-3 px-1 md:mb-4 md:px-2">
-        <h2 className="text-[21px] font-semibold tracking-[-0.02em] text-foreground">
+        <h2 className="text-[18px] font-normal tracking-normal text-foreground">
           {t("settings.sidebar.title")}
         </h2>
       </div>
@@ -1488,15 +1596,11 @@ function SettingsSidebar({
 function OverviewSettings({
   settings,
   requiresRestart,
-  onRestart,
-  isRestarting,
   onSelectSection,
   showBrandLogos,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
-  onRestart?: () => void;
-  isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
 }) {
@@ -1504,6 +1608,16 @@ function OverviewSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const activePreset = settings.agent.model_preset || "default";
   const activeProvider = settings.agent.resolved_provider ?? settings.agent.provider;
+  const activeProviderConfigured = settingsProviderConfigured(settings, activeProvider);
+  const activeProviderLabel = providerDisplayLabel(settings.providers, activeProvider);
+  const activeModelValue = activeProviderConfigured
+    ? settings.agent.model
+    : tx("settings.values.notConfigured", "Not configured");
+  const activeModelCaption = activeProviderConfigured
+    ? `${activeProvider} · ${activePreset}`
+    : activeProviderLabel || settings.agent.model
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
@@ -1515,48 +1629,23 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
+  const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
+  const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
+  const runtimeTitle = isNativeHost
+    ? tx("settings.rows.engine", "Engine")
+    : tx("settings.rows.gateway", "Gateway");
+  const runtimeValue = isNativeHost
+    ? tx("settings.values.privateEngine", "Private engine")
+    : `${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`;
+  const runtimeCaption = isNativeHost
+    ? tx("settings.values.unixSocket", "Unix socket")
+    : requiresRestart
+      ? tx("settings.values.restartPending", "Restart pending")
+      : tx("settings.values.ready", "Ready");
   return (
     <div className="space-y-7">
       <section>
-        <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
-          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <NanobotBrandLogo size="lg" testId="overview-nanobot-logo" />
-              <div className="min-w-0">
-                <div className="text-[12px] font-medium text-muted-foreground">nanobot</div>
-                <div className="mt-0.5 truncate text-[18px] font-semibold leading-6 text-foreground">
-                  {settings.agent.model}
-                </div>
-                <div className="mt-0.5 truncate text-[13px] leading-5 text-muted-foreground">
-                  {activeProvider} · {activePreset}
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              <StatusPill tone={requiresRestart ? "neutral" : "success"}>
-                {requiresRestart
-                  ? tx("settings.values.restartPending", "Restart pending")
-                  : tx("settings.values.ready", "Ready")}
-              </StatusPill>
-              {requiresRestart && onRestart ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={onRestart}
-                  disabled={isRestarting}
-                  className="rounded-full"
-                >
-                  {isRestarting ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                  ) : (
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  )}
-                  {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <TokenUsageHeatmap usage={settings.usage} />
       </section>
 
       <section>
@@ -1566,8 +1655,8 @@ function OverviewSettings({
             icon={Bot}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
-            value={settings.agent.model}
-            caption={`${activeProvider} · ${activePreset}`}
+            value={activeModelValue}
+            caption={activeModelCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("models")}
           />
@@ -1603,24 +1692,233 @@ function OverviewSettings({
         <SettingsGroup>
           <OverviewListRow
             icon={Server}
-            title={tx("settings.rows.gateway", "Gateway")}
-            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
-            caption={
-              requiresRestart
-                ? tx("settings.values.restartPending", "Restart pending")
-                : tx("settings.values.ready", "Ready")
-            }
+            title={runtimeTitle}
+            value={runtimeValue}
+            caption={runtimeCaption}
             onClick={() => onSelectSection("runtime")}
           />
           <OverviewListRow
             icon={HardDrive}
             title={tx("settings.overview.workspace", "Workspace")}
-            value={settings.runtime.workspace_path}
-            caption={settings.runtime.config_path}
+            value={tx("settings.values.defaultWorkspace", "Default workspace")}
+            caption={workspaceCaption}
             onClick={() => onSelectSection("runtime")}
           />
         </SettingsGroup>
       </section>
+    </div>
+  );
+}
+
+type TokenUsagePayload = NonNullable<SettingsPayload["usage"]>;
+type TokenUsageDay = TokenUsagePayload["days"][number];
+type TokenUsageCell = {
+  date: string;
+  total: number;
+  estimated: number;
+  requests: number;
+  sources: NonNullable<TokenUsageDay["sources"]>;
+  future: boolean;
+};
+type TokenUsageMonthLabel = {
+  label: string;
+  column: number;
+};
+
+const TOKEN_HEATMAP_CELLS = 371;
+const TOKEN_HEATMAP_COLUMNS = Math.ceil(TOKEN_HEATMAP_CELLS / 7);
+const TOKEN_USAGE_SOURCE_ORDER = ["user", "api", "cron", "dream", "system"] as const;
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildTokenUsageCalendar(
+  days: TokenUsageDay[] | undefined,
+  monthFormatter: Intl.DateTimeFormat,
+): { cells: TokenUsageCell[]; monthLabels: TokenUsageMonthLabel[] } {
+  const byDate = new Map((days ?? []).map((day) => [day.date, day]));
+  const today = startOfUtcDay(new Date());
+  const end = addUtcDays(today, 6 - today.getUTCDay());
+  const start = addUtcDays(end, -(TOKEN_HEATMAP_CELLS - 1));
+  const seenMonths = new Set<string>();
+  const monthLabels: TokenUsageMonthLabel[] = [];
+
+  const cells = Array.from({ length: TOKEN_HEATMAP_CELLS }, (_, index) => {
+    const date = addUtcDays(start, index);
+    const key = isoDay(date);
+    const row = byDate.get(key);
+    const monthKey = key.slice(0, 7);
+    if (!seenMonths.has(monthKey)) {
+      seenMonths.add(monthKey);
+      monthLabels.push({
+        label: monthFormatter.format(date),
+        column: Math.floor(index / 7) + 1,
+      });
+    }
+    return {
+      date: key,
+      total: row?.total_tokens ?? 0,
+      estimated: row?.estimated_tokens ?? 0,
+      requests: row?.requests ?? 0,
+      sources: row?.sources ?? {},
+      future: date > today,
+    };
+  });
+  return { cells, monthLabels };
+}
+
+function tokenUsageSourceLabel(
+  source: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (source === "user") return tx("settings.usage.sources.user", "Chat");
+  if (source === "api") return tx("settings.usage.sources.api", "API");
+  if (source === "cron") return tx("settings.usage.sources.cron", "Automations");
+  if (source === "dream") return tx("settings.usage.sources.dream", "Memory");
+  return tx("settings.usage.sources.system", "System");
+}
+
+function tokenUsageSourceBreakdown(
+  cell: TokenUsageCell,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  const known = TOKEN_USAGE_SOURCE_ORDER.filter((source) => cell.sources[source]?.total_tokens > 0);
+  const extra = Object.keys(cell.sources)
+    .filter((source) => !TOKEN_USAGE_SOURCE_ORDER.includes(source as typeof TOKEN_USAGE_SOURCE_ORDER[number]))
+    .filter((source) => cell.sources[source]?.total_tokens > 0)
+    .sort();
+  return [...known, ...extra]
+    .map((source) => {
+      const label = tokenUsageSourceLabel(source, tx);
+      const tokens = formatCompactTokens(cell.sources[source]?.total_tokens ?? 0);
+      return `${label} ${tokens}`;
+    })
+    .join(" · ");
+}
+
+function formatCompactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1)}K`;
+  return String(tokens);
+}
+
+function tokenUsageLevel(tokens: number, max: number): number {
+  if (tokens <= 0 || max <= 0) return 0;
+  const ratio = tokens / max;
+  if (ratio >= 0.75) return 4;
+  if (ratio >= 0.45) return 3;
+  if (ratio >= 0.2) return 2;
+  return 1;
+}
+
+function tokenUsageCellClass(level: number, future: boolean): string {
+  if (future) return "bg-transparent ring-1 ring-neutral-200/70 dark:ring-white/[0.045]";
+  if (level === 4) return "bg-sky-300 dark:bg-sky-300";
+  if (level === 3) return "bg-sky-400/85 dark:bg-sky-500/80";
+  if (level === 2) return "bg-sky-500/60 dark:bg-sky-700/85";
+  if (level === 1) return "bg-sky-500/30 dark:bg-sky-900/80";
+  return "bg-neutral-200/70 ring-1 ring-black/[0.025] dark:bg-white/[0.08] dark:ring-white/[0.035]";
+}
+
+function TokenUsageHeatmap({ usage }: { usage?: TokenUsagePayload }) {
+  const { t, i18n } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const monthFormatter = useMemo(
+    () => new Intl.DateTimeFormat(i18n.language, { month: "short", timeZone: "UTC" }),
+    [i18n.language],
+  );
+  const { cells, monthLabels } = useMemo(
+    () => buildTokenUsageCalendar(usage?.days, monthFormatter),
+    [monthFormatter, usage?.days],
+  );
+  const maxTokens = Math.max(0, ...cells.map((cell) => cell.total));
+
+  return (
+    <div className="overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mx-auto w-full min-w-[760px] max-w-[1054px] px-0.5">
+        <div className="mb-2 flex justify-end">
+          <span className="text-[11px] font-normal leading-none text-muted-foreground/64">
+            {tx("settings.usage.shortTitle", "Token Usage")}
+          </span>
+        </div>
+        <div
+          className="mb-2 grid h-4 gap-1.5 text-[10px] font-normal leading-4 text-muted-foreground/62"
+          style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
+          aria-hidden
+        >
+          {monthLabels.map((month) => (
+            <span
+              key={`${month.label}-${month.column}`}
+              className="truncate"
+              style={{ gridColumnStart: month.column, gridColumnEnd: "span 4" }}
+            >
+              {month.label}
+            </span>
+          ))}
+        </div>
+        <div
+          className="grid grid-flow-col grid-rows-7 gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
+          aria-label={tx("settings.usage.title", "Token activity")}
+        >
+          <TooltipProvider delayDuration={120} skipDelayDuration={80}>
+            {cells.map((cell) => {
+              const level = tokenUsageLevel(cell.total, maxTokens);
+              const baseLabel = cell.future
+                ? cell.date
+                : tx("settings.usage.cellTitle", "{{date}}: {{tokens}} tokens, {{requests}} requests", {
+                    date: cell.date,
+                    tokens: formatCompactTokens(cell.total),
+                    requests: cell.requests,
+                  });
+              const label = cell.future || cell.estimated <= 0
+                ? baseLabel
+                : `${baseLabel} · ${
+                    cell.estimated >= cell.total
+                      ? tx("settings.usage.estimated", "estimated")
+                      : tx("settings.usage.includesEstimates", "includes estimates")
+                  }`;
+              const breakdown = cell.future ? "" : tokenUsageSourceBreakdown(cell, tx);
+              const ariaLabel = breakdown ? `${label} · ${breakdown}` : label;
+              return (
+                <Tooltip key={cell.date}>
+                  <TooltipTrigger asChild>
+                    <span
+                      aria-label={ariaLabel}
+                      className={cn(
+                        "aspect-square w-full rounded-[4px] transition-transform hover:scale-110",
+                        tokenUsageCellClass(level, cell.future),
+                      )}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    align="center"
+                    className="rounded-[10px] border-border/45 bg-popover px-2.5 py-1.5 text-[11px] font-normal text-popover-foreground shadow-lg"
+                  >
+                    <span className="block">{label}</span>
+                    {breakdown ? (
+                      <span className="mt-1 block text-muted-foreground">{breakdown}</span>
+                    ) : null}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </TooltipProvider>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1885,9 +2183,8 @@ function ModelsSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const oauthProviders = settings.providers.filter((provider) => provider.auth_type === "oauth");
   const showAutoProvider = defaultPreset(settings)?.provider === "auto" || form.provider === "auto";
-  const selectableProviders = uniqueProviders([...configuredProviders, ...oauthProviders]);
+  const selectableProviders = uniqueProviders(configuredProviders);
   const providerOptions = showAutoProvider
     ? [{ name: "auto", label: tx("settings.values.auto", "Auto") }, ...selectableProviders]
     : selectableProviders;
@@ -1900,6 +2197,7 @@ function ModelsSettings({
   const selectedProviderNeedsSignIn =
     selectedProvider?.auth_type === "oauth" && !selectedProvider.configured;
   const selectedProviderSigningIn = providerSaving === selectedProvider?.name;
+  const selectedProviderConfigured = settingsProviderConfigured(settings, form.provider);
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
@@ -1918,6 +2216,7 @@ function ModelsSettings({
               settings={settings}
               draftModel={form.model}
               draftProvider={form.provider}
+              providerConfigured={selectedProviderConfigured}
               showProviderLogos={showBrandLogos}
               onChange={(modelPreset) => {
                 const nextPreset = settings.model_presets.find((preset) => preset.name === modelPreset);
@@ -4060,10 +4359,12 @@ function RuntimeSettings({
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
         <SettingsGroup>
-          <ReadOnlyRow
-            title={tx("settings.rows.gateway", "Gateway")}
-            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
-          />
+          {!isNativeHost ? (
+            <ReadOnlyRow
+              title={tx("settings.rows.gateway", "Gateway")}
+              value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
+            />
+          ) : null}
           <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
           <ReadOnlyRow title={tx("settings.rows.workspacePath", "Default workspace")} value={settings.runtime.workspace_path} />
           {onRestart && !requiresRestartPending ? (
@@ -4369,7 +4670,14 @@ function ModelIdPicker({
   const [error, setError] = useState<string | null>(null);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
-  const canFetchModels = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const providerRow = settingsProviderRow(settings, effectiveProvider);
+  const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
+  const providerRequiresConfiguration = hasConcreteProvider && !providerConfigured;
+  const providerUsesManualModelIds =
+    hasConcreteProvider && providerConfigured && providerRow?.auth_type === "oauth";
+  const canFetchModels =
+    hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
   const providerModels = payload?.models ?? [];
   const visibleModels = providerModels
@@ -4390,13 +4698,15 @@ function ModelIdPicker({
   const hasModelList = payload?.status === "available";
   const showModels = Boolean(hasModelList && payload && (!isCatalog || normalizedQuery));
   const customCandidate = query.trim();
+  const allowCustomModel = !providerRequiresConfiguration;
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
   const providerModelCount = payload?.model_count ?? providerModels.length;
+  const modelUnconfigured = !value.trim() || !providerConfigured;
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-  }, [open, effectiveProvider]);
+    setQuery(providerUsesManualModelIds || !hasConcreteProvider ? value : "");
+  }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
   useEffect(() => {
     if (!open || !shouldFetchModels) {
@@ -4443,7 +4753,11 @@ function ModelIdPicker({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+        <ProviderPickerIcon
+          provider={effectiveProvider}
+          showBrandLogos={showProviderLogos}
+          unconfigured={!providerConfigured}
+        />
         <span className="min-w-0 truncate font-medium text-foreground">
           {model.label ?? model.id}
         </span>
@@ -4467,7 +4781,11 @@ function ModelIdPicker({
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+            <ProviderPickerIcon
+              provider={effectiveProvider}
+              showBrandLogos={showProviderLogos}
+              unconfigured={modelUnconfigured}
+            />
             <span
               className={cn(
                 "min-w-0 truncate font-medium",
@@ -4500,7 +4818,15 @@ function ModelIdPicker({
           </div>
         </div>
 
-        {!canFetchModels ? (
+        {providerRequiresConfiguration ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
+          </div>
+        ) : providerUsesManualModelIds ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.unsupportedModelList", "Type a model ID manually.")}
+          </div>
+        ) : !canFetchModels ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.autoProviderCustomOnly", "Auto provider mode uses custom model IDs.")}
           </div>
@@ -4544,7 +4870,7 @@ function ModelIdPicker({
           </div>
         ) : null}
 
-        {customCandidate && !exactQueryMatch && customCandidate !== value ? (
+        {allowCustomModel && customCandidate && !exactQueryMatch && customCandidate !== value ? (
           <>
             {showModels ? <DropdownMenuSeparator /> : null}
             <DropdownMenuItem
@@ -4581,16 +4907,30 @@ function formatContextWindow(tokens: number): string {
 function ProviderPickerIcon({
   provider,
   showBrandLogos,
+  unconfigured = false,
 }: {
   provider: string;
   showBrandLogos: boolean;
+  unconfigured?: boolean;
 }) {
   const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
-  const Icon = PROVIDER_ICONS[provider] ?? Sparkles;
+  const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
   const logoUrl = brand?.logoUrls[logoIndex];
 
   useEffect(() => setLogoIndex(0), [provider]);
+
+  if (unconfigured) {
+    return (
+      <span
+        data-testid="provider-picker-unconfigured-icon"
+        className="grid h-5 w-5 shrink-0 place-items-center text-amber-700 dark:text-amber-200"
+        aria-hidden
+      >
+        <CircleAlert className="h-4 w-4" strokeWidth={1.8} />
+      </span>
+    );
+  }
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -4901,32 +5241,6 @@ function ProviderIcon({
   );
 }
 
-function NanobotBrandLogo({
-  size = "sm",
-  testId,
-}: {
-  size?: "sm" | "lg";
-  testId?: string;
-}) {
-  return (
-    <span
-      data-testid={testId}
-      className={cn(
-        "grid shrink-0 place-items-center overflow-hidden border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]",
-        size === "lg" ? "h-12 w-12 rounded-[16px]" : "h-9 w-9 rounded-[12px]",
-      )}
-      aria-hidden
-    >
-      <img
-        src={NANOBOT_ICON_SRC}
-        alt=""
-        className={cn("select-none object-contain", size === "lg" ? "h-10 w-10" : "h-7 w-7")}
-        draggable={false}
-      />
-    </span>
-  );
-}
-
 function OverviewRowIcon({
   icon: Icon,
 }: {
@@ -5090,6 +5404,7 @@ function ModelPresetPicker({
   settings,
   draftModel,
   draftProvider,
+  providerConfigured,
   showProviderLogos,
   onChange,
   onCreateConfiguration,
@@ -5099,6 +5414,7 @@ function ModelPresetPicker({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  providerConfigured: boolean;
   showProviderLogos: boolean;
   onChange: (preset: string) => void;
   onCreateConfiguration: () => void;
@@ -5126,6 +5442,7 @@ function ModelPresetPicker({
               settings={settings}
               draftModel={draftModel}
               draftProvider={draftProvider}
+              forceUnconfigured={selectedPreset?.is_default ? !providerConfigured : undefined}
               showProviderLogos={showProviderLogos}
               compact
             />
@@ -5190,6 +5507,7 @@ function ModelPresetOptionContent({
   settings,
   draftModel,
   draftProvider,
+  forceUnconfigured,
   showProviderLogos,
   compact = false,
 }: {
@@ -5197,27 +5515,50 @@ function ModelPresetOptionContent({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  forceUnconfigured?: boolean;
   showProviderLogos: boolean;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const provider = modelPresetProviderKey(preset, settings, {
     draftProvider: preset.is_default ? draftProvider : undefined,
   });
   const model = preset.is_default ? draftModel : preset.model;
   const providerName = providerDisplayLabel(settings.providers, provider);
+  const providerConfigured =
+    forceUnconfigured === undefined
+      ? settingsProviderConfigured(settings, provider)
+      : !forceUnconfigured;
+  const title = providerConfigured ? model || preset.label : tx("settings.values.notConfigured", "Not configured");
+  const caption = providerConfigured
+    ? `${providerName}${preset.label ? ` · ${preset.label}` : ""}`
+    : providerName || model || preset.label
+      ? [providerName, model || preset.label].filter(Boolean).join(" · ")
+      : tx("settings.byok.noConfiguredProviders", "No configured providers");
   return (
     <span className="flex min-w-0 items-center gap-2.5">
-      <ProviderPickerIcon provider={provider} showBrandLogos={showProviderLogos} />
+      <ProviderPickerIcon
+        provider={provider}
+        showBrandLogos={showProviderLogos}
+        unconfigured={!providerConfigured}
+      />
       <span className="min-w-0 text-left leading-tight">
-        <span className="block truncate font-medium text-foreground">{model || preset.label}</span>
+        <span
+          className={cn(
+            "block truncate font-medium",
+            providerConfigured ? "text-foreground" : "text-amber-800 dark:text-amber-200",
+          )}
+        >
+          {title}
+        </span>
         <span
           className={cn(
             "mt-0.5 block truncate text-muted-foreground",
             compact ? "text-[11.5px]" : "text-[12px]",
           )}
         >
-          {providerName}
-          {preset.label ? ` · ${preset.label}` : ""}
+          {caption}
         </span>
       </span>
     </span>

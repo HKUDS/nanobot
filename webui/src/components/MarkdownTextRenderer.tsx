@@ -19,6 +19,7 @@ interface MarkdownTextRendererProps {
   children: string;
   className?: string;
   highlightCode?: boolean;
+  onOpenFilePreview?: (path: string) => void;
 }
 
 type MarkdownAstNode = {
@@ -187,6 +188,38 @@ function nodeText(value: ReactNode): string {
     .join("");
 }
 
+function cleanFileReferenceTarget(value: string): string {
+  let target = value.trim();
+  if (!target) return "";
+  try {
+    if (/^file:\/\//i.test(target)) {
+      target = decodeURIComponent(new URL(target).pathname);
+    } else {
+      target = decodeURIComponent(target);
+    }
+  } catch {
+    // Keep the raw value when URL/path decoding is not possible.
+  }
+  target = target.split("?", 1)[0]?.split("#", 1)[0]?.trim() ?? "";
+  if (!/^[A-Za-z]:[\\/]/.test(target)) {
+    target = target.replace(/:\d+(?::\d+)?$/, "");
+  }
+  return target;
+}
+
+function isPreviewableFileTarget(value: string): boolean {
+  if (isLikelyFilePath(value)) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return false;
+  if (/[\\/]/.test(value)) return false;
+  return /^[^?#]+\.[a-z0-9][a-z0-9_-]{0,12}$/i.test(value);
+}
+
+function fileReferenceFromLink(href: string | undefined): string | null {
+  if (!href || /^https?:\/\//i.test(href) || href.startsWith("#")) return null;
+  const target = cleanFileReferenceTarget(href);
+  return isPreviewableFileTarget(target) ? target : null;
+}
+
 function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
   let text = "";
   let href: string | undefined;
@@ -326,6 +359,7 @@ export default function MarkdownTextRenderer({
   children,
   className,
   highlightCode = true,
+  onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const components = useMemo<Components>(
     () => ({
@@ -344,7 +378,7 @@ export default function MarkdownTextRenderer({
         }
         const raw = String(kids).replace(/\n$/, "");
         if (isLikelyFilePath(raw)) {
-          return <FileReferenceChip path={raw} />;
+          return <FileReferenceChip path={raw} onOpen={onOpenFilePreview} />;
         }
         /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
@@ -405,6 +439,18 @@ export default function MarkdownTextRenderer({
         );
       },
       a({ href, children: markdownChildren, ...props }) {
+        const filePath = fileReferenceFromLink(href);
+        if (filePath) {
+          const label = nodeText(markdownChildren).trim();
+          return (
+            <FileReferenceChip
+              path={label || filePath}
+              tooltipPath={filePath}
+              previewPath={filePath}
+              onOpen={onOpenFilePreview}
+            />
+          );
+        }
         return (
           <a
             href={href}
@@ -495,7 +541,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode],
+    [highlightCode, onOpenFilePreview],
   );
 
   return (

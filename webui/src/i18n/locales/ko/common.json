@@ -187,6 +187,9 @@
       "disabled": "비활성화됨",
       "restartPending": "재시작 대기",
       "ready": "준비됨",
+      "privateEngine": "비공개 엔진",
+      "unixSocket": "Unix 소켓",
+      "defaultWorkspace": "기본 작업 공간",
       "comfortable": "편안함",
       "compact": "컴팩트",
       "auto": "자동",
@@ -277,6 +280,31 @@
       "webSearch": "웹 검색",
       "imageGeneration": "이미지 생성",
       "workspace": "작업공간"
+    },
+    "usage": {
+      "title": "Token 활동",
+      "shortTitle": "Token Usage",
+      "subtitle": "최근 12개월 동안 제공자가 보고한 사용량입니다.",
+      "empty": "새 모델 응답 이후 token 활동이 표시됩니다.",
+      "totalTokens": "누적 Token 수",
+      "peakTokens": "최고 Token 수",
+      "thirtyDayTokens": "30일 Token 수",
+      "currentStreak": "현재 연속 일수",
+      "longestStreak": "최장 연속 일수",
+      "daysValue": "{{count}}일",
+      "last30": "30일",
+      "activeDays": "활성 일수",
+      "requests": "요청",
+      "estimated": "추정",
+      "includesEstimates": "추정 포함",
+      "cellTitle": "{{date}}: {{tokens}} tokens, 요청 {{requests}}회",
+      "sources": {
+        "user": "채팅",
+        "api": "API",
+        "cron": "자동화",
+        "dream": "메모리 정리",
+        "system": "시스템"
+      }
     },
     "providers": {
       "searchPlaceholder": "제공자 검색",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "목표 닫기",
       "send": "메시지 보내기",
       "stop": "응답 중지",
+      "modelNotConfigured": "모델이 설정되지 않음",
+      "configureModel": "모델 설정",
       "queued": {
         "label": "대기 중인 안내",
         "guide": "안내",
@@ -732,6 +762,15 @@
     "prev": "이전 이미지",
     "next": "다음 이미지",
     "close": "미리보기 닫기"
+  },
+  "filePreview": {
+    "aria": "파일 미리보기",
+    "close": "파일 미리보기 닫기",
+    "loading": "미리보기 로딩 중...",
+    "failed": "이 파일을 미리 볼 수 없습니다.",
+    "routeMissing": "파일 미리보기에는 최신 gateway가 필요합니다. nanobot gateway를 다시 시작한 뒤 다시 시도하세요.",
+    "resize": "파일 미리보기 크기 조절",
+    "truncated": "파일이 커서 미리보기가 잘렸습니다."
   },
   "code": {
     "fallbackLanguage": "코드",

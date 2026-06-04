@@ -187,6 +187,9 @@
       "disabled": "Désactivé",
       "restartPending": "Redémarrage en attente",
       "ready": "Prêt",
+      "privateEngine": "Moteur privé",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Espace par défaut",
       "comfortable": "Confortable",
       "compact": "Compacte",
       "auto": "Automatique",
@@ -277,6 +280,31 @@
       "webSearch": "Recherche web",
       "imageGeneration": "Génération d’images",
       "workspace": "Espace de travail"
+    },
+    "usage": {
+      "title": "Activité des tokens",
+      "shortTitle": "Token Usage",
+      "subtitle": "Usage signalé par le fournisseur sur les 12 derniers mois.",
+      "empty": "L’activité des tokens apparaîtra après les nouvelles réponses du modèle.",
+      "totalTokens": "Tokens cumulés",
+      "peakTokens": "Pic de tokens",
+      "thirtyDayTokens": "Tokens sur 30 jours",
+      "currentStreak": "Série actuelle",
+      "longestStreak": "Plus longue série",
+      "daysValue": "{{count}} j",
+      "last30": "30 jours",
+      "activeDays": "Jours actifs",
+      "requests": "Requêtes",
+      "estimated": "estimé",
+      "includesEstimates": "inclut des estimations",
+      "cellTitle": "{{date}} : {{tokens}} tokens, {{requests}} requêtes",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automatisations",
+        "dream": "Mémoire",
+        "system": "Système"
+      }
     },
     "providers": {
       "searchPlaceholder": "Rechercher des fournisseurs",
@@ -565,6 +593,8 @@
       "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "modelNotConfigured": "Modèle non configuré",
+      "configureModel": "Configurer le modèle",
       "queued": {
         "label": "Guidage en attente",
         "guide": "Guider",
@@ -732,6 +762,15 @@
     "prev": "Image précédente",
     "next": "Image suivante",
     "close": "Fermer l’aperçu"
+  },
+  "filePreview": {
+    "aria": "Aperçu du fichier",
+    "close": "Fermer l’aperçu du fichier",
+    "loading": "Chargement de l’aperçu...",
+    "failed": "Impossible de prévisualiser ce fichier.",
+    "routeMissing": "L’aperçu du fichier nécessite le dernier gateway. Redémarrez nanobot gateway puis réessayez.",
+    "resize": "Redimensionner l’aperçu du fichier",
+    "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },
   "code": {
     "fallbackLanguage": "code",

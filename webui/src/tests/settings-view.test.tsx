@@ -118,7 +118,7 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "apps" | "advanced" | "models";
+    initialSection?: "overview" | "apps" | "advanced" | "models";
     onSettingsChange?: (payload: SettingsPayload) => void;
   } = {},
 ) {
@@ -219,6 +219,55 @@ describe("SettingsView Apps catalog", () => {
     await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
   });
 
+  it("shows token activity on the overview", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      usage: {
+        days: [
+          {
+            date: "2026-06-03",
+            prompt_tokens: 1200,
+            completion_tokens: 300,
+            cached_tokens: 500,
+            total_tokens: 1500,
+            requests: 2,
+          },
+        ],
+        total_tokens: 1500,
+        total_tokens_30d: 1500,
+        total_tokens_365d: 1500,
+        peak_day_tokens: 1500,
+        current_streak_days: 1,
+        longest_streak_days: 1,
+        active_days_30d: 1,
+        requests_30d: 2,
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByLabelText("Token activity")).toBeInTheDocument();
+    expect(screen.getByText("Token Usage")).toBeInTheDocument();
+    expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
+    expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
+  });
+
   it("shows context window options in model settings", async () => {
     vi.stubGlobal(
       "fetch",
@@ -240,6 +289,280 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+  });
+
+  it("marks the current model as unconfigured when its provider needs setup", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      agent: {
+        ...settingsPayload().agent,
+        model: "openai-codex/gpt-5.1-codex",
+        provider: "openai_codex",
+        resolved_provider: "openai_codex",
+        has_api_key: false,
+      },
+      model_presets: [
+        {
+          ...settingsPayload().model_presets[0],
+          model: "openai-codex/gpt-5.1-codex",
+          provider: "openai_codex",
+        },
+      ],
+      providers: [
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: false,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: null,
+          oauth_account: null,
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const configurationButton = await screen.findByRole("button", {
+      name: "Current configuration",
+    });
+    expect(configurationButton).toHaveTextContent("Not configured");
+    expect(configurationButton).toHaveTextContent("OpenAI Codex · openai-codex/gpt-5.1-codex");
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("keeps unsigned OAuth providers out of the active provider picker", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      agent: {
+        ...settingsPayload().agent,
+        model: "deepseek-chat",
+        provider: "deepseek",
+        resolved_provider: "deepseek",
+      },
+      model_presets: [
+        {
+          ...settingsPayload().model_presets[0],
+          model: "deepseek-chat",
+          provider: "deepseek",
+        },
+      ],
+      providers: [
+        {
+          name: "deepseek",
+          label: "DeepSeek",
+          configured: true,
+          auth_type: "api_key",
+          api_key_required: true,
+          api_key_hint: "sk-...",
+          api_base: "https://api.deepseek.com",
+          default_api_base: "https://api.deepseek.com",
+        },
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: false,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: null,
+          oauth_account: null,
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+        {
+          name: "github_copilot",
+          label: "GitHub Copilot",
+          configured: false,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://api.githubcopilot.com",
+          oauth_account: null,
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const deepseekButtons = await screen.findAllByRole("button", { name: /DeepSeek/ });
+    const providerPicker = deepseekButtons.find(
+      (button) => button.getAttribute("aria-haspopup") === "menu",
+    );
+    if (!providerPicker) throw new Error("provider picker was not found");
+    fireEvent.pointerDown(providerPicker);
+
+    expect(await screen.findByRole("menuitem", { name: /DeepSeek/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /OpenAI Codex/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /GitHub Copilot/ })).not.toBeInTheDocument();
+  });
+
+  it("does not fetch model lists for unsigned OAuth providers", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      agent: {
+        ...settingsPayload().agent,
+        model: "",
+        provider: "openai_codex",
+        resolved_provider: "openai_codex",
+      },
+      model_presets: [
+        {
+          ...settingsPayload().model_presets[0],
+          model: "",
+          provider: "openai_codex",
+        },
+      ],
+      providers: [
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: false,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: null,
+          oauth_account: null,
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+        {
+          name: "github_copilot",
+          label: "GitHub Copilot",
+          configured: false,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: "https://api.githubcopilot.com",
+          oauth_account: null,
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models" });
+
+    fireEvent.pointerDown(await screen.findByRole("button", { name: /Select model/i }));
+    expect(
+      await screen.findByText("Configure this provider before loading models."),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/settings/provider-models"),
+      ),
+    ).toBe(false);
+  });
+
+  it("prefills manual model ids for configured OAuth providers", async () => {
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      agent: {
+        ...settingsPayload().agent,
+        model: "open-codex/gpt-5.5",
+        provider: "openai_codex",
+        resolved_provider: "openai_codex",
+      },
+      model_presets: [
+        {
+          ...settingsPayload().model_presets[0],
+          model: "open-codex/gpt-5.5",
+          provider: "openai_codex",
+        },
+      ],
+      providers: [
+        {
+          name: "openai_codex",
+          label: "OpenAI Codex",
+          configured: true,
+          auth_type: "oauth",
+          api_key_required: false,
+          api_key_hint: null,
+          api_base: null,
+          default_api_base: null,
+          oauth_account: "acct-test",
+          oauth_expires_at: null,
+          oauth_login_supported: true,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models" });
+
+    const modelButtons = await screen.findAllByRole("button", { name: /open-codex\/gpt-5\.5/i });
+    fireEvent.pointerDown(modelButtons[modelButtons.length - 1]);
+    const input = (await screen.findByPlaceholderText("Search or type model ID")) as HTMLInputElement;
+    expect(input.value).toBe("open-codex/gpt-5.5");
+
+    fireEvent.change(input, { target: { value: "openai-codex/gpt-5.5" } });
+    expect(await screen.findByText("“openai-codex/gpt-5.5”")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/settings/provider-models"),
+      ),
+    ).toBe(false);
   });
 
   it("can close the new configuration dialog without trapping the settings page", async () => {

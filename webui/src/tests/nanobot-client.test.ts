@@ -429,6 +429,24 @@ describe("NanobotClient", () => {
     );
   });
 
+  it("includes an explicit turn id on outbound WebUI messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    client.sendMessage("chat-x", "hello", undefined, { turnId: "turn-1" });
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "message",
+      chat_id: "chat-x",
+      content: "hello",
+      turn_id: "turn-1",
+      webui: true,
+    });
+  });
+
   it("includes image generation options in outbound messages", () => {
     const client = new NanobotClient({
       url: "ws://test",
