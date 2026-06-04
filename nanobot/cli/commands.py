@@ -1513,6 +1513,63 @@ def _run_gateway(
                             f"Content-Length: {len(body)}\r\n"
                             f"\r\n{body}"
                         )
+            elif method == "POST" and path == "/hooks/foolish-storefront-review":
+                try:
+                    header_end = data.find(b"\r\n\r\n")
+                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                    review = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+
+                    telegram_cfg = config.channels.telegram
+                    tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
+                    chat_id = str(tg_allow[0]) if tg_allow else ""
+
+                    if chat_id:
+                        rating = int(review.get("rating", 0))
+                        stars = "⭐" * rating
+                        reviewer = review.get("reviewerName", "Anonimo")
+                        product_name = review.get("productName", review.get("productSlug", "?"))
+                        body_text = review.get("body") or ""
+                        photo_urls = review.get("photoUrls", [])
+                        publish_url = review.get("publishUrl", "")
+                        remove_url = review.get("removeUrl", "")
+
+                        if len(photo_urls) == 1:
+                            photo_note = "\n📸 1 foto allegata"
+                        elif len(photo_urls) > 1:
+                            photo_note = f"\n📸 {len(photo_urls)} foto allegate"
+                        else:
+                            photo_note = ""
+
+                        msg_text = (
+                            f"{stars} — {reviewer}\n"
+                            f"Prodotto: {product_name}"
+                            f"{photo_note}\n\n"
+                            f'"{body_text}"\n\n'
+                            f"→ Pubblica: {publish_url}\n"
+                            f"→ Rimuovi: {remove_url}"
+                        )
+
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(channel="telegram", chat_id=chat_id, content=msg_text),
+                        ))
+                        logger.info("foolish-storefront-review hook: notified telegram {}", chat_id)
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("foolish-storefront-review hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
             elif method == "POST" and path == "/hooks/foolish-storefront-cron":
                 try:
                     header_end = data.find(b"\r\n\r\n")
