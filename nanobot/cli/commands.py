@@ -878,13 +878,12 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.tools.cron import CronTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.cron.executor import CronJobExecutor
     from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
@@ -976,174 +975,44 @@ def _run_gateway(
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
 
-    # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
-        async def _silent(*_args, **_kwargs):
-            pass
+    hb_cfg = config.gateway.heartbeat
 
-        # Dream is an internal job — run directly, not through the agent loop.
-        if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
-
-            dream_session_key = MemoryStore.dream_session_key
-            build_dream_commit_message = MemoryStore.build_dream_commit_message
-            prune_dream_sessions = MemoryStore.prune_dream_sessions
-
-            store = agent.context.memory
-            resp = None
-            try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
-                    return None
-                prompt, last_cursor = result
-                key = dream_session_key()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                )
-                if MemoryStore.dream_run_completed(resp):
-                    store.set_last_dream_cursor(last_cursor)
-                    logger.info("Dream cron job completed, cursor advanced to {}", last_cursor)
-                else:
-                    logger.warning(
-                        "Dream cron job did not complete; cursor remains at {}",
-                        store.get_last_dream_cursor(),
-                    )
-            except Exception:
-                logger.exception("Dream cron job failed")
-            finally:
-                if store.git.is_initialized():
-                    msg = build_dream_commit_message(
-                        "dream: periodic memory consolidation", resp,
-                    )
-                    sha = store.git.auto_commit(msg)
-                    if sha:
-                        logger.info("Dream commit: {}", sha)
-                store.compact_history()
-                prune_dream_sessions(agent.sessions.sessions_dir)
+    def _get_channel(channel_name: str) -> Any | None:
+        try:
+            return channels.channels.get(channel_name)
+        except NameError:
             return None
 
-        # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
-        if job.name == "heartbeat":
-            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
-            try:
-                content = heartbeat_file.read_text(encoding="utf-8")
-            except OSError:
-                logger.debug("Heartbeat: HEARTBEAT.md missing")
-                return None
-            if not _heartbeat_has_active_tasks(content):
-                logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
-                return None
-
-            channel, chat_id = _pick_heartbeat_target()
-            if channel == "cli":
-                return None
-
-            prompt = (
-                _HEARTBEAT_PREAMBLE
-                + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
-            )
-
-            # Internal check: funnel all output through the post-run gate so the
-            # turn can't deliver directly via the message tool and skip it.
-            suppress_token = None
-            if isinstance(message_tool, MessageTool):
-                suppress_token = message_tool.set_suppress_delivery(True)
-            try:
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key="heartbeat",
-                    channel=channel,
-                    chat_id=chat_id,
-                    on_progress=_silent,
-                )
-            finally:
-                if isinstance(message_tool, MessageTool) and suppress_token is not None:
-                    message_tool.reset_suppress_delivery(suppress_token)
-            response = resp.content if resp else ""
-
-            # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
-
-            if not response:
-                return None
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            should_notify = await evaluate_response(
-                response, prompt, agent.provider, agent.model,
-                default_notify=False,
-            )
-            if should_notify:
-                logger.info("Heartbeat: completed, delivering response")
-                await _deliver_to_channel(
-                    OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
-                )
-            else:
-                logger.info("Heartbeat: silenced by post-run evaluation")
-            return response
-
-        reminder_note = (
-            "The scheduled time has arrived. Deliver this reminder to the user now, "
-            "as a brief and natural message in their language. Speak directly to them — "
-            "do not narrate progress, summarize, include user IDs, or add status reports "
-            "like 'Done' or 'Reminded'.\n\n"
-            f"Reminder: {job.payload.message}"
-        )
-
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-
-        message_record_token = None
-        if isinstance(message_tool, MessageTool):
-            message_record_token = message_tool.set_record_channel_delivery(True)
-
+    def _pick_heartbeat_target() -> tuple[str, str]:
+        """Pick a routable channel/chat target for heartbeat-triggered messages."""
         try:
-            resp = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-                on_progress=_silent,
-            )
-        finally:
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-            if isinstance(message_tool, MessageTool) and message_record_token is not None:
-                message_tool.reset_record_channel_delivery(message_record_token)
+            enabled = set(channels.enabled_channels)
+        except NameError:
+            return "cli", "direct"
+        for item in session_manager.list_sessions():
+            key = item.get("key") or ""
+            if ":" not in key:
+                continue
+            channel, chat_id = key.split(":", 1)
+            if channel in {"cli", "system"}:
+                continue
+            if channel in enabled and chat_id:
+                return channel, chat_id
+        return "cli", "direct"
 
-        response = resp.content if resp else ""
-
-        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, reminder_note, agent.provider, agent.model,
-            )
-            if should_notify:
-                await _deliver_to_channel(
-                    OutboundMessage(
-                        channel=job.payload.channel or "cli",
-                        chat_id=job.payload.to,
-                        content=response,
-                        metadata=dict(job.payload.channel_meta),
-                    ),
-                    record=True,
-                    session_key=job.payload.session_key,
-                )
-        return response
-
-    cron.on_job = on_cron_job
+    cron_executor = CronJobExecutor(
+        agent=agent,
+        bus=bus,
+        deliver_to_channel=_deliver_to_channel,
+        get_channel=_get_channel,
+        evaluate_response=evaluate_response,
+        heartbeat_workspace=config.workspace_path,
+        heartbeat_preamble=_HEARTBEAT_PREAMBLE,
+        heartbeat_has_active_tasks=_heartbeat_has_active_tasks,
+        pick_heartbeat_target=_pick_heartbeat_target,
+        heartbeat_keep_recent_messages=hb_cfg.keep_recent_messages,
+    )
+    cron.on_job = cron_executor.run
 
     def _webui_runtime_model_name() -> str | None:
         model = getattr(agent, "model", None)
@@ -1164,20 +1033,6 @@ def _run_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
     )
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        return "cli", "direct"
-
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -1187,7 +1042,6 @@ def _run_gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    hb_cfg = config.gateway.heartbeat
     if hb_cfg.enabled:
         console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
     else:
