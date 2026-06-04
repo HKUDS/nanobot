@@ -646,7 +646,8 @@ class WebSocketChannel(BaseChannel):
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
         if t == "new_chat":
-            new_id = str(uuid.uuid4())
+            target_cid = envelope.get("target_chat_id")
+            new_id = target_cid if _is_valid_chat_id(target_cid) else str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
                 connection,
                 lambda: self._workspaces.scope_for_new_chat(
