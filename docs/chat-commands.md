@@ -15,6 +15,7 @@ These commands work inside chat channels and interactive agent sessions:
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/skill` | List enabled skills and their descriptions |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
