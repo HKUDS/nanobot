@@ -1354,7 +1354,10 @@ describe("App layout", () => {
     expect(createChatSpy).not.toHaveBeenCalled();
   });
 
-  it("starts a new chat from the keyboard shortcut", async () => {
+  it.each([
+    ["Command", { metaKey: true }],
+    ["Control", { ctrlKey: true }],
+  ])("starts a new chat from the %s keyboard shortcut", async (_label, modifier) => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -1369,9 +1372,47 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    fireEvent.keyDown(window, { key: "O", shiftKey: true, metaKey: true });
+    fireEvent.keyDown(window, { key: "O", shiftKey: true, ...modifier });
 
     expect(window.location.hash).toBe("#/new");
+  });
+
+  it("closes search when starting a new chat from the keyboard shortcut", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Existing chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(await screen.findByRole("dialog", { name: "Search" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "O", shiftKey: true, metaKey: true });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
+    );
+    expect(window.location.hash).toBe("#/new");
+  });
+
+  it("exposes the new chat keyboard shortcut in the sidebar title", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
+    expect(within(sidebar).getByRole("button", { name: "New chat" })).toHaveAttribute(
+      "title",
+      "New chat (Cmd/Ctrl+Shift+O)",
+    );
   });
 
   it("keeps large sidebars light while search still covers every chat", async () => {
