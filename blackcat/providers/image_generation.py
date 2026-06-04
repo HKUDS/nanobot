@@ -15,7 +15,7 @@ import httpx
 from loguru import logger
 
 from blackcat.providers.registry import find_by_name
-from blackcat.utils.media import detect_image_mime
+from blackcat.utils.helpers import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
     "HTTP-Referer": "https://github.com/HKUDS/blackcat",
@@ -522,12 +522,6 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
             return base
         return self._default_base_url()
 
-    def _ollama_model(self, model: str) -> str:
-        """Strip the ``ollama/`` prefix if present."""
-        if model.startswith(("ollama/", "ollama_")):
-            return model.split("/", 1)[1]
-        return model
-
     async def generate(
         self,
         *,
@@ -544,7 +538,7 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
 
         width, height = _ollama_dimensions(aspect_ratio, image_size)
         body: dict[str, Any] = {
-            "model": self._ollama_model(model),
+            "model": model,
             "prompt": prompt,
             "width": width,
             "height": height,
@@ -1002,8 +996,6 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
             body["size"] = size
 
         body.update(self.extra_body)
-        # Drop null-valued params so extraBody can opt out of defaults like response_format.
-        body = {key: value for key, value in body.items() if value is not None}
 
         logger.info("OpenAI Images API request: POST {}/images/generations body={}", self.api_base, body)
 
@@ -1045,8 +1037,8 @@ class CustomImageGenerationClient(ImageGenerationProvider):
     """OpenAI-compatible Images API for user-configured custom providers."""
 
     provider_name = "custom"
-    missing_base_message = (
-        "Custom image generation API base is not configured. Set providers.custom.apiBase."
+    missing_key_message = (
+        "Custom image generation API key is not configured. Set providers.custom.apiKey."
     )
 
     def _default_base_url(self) -> str:
@@ -1054,13 +1046,7 @@ class CustomImageGenerationClient(ImageGenerationProvider):
 
     @staticmethod
     def _custom_size(aspect_ratio: str | None, image_size: str | None) -> str:
-        if image_size:
-            requested = image_size.strip()
-            if requested:
-                if requested.lower() == "1k":
-                    return "1024x1024"
-                return requested
-        return _openai_size("gpt-image-2", aspect_ratio, None)
+        return _openai_size("gpt-image-2", aspect_ratio, image_size)
 
     async def generate(
         self,
@@ -1071,8 +1057,8 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         aspect_ratio: str | None = None,
         image_size: str | None = None,
     ) -> GeneratedImageResponse:
-        if not self.api_base:
-            raise ImageGenerationError(self.missing_base_message)
+        if not self.api_key:
+            raise ImageGenerationError(self.missing_key_message)
 
         if reference_images:
             logger.warning(
@@ -1082,12 +1068,11 @@ class CustomImageGenerationClient(ImageGenerationProvider):
                 model,
             )
 
-        headers: dict[str, str] = {
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
+            **self.extra_headers,
         }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        headers.update(self.extra_headers)
 
         body: dict[str, Any] = {
             "model": model,

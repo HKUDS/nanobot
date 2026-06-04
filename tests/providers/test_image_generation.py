@@ -632,28 +632,6 @@ async def test_openai_payload_and_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_extra_body_null_drops_default_params_only() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        extra_body={
-            "response_format": None,
-            "seed": 0,
-            "safety_checker": False,
-        },
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="dall-e-3")
-
-    body = fake.calls[0]["json"]
-    assert "response_format" not in body
-    assert body["n"] == 1
-    assert body["seed"] == 0
-    assert body["safety_checker"] is False
-
-
-@pytest.mark.asyncio
 async def test_openai_b64_json_response_uses_detected_mime() -> None:
     raw_b64 = base64.b64encode(JPEG_BYTES).decode("ascii")
     fake = FakeClient(FakeResponse({"data": [{"b64_json": raw_b64}]}))
@@ -866,86 +844,10 @@ async def test_custom_generate_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_generate_preserves_provider_size_hint() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = CustomImageGenerationClient(
-        api_key="sk-custom-test",
-        api_base="https://custom.example/v1",
-        client=fake,  # type: ignore[arg-type]
-    )
+async def test_custom_generate_no_api_key() -> None:
+    client = CustomImageGenerationClient(api_key=None)
 
-    await client.generate(
-        prompt="a cat on the moon",
-        model="custom-image-model",
-        image_size="2K",
-    )
-
-    assert fake.calls[0]["json"]["size"] == "2K"
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_maps_one_k_to_openai_dimension() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = CustomImageGenerationClient(
-        api_key="sk-custom-test",
-        api_base="https://custom.example/v1",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(
-        prompt="a cat on the moon",
-        model="custom-image-model",
-        image_size="1K",
-    )
-
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_extra_body_can_override_defaults() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"url": "https://images.example/cat.png"}]}))
-    fake.get_response = FakeResponse({}, content=PNG_BYTES)
-    client = CustomImageGenerationClient(
-        api_key="sk-custom-test",
-        api_base="https://custom.example/v1",
-        extra_body={"response_format": "url", "size": "2K"},
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(
-        prompt="a cat on the moon",
-        model="custom-image-model",
-        image_size="1K",
-    )
-
-    expected_data_url = f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('ascii')}"
-    assert response.images == [expected_data_url]
-    assert fake.get_calls[0]["url"] == "https://images.example/cat.png"
-    body = fake.calls[0]["json"]
-    assert body["response_format"] == "url"
-    assert body["size"] == "2K"
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_without_api_key_omits_authorization() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = CustomImageGenerationClient(
-        api_key=None,
-        api_base="http://localhost:7860/v1",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(prompt="draw", model="custom-image-model")
-
-    assert response.images == [PNG_DATA_URL]
-    assert "Authorization" not in fake.calls[0]["headers"]
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_requires_api_base() -> None:
-    client = CustomImageGenerationClient(api_key="sk-custom-test")
-
-    with pytest.raises(ImageGenerationError, match="providers.custom.apiBase"):
+    with pytest.raises(ImageGenerationError, match="providers.custom.apiKey"):
         await client.generate(prompt="draw", model="custom-image-model")
 
 
