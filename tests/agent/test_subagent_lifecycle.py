@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.hook import AgentHookContext, AgentRunHookContext
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
     SubagentManager,
@@ -16,7 +16,6 @@ from nanobot.agent.subagent import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,6 +48,21 @@ def _make_hook_context(**overrides) -> AgentHookContext:
     )
     defaults.update(overrides)
     return AgentHookContext(**defaults)
+
+
+def _make_run_hook_context(**overrides) -> AgentRunHookContext:
+    defaults = dict(
+        messages=[],
+        final_content="ok",
+        tools_used=[],
+        usage={},
+        stop_reason="completed",
+        error=None,
+        tool_events=[],
+        had_injections=False,
+    )
+    defaults.update(overrides)
+    return AgentRunHookContext(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -259,9 +273,12 @@ class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_status_updated_on_success(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
-            final_content="ok", messages=[], stop_reason="completed",
-        ))
+
+        async def _run(spec):
+            await spec.hook.after_run(_make_run_hook_context(stop_reason="completed"))
+            return AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
+
+        sm.runner.run = _run
         status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock):
             await sm._run_subagent(
@@ -556,3 +573,32 @@ class TestSubagentHook:
         ctx = _make_hook_context(error="something broke")
         await hook.after_iteration(ctx)
         assert status.error == "something broke"
+
+    @pytest.mark.asyncio
+    async def test_after_run_updates_final_status(self):
+        status = SubagentStatus(
+            task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
+        )
+        hook = _SubagentHook("t1", status)
+        ctx = _make_run_hook_context(
+            stop_reason="tool_error",
+            tool_events=[{"name": "read_file", "status": "error", "detail": "not found"}],
+            usage={"prompt_tokens": 100, "completion_tokens": 20},
+            error="tool failed",
+        )
+        await hook.after_run(ctx)
+        assert status.stop_reason == "tool_error"
+        assert status.tool_events == ctx.tool_events
+        assert status.usage == {"prompt_tokens": 100, "completion_tokens": 20}
+        assert status.error == "tool failed"
+
+    @pytest.mark.asyncio
+    async def test_on_error_updates_final_status(self):
+        status = SubagentStatus(
+            task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
+        )
+        hook = _SubagentHook("t1", status)
+        ctx = _make_run_hook_context(stop_reason="error", error="LLM down")
+        await hook.on_error(ctx)
+        assert status.stop_reason == "error"
+        assert status.error == "LLM down"

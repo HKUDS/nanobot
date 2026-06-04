@@ -10,22 +10,22 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -69,6 +69,21 @@ class _SubagentHook(AgentHook):
         self._status.usage = dict(context.usage)
         if context.error:
             self._status.error = str(context.error)
+
+    def _apply_run_context(self, context: AgentRunHookContext) -> None:
+        if self._status is None:
+            return
+        self._status.tool_events = list(context.tool_events)
+        self._status.usage = dict(context.usage)
+        self._status.stop_reason = context.stop_reason
+        if context.error:
+            self._status.error = str(context.error)
+
+    async def after_run(self, context: AgentRunHookContext) -> None:
+        self._apply_run_context(context)
+
+    async def on_error(self, context: AgentRunHookContext) -> None:
+        self._apply_run_context(context)
 
 
 class SubagentManager:
@@ -259,10 +274,8 @@ class SubagentManager:
                 if token is not None:
                     reset_workspace_scope(token)
             status.phase = "done"
-            status.stop_reason = result.stop_reason
 
             if result.stop_reason == "tool_error":
-                status.tool_events = list(result.tool_events)
                 await self._announce_result(
                     task_id, label, task,
                     self._format_partial_progress(result),

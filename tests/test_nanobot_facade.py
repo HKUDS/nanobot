@@ -170,35 +170,29 @@ def test_import_from_top_level():
 
 
 # ---------------------------------------------------------------------------
-# RunResult.tools_used / messages — populated from the agent iterations
+# RunResult.tools_used / messages — populated from the final run snapshot
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_run_populates_tools_used_across_iterations(tmp_path):
-    """tools_used collects every tool name fired across all iterations, in order."""
-    from nanobot.agent.hook import AgentHookContext
+async def test_run_populates_tools_used_from_run_snapshot(tmp_path):
+    """tools_used comes from the authoritative run-level snapshot."""
+    from nanobot.agent.hook import AgentRunHookContext
     from nanobot.bus.events import OutboundMessage
-    from nanobot.providers.base import ToolCallRequest
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(message, *, session_key):
-        # Whatever hooks the SDK installed are now on the loop.
         extras = bot._loop._extra_hooks
         messages = [{"role": "user", "content": message}]
-        ctx1 = AgentHookContext(iteration=0, messages=messages)
-        ctx1.tool_calls = [
-            ToolCallRequest(id="c1", name="read_file", arguments={}),
-            ToolCallRequest(id="c2", name="grep", arguments={}),
-        ]
+        messages.append({"role": "assistant", "content": "final"})
+        ctx = AgentRunHookContext(
+            messages=messages,
+            tools_used=["read_file", "grep", "web_fetch"],
+            stop_reason="completed",
+        )
         for h in extras:
-            await h.after_iteration(ctx1)
-        messages.append({"role": "assistant", "content": "ok"})
-        ctx2 = AgentHookContext(iteration=1, messages=messages)
-        ctx2.tool_calls = [ToolCallRequest(id="c3", name="web_fetch", arguments={})]
-        for h in extras:
-            await h.after_iteration(ctx2)
+            await h.after_run(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="final")
 
     bot._loop.process_direct = fake_process_direct
@@ -209,8 +203,8 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_populates_final_messages(tmp_path):
-    """messages reflects the agent's message list at the last iteration."""
-    from nanobot.agent.hook import AgentHookContext
+    """messages reflects the final run-level message list."""
+    from nanobot.agent.hook import AgentRunHookContext
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -222,9 +216,9 @@ async def test_run_populates_final_messages(tmp_path):
             {"role": "user", "content": message},
             {"role": "assistant", "content": "hi there"},
         ]
-        ctx = AgentHookContext(iteration=0, messages=messages)
+        ctx = AgentRunHookContext(messages=messages, stop_reason="completed")
         for h in extras:
-            await h.after_iteration(ctx)
+            await h.after_run(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="hi there")
 
     bot._loop.process_direct = fake_process_direct
@@ -237,7 +231,7 @@ async def test_run_populates_final_messages(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
-    """If process_direct never triggers after_iteration, tools_used/messages stay []."""
+    """If process_direct never reaches the runner, tools_used/messages stay []."""
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -302,19 +296,10 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sdk_capture_prefers_run_level_snapshot():
-    from nanobot.agent.hook import AgentHookContext, AgentRunHookContext, SDKCaptureHook
-    from nanobot.providers.base import ToolCallRequest
+async def test_sdk_capture_uses_run_level_snapshot():
+    from nanobot.agent.hook import AgentRunHookContext, SDKCaptureHook
 
     hook = SDKCaptureHook()
-    iter_messages = [{"role": "user", "content": "work"}]
-    iter_context = AgentHookContext(iteration=0, messages=iter_messages)
-    iter_context.tool_calls = [
-        ToolCallRequest(id="call_1", name="read_file", arguments={}),
-        ToolCallRequest(id="call_2", name="grep", arguments={}),
-    ]
-    await hook.after_iteration(iter_context)
-
     final_messages = [
         {"role": "user", "content": "work"},
         {"role": "assistant", "content": "done"},
