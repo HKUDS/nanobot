@@ -27,8 +27,8 @@ def _make_loop(*, tools_config=None):
 
     with patch("blackcat.agent.loop.ContextBuilder"), \
          patch("blackcat.agent.loop.SessionManager"), \
-         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("blackcat.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
     return loop, bus
 

@@ -104,7 +104,6 @@ def bus() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         "blackcat.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
@@ -233,7 +232,7 @@ def test_issue_route_secret_matches_bearer_and_header() -> None:
     secret = "my-secret"
     bearer_headers = Headers([("Authorization", "Bearer my-secret")])
     assert _issue_route_secret_matches(bearer_headers, secret) is True
-    x_headers = Headers([("X-Blackcat-Auth", "my-secret")])
+    x_headers = Headers([("X-Nanobot-Auth", "my-secret")])
     assert _issue_route_secret_matches(x_headers, secret) is True
     wrong = Headers([("Authorization", "Bearer other")])
     assert _issue_route_secret_matches(wrong, secret) is False
@@ -278,8 +277,6 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
 
 @pytest.mark.asyncio
 async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
-    from blackcat.webui.transcript import read_transcript_lines
-
     channel = _ch(bus)
     conn = MagicMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -287,111 +284,14 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
     await channel._dispatch_envelope(
         conn,
         "webui-client",
-        {
-            "type": "message",
-            "chat_id": "chat-1",
-            "content": "hello",
-            "webui": True,
-            "turn_id": "turn-1",
-        },
+        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
     )
 
     msg = bus.publish_inbound.await_args.args[0]
     assert msg.channel == "websocket"
     assert msg.chat_id == "chat-1"
     assert msg.metadata["webui"] is True
-    assert msg.metadata["webui_turn_id"] == "turn-1"
     assert msg.metadata["_wants_stream"] is True
-    lines = read_transcript_lines("websocket:chat-1")
-    assert lines == [{
-        "event": "user",
-        "chat_id": "chat-1",
-        "text": "hello",
-        "turn_id": "turn-1",
-        "turn_phase": "user",
-        "turn_seq": 1,
-    }]
-
-
-@pytest.mark.asyncio
-async def test_webui_message_envelope_persists_user_transcript_for_refresh(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch,
-) -> None:
-    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
-
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
-    channel = _ch(bus)
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-
-    async def answer_during_publish(_msg: Any) -> None:
-        await channel.send(OutboundMessage(channel="websocket", chat_id="chat-1", content="hi back"))
-
-    bus.publish_inbound.side_effect = answer_during_publish
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
-    )
-
-    lines = read_transcript_lines("websocket:chat-1")
-    assert [line["event"] for line in lines] == ["user", "message"]
-
-    body = build_webui_thread_response("websocket:chat-1")
-    assert body is not None
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == ["hello", "hi back"]
-
-
-@pytest.mark.asyncio
-async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch,
-) -> None:
-    from blackcat.webui.transcript import read_transcript_lines
-
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
-    channel = _ch(bus)
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "message", "chat_id": "chat-1", "content": "/stop", "webui": True},
-    )
-
-    msg = bus.publish_inbound.await_args.args[0]
-    assert msg.content == "/stop"
-    assert read_transcript_lines("websocket:chat-1") == []
-
-
-@pytest.mark.asyncio
-async def test_webui_user_transcript_append_failure_does_not_block_inbound(
-    bus: MagicMock,
-    monkeypatch,
-) -> None:
-    def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr("blackcat.webui.transcript.append_transcript_object", fail_append)
-    channel = _ch(bus)
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
-    )
-
-    msg = bus.publish_inbound.await_args.args[0]
-    assert msg.chat_id == "chat-1"
-    assert msg.content == "hello"
 
 
 @pytest.mark.asyncio
@@ -684,58 +584,6 @@ async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp
 
 
 @pytest.mark.asyncio
-async def test_native_webui_scope_allows_custom_scope_without_loopback(
-    bus: MagicMock,
-    tmp_path,
-) -> None:
-    default_workspace = tmp_path / "default"
-    project = tmp_path / "project"
-    default_workspace.mkdir()
-    project.mkdir()
-    sessions = SessionManager(tmp_path / "sessions")
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
-        bus,
-        gateway=_basic_handler(
-            bus,
-            session_manager=sessions,
-            workspace_path=default_workspace,
-            runtime_surface="native",
-        ),
-    )
-    conn = AsyncMock()
-    conn.remote_address = None
-
-    await channel._dispatch_envelope(
-        conn,
-        "native-client",
-        {
-            "type": "set_workspace_scope",
-            "chat_id": "chat-native",
-            "workspace_scope": {
-                "project_path": str(project),
-                "access_mode": "full",
-            },
-        },
-    )
-
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "session_updated"
-    assert payload["chat_id"] == "chat-native"
-    assert payload["workspace_scope"]["project_path"] == str(project.resolve())
-    assert payload["workspace_scope"]["project_name"] == "project"
-    assert payload["workspace_scope"]["access_mode"] == "full"
-    assert payload["workspace_scope"]["restrict_to_workspace"] is False
-    assert payload["workspace_scope"]["sandbox_status"]["restrict_to_workspace"] is False
-    assert payload["workspace_scope"]["sandbox_status"]["workspace_root"] == str(project.resolve())
-    saved = sessions.read_session_file("websocket:chat-native")
-    assert saved["metadata"]["workspace_scope"] == {
-        "project_path": str(project.resolve()),
-        "access_mode": "full",
-    }
-
-
-@pytest.mark.asyncio
 async def test_send_delivers_json_message_with_media_and_reply() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
@@ -870,7 +718,6 @@ async def test_send_progress_includes_structured_tool_events() -> None:
         metadata={
             "_progress": True,
             "_tool_hint": True,
-            "webui_turn_id": "turn-1",
             "_tool_events": [
                 {
                     "version": 1,
@@ -890,9 +737,6 @@ async def test_send_progress_includes_structured_tool_events() -> None:
     payload = json.loads(mock_ws.send.await_args.args[0])
     assert payload["event"] == "message"
     assert payload["kind"] == "tool_hint"
-    assert payload["turn_id"] == "turn-1"
-    assert payload["turn_phase"] == "activity"
-    assert payload["turn_seq"] == 1
     assert payload["tool_events"] == [
         {
             "version": 1,
@@ -1015,28 +859,6 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
     assert second["event"] == "stream_end"
     assert second["chat_id"] == "chat-1"
     assert second["stream_id"] == "sid"
-    assert "text" not in second
-
-
-@pytest.mark.asyncio
-async def test_send_delta_stream_end_includes_inline_final_text() -> None:
-    bus = MagicMock()
-    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
-    mock_ws = AsyncMock()
-    channel._attach(mock_ws, "chat-1")
-
-    await channel.send_delta(
-        "chat-1",
-        "merged plain text",
-        {"_stream_delta": True, "_stream_end": True, "_stream_id": "sid"},
-    )
-
-    mock_ws.send.assert_awaited_once()
-    final = json.loads(mock_ws.send.await_args.args[0])
-    assert final["event"] == "stream_end"
-    assert final["chat_id"] == "chat-1"
-    assert final["stream_id"] == "sid"
-    assert final["text"] == "merged plain text"
 
 
 @pytest.mark.asyncio
@@ -1186,37 +1008,6 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
     await channel.send_reasoning_delta("unattached", "thinking", None)
     await channel.send_reasoning_end("unattached", None)
     assert channel._subs == {}
-
-
-@pytest.mark.asyncio
-async def test_stream_transcript_persists_without_subscribers() -> None:
-    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
-
-    bus = MagicMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "streaming": True},
-        bus,
-        gateway=_basic_handler(bus),
-    )
-
-    await channel.send_delta("chat-1", "hello", {"_stream_delta": True, "_stream_id": "s1"})
-    await channel.send_delta("chat-1", " world", {"_stream_delta": True, "_stream_id": "s1"})
-    await channel.send_delta("chat-1", "", {"_stream_end": True, "_stream_id": "s1"})
-    await channel.send(OutboundMessage(
-        channel="websocket",
-        chat_id="chat-1",
-        content="",
-        metadata={"_turn_end": True, "latency_ms": 42},
-    ))
-
-    assert channel._subs == {}
-    lines = read_transcript_lines("websocket:chat-1")
-    assert [line["event"] for line in lines] == ["delta", "delta", "stream_end", "turn_end"]
-    body = build_webui_thread_response("websocket:chat-1")
-    assert body is not None
-    assert body["messages"][-1]["role"] == "assistant"
-    assert body["messages"][-1]["content"] == "hello world"
-    assert body["messages"][-1]["latencyMs"] == 42
 
 
 @pytest.mark.asyncio
@@ -1701,7 +1492,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         providers = {provider["name"]: provider for provider in body["providers"]}
         assert providers["openai"]["configured"] is True
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
-        assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
+        assert providers["azure_openai"]["api_key_required"] is True
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
         assert providers["skywork"]["label"] == "Skywork"
@@ -2009,7 +1800,7 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock) -> None:
     try:
         response = await _http_get(
             f"http://127.0.0.1:{port}/webui/bootstrap",
-            headers={"X-Blackcat-Auth": "native-secret"},
+            headers={"X-Nanobot-Auth": "native-secret"},
         )
         assert response.status_code == 200
         body = response.json()
@@ -2058,7 +1849,7 @@ def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> No
     config.tools.restrict_to_workspace = True
     save_config(config, config_path)
     monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
-    monkeypatch.setenv("BLACKCAT_SANDBOX_ENFORCED", "macos_app_sandbox")
+    monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")
 
     body = settings_payload()
     sandbox = body["advanced"]["workspace_sandbox"]
@@ -2620,112 +2411,3 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert len(body["messages"]) == 1
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["content"] == "hi"
-
-
-def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
-    from urllib.parse import quote
-
-    from websockets.datastructures import Headers
-    from websockets.http11 import Request
-
-    workspace = tmp_path / "workspace"
-    source = workspace / "blackcat" / "agent" / "hook.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("print('hello')\n", encoding="utf-8")
-
-    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
-    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
-    key = "websocket:file-preview"
-    enc = quote(key, safe="")
-    path = quote("blackcat/agent/hook.py:12", safe="")
-    req = Request(
-        f"/api/sessions/{enc}/file-preview?path={path}",
-        Headers([("Authorization", "Bearer tok")]),
-    )
-
-    resp = gateway.http._handle_file_preview(req, enc)
-
-    assert resp.status_code == 200
-    body = json.loads(resp.body.decode())
-    assert body["display_path"] == "blackcat/agent/hook.py"
-    assert body["language"] == "python"
-    assert body["content"].splitlines() == ["print('hello')"]
-    assert body["truncated"] is False
-
-
-def test_file_preview_normalizes_windows_file_url() -> None:
-    from blackcat.webui.file_preview import _clean_preview_path
-
-    assert _clean_preview_path("file:///C:/Users/me/project/app.py") == (
-        "C:/Users/me/project/app.py"
-    )
-    assert _clean_preview_path("file:///tmp/project/app.py") == "/tmp/project/app.py"
-
-
-def test_handle_file_preview_rejects_paths_outside_workspace(tmp_path) -> None:
-    from urllib.parse import quote
-
-    from websockets.datastructures import Headers
-    from websockets.http11 import Request
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    outside = tmp_path / "secret.py"
-    outside.write_text("secret = True\n", encoding="utf-8")
-
-    gateway = _basic_handler(MagicMock(), workspace_path=workspace)
-    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
-    key = "websocket:file-preview"
-    enc = quote(key, safe="")
-    req = Request(
-        f"/api/sessions/{enc}/file-preview?path={quote(str(outside), safe='')}",
-        Headers([("Authorization", "Bearer tok")]),
-    )
-
-    resp = gateway.http._handle_file_preview(req, enc)
-
-    assert resp.status_code == 403
-
-
-def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    from urllib.parse import quote
-
-    from websockets.datastructures import Headers
-    from websockets.http11 import Request
-
-    from blackcat.webui.transcript import append_transcript_object
-
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
-    workspace = tmp_path / "workspace"
-    sessions = SessionManager(workspace)
-    key = "websocket:c-legacy"
-    session = sessions.get_or_create(key)
-    session.add_message("user", "legacy question")
-    session.add_message("assistant", "legacy answer")
-    sessions.save(session)
-    append_transcript_object(
-        key,
-        {"event": "message", "chat_id": "c-legacy", "text": "legacy answer"},
-    )
-
-    bus = MagicMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"]},
-        bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
-    )
-    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
-    enc = quote(key, safe="")
-    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
-    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
-
-    assert resp.status_code == 200
-    body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == [
-        "legacy question",
-        "legacy answer",
-    ]

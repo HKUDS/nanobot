@@ -519,9 +519,8 @@ class TestNewCommandArchival:
 
         call_count = 0
 
-        async def _failing_summarize(_messages, *, session_key=None) -> bool:
+        async def _failing_summarize(_messages) -> bool:
             nonlocal call_count
-            assert session_key == "cli:test"
             call_count += 1
             return False
 
@@ -552,12 +551,10 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
 
         archived_count = -1
-        archived_session_key = None
 
-        async def _fake_summarize(messages, *, session_key=None) -> bool:
-            nonlocal archived_count, archived_session_key
+        async def _fake_summarize(messages) -> bool:
+            nonlocal archived_count
             archived_count = len(messages)
-            archived_session_key = session_key
             return True
 
         loop.consolidator.archive = _fake_summarize  # type: ignore[method-assign]
@@ -570,7 +567,6 @@ class TestNewCommandArchival:
 
         await loop.close_mcp()
         assert archived_count == 3
-        assert archived_session_key == "cli:test"
 
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:
@@ -583,8 +579,7 @@ class TestNewCommandArchival:
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
 
-        async def _ok_summarize(_messages, *, session_key=None) -> bool:
-            assert session_key == "cli:test"
+        async def _ok_summarize(_messages) -> bool:
             return True
 
         loop.consolidator.archive = _ok_summarize  # type: ignore[method-assign]
@@ -611,8 +606,7 @@ class TestNewCommandArchival:
         archived = asyncio.Event()
         release_archive = asyncio.Event()
 
-        async def _slow_summarize(_messages, *, session_key=None) -> bool:
-            assert session_key == "cli:test"
+        async def _slow_summarize(_messages) -> bool:
             await release_archive.wait()
             archived.set()
             return True

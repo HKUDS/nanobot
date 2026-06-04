@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from blackcat.agent.consolidate import _ARCHIVE_SUMMARY_MAX_CHARS, Consolidator
 from blackcat.agent.memory import (
+    _ARCHIVE_SUMMARY_MAX_CHARS,
+    Consolidator,
     MemoryStore,
 )
 from blackcat.providers.base import LLMResponse
@@ -136,7 +137,7 @@ class TestConsolidatorTokenBudget:
         session.messages = [{"role": "user", "content": "hi"}]
         session.key = "test:key"
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(100, "tiktoken"))
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session)
         consolidator.archive.assert_not_called()
@@ -149,13 +150,13 @@ class TestConsolidatorTokenBudget:
 
         captured: dict[str, list[dict]] = {}
 
-        async def build_messages(**kwargs):
+        def build_messages(**kwargs):
             captured["history"] = kwargs["history"]
             return kwargs["history"]
 
         consolidator._build_messages = build_messages
 
-        await consolidator.estimate_session_prompt_tokens(session)
+        consolidator.estimate_session_prompt_tokens(session)
 
         assert len(captured["history"]) == 160
         assert captured["history"][0]["content"].endswith("msg-0")
@@ -172,7 +173,7 @@ class TestConsolidatorTokenBudget:
             session.add_message("assistant", f"a{i}")
 
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(100, "tiktoken"))
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value="old conversation summary")
 
         await consolidator.maybe_consolidate_by_tokens(
@@ -205,7 +206,7 @@ class TestConsolidatorTokenBudget:
         session.add_message("assistant", "final answer")
 
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(100, "tiktoken"))
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value="tool turn summary")
 
         await consolidator.maybe_consolidate_by_tokens(
@@ -232,7 +233,7 @@ class TestConsolidatorTokenBudget:
             for i in range(70)
         ]
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(
+        consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
         # Use real pick_consolidation_boundary — it will find boundary at idx=50
@@ -261,7 +262,7 @@ class TestConsolidatorTokenBudget:
         ]
         session.metadata = {}
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(
+        consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
         # LLM consolidation fails — archive() returns None (raw_archive fired).
@@ -288,7 +289,7 @@ class TestConsolidatorTokenBudget:
         session.metadata = {}
         consolidator.sessions._session_cache[session.key] = session
         # Keep estimates high so the loop would otherwise run multiple rounds.
-        consolidator.estimate_session_prompt_tokens = AsyncMock(
+        consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1200, "tiktoken")
         )
         consolidator.archive = AsyncMock(return_value=None)
@@ -312,7 +313,7 @@ class TestConsolidatorTokenBudget:
             for i in range(70)
         ]
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = AsyncMock(
+        consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
         consolidator.archive = AsyncMock(return_value=True)
@@ -532,8 +533,7 @@ class TestConsolidatorSessionRefresh:
     @pytest.mark.asyncio
     async def test_reloads_before_empty_session_guard(self, tmp_path):
         """A stale empty reference must not skip a non-empty cached session."""
-        from blackcat.agent.consolidate import Consolidator
-        from blackcat.agent.memory import MemoryStore
+        from blackcat.agent.memory import Consolidator, MemoryStore
         from blackcat.session.manager import Session, SessionManager
 
         store = MemoryStore(tmp_path)
@@ -561,11 +561,11 @@ class TestConsolidatorSessionRefresh:
 
         seen: dict[str, Session] = {}
 
-        async def estimate(session: Session):
+        def estimate(session: Session):
             seen["session"] = session
             return 10, "test"
 
-        consolidator.estimate_session_prompt_tokens = AsyncMock(side_effect=estimate)
+        consolidator.estimate_session_prompt_tokens = MagicMock(side_effect=estimate)
 
         await consolidator.maybe_consolidate_by_tokens(stale_empty)
 
@@ -576,8 +576,7 @@ class TestConsolidatorSessionRefresh:
         """After compact_idle_session replaces the session, a concurrent
         maybe_consolidate_by_tokens with the old reference should use the
         fresh session from cache instead of overwriting."""
-        from blackcat.agent.consolidate import Consolidator
-        from blackcat.agent.memory import MemoryStore
+        from blackcat.agent.memory import Consolidator, MemoryStore
         from blackcat.session.manager import SessionManager
 
         store = MemoryStore(tmp_path)
