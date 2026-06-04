@@ -30,18 +30,6 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
-function mockFetchRoutes(routes: Record<string, unknown>): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const body = routes[String(input)];
-      return body === undefined
-        ? ({ ok: false, status: 404, json: async () => ({}) } as Response)
-        : jsonResponse(body);
-    }),
-  );
-}
-
 function baseSettingsPayload() {
   return {
     agent: {
@@ -125,7 +113,6 @@ function baseSettingsPayload() {
       mcp_server_count: 0,
       exec_enabled: true,
       exec_sandbox: null,
-      exec_path_prepend_set: false,
       exec_path_append_set: false,
     },
     requires_restart: false,
@@ -202,11 +189,11 @@ vi.mock("@/lib/blackcat-client", () => {
     updateUrl = updateUrlSpy;
   }
 
-  return { BlackcatClient: MockClient };
+  return { NanobotClient: MockClient };
 });
 
-import App from "@/App";
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import App from "@/App";
 
 describe("App layout", () => {
   beforeEach(() => {
@@ -220,9 +207,7 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
-    localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
     setNavigatorPlatform("Linux x86_64");
-    localStorage.removeItem("blackcat-webui.sidebar");
     localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
@@ -256,129 +241,6 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
-  });
-
-  it("opens Skills from the main sidebar", async () => {
-    mockFetchRoutes({
-      "/api/settings": baseSettingsPayload(),
-      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
-      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
-      "/api/webui/skills": {
-        skills: [
-          { name: "cron", description: "Schedule reminders.", source: "builtin", available: true },
-          {
-            name: "github",
-            description: "Work with GitHub.",
-            source: "builtin",
-            available: false,
-            unavailable_reason: "CLI: gh",
-          },
-        ],
-      },
-      "/api/webui/skills/github": {
-        name: "github",
-        description: "Work with GitHub.",
-        source: "builtin",
-        available: false,
-        unavailable_reason: "CLI: gh",
-        requirements: {
-          bins: ["gh"],
-          env: [],
-          missing_bins: ["gh"],
-          missing_env: [],
-        },
-        raw_markdown: "---\nname: github\n---\nUse GitHub CLI.",
-      },
-    });
-
-    render(<App />);
-
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
-
-    fireEvent.click(skillsButton);
-
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
-    expect(screen.getByText("cron")).toBeInTheDocument();
-    expect(screen.getByText("github")).toBeInTheDocument();
-    expect(screen.getByText("Missing: CLI: gh")).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(document.title).toBe("Skills · blackcat");
-
-    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
-
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
-
-    expect(await screen.findByRole("heading", { name: "github" })).toBeInTheDocument();
-    expect(screen.getByText("Unavailable reason")).toBeInTheDocument();
-    expect(screen.getAllByText("CLI: gh").length).toBeGreaterThan(0);
-    expect(screen.getByText("Missing CLI")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Raw SKILL.md"));
-    expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
-  });
-
-  it("fully collapses the native host sidebar and previews it on hover", async () => {
-    mockSessions = [
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "Desktop chat",
-      },
-    ];
-    vi.mocked(fetchBootstrap).mockResolvedValue({
-      token: "tok",
-      ws_path: "/",
-      expires_in: 300,
-      runtime_surface: "native",
-    });
-
-    render(<App />);
-
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const flowSidebar = screen.getByTestId("host-sidebar-flow");
-    const toggle = screen.getByTestId("host-sidebar-toggle");
-    expect(flowSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      screen.getByRole("navigation", { name: "Sidebar navigation" }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "0px" }));
-    expect(
-      screen.queryByRole("navigation", { name: "Sidebar navigation" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.mouseEnter(toggle);
-    const previewSidebar = await screen.findByTestId("host-sidebar-preview");
-    expect(flowSidebar).toHaveStyle({ width: "0px" });
-    expect(previewSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      within(previewSidebar).getByRole("navigation", {
-        name: "Sidebar navigation",
-      }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(screen.queryByTestId("host-sidebar-preview")).not.toBeInTheDocument(),
-    );
-    expect(flowSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      screen.getByRole("navigation", { name: "Sidebar navigation" }),
-    ).toBeInTheDocument();
   });
 
   it("switches to the next session when deleting the active chat", async () => {
@@ -1024,7 +886,6 @@ describe("App layout", () => {
                 mcp_server_count: 0,
                 exec_enabled: true,
                 exec_sandbox: null,
-                exec_path_prepend_set: false,
                 exec_path_append_set: false,
               },
               requires_restart: false,
@@ -1175,18 +1036,34 @@ describe("App layout", () => {
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
-    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
-    window.history.replaceState(null, "", "/#/settings?section=voice");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/settings") {
+          return jsonResponse(baseSettingsPayload());
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    window.history.replaceState(null, "", "/#/settings?section=models");
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=models");
   });
 
   it("updates the URL hash when switching settings sections", async () => {
-    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === "/api/settings") {
+          return jsonResponse(baseSettingsPayload());
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
 
     render(<App />);
 
@@ -1201,19 +1078,25 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Voice" }));
-
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
   it("opens Apps from the main sidebar without replacing the sidebar", async () => {
-    mockFetchRoutes({
-      "/api/settings": baseSettingsPayload(),
-      "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
-      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
-    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const href = String(input);
+        if (href === "/api/settings") {
+          return jsonResponse(baseSettingsPayload());
+        }
+        if (href === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" });
+        }
+        if (href === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
 
     render(<App />);
 
@@ -1352,7 +1235,6 @@ describe("App layout", () => {
                 mcp_server_count: 0,
                 exec_enabled: true,
                 exec_sandbox: null,
-                exec_path_prepend_set: false,
                 exec_path_append_set: false,
               },
               requires_restart: false,
