@@ -844,10 +844,25 @@ async def test_custom_generate_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_generate_no_api_key() -> None:
-    client = CustomImageGenerationClient(api_key=None)
+async def test_custom_generate_without_api_key_omits_authorization() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = CustomImageGenerationClient(
+        api_key=None,
+        api_base="http://localhost:7860/v1",
+        client=fake,  # type: ignore[arg-type]
+    )
 
-    with pytest.raises(ImageGenerationError, match="providers.custom.apiKey"):
+    response = await client.generate(prompt="draw", model="custom-image-model")
+
+    assert response.images == [PNG_DATA_URL]
+    assert "Authorization" not in fake.calls[0]["headers"]
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_requires_api_base() -> None:
+    client = CustomImageGenerationClient(api_key="sk-custom-test")
+
+    with pytest.raises(ImageGenerationError, match="providers.custom.apiBase"):
         await client.generate(prompt="draw", model="custom-image-model")
 
 
