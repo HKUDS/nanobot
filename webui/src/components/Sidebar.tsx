@@ -124,6 +124,7 @@ export function Sidebar(props: SidebarProps) {
           label={t("sidebar.newChat")}
           onClick={props.onNewChat}
           icon={<SquarePen className="h-4 w-4" />}
+          shortcut="Cmd/Ctrl+Shift+O"
         />
         <SidebarActionButton
           collapsed={collapsed}
@@ -213,6 +214,7 @@ function SidebarActionButton({
   onClick,
   active = false,
   className,
+  shortcut,
 }: {
   collapsed: boolean;
   label: string;
@@ -220,14 +222,17 @@ function SidebarActionButton({
   onClick: () => void;
   active?: boolean;
   className?: string;
+  shortcut?: string;
 }) {
+  const title = shortcut ? `${label} (${shortcut})` : collapsed ? label : undefined;
+
   return (
     <Button
       type="button"
       variant="ghost"
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      title={collapsed ? label : undefined}
+      title={title}
       onClick={() => onClick()}
       className={cn(
         "group h-8 min-w-0 gap-2 overflow-hidden rounded-full font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground",
