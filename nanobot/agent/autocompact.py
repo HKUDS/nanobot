@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
-    _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
@@ -34,21 +33,13 @@ class AutoCompact:
             ts = datetime.fromisoformat(ts)
         return ((now or datetime.now()) - ts).total_seconds() >= self._ttl * 60
 
-    @staticmethod
-    def _format_summary(text: str, last_active: datetime) -> str:
-        return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
-
-    @classmethod
-    def _is_internal_session(cls, key: str) -> bool:
-        return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
-
     def check_expired(self, schedule_background: Callable[[Coroutine], None],
                       active_session_keys: Collection[str] = ()) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
         for info in self.sessions.list_sessions():
             key = info.get("key", "")
-            if not key or self._is_internal_session(key) or key in self._archiving:
+            if not key or key in self._archiving:
                 continue
             if key in active_session_keys:
                 continue
@@ -57,40 +48,31 @@ class AutoCompact:
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
-        if self._is_internal_session(key):
-            self._archiving.discard(key)
-            return
         try:
             summary = await self.consolidator.compact_idle_session(
                 key, self._RECENT_SUFFIX_MESSAGES,
             )
             if summary and summary != "(nothing)":
                 session = self.sessions.get_or_create(key)
-                meta = session.metadata.get("_last_summary")
-                if isinstance(meta, dict):
-                    self._summaries[key] = (
-                        meta["text"],
-                        datetime.fromisoformat(meta["last_active"]),
-                    )
+                from nanobot.agent.memory import session_summary_text
+
+                rendered = session_summary_text(session)
+                if rendered:
+                    self._summaries[key] = (rendered, datetime.now())
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
             self._archiving.discard(key)
 
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
-        if self._is_internal_session(key):
-            self._archiving.discard(key)
-            self._summaries.pop(key, None)
-            return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:
-            return session, self._format_summary(entry[0], entry[1])
-        # Cold path: summary persisted in session metadata (process restarted).
-        meta = session.metadata.get("_last_summary")
-        if isinstance(meta, dict):
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
-        return session, None
+            return session, entry[0]
+        # Cold path: summary from session metadata (process restarted).
+        from nanobot.agent.memory import session_summary_text
+
+        return session, session_summary_text(session)
