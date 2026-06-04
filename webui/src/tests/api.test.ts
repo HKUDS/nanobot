@@ -212,6 +212,21 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("serializes provider registry config fields", async () => {
+    await updateProviderSettings("tok", {
+      provider: "bedrock",
+      region: "us-west-2",
+      profile: "prod",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=bedrock&region=us-west-2&profile=prod",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("serializes web search settings updates", async () => {
     await updateWebSearchSettings("tok", {
       provider: "searxng",

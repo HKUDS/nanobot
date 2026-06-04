@@ -56,6 +56,7 @@ class ProviderSpec:
 
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False
+    oauth_provider: str = ""
 
     # Direct providers skip API-key validation (user supplies everything)
     is_direct: bool = False
@@ -81,9 +82,71 @@ class ProviderSpec:
     # whose API returns the actual answer in "reasoning" instead of "content".
     reasoning_as_content: bool = False
 
+    # Provider-specific config fields beyond the common API connection fields.
+    config_fields: tuple[str, ...] = ()
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
+
+    def supports_config_field(self, field: str) -> bool:
+        return (
+            field in {"api_key", "api_base", "extra_headers", "extra_body"}
+            or field in self.config_fields
+        )
+
+
+@dataclass(frozen=True)
+class ProviderResolution:
+    """Resolved provider reference from config, including auto-detected providers."""
+
+    requested_name: str
+    name: str | None
+    spec: ProviderSpec | None
+    config: Any
+    is_auto: bool = False
+
+    @property
+    def resolved_name(self) -> str | None:
+        return self.name
+
+    @property
+    def api_base(self) -> str | None:
+        if self.config and self.config.api_base:
+            return self.config.api_base
+        if self.spec and self.spec.default_api_base:
+            return self.spec.default_api_base
+        return None
+
+    @property
+    def api_type(self) -> str:
+        if self.spec and self.spec.supports_config_field("api_type") and self.config:
+            return self.config.api_type
+        return "auto"
+
+    @property
+    def region(self) -> str | None:
+        if self.spec and self.spec.supports_config_field("region") and self.config:
+            return getattr(self.config, "region", None)
+        return None
+
+    @property
+    def profile(self) -> str | None:
+        if self.spec and self.spec.supports_config_field("profile") and self.config:
+            return getattr(self.config, "profile", None)
+        return None
+
+    def signature_fields(self) -> tuple[Any, ...]:
+        return (
+            self.name,
+            self.config.api_key if self.config else None,
+            self.api_base,
+            self.config.extra_headers if self.config else None,
+            self.config.extra_body if self.config else None,
+            self.api_type,
+            self.region,
+            self.profile,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +195,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="AWS Bedrock",
         backend="bedrock",
         is_direct=True,
+        config_fields=("region", "profile"),
     ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
@@ -285,6 +349,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="OpenAI",
         backend="openai_compat",
         supports_max_completion_tokens=True,
+        config_fields=("api_type",),
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
@@ -296,6 +361,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
         is_oauth=True,
+        oauth_provider="openai_codex",
     ),
     # GitHub Copilot: OAuth-based
     ProviderSpec(
@@ -307,6 +373,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,
         is_oauth=True,
+        oauth_provider="github_copilot",
         supports_max_completion_tokens=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com

@@ -8,7 +8,6 @@ from pathlib import Path
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import find_by_name
 
 
 @dataclass(frozen=True)
@@ -38,9 +37,10 @@ def _make_provider_core(
     """Create a plain LLM provider without failover wrapping."""
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
     model = model or resolved.model
-    provider_name = config.get_provider_name(model, preset=resolved)
-    p = config.get_provider(model, preset=resolved)
-    spec = find_by_name(provider_name) if provider_name else None
+    provider_ref = config.resolve_provider_ref(model, preset=resolved)
+    provider_name = provider_ref.name
+    p = provider_ref.config
+    spec = provider_ref.spec
     backend = spec.backend if spec else "openai_compat"
 
     if backend == "azure_openai":
@@ -84,8 +84,8 @@ def _make_provider_core(
             api_key=p.api_key if p else None,
             api_base=p.api_base if p else None,
             default_model=model,
-            region=getattr(p, "region", None) if p else None,
-            profile=getattr(p, "profile", None) if p else None,
+            region=provider_ref.region,
+            profile=provider_ref.profile,
             extra_body=p.extra_body if p else None,
         )
     else:
@@ -98,7 +98,7 @@ def _make_provider_core(
             extra_headers=p.extra_headers if p else None,
             spec=spec,
             extra_body=p.extra_body if p else None,
-            api_type=p.api_type if p and provider_name == "openai" else "auto",
+            api_type=provider_ref.api_type,
         )
 
     provider.generation = resolved.to_generation_settings()
@@ -171,22 +171,15 @@ def provider_signature(
 ) -> tuple[object, ...]:
     """Return the config fields that affect the active provider chain."""
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    p = config.get_provider(resolved.model, preset=resolved)
+    provider_ref = config.resolve_provider_ref(resolved.model, preset=resolved)
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
     def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
-        fp = config.get_provider(fallback.model, preset=fallback)
+        fallback_ref = config.resolve_provider_ref(fallback.model, preset=fallback)
         return (
             fallback.model,
             fallback.provider,
-            config.get_provider_name(fallback.model, preset=fallback),
-            config.get_api_key(fallback.model, preset=fallback),
-            config.get_api_base(fallback.model, preset=fallback),
-            fp.extra_headers if fp else None,
-            fp.extra_body if fp else None,
-            fp.api_type if fp else "auto",
-            getattr(fp, "region", None) if fp else None,
-            getattr(fp, "profile", None) if fp else None,
+            *fallback_ref.signature_fields(),
             fallback.max_tokens,
             fallback.temperature,
             fallback.reasoning_effort,
@@ -196,14 +189,7 @@ def provider_signature(
     return (
         resolved.model,
         resolved.provider,
-        config.get_provider_name(resolved.model, preset=resolved),
-        config.get_api_key(resolved.model, preset=resolved),
-        config.get_api_base(resolved.model, preset=resolved),
-        p.extra_headers if p else None,
-        p.extra_body if p else None,
-        p.api_type if p else "auto",
-        getattr(p, "region", None) if p else None,
-        getattr(p, "profile", None) if p else None,
+        *provider_ref.signature_fields(),
         resolved.max_tokens,
         resolved.temperature,
         resolved.reasoning_effort,

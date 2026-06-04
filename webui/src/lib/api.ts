@@ -394,6 +394,8 @@ export async function updateProviderSettings(
   if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
   if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
   if (update.apiType !== undefined) query.set("api_type", update.apiType);
+  if (update.region !== undefined) query.set("region", update.region);
+  if (update.profile !== undefined) query.set("profile", update.profile);
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
     token,
