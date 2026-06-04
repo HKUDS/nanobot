@@ -1276,9 +1276,14 @@ def _run_gateway(
         if text.startswith("/start"):
             parts = text.split()
             payload_param = parts[1] if len(parts) > 1 else ""
-            if payload_param.startswith("order_"):
-                order_ref = payload_param[6:]  # strip "order_"
-                order = await _cms_get_order_by_ref(order_ref)
+            if payload_param.startswith("order_") or payload_param.startswith("session_"):
+                # order_FOOLISH-XXX or session_cs_live_XXX (fallback via Stripe session)
+                order_ref = payload_param[6:] if payload_param.startswith("order_") else None
+                stripe_session = payload_param[8:] if payload_param.startswith("session_") else None
+                order = await _cms_get_order_by_ref(order_ref) if order_ref else None
+                if not order and stripe_session:
+                    # Try lookup by stripeSessionId if we add that field later; for now greet generically
+                    pass
                 if order:
                     await _cms_patch_order(str(order["id"]), {"customerTelegramId": chat_id})
                     await _customer_bot_send(
@@ -1430,6 +1435,49 @@ def _run_gateway(
                         f"Content-Length: {len(body)}\r\n"
                         f"\r\n{body}"
                     )
+            elif method == "POST" and path == "/hooks/foolish-pro-register":
+                try:
+                    header_end = data.find(b"\r\n\r\n")
+                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                    pro = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+
+                    # Notify Alessandro
+                    tg_allow = (config.channels.telegram.get("allowFrom") or []) if isinstance(config.channels.telegram, dict) else []
+                    ale_chat = str(tg_allow[0]) if tg_allow else ""
+                    if ale_chat:
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(
+                                channel="telegram",
+                                chat_id=ale_chat,
+                                content=(
+                                    f"🏷️ Nuovo Foolish Pro — {pro.get('businessName', 'N/A')}\n\n"
+                                    f"Contatto: {pro.get('contactName', 'N/A')}\n"
+                                    f"Email: {pro.get('email', 'N/A')}\n"
+                                    f"P.IVA: {pro.get('vatNumber', 'N/A')}\n"
+                                    f"Telegram: {pro.get('telegramUsername') or 'non fornito'}\n"
+                                    f"Codice: {pro.get('discountCode', 'N/A')}"
+                                ),
+                            )
+                        ))
+
+                    # Send welcome message to customer via customer bot if telegram username known
+                    tg_username = pro.get('telegramUsername') or ''
+                    if tg_username:
+                        # Can't DM by username directly — Frank will note it and follow up when they write
+                        logger.info("pro-register: customer {} has telegram {}", pro.get('contactName'), tg_username)
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("foolish-pro-register hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n\r\n{body}"
+                    )
             elif method == "POST" and path == "/hooks/customer-telegram":
                 import os as _os
                 wh_secret = _os.environ.get("FOOLISH_CUSTOMER_WH_SECRET", "")
@@ -1465,6 +1513,53 @@ def _run_gateway(
                             f"Content-Length: {len(body)}\r\n"
                             f"\r\n{body}"
                         )
+            elif method == "POST" and path == "/hooks/foolish-storefront-cron":
+                try:
+                    header_end = data.find(b"\r\n\r\n")
+                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                    cron = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+
+                    cron_name = cron.get("cron", "unknown")
+                    sent = int(cron.get("sent", 0))
+                    recipients = cron.get("recipients", [])
+                    errors = cron.get("errors", [])
+
+                    telegram_cfg = config.channels.telegram
+                    tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
+                    chat_id = str(tg_allow[0]) if tg_allow else ""
+
+                    if chat_id:
+                        icon = "⚠️" if errors else "✅"
+                        msg_text = (
+                            f"{icon} Cron email — {cron_name}\n"
+                            f"Inviate: {sent}"
+                        )
+                        if errors:
+                            error_lines = "\n".join(f"  • {e}" for e in errors[:5])
+                            msg_text += f"\nErrori ({len(errors)}):\n{error_lines}"
+                            if len(errors) > 5:
+                                msg_text += f"\n  ... e altri {len(errors) - 5}"
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(channel="telegram", chat_id=chat_id, content=msg_text),
+                        ))
+                        logger.info("foolish-storefront-cron hook: {} sent={} errors={}", cron_name, sent, len(errors))
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("foolish-storefront-cron hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
             else:
                 body = "Not Found"
                 resp = (
