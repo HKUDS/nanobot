@@ -10,6 +10,7 @@ import pytest
 from nanobot.providers.image_generation import (
     AIHubMixImageGenerationClient,
     CodexImageGenerationClient,
+    CustomImageGenerationClient,
     GeminiImageGenerationClient,
     GeneratedImageResponse,
     ImageGenerationError,
@@ -804,6 +805,63 @@ async def test_openai_requires_api_key() -> None:
 
     with pytest.raises(ImageGenerationError, match="API key"):
         await client.generate(prompt="draw", model="dall-e-3")
+
+
+# ---------------------------------------------------------------------------
+# Custom OpenAI-compatible Images API
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_success() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = CustomImageGenerationClient(
+        api_key="sk-custom-test",
+        api_base="https://custom.example/v1/",
+        extra_headers={"X-Test": "1"},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="a cat on the moon",
+        model="custom-image-model",
+        aspect_ratio="16:9",
+    )
+
+    assert isinstance(response, GeneratedImageResponse)
+    assert response.images == [PNG_DATA_URL]
+    assert response.content == ""
+    call = fake.calls[0]
+    assert call["url"] == "https://custom.example/v1/images/generations"
+    assert call["headers"]["Authorization"] == "Bearer sk-custom-test"
+    assert call["headers"]["X-Test"] == "1"
+    body = call["json"]
+    assert body["model"] == "custom-image-model"
+    assert body["prompt"] == "a cat on the moon"
+    assert body["response_format"] == "b64_json"
+    assert body["n"] == 1
+    assert body["size"] == "1536x1024"
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_no_api_key() -> None:
+    client = CustomImageGenerationClient(api_key=None)
+
+    with pytest.raises(ImageGenerationError, match="providers.custom.apiKey"):
+        await client.generate(prompt="draw", model="custom-image-model")
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_http_error() -> None:
+    fake = FakeClient(FakeResponse({"error": "bad request"}, status_code=400))
+    client = CustomImageGenerationClient(
+        api_key="sk-custom-test",
+        api_base="https://custom.example/v1",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="HTTP 400"):
+        await client.generate(prompt="draw", model="custom-image-model")
 
 
 # ---------------------------------------------------------------------------
