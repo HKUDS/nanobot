@@ -658,6 +658,31 @@ class AgentLoop:
         budget = self.context_window_tokens - max(1, reserved_output) - 1024
         return budget if budget > 0 else max(128, self.context_window_tokens // 2)
 
+    @staticmethod
+    def _hook_includes_ephemeral(hook: AgentHook) -> bool:
+        try:
+            return hook.include_ephemeral() is True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _usage_source_for_turn(
+        *,
+        channel: str,
+        session_key: str | None,
+        ephemeral: bool,
+    ) -> str:
+        key = session_key or ""
+        if key.startswith("dream:") or (ephemeral and key.startswith("dream")):
+            return "dream"
+        if key == "heartbeat" or key.startswith("cron:"):
+            return "cron"
+        if channel == "api" or key.startswith("api:"):
+            return "api"
+        if channel == "system":
+            return "system"
+        return "user"
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -701,8 +726,12 @@ class AgentLoop:
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        extra_hooks = [
+            h for h in self._extra_hooks
+            if not ephemeral or self._hook_includes_ephemeral(h)
+        ]
+        if extra_hooks:
+            hook = CompositeHook([loop_hook] + extra_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -816,6 +845,11 @@ class AgentLoop:
                 ),
                 goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
                 goal_continue_message=_goal_continue,
+                usage_source=self._usage_source_for_turn(
+                    channel=channel,
+                    session_key=active_session_key,
+                    ephemeral=ephemeral,
+                ),
             ))
         finally:
             reset_workspace_scope(workspace_token)

@@ -22,6 +22,7 @@ from websockets.http11 import Response
 
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -162,6 +163,9 @@ class GatewayHTTPHandler:
             runtime_capabilities=self._capabilities,
         )
 
+    def workspace_controls_available(self, connection: Any) -> bool:
+        return self._runtime_surface == "native" or _is_localhost(connection)
+
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
@@ -291,6 +295,10 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
+        if m:
+            return self._handle_file_preview(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
             return self._handle_session_delete(request, m.group(1))
@@ -369,6 +377,24 @@ class GatewayHTTPHandler:
         data["workspace_scope"] = scope.payload()
         return _http_json_response(data)
 
+    def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        path = _query_first(_parse_query(request.path), "path")
+        try:
+            payload = file_preview_payload(
+                path,
+                scope=self.workspaces.scope_for_session_key(decoded_key),
+            )
+        except WebUIFilePreviewError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(payload)
+
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -426,7 +452,9 @@ class GatewayHTTPHandler:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response(
-            self.workspaces.payload(controls_available=_is_localhost(connection))
+            self.workspaces.payload(
+                controls_available=self.workspace_controls_available(connection)
+            )
         )
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:

@@ -10,10 +10,9 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import app
-from nanobot.providers.factory import make_provider
 from nanobot.config.schema import Config
 from nanobot.cron.types import CronJob, CronPayload
-from nanobot.providers.factory import ProviderSnapshot
+from nanobot.providers.factory import ProviderSnapshot, make_provider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
@@ -542,8 +541,8 @@ def test_openai_compat_provider_passes_model_through():
 
 
 def test_make_provider_uses_github_copilot_backend():
-    from nanobot.providers.factory import make_provider
     from nanobot.config.schema import Config
+    from nanobot.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -1597,6 +1596,65 @@ def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
     assert extras["websocket"]["unix_socket_path"] == "/tmp/nanobot-test.sock"
     assert extras["websocket"]["token_issue_secret"] == "secret"
     assert extras["websocket"]["websocket_requires_token"] is True
+
+
+def test_load_or_create_desktop_config_bootstraps_without_api_key(tmp_path: Path) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+
+    config_path = tmp_path / "config.json"
+    loaded = _load_or_create_desktop_config(
+        str(config_path),
+        str(tmp_path / "workspace"),
+    )
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert loaded.agents.defaults.model_preset is None
+    assert config_path.exists()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_repairs_existing_unconfigured_default(
+    tmp_path: Path,
+) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+    from nanobot.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_unwinds_persisted_bootstrap(
+    tmp_path: Path,
+) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+    from nanobot.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.provider = "openai_codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    save_config(config, config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
 
 
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(

@@ -23,6 +23,7 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import PROVIDERS, find_by_name
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
@@ -747,6 +748,7 @@ def settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
+        "usage": token_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -769,6 +771,12 @@ def settings_payload(
         restart_required_sections=restart_required_sections,
         apply_state=apply_state,
     )
+
+
+def settings_usage_payload() -> dict[str, Any]:
+    """Return the lightweight token usage slice for Overview refreshes."""
+    config = load_config()
+    return token_usage_payload(timezone_name=config.agents.defaults.timezone)
 
 
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:

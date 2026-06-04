@@ -738,6 +738,59 @@ def gateway(
     _run_gateway(cfg, port=port)
 
 
+DESKTOP_BOOTSTRAP_PROVIDER = "openai_codex"
+DESKTOP_BOOTSTRAP_MODEL = "openai-codex/gpt-5.1-codex"
+
+
+def _desktop_provider_error_is_recoverable(error: ValueError) -> bool:
+    message = str(error)
+    return "No API key configured" in message or "requires api_key and api_base" in message
+
+
+def _desktop_provider_needs_bootstrap(config: Config) -> bool:
+    from nanobot.providers.factory import make_provider
+
+    try:
+        make_provider(config)
+        return False
+    except ValueError as e:
+        if not _desktop_provider_error_is_recoverable(e):
+            raise
+        return True
+
+
+def _reset_desktop_config_to_unconfigured(config: Config) -> bool:
+    defaults = config.agents.defaults
+    changed = False
+    if defaults.model_preset is not None:
+        defaults.model_preset = None
+        changed = True
+    if defaults.provider:
+        defaults.provider = ""
+        changed = True
+    if defaults.model:
+        defaults.model = ""
+        changed = True
+    return changed
+
+
+def _is_persisted_desktop_bootstrap(config: Config) -> bool:
+    defaults = config.agents.defaults
+    return (
+        defaults.model_preset is None
+        and defaults.provider == DESKTOP_BOOTSTRAP_PROVIDER
+        and defaults.model == DESKTOP_BOOTSTRAP_MODEL
+        and not config.model_presets
+    )
+
+
+def _apply_desktop_runtime_bootstrap(config: Config) -> None:
+    defaults = config.agents.defaults
+    config.agents.defaults.model_preset = None
+    defaults.provider = DESKTOP_BOOTSTRAP_PROVIDER
+    defaults.model = DESKTOP_BOOTSTRAP_MODEL
+
+
 def _load_or_create_desktop_config(config: str | None, workspace: str | None) -> Config:
     """Load the desktop-owned config, creating it on first launch."""
     from nanobot.config.loader import (
@@ -751,7 +804,7 @@ def _load_or_create_desktop_config(config: str | None, workspace: str | None) ->
 
     config_path = Path(config).expanduser().resolve() if config else get_config_path()
     set_config_path(config_path)
-    created = False
+    changed = False
     if config_path.exists():
         try:
             loaded = resolve_config_env_vars(load_config(config_path))
@@ -760,16 +813,25 @@ def _load_or_create_desktop_config(config: str | None, workspace: str | None) ->
             raise typer.Exit(1)
     else:
         loaded = NanobotConfig()
-        created = True
+        changed = True
 
     if workspace:
         workspace_path = Path(workspace).expanduser()
         loaded.agents.defaults.workspace = str(workspace_path)
-        created = True
+        changed = True
 
-    if created:
+    if _is_persisted_desktop_bootstrap(loaded):
+        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
+    elif _desktop_provider_needs_bootstrap(loaded):
+        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
+
+    if changed:
         save_config(loaded, config_path)
-    return loaded
+
+    runtime_config = loaded.model_copy(deep=True)
+    if _desktop_provider_needs_bootstrap(runtime_config):
+        _apply_desktop_runtime_bootstrap(runtime_config)
+    return runtime_config
 
 
 def _configure_desktop_gateway(
@@ -889,6 +951,7 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
 
@@ -923,6 +986,7 @@ def _run_gateway(
         provider_snapshot_loader=load_provider_snapshot,
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
+        hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
     )
     WebuiTurnCoordinator(
         bus=bus,
