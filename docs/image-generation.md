@@ -108,7 +108,7 @@ Configure:
 }
 ```
 
-The `apiBase` is required. The provider sends requests to `{apiBase}/images/generations` using the OpenAI Images API format with `response_format: "b64_json"`.
+The `apiBase` is required. The provider sends requests to `{apiBase}/images/generations` using the OpenAI Images API format with `response_format: "b64_json"`. The `apiKey` is optional for local or unauthenticated endpoints.
 
 ### AIHubMix
 
@@ -350,7 +350,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
+| `unsupported image generation provider` | Use `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; blackcat expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or blackcat media directory and must be valid image files |
