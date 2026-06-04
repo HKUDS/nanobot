@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import urllib.parse
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from typing import Any, Mapping
 from weakref import WeakKeyDictionary
@@ -41,6 +42,7 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
 _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
+_ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 
 
 def _sanitize_name(name: str) -> str:
@@ -51,6 +53,19 @@ def _sanitize_name(name: str) -> str:
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
+
+
+def _is_session_terminated(exc: BaseException) -> bool:
+    """Return True when the MCP SDK reports a dead client session."""
+    messages = [str(exc)]
+    error = getattr(exc, "error", None)
+    if error is not None:
+        messages.append(str(getattr(error, "message", "")))
+    return any(
+        marker in message.lower()
+        for marker in ("session terminated", "connection closed")
+        for message in messages
+    )
 
 
 async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
@@ -68,7 +83,8 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
         port = 443 if parsed.scheme == "https" else 80
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=timeout,
+            asyncio.open_connection(host, port),
+            timeout=timeout,
         )
         writer.close()
         await writer.wait_closed()
@@ -174,13 +190,54 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
     return normalized
 
 
-class MCPToolWrapper(Tool):
+class _MCPWrapperBase(Tool):
+    """Common reconnect handling for wrappers bound to one MCP server session."""
+
+    _plugin_discoverable = False
+
+    def _set_mcp_connection(self, session: Any, server_name: str) -> None:
+        self._session = session
+        self._server_name = server_name
+        self._reconnect: _ReconnectCallback | None = None
+
+    def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
+        self._reconnect = reconnect
+
+    async def _refresh_session_after_termination(
+        self,
+        exc: BaseException,
+        already_refreshed: bool,
+        capability_kind: str,
+    ) -> bool:
+        if already_refreshed or not _is_session_terminated(exc) or self._reconnect is None:
+            return False
+        logger.warning(
+            "MCP {} '{}' session terminated; reconnecting server '{}' before retry",
+            capability_kind,
+            self._name,
+            self._server_name,
+        )
+        refreshed_tool = await self._reconnect(self._server_name, self._name, self)
+        refreshed_session = getattr(refreshed_tool, "_session", None)
+        if refreshed_session is None:
+            logger.warning(
+                "MCP {} '{}' could not refresh session for server '{}'",
+                capability_kind,
+                self._name,
+                self._server_name,
+            )
+            return False
+        self._session = refreshed_session
+        return True
+
+
+class MCPToolWrapper(_MCPWrapperBase):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
     _plugin_discoverable = False
 
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
-        self._session = session
+        self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
         self._name = _sanitize_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
@@ -203,7 +260,9 @@ class MCPToolWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
-        for attempt in range(2):  # At most 1 retry
+        retried_transient = False
+        refreshed_session = False
+        while True:
             try:
                 result = await asyncio.wait_for(
                     self._session.call_tool(self._original_name, arguments=kwargs),
@@ -223,8 +282,16 @@ class MCPToolWrapper(Tool):
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
                 return "(MCP tool call was cancelled)"
             except Exception as exc:
+                if await self._refresh_session_after_termination(
+                    exc,
+                    refreshed_session,
+                    "tool",
+                ):
+                    refreshed_session = True
+                    continue
                 if _is_transient(exc):
-                    if attempt == 0:
+                    if not retried_transient:
+                        retried_transient = True
                         logger.warning(
                             "MCP tool '{}' hit transient error ({}), retrying once...",
                             self._name,
@@ -259,13 +326,13 @@ class MCPToolWrapper(Tool):
         return "(MCP tool call failed)"  # Unreachable, but satisfies type checkers
 
 
-class MCPResourceWrapper(Tool):
+class MCPResourceWrapper(_MCPWrapperBase):
     """Wraps an MCP resource URI as a read-only nanobot Tool."""
 
     _plugin_discoverable = False
 
     def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
-        self._session = session
+        self._set_mcp_connection(session, server_name)
         self._uri = resource_def.uri
         self._name = _sanitize_name(f"mcp_{server_name}_resource_{resource_def.name}")
         desc = resource_def.description or resource_def.name
@@ -296,7 +363,9 @@ class MCPResourceWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
-        for attempt in range(2):
+        retried_transient = False
+        refreshed_session = False
+        while True:
             try:
                 result = await asyncio.wait_for(
                     self._session.read_resource(self._uri),
@@ -314,8 +383,16 @@ class MCPResourceWrapper(Tool):
                 logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
                 return "(MCP resource read was cancelled)"
             except Exception as exc:
+                if await self._refresh_session_after_termination(
+                    exc,
+                    refreshed_session,
+                    "resource",
+                ):
+                    refreshed_session = True
+                    continue
                 if _is_transient(exc):
-                    if attempt == 0:
+                    if not retried_transient:
+                        retried_transient = True
                         logger.warning(
                             "MCP resource '{}' hit transient error ({}), retrying once...",
                             self._name,
@@ -350,13 +427,13 @@ class MCPResourceWrapper(Tool):
         return "(MCP resource read failed)"  # Unreachable
 
 
-class MCPPromptWrapper(Tool):
+class MCPPromptWrapper(_MCPWrapperBase):
     """Wraps an MCP prompt as a read-only nanobot Tool."""
 
     _plugin_discoverable = False
 
     def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
-        self._session = session
+        self._set_mcp_connection(session, server_name)
         self._prompt_name = prompt_def.name
         self._name = _sanitize_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
         desc = prompt_def.description or prompt_def.name
@@ -402,7 +479,9 @@ class MCPPromptWrapper(Tool):
         from mcp import types
         from mcp.shared.exceptions import McpError
 
-        for attempt in range(2):
+        retried_transient = False
+        refreshed_session = False
+        while True:
             try:
                 result = await asyncio.wait_for(
                     self._session.get_prompt(self._prompt_name, arguments=kwargs),
@@ -420,6 +499,13 @@ class MCPPromptWrapper(Tool):
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
                 return "(MCP prompt call was cancelled)"
             except McpError as exc:
+                if await self._refresh_session_after_termination(
+                    exc,
+                    refreshed_session,
+                    "prompt",
+                ):
+                    refreshed_session = True
+                    continue
                 logger.exception(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
@@ -428,8 +514,16 @@ class MCPPromptWrapper(Tool):
                 )
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
+                if await self._refresh_session_after_termination(
+                    exc,
+                    refreshed_session,
+                    "prompt",
+                ):
+                    refreshed_session = True
+                    continue
                 if _is_transient(exc):
-                    if attempt == 0:
+                    if not retried_transient:
+                        retried_transient = True
                         logger.warning(
                             "MCP prompt '{}' hit transient error ({}), retrying once...",
                             self._name,
@@ -747,6 +841,7 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
     try:
         connected = await connect_mcp_servers(missing_servers, registry)
         state._mcp_stacks.update(connected)
+        _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)
         if connected:
             logger.info("MCP connected servers: {}", sorted(connected))
@@ -766,8 +861,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
     """Reconcile live MCP connections with the current config file."""
     async with _reload_lock(state):
         try:
-            from nanobot.config.loader import (load_config,
-                                               resolve_config_env_vars)
+            from nanobot.config.loader import load_config, resolve_config_env_vars
 
             config = resolve_config_env_vars(load_config())
             next_servers = dict(config.tools.mcp_servers)
@@ -808,6 +902,7 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         if to_connect:
             connected = await connect_mcp_servers(to_connect, registry)
             state._mcp_stacks.update(connected)
+            _attach_reconnect_handlers(state, registry, connected)
 
         state._mcp_connected = bool(state._mcp_stacks)
         failed = sorted(set(to_connect) - set(connected))
@@ -909,6 +1004,68 @@ def _reload_lock(state: Any) -> asyncio.Lock:
         return lock
 
 
+def _attach_reconnect_handlers(
+    state: Any,
+    registry: ToolRegistry,
+    server_names: Mapping[str, Any] | set[str] | list[str] | tuple[str, ...],
+) -> None:
+    async def reconnect(server_name: str, tool_name: str, stale_tool: Tool) -> Tool | None:
+        return await _refresh_terminated_server(
+            state,
+            registry,
+            server_name,
+            tool_name,
+            stale_tool,
+        )
+
+    for server_name in server_names:
+        prefix = _tool_prefix(server_name)
+        for tool_name in list(registry.tool_names):
+            if not tool_name.startswith(prefix):
+                continue
+            tool = registry.get(tool_name)
+            if isinstance(tool, _MCPWrapperBase):
+                tool.set_reconnect_handler(reconnect)
+
+
+async def _refresh_terminated_server(
+    state: Any,
+    registry: ToolRegistry,
+    server_name: str,
+    tool_name: str,
+    stale_tool: Tool,
+) -> Tool | None:
+    async with _reload_lock(state):
+        cfg = state._mcp_servers.get(server_name)
+        if cfg is None:
+            logger.warning(
+                "MCP server '{}' session terminated but is no longer configured",
+                server_name,
+            )
+            return None
+
+        current_tool = registry.get(tool_name)
+        if (
+            current_tool is not None
+            and current_tool is not stale_tool
+            and server_name in state._mcp_stacks
+        ):
+            return current_tool
+
+        logger.warning("MCP server '{}' session terminated; refreshing connection", server_name)
+        _unregister_server_tools(state, registry, server_name)
+        await _close_server(state, server_name)
+
+        connected = await connect_mcp_servers({server_name: cfg}, registry)
+        state._mcp_stacks.update(connected)
+        _attach_reconnect_handlers(state, registry, connected)
+        state._mcp_connected = bool(state._mcp_stacks)
+        if server_name not in connected:
+            logger.warning("MCP server '{}' reconnect failed after session termination", server_name)
+            return None
+        return registry.get(tool_name)
+
+
 def _server_signature(cfg: Any) -> Any:
     if hasattr(cfg, "model_dump"):
         return cfg.model_dump(mode="json")
@@ -916,10 +1073,7 @@ def _server_signature(cfg: Any) -> Any:
 
 
 def _tool_prefix(server_name: str) -> str:
-    safe_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in server_name)
-    while "__" in safe_name:
-        safe_name = safe_name.replace("__", "_")
-    return f"mcp_{safe_name}_"
+    return _sanitize_name(f"mcp_{server_name}_")
 
 
 def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: str) -> int:
