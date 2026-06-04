@@ -58,7 +58,7 @@ class AutoCompact:
 
                 rendered = session_summary_text(session)
                 if rendered:
-                    self._summaries[key] = (rendered, datetime.now())
+                    self._summaries[key] = rendered
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
@@ -69,9 +69,9 @@ class AutoCompact:
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
-        entry = self._summaries.pop(key, None)
-        if entry:
-            return session, entry[0]
+        rendered = self._summaries.pop(key, None)
+        if rendered:
+            return session, rendered
         # Cold path: summary from session metadata (process restarted).
         from nanobot.agent.memory import session_summary_text
 
