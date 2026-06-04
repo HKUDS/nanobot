@@ -46,7 +46,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -83,6 +83,32 @@ OpenRouter uses a chat-completions style image response. Configure:
 ```
 
 Use a model that supports image generation and image editing if you want reference-image edits.
+
+### Custom (OpenAI-compatible)
+
+Any OpenAI-compatible image generation API can be used with the `custom` provider. This includes local Stable Diffusion servers, Replicate, Agnes AI, and similar services that expose the `/v1/images/generations` endpoint.
+
+Configure:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "${CUSTOM_IMAGE_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "custom",
+      "model": "your-model-name"
+    }
+  }
+}
+```
+
+The `apiBase` is required. The provider sends requests to `{apiBase}/images/generations` using the OpenAI Images API format with `response_format: "b64_json"`.
 
 ### AIHubMix
 
