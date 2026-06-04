@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.utils.runtime import is_blank_text
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -94,6 +95,10 @@ class FallbackProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
+
+    @property
+    def has_fallbacks(self) -> bool:
+        return self._has_fallbacks
 
     @property
     def supports_progress_deltas(self) -> bool:
@@ -247,6 +252,95 @@ class FallbackProvider(LLMProvider):
             content=f"Primary model '{primary_model}' circuit open and no fallbacks available",
             finish_reason="error",
         )
+
+    async def try_on_empty_response(
+        self,
+        request_fn: Callable[[LLMProvider, Any], Awaitable[LLMResponse]],
+        *,
+        skip_if_streamed: bool = False,
+        accept_tool_calls: bool = True,
+    ) -> LLMResponse | None:
+        """Try fallback models when the primary returned a blank successful reply.
+
+        A fallback response counts as "successful" when it has non-blank text
+        content **or** at least one tool call (when *accept_tool_calls* is True).
+        Set *accept_tool_calls* to False on the finalization-recovery path where
+        we explicitly need a textual answer rather than another tool invocation.
+        """
+        if skip_if_streamed or not self._has_fallbacks:
+            return None
+
+        for idx, fallback in enumerate(self._fallback_presets):
+            fallback_model = fallback.model
+            if idx == 0:
+                logger.info(
+                    "Primary model returned empty response, trying fallback '{}'",
+                    fallback_model,
+                )
+            else:
+                logger.info(
+                    "Fallback '{}' also returned empty, trying next fallback '{}'",
+                    self._fallback_presets[idx - 1].model,
+                    fallback_model,
+                )
+            try:
+                fallback_provider = self._provider_factory(fallback)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to create provider for fallback '{}': {}",
+                    fallback_model,
+                    exc,
+                )
+                continue
+
+            try:
+                fallback_response = await request_fn(fallback_provider, fallback)
+            except Exception as exc:
+                logger.warning(
+                    "Fallback '{}' request failed after empty primary response: {}",
+                    fallback_model,
+                    exc,
+                )
+                continue
+
+            if fallback_response.finish_reason == "error":
+                logger.warning(
+                    "Fallback '{}' returned error after empty primary response: {}",
+                    fallback_model,
+                    (fallback_response.content or "")[:120],
+                )
+                continue
+
+            has_text = not is_blank_text(fallback_response.content)
+            has_tool_calls = bool(fallback_response.tool_calls)
+            if has_text or (accept_tool_calls and has_tool_calls):
+                logger.info(
+                    "Fallback '{}' succeeded after primary empty response "
+                    "(content={}, tool_calls={})",
+                    fallback_model,
+                    has_text,
+                    len(fallback_response.tool_calls),
+                )
+                return fallback_response
+
+            if has_tool_calls and not accept_tool_calls:
+                logger.warning(
+                    "Fallback '{}' produced tool_calls but text answer was required "
+                    "(content empty, tool_calls={}); discarding",
+                    fallback_model,
+                    len(fallback_response.tool_calls),
+                )
+            else:
+                logger.warning(
+                    "Fallback '{}' returned empty response after primary empty response",
+                    fallback_model,
+                )
+
+        logger.warning(
+            "All {} fallback model(s) returned empty after primary empty response",
+            len(self._fallback_presets),
+        )
+        return None
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:

@@ -392,6 +392,109 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
 
 
 @pytest.mark.asyncio
+async def test_runner_empty_response_fallback_dispatches_tool_calls() -> None:
+    """Tool calls returned from empty-response fallback must be executed."""
+    from typing import Any
+
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.providers.base import LLMProvider
+    from nanobot.providers.fallback_provider import FallbackProvider
+    from tests.agent.test_runner_fallback import _FakeProvider, _fallback, _make_response
+
+    class _StatefulProvider(LLMProvider):
+        def __init__(self, responses: list[LLMResponse]):
+            super().__init__()
+            self._responses = list(responses)
+            self.chat_calls: list[dict[str, Any]] = []
+
+        def get_default_model(self) -> str:
+            return "stateful/model"
+
+        async def chat(self, **kwargs: Any) -> LLMResponse:
+            self.chat_calls.append(dict(kwargs))
+            if self._responses:
+                return self._responses.pop(0)
+            return _make_response("")
+
+        async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+            return await self.chat(**kwargs)
+
+    primary = _StatefulProvider([
+        _make_response(""),  # iter 0: empty -> silent retry
+        _make_response(""),  # iter 1: empty -> fallback
+        _make_response("done"),  # iter 2: after tool result
+    ])
+    fallback = _FakeProvider(
+        "fallback",
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a.txt"})],
+            finish_reason="tool_calls",
+        ),
+    )
+    provider = FallbackProvider(
+        primary=primary,
+        fallback_presets=[_fallback("fallback-a")],
+        provider_factory=MagicMock(return_value=fallback),
+    )
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read file"}],
+        tools=tools,
+        model="primary-model",
+        max_iterations=6,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    tools.execute.assert_awaited_once()
+    assert "read_file" in result.tools_used
+    tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "tc1"
+
+
+@pytest.mark.asyncio
+async def test_runner_finalization_fallback_uses_retry_messages_without_tools() -> None:
+    """Fallback after empty finalization should reuse finalization retry shape."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.providers.fallback_provider import FallbackProvider
+    from nanobot.utils.runtime import FINALIZATION_RETRY_PROMPT
+    from tests.agent.test_runner_fallback import _FakeProvider, _fallback, _make_response
+
+    primary = _FakeProvider("primary", _make_response(""))
+    fallback = _FakeProvider("fallback", _make_response(""))
+    provider = FallbackProvider(
+        primary=primary,
+        fallback_presets=[_fallback("fallback-a")],
+        provider_factory=MagicMock(return_value=fallback),
+    )
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="primary-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert len(fallback.chat_calls) == 2
+    finalization_call = fallback.chat_calls[1]
+    assert finalization_call.get("tools") is None
+    assert finalization_call["messages"][-1]["role"] == "user"
+    assert finalization_call["messages"][-1]["content"] == FINALIZATION_RETRY_PROMPT
+
+
+@pytest.mark.asyncio
 async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
     """Regression: provider retry heartbeats must route through
     ``retry_wait_callback``, not ``progress_callback``. Binding them to

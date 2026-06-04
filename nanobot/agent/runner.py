@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import os
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +15,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
     build_file_edit_end_event,
@@ -122,6 +123,22 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+
+
+@dataclass(slots=True)
+class _ToolPhaseResult:
+    """Outcome of :meth:`AgentRunner._dispatch_tool_calls_phase`.
+
+    Tells the outer iteration loop whether to ``continue`` (with updated
+    injection state) or ``break`` (carrying error / final_content / stop_reason).
+    """
+
+    proceed: str  # "continue" or "break"
+    injection_cycles: int = 0
+    had_injections: bool = False
+    error: str | None = None
+    final_content: str | None = None
+    stop_reason: str | None = None
 
 
 class AgentRunner:
@@ -332,95 +349,33 @@ class AgentRunner:
                 context.streamed_reasoning = True
 
             if response.should_execute_tools:
-                context.tool_calls = list(response.tool_calls)
-                if hook.wants_streaming():
-                    await hook.on_stream_end(context, resuming=True)
-
-                assistant_message = build_assistant_message(
-                    response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
+                phase_result = await self._dispatch_tool_calls_phase(
+                    spec=spec,
+                    response=response,
+                    messages=messages,
+                    tools_used=tools_used,
+                    tool_events=tool_events,
+                    external_lookup_counts=external_lookup_counts,
+                    workspace_violation_counts=workspace_violation_counts,
+                    injection_cycles=injection_cycles,
+                    iteration=iteration,
+                    context=context,
+                    hook=hook,
                 )
-                messages.append(assistant_message)
-                tools_used.extend(tc.name for tc in response.tool_calls)
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "awaiting_tools",
-                        "iteration": iteration,
-                        "model": spec.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
-                    },
-                )
-
-                await hook.before_execute_tools(context)
-
-                results, new_events, fatal_error = await self._execute_tools(
-                    spec,
-                    response.tool_calls,
-                    external_lookup_counts,
-                    workspace_violation_counts,
-                )
-                tool_events.extend(new_events)
-                context.tool_results = list(results)
-                context.tool_events = list(new_events)
-                completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self._normalize_tool_result(
-                            spec,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
-                    messages.append(tool_message)
-                    completed_tool_results.append(tool_message)
-                if fatal_error is not None:
-                    error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
-                    final_content = error
-                    stop_reason = "tool_error"
-                    self._append_final_message(messages, final_content)
-                    context.final_content = final_content
-                    context.error = error
-                    context.stop_reason = stop_reason
-                    await hook.after_iteration(context)
-                    should_continue, injection_cycles = await self._try_drain_injections(
-                        spec, messages, None, injection_cycles,
-                        phase="after tool error",
-                    )
-                    if should_continue:
-                        had_injections = True
-                        continue
-                    break
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "tools_completed",
-                        "iteration": iteration,
-                        "model": spec.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": completed_tool_results,
-                        "pending_tool_calls": [],
-                    },
-                )
-                empty_content_retries = 0
-                length_recovery_count = 0
-                # Checkpoint 1: drain injections after tools, before next LLM call
-                _drained, injection_cycles = await self._try_drain_injections(
-                    spec, messages, None, injection_cycles,
-                    phase="after tool execution",
-                )
-                if _drained:
+                injection_cycles = phase_result.injection_cycles
+                if phase_result.had_injections:
                     had_injections = True
-                await hook.after_iteration(context)
-                continue
+                if phase_result.proceed == "continue":
+                    empty_content_retries = 0
+                    length_recovery_count = 0
+                    continue
+                if phase_result.error is not None:
+                    error = phase_result.error
+                if phase_result.final_content is not None:
+                    final_content = phase_result.final_content
+                if phase_result.stop_reason is not None:
+                    stop_reason = phase_result.stop_reason
+                break
 
             if response.has_tool_calls:
                 logger.warning(
@@ -444,22 +399,90 @@ class AgentRunner:
                         await hook.on_stream_end(context, resuming=False)
                     await hook.after_iteration(context)
                     continue
-                logger.warning(
-                    "Empty response on turn {} for {} after {} retries; attempting finalization",
-                    iteration,
-                    spec.session_key or "default",
-                    empty_content_retries,
+                fb_response = await self._try_empty_response_fallback(
+                    spec, messages_for_model, hook, context
                 )
-                if hook.wants_streaming():
-                    await hook.on_stream_end(context, resuming=False)
-                response = await self._request_finalization_retry(spec, messages_for_model)
-                retry_usage = self._usage_dict(response.usage)
-                self._accumulate_usage(usage, retry_usage)
-                raw_usage = self._merge_usage(raw_usage, retry_usage)
-                context.response = response
-                context.usage = dict(raw_usage)
-                context.tool_calls = list(response.tool_calls)
-                clean = hook.finalize_content(context, response.content)
+                if fb_response is not None:
+                    response = fb_response
+                    retry_usage = self._usage_dict(response.usage)
+                    self._accumulate_usage(usage, retry_usage)
+                    raw_usage = self._merge_usage(raw_usage, retry_usage)
+                    context.response = response
+                    context.usage = dict(raw_usage)
+                    context.tool_calls = list(response.tool_calls)
+                    clean = hook.finalize_content(context, response.content)
+                    empty_content_retries = 0
+                    # If the fallback returned executable tool calls, run them
+                    # in this same iteration instead of falling through to the
+                    # empty-final-response path (which would silently drop them).
+                    if response.should_execute_tools:
+                        phase_result = await self._dispatch_tool_calls_phase(
+                            spec=spec,
+                            response=response,
+                            messages=messages,
+                            tools_used=tools_used,
+                            tool_events=tool_events,
+                            external_lookup_counts=external_lookup_counts,
+                            workspace_violation_counts=workspace_violation_counts,
+                            injection_cycles=injection_cycles,
+                            iteration=iteration,
+                            context=context,
+                            hook=hook,
+                        )
+                        injection_cycles = phase_result.injection_cycles
+                        if phase_result.had_injections:
+                            had_injections = True
+                        if phase_result.proceed == "continue":
+                            length_recovery_count = 0
+                            continue
+                        if phase_result.error is not None:
+                            error = phase_result.error
+                        if phase_result.final_content is not None:
+                            final_content = phase_result.final_content
+                        if phase_result.stop_reason is not None:
+                            stop_reason = phase_result.stop_reason
+                        break
+                elif is_blank_text(clean):
+                    logger.warning(
+                        "Empty response on turn {} for {} after {} retries; attempting finalization",
+                        iteration,
+                        spec.session_key or "default",
+                        empty_content_retries,
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    response, retry_messages = await self._request_finalization_retry(
+                        spec, messages_for_model,
+                    )
+                    retry_usage = self._usage_dict(response.usage)
+                    self._accumulate_usage(usage, retry_usage)
+                    raw_usage = self._merge_usage(raw_usage, retry_usage)
+                    context.response = response
+                    context.usage = dict(raw_usage)
+                    context.tool_calls = list(response.tool_calls)
+                    clean = hook.finalize_content(context, response.content)
+
+                    if is_blank_text(clean):
+                        logger.warning(
+                            "Empty finalization for {}; trying fallback",
+                            spec.session_key or "default",
+                        )
+                        # Reuse the finalization-retry messages and disable tools
+                        # so the fallback is forced to produce a textual answer.
+                        fb_after = await self._try_empty_response_fallback(
+                            spec, retry_messages, hook, context,
+                            disable_tools=True,
+                            accept_tool_calls=False,
+                        )
+                        if fb_after is not None:
+                            response = fb_after
+                            retry_usage = self._usage_dict(fb_after.usage)
+                            self._accumulate_usage(usage, retry_usage)
+                            raw_usage = self._merge_usage(raw_usage, retry_usage)
+                            context.response = response
+                            context.usage = dict(raw_usage)
+                            context.tool_calls = list(response.tool_calls)
+                            clean = hook.finalize_content(context, response.content)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
                 length_recovery_count += 1
@@ -632,7 +655,11 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         hook: AgentHook,
         context: AgentHookContext,
+        *,
+        provider: LLMProvider | None = None,
+        disable_tools: bool = False,
     ):
+        active_provider = provider or self.provider
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
@@ -649,14 +676,14 @@ class AgentRunner:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=None if disable_tools else spec.tools.get_definitions(),
         )
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
             and spec.stream_progress_deltas
             and spec.progress_callback is not None
-            and getattr(self.provider, "supports_progress_deltas", False) is True
+            and getattr(active_provider, "supports_progress_deltas", False) is True
         )
 
         progress_state: dict[str, bool] | None = None
@@ -691,7 +718,7 @@ class AgentRunner:
                 context.streamed_reasoning = True
                 await hook.emit_reasoning(delta)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = active_provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
@@ -722,13 +749,13 @@ class AgentRunner:
                     context.streamed_content = True
                     await spec.progress_callback(incremental)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = active_provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
                 on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         else:
-            coro = self.provider.chat_with_retry(**kwargs)
+            coro = active_provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
         # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
@@ -768,11 +795,57 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
-    ):
+    ) -> tuple[LLMResponse, list[dict[str, Any]]]:
+        """Issue the finalization retry. Return both the response and the
+        message list actually sent so the caller can reuse the same shape
+        (finalization prompt appended, ``tools=None``) for any downstream
+        fallback attempt against the same prompt.
+        """
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        response = await self.provider.chat_with_retry(**kwargs)
+        return response, retry_messages
+
+    async def _try_empty_response_fallback(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        hook: AgentHook,
+        context: AgentHookContext,
+        *,
+        disable_tools: bool = False,
+        accept_tool_calls: bool = True,
+    ) -> LLMResponse | None:
+        """Run the configured fallback chain when the primary returned blank.
+
+        On the finalization-recovery path callers pass ``disable_tools=True``
+        and ``accept_tool_calls=False`` so the fallback model is forced to
+        produce a textual final answer instead of another tool invocation.
+        """
+        if not isinstance(self.provider, FallbackProvider):
+            return None
+        if not self.provider.has_fallbacks or context.streamed_content:
+            return None
+
+        async def request_fn(underlying: LLMProvider, preset: Any) -> LLMResponse:
+            fb_spec = replace(
+                spec,
+                model=preset.model,
+                max_tokens=preset.max_tokens,
+                temperature=preset.temperature,
+                reasoning_effort=preset.reasoning_effort,
+            )
+            return await self._request_model(
+                fb_spec, messages, hook, context,
+                provider=underlying, disable_tools=disable_tools,
+            )
+
+        return await self.provider.try_on_empty_response(
+            request_fn,
+            skip_if_streamed=context.streamed_content,
+            accept_tool_calls=accept_tool_calls,
+        )
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
@@ -797,6 +870,124 @@ class AgentRunner:
         for key, value in right.items():
             merged[key] = merged.get(key, 0) + value
         return merged
+
+    async def _dispatch_tool_calls_phase(
+        self,
+        *,
+        spec: AgentRunSpec,
+        response: LLMResponse,
+        messages: list[dict[str, Any]],
+        tools_used: list[str],
+        tool_events: list[dict[str, str]],
+        external_lookup_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int],
+        injection_cycles: int,
+        iteration: int,
+        context: AgentHookContext,
+        hook: AgentHook,
+    ) -> _ToolPhaseResult:
+        """Execute tool calls from *response* and update conversation state.
+
+        Used inline at the top of each iteration and as a re-dispatch path
+        when an empty-response fallback returns executable tool calls.
+        Mutates *messages*, *tools_used*, *tool_events* and the per-tool
+        counter dicts in place.
+        """
+        context.tool_calls = list(response.tool_calls)
+        if hook.wants_streaming():
+            await hook.on_stream_end(context, resuming=True)
+
+        assistant_message = build_assistant_message(
+            response.content or "",
+            tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+            reasoning_content=response.reasoning_content,
+            thinking_blocks=response.thinking_blocks,
+        )
+        messages.append(assistant_message)
+        tools_used.extend(tc.name for tc in response.tool_calls)
+        await self._emit_checkpoint(
+            spec,
+            {
+                "phase": "awaiting_tools",
+                "iteration": iteration,
+                "model": spec.model,
+                "assistant_message": assistant_message,
+                "completed_tool_results": [],
+                "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+            },
+        )
+
+        await hook.before_execute_tools(context)
+
+        results, new_events, fatal_error = await self._execute_tools(
+            spec,
+            response.tool_calls,
+            external_lookup_counts,
+            workspace_violation_counts,
+        )
+        tool_events.extend(new_events)
+        context.tool_results = list(results)
+        context.tool_events = list(new_events)
+        completed_tool_results: list[dict[str, Any]] = []
+        for tool_call, result in zip(response.tool_calls, results):
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "content": self._normalize_tool_result(
+                    spec,
+                    tool_call.id,
+                    tool_call.name,
+                    result,
+                ),
+            }
+            messages.append(tool_message)
+            completed_tool_results.append(tool_message)
+
+        if fatal_error is not None:
+            error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
+            final_content = error
+            stop_reason = "tool_error"
+            self._append_final_message(messages, final_content)
+            context.final_content = final_content
+            context.error = error
+            context.stop_reason = stop_reason
+            await hook.after_iteration(context)
+            should_continue, injection_cycles = await self._try_drain_injections(
+                spec, messages, None, injection_cycles,
+                phase="after tool error",
+            )
+            return _ToolPhaseResult(
+                proceed="continue" if should_continue else "break",
+                injection_cycles=injection_cycles,
+                had_injections=should_continue,
+                error=error,
+                final_content=final_content,
+                stop_reason=stop_reason,
+            )
+
+        await self._emit_checkpoint(
+            spec,
+            {
+                "phase": "tools_completed",
+                "iteration": iteration,
+                "model": spec.model,
+                "assistant_message": assistant_message,
+                "completed_tool_results": completed_tool_results,
+                "pending_tool_calls": [],
+            },
+        )
+        # Checkpoint 1: drain injections after tools, before next LLM call
+        _drained, injection_cycles = await self._try_drain_injections(
+            spec, messages, None, injection_cycles,
+            phase="after tool execution",
+        )
+        await hook.after_iteration(context)
+        return _ToolPhaseResult(
+            proceed="continue",
+            injection_cycles=injection_cycles,
+            had_injections=_drained,
+        )
 
     async def _execute_tools(
         self,
