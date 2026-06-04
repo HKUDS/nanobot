@@ -12,7 +12,7 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 ## Behavior
 
 - Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)
-- Single-message input: each request must contain exactly one `user` message
+- Chat messages: accepts standard OpenAI-style `messages`; the latest `user` message is treated as the current turn, and earlier messages are passed as prior conversation context
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - Streaming: set `stream=true` to receive Server-Sent Events (`text/event-stream`) with OpenAI-compatible delta chunks, terminated by `data: [DONE]`; omit or set `stream=false` for a single JSON response
 - **File uploads**: supports images, PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) via JSON base64 or `multipart/form-data` (max 10MB per file)

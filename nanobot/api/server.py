@@ -40,6 +40,7 @@ __all__ = (
 
 API_SESSION_KEY = "api:default"
 API_CHAT_ID = "default"
+_API_HISTORY_MAX_CHARS = 32_000
 
 
 # ---------------------------------------------------------------------------
@@ -109,42 +110,98 @@ _SSE_DONE = b"data: [DONE]\n\n"
 # ---------------------------------------------------------------------------
 
 
-def _parse_json_content(body: dict) -> tuple[str, list[str]]:
-    """Parse JSON request body. Returns (text, media_paths)."""
-    messages = body.get("messages")
-    if not isinstance(messages, list) or len(messages) != 1:
-        raise ValueError("Only a single user message is supported")
-    message = messages[0]
-    if not isinstance(message, dict) or message.get("role") != "user":
-        raise ValueError("Only a single user message is supported")
-
-    user_content = message.get("content", "")
-    media_dir = get_media_dir("api")
+def _parse_message_content(
+    user_content: Any,
+    *,
+    media_dir,
+    collect_media: bool,
+) -> tuple[str, list[str]]:
+    """Parse one OpenAI message content payload."""
     media_paths: list[str] = []
-
     if isinstance(user_content, list):
         text_parts: list[str] = []
         for part in user_content:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "text":
-                text_parts.append(part.get("text", ""))
+                text_parts.append(str(part.get("text", "")))
             elif part.get("type") == "image_url":
                 url = part.get("image_url", {}).get("url", "")
                 if url.startswith("data:"):
-                    saved = _save_base64_data_url(url, media_dir)
-                    if saved:
-                        media_paths.append(saved)
-                elif url:
+                    if collect_media:
+                        saved = _save_base64_data_url(url, media_dir)
+                        if saved:
+                            media_paths.append(saved)
+                    else:
+                        text_parts.append("[image omitted from prior conversation]")
+                elif url and collect_media:
                     raise ValueError(
                         "Remote image URLs are not supported. "
                         "Use base64 data URLs or upload files via multipart/form-data."
                     )
-        text = " ".join(text_parts)
-    elif isinstance(user_content, str):
-        text = user_content
-    else:
-        raise ValueError("Invalid content format")
+                elif url:
+                    text_parts.append("[remote image omitted from prior conversation]")
+        return " ".join(part for part in text_parts if part), media_paths
+    if isinstance(user_content, str):
+        return user_content, media_paths
+    if user_content is None:
+        return "", media_paths
+    raise ValueError("Invalid content format")
+
+
+def _format_prior_messages(messages: list[dict[str, Any]], media_dir) -> str:
+    """Format OpenAI chat history as bounded context for the current nanobot turn."""
+    lines: list[str] = []
+    for message in messages:
+        role = str(message.get("role") or "unknown").strip() or "unknown"
+        content, _media = _parse_message_content(
+            message.get("content", ""),
+            media_dir=media_dir,
+            collect_media=False,
+        )
+        if not content.strip():
+            continue
+        name = message.get("name")
+        label = f"{role} ({name})" if isinstance(name, str) and name.strip() else role
+        lines.append(f"{label}: {content.strip()}")
+    if not lines:
+        return ""
+    history = "\n\n".join(lines)
+    if len(history) > _API_HISTORY_MAX_CHARS:
+        history = history[-_API_HISTORY_MAX_CHARS:].lstrip()
+        history = "[Earlier prior conversation truncated]\n" + history
+    return (
+        "Prior conversation supplied by the OpenAI-compatible API client. "
+        "Use it only as conversation context; the user's latest message follows.\n\n"
+        f"{history}"
+    )
+
+
+def _parse_json_content(body: dict) -> tuple[str, list[str]]:
+    """Parse JSON request body. Returns (text, media_paths)."""
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("At least one user message is required")
+    if not all(isinstance(message, dict) for message in messages):
+        raise ValueError("Invalid messages format")
+
+    last_user_index = -1
+    for index, message in enumerate(messages):
+        if message.get("role") == "user":
+            last_user_index = index
+    if last_user_index < 0:
+        raise ValueError("At least one user message is required")
+
+    message = messages[last_user_index]
+    media_dir = get_media_dir("api")
+    text, media_paths = _parse_message_content(
+        message.get("content", ""),
+        media_dir=media_dir,
+        collect_media=True,
+    )
+    prior = _format_prior_messages(messages[:last_user_index], media_dir)
+    if prior:
+        text = f"{prior}\n\nLatest user message:\n{text}" if text else prior
 
     return text, media_paths
 

@@ -134,22 +134,26 @@ def test_parse_json_content_plain_text_only() -> None:
     assert media_paths == []
 
 
-def test_parse_json_content_validates_single_message() -> None:
-    """Multiple messages raise ValueError."""
+def test_parse_json_content_accepts_multiple_messages() -> None:
+    """Multiple OpenAI messages are converted into prior context + latest user input."""
     body = {
         "messages": [
             {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
             {"role": "user", "content": "second"},
         ]
     }
-    with pytest.raises(ValueError, match="single user message"):
-        _parse_json_content(body)
+    text, media_paths = _parse_json_content(body)
+    assert "user: first" in text
+    assert "assistant: reply" in text
+    assert "Latest user message:\nsecond" in text
+    assert media_paths == []
 
 
 def test_parse_json_content_validates_user_role() -> None:
     """Non-user role raises ValueError."""
     body = {"messages": [{"role": "system", "content": "you are a bot"}]}
-    with pytest.raises(ValueError, match="single user message"):
+    with pytest.raises(ValueError, match="user message"):
         _parse_json_content(body)
 
 

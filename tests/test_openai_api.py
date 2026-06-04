@@ -134,27 +134,32 @@ async def test_model_mismatch_returns_400() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_user_message_required() -> None:
+async def test_multiple_openai_messages_are_accepted() -> None:
     request = MagicMock()
     request.json = AsyncMock(
         return_value={
             "messages": [
                 {"role": "user", "content": "hello"},
                 {"role": "assistant", "content": "previous reply"},
+                {"role": "user", "content": "follow up"},
             ],
         }
     )
+    agent = _make_mock_agent()
     request.app = {
-        "agent_loop": _make_mock_agent(),
+        "agent_loop": agent,
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
-    assert resp.status == 400
-    body = json.loads(resp.body)
-    assert "single user message" in body["error"]["message"].lower()
+    assert resp.status == 200
+    content = agent.process_direct.call_args.kwargs["content"]
+    assert "Prior conversation supplied by the OpenAI-compatible API client" in content
+    assert "user: hello" in content
+    assert "assistant: previous reply" in content
+    assert "Latest user message:\nfollow up" in content
 
 
 @pytest.mark.asyncio
@@ -175,7 +180,7 @@ async def test_single_user_message_must_have_user_role() -> None:
     resp = await handle_chat_completions(request)
     assert resp.status == 400
     body = json.loads(resp.body)
-    assert "single user message" in body["error"]["message"].lower()
+    assert "user message" in body["error"]["message"].lower()
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
