@@ -15,6 +15,13 @@ let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
+function setNavigatorPlatform(platform: string): void {
+  Object.defineProperty(window.navigator, "platform", {
+    configurable: true,
+    value: platform,
+  });
+}
+
 function jsonResponse(body: unknown): Response {
   return {
     ok: true,
@@ -200,6 +207,7 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
+    setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
@@ -1409,9 +1417,27 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
+    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
+    expect(newChatButton).toHaveAttribute(
+      "title",
+      "New chat (Ctrl+Shift+O)",
+    );
+    expect(newChatButton).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Meta+Shift+O Control+Shift+O",
+    );
+  });
+
+  it("uses macOS shortcut glyphs in the sidebar title", async () => {
+    setNavigatorPlatform("MacIntel");
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+
     expect(within(sidebar).getByRole("button", { name: "New chat" })).toHaveAttribute(
       "title",
-      "New chat (Cmd/Ctrl+Shift+O)",
+      "New chat (⌘⇧O)",
     );
   });
 
