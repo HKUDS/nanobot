@@ -85,6 +85,7 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
     from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
@@ -131,6 +132,7 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     )
 
     from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
@@ -244,3 +246,24 @@ def test_load_config_accepts_legacy_local_preview_access(tmp_path) -> None:
     config = load_config(config_path)
 
     assert config.tools.webui_allow_local_service_access is False
+
+
+def test_load_config_defaults_subagent_mcp_access_to_disabled(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"tools": {}}), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.tools.subagent_mcp_access is False
+
+
+def test_load_config_accepts_subagent_mcp_access_flag(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"tools": {"subagentMcpAccess": True}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.tools.subagent_mcp_access is True

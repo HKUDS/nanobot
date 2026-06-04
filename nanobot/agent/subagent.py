@@ -16,16 +16,16 @@ from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.providers.base import LLMProvider
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -82,6 +82,7 @@ class SubagentManager:
         max_tool_result_chars: int,
         model: str | None = None,
         tools_config: ToolsConfig | None = None,
+        parent_tools: ToolRegistry | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
@@ -94,6 +95,7 @@ class SubagentManager:
         self.bus = bus
         self.model = model or provider.get_default_model()
         self.tools_config = tools_config or ToolsConfig()
+        self.parent_tools = parent_tools
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
@@ -118,8 +120,20 @@ class SubagentManager:
         return ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
+            subagent_mcp_access=self.tools_config.subagent_mcp_access,
             restrict_to_workspace=self.restrict_to_workspace,
         )
+
+    def _register_parent_mcp_tools(self, registry: ToolRegistry, cfg: ToolsConfig) -> None:
+        """Share already-connected MCP wrappers with an isolated subagent registry."""
+        if not cfg.subagent_mcp_access or self.parent_tools is None:
+            return
+        for name in self.parent_tools.tool_names:
+            if not name.startswith("mcp_"):
+                continue
+            tool = self.parent_tools.get(name)
+            if tool is not None:
+                registry.register(tool)
 
     def _build_tools(
         self,
@@ -140,6 +154,7 @@ class SubagentManager:
             ),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
+        self._register_parent_mcp_tools(registry, cfg)
         return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
