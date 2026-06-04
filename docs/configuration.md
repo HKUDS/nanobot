@@ -1414,6 +1414,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
+| `channels.telegram.chatAccess` | `{}` | Optional per-chat access rules for Telegram. Each key is a Telegram `chat_id`; each value is either `"*"` to allow every sender in that chat, or a list of user IDs/usernames allowed only in that chat. Chats not listed here fall back to `allowFrom`. This controls who may talk to the bot; `groupPolicy` still controls whether plain group messages are accepted or a mention/reply is required. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
