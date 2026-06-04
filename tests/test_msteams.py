@@ -851,10 +851,11 @@ async def test_validate_inbound_auth_accepts_observed_botframework_shape(make_ch
         headers={"kid": jwk["kid"]},
     )
 
-    await ch._validate_inbound_auth(
+    result = await ch._validate_inbound_auth(
         f"Bearer {token}",
         {"serviceUrl": service_url},
     )
+    assert result is None
 
 
 @pytest.mark.asyncio

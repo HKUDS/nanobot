@@ -21,7 +21,8 @@ def _ctx() -> AgentHookContext:
 @pytest.mark.asyncio
 async def test_base_hook_emit_reasoning_is_noop():
     hook = AgentHook()
-    await hook.emit_reasoning("should not raise")
+    result = await hook.emit_reasoning("should not raise")
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

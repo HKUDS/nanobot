@@ -118,6 +118,11 @@ class TestMidTurnCommandDispatchedDirectly:
         )
         result = await router.dispatch(ctx)
         assert result is not None
+        assert result.channel == "test"
+        assert result.chat_id == "chat1"
+        assert result.metadata["render_as"] == "text"
+        assert "/new" in result.content
+        assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in result.content
 
     @pytest.mark.asyncio
     async def test_prefix_command_args_populated(self, router: CommandRouter) -> None:
@@ -211,6 +216,10 @@ class TestPairingCommandDispatch:
         result = await router.dispatch(ctx)
         assert result is not None
         assert "Approved" in result.content
+        assert result.content == (
+            "Approved pairing code `ABCD-EFGH` — 123 can now access telegram"
+        )
+        assert result.metadata.get("_pairing_command") is True
 
     @pytest.mark.asyncio
     async def test_pairing_revoke_dispatched(
@@ -229,3 +238,5 @@ class TestPairingCommandDispatch:
         result = await router.dispatch(ctx)
         assert result is not None
         assert "Revoked" in result.content
+        assert result.content == "Revoked 123 from telegram"
+        assert result.metadata.get("_pairing_command") is True

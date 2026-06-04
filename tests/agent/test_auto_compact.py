@@ -111,6 +111,13 @@ def _make_fake_compact(
     return _fake_compact
 
 
+async def _drain_background_tasks(loop: AgentLoop) -> None:
+    tasks = list(loop._background_tasks)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+
 class TestSessionTTLConfig:
     """Test session TTL configuration."""
 
@@ -269,7 +276,7 @@ class TestAutoCompact:
 
         loop.consolidator.compact_idle_session = _make_fake_compact(loop)
         loop.auto_compact.check_expired(loop._schedule_background)
-        await asyncio.sleep(0.1)
+        await _drain_background_tasks(loop)
 
         active_after = loop.sessions.get_or_create("cli:active")
         assert len(active_after.messages) == 1
@@ -710,7 +717,7 @@ class TestProactiveAutoCompact:
             loop._schedule_background,
             active_session_keys=active_session_keys,
         )
-        await asyncio.sleep(0.1)
+        await _drain_background_tasks(loop)
 
     @pytest.mark.asyncio
     async def test_no_check_when_ttl_disabled(self, tmp_path):
@@ -815,12 +822,11 @@ class TestProactiveAutoCompact:
 
         # Second call should skip (key is in _archiving)
         loop.auto_compact.check_expired(loop._schedule_background)
-        await asyncio.sleep(0.05)
         assert archive_count == 1
 
         # Clean up
         block_forever.set()
-        await asyncio.sleep(0.1)
+        await _drain_background_tasks(loop)
         await loop.close_mcp()
 
     @pytest.mark.asyncio

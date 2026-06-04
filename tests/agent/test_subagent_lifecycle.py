@@ -17,7 +17,6 @@ from nanobot.agent.subagent import (
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -49,6 +48,13 @@ def _make_hook_context(**overrides) -> AgentHookContext:
     )
     defaults.update(overrides)
     return AgentHookContext(**defaults)
+
+
+async def _drain_subagent_tasks(sm: SubagentManager) -> None:
+    tasks = list(sm._running_tasks.values())
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@ class TestSpawn:
         assert len(sm._running_tasks) == 1
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
         assert len(sm._running_tasks) == 0
 
     @pytest.mark.asyncio
@@ -124,7 +130,7 @@ class TestSpawn:
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("my task")
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
         # Status cleaned up after task completes
         assert len(sm._task_statuses) == 0
 
@@ -142,7 +148,7 @@ class TestSpawn:
         assert len(sm._session_tasks["s1"]) == 1
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
         assert "s1" not in sm._session_tasks
 
     @pytest.mark.asyncio
@@ -158,7 +164,7 @@ class TestSpawn:
         assert len(sm._session_tasks) == 0
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
 
     @pytest.mark.asyncio
     async def test_label_defaults_to_truncated_task(self, tmp_path):
@@ -175,7 +181,7 @@ class TestSpawn:
         assert status.label == long_task[:30] + "..."
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
 
     @pytest.mark.asyncio
     async def test_custom_label(self, tmp_path):
@@ -191,7 +197,7 @@ class TestSpawn:
         assert status.label == "Custom Label"
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
 
     @pytest.mark.asyncio
     async def test_cleanup_callback_removes_all_entries(self, tmp_path):
@@ -200,7 +206,7 @@ class TestSpawn:
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("task", session_key="s1")
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
         assert len(sm._running_tasks) == 0
         assert len(sm._task_statuses) == 0
         assert len(sm._session_tasks) == 0
@@ -452,7 +458,7 @@ class TestCancelBySession:
         count = await sm.cancel_by_session("s1")
         assert count == 2
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
 
     @pytest.mark.asyncio
     async def test_no_tasks_returns_zero(self, tmp_path):
@@ -467,7 +473,7 @@ class TestCancelBySession:
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("task1", session_key="s1")
-        await asyncio.sleep(0.1)  # Wait for completion
+        await _drain_subagent_tasks(sm)
 
         count = await sm.cancel_by_session("s1")
         assert count == 0
@@ -499,7 +505,7 @@ class TestRunningCounts:
         assert sm.get_running_count_by_session("s1") == 2
 
         block.set()
-        await asyncio.sleep(0.1)
+        await _drain_subagent_tasks(sm)
         assert sm.get_running_count() == 0
 
     @pytest.mark.asyncio
@@ -521,8 +527,9 @@ class TestSubagentHook:
         tool_call.name = "read_file"
         tool_call.arguments = {"path": "/tmp/test"}
         ctx = _make_hook_context(tool_calls=[tool_call])
-        # Should not raise
-        await hook.before_execute_tools(ctx)
+        result = await hook.before_execute_tools(ctx)
+        assert result is None
+        assert ctx.tool_calls == [tool_call]
 
     @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
@@ -544,8 +551,9 @@ class TestSubagentHook:
     async def test_after_iteration_no_status_noop(self):
         hook = _SubagentHook("t1", status=None)
         ctx = _make_hook_context(iteration=5)
-        # Should not raise
-        await hook.after_iteration(ctx)
+        result = await hook.after_iteration(ctx)
+        assert result is None
+        assert ctx.iteration == 5
 
     @pytest.mark.asyncio
     async def test_after_iteration_sets_error(self):

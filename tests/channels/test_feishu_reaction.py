@@ -105,6 +105,7 @@ class TestRemoveReactionSync:
 
         # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
+        ch._client.im.v1.message_reaction.delete.assert_called_once()
 
     def test_handles_exception_gracefully(self):
         ch = _make_channel()
@@ -112,6 +113,7 @@ class TestRemoveReactionSync:
 
         # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
+        ch._client.im.v1.message_reaction.delete.assert_called_once()
 
 
 # ── _remove_reaction (async) ────────────────────────────────────────────────

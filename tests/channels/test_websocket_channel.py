@@ -686,6 +686,7 @@ async def test_send_missing_connection_is_noop_without_error() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     msg = OutboundMessage(channel="websocket", chat_id="missing", content="x")
     await channel.send(msg)
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1006,7 +1007,7 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
     await channel.send_reasoning_delta("unattached", "thinking", None)
     await channel.send_reasoning_end("unattached", None)
-    # No subscribers, no exception, no send.
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1299,6 +1300,7 @@ async def test_send_delta_missing_connection_is_noop() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
     # No exception, no error — just a no-op
     await channel.send_delta("nonexistent", "chunk", {"_stream_delta": True, "_stream_id": "s1"})
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1308,6 +1310,7 @@ async def test_stop_is_idempotent() -> None:
     # stop() before start() should not raise
     await channel.stop()
     await channel.stop()
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
