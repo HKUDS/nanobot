@@ -723,7 +723,7 @@ class CliAppManager:
             if pip_available:
                 prefix.extend(["--upgrade", "--force-reinstall"])
             else:
-                prefix.append("--upgrade")
+                prefix.extend(["--upgrade", "--reinstall"])
         return prefix + args
 
     def _pip_uninstall_argv(

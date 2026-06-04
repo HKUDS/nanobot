@@ -815,6 +815,34 @@ def test_install_uses_uv_pip_when_pip_unavailable(
     ]
 
 
+def test_update_uses_uv_pip_reinstall_when_pip_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    monkeypatch.setattr(CliAppManager, "_pip_available", staticmethod(lambda: False))
+    monkeypatch.setattr(
+        "nanobot.apps.cli.service.shutil.which",
+        lambda command: "/usr/bin/uv" if command == "uv" else None,
+    )
+
+    argv = manager._pip_install_argv(
+        {"name": "gimp", "install_cmd": "pip install cli-anything-gimp"},
+        update=True,
+    )
+
+    assert argv == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        sys.executable,
+        "--upgrade",
+        "--reinstall",
+        "cli-anything-gimp",
+    ]
+
+
 def test_uninstall_uses_uv_pip_when_pip_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
