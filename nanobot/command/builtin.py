@@ -99,6 +99,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "undo-2",
     ),
     BuiltinCommandSpec(
+        "/mcp",
+        "List MCP servers",
+        "Show configured MCP servers and connection status.",
+        "server",
+    ),
+    BuiltinCommandSpec(
         "/help",
         "Show help",
         "List available slash commands.",
@@ -642,6 +648,44 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_mcp(ctx: CommandContext) -> OutboundMessage:
+    """List configured MCP servers with connection status and registered tools."""
+    loop = ctx.loop
+    servers = getattr(loop, "_mcp_servers", None) or {}
+    stacks = getattr(loop, "_mcp_stacks", None) or {}
+
+    if not servers:
+        content = "No MCP servers configured. Add them under `tools.mcp_servers` in config."
+    else:
+        from nanobot.agent.tools.mcp import _tool_prefix
+
+        lines = [f"MCP servers ({len(stacks)}/{len(servers)} connected):", ""]
+        for name in sorted(servers):
+            cfg = servers[name]
+            transport = getattr(cfg, "transport", "stdio") if hasattr(cfg, "transport") else "stdio"
+            connected = name in stacks
+            status = "connected" if connected else "offline"
+            tool_names = sorted(
+                t for t in loop.tools.tool_names if t.startswith(_tool_prefix(name))
+            )
+            tool_count = len(tool_names)
+            if tool_names and tool_count <= 5:
+                tools_str = f"{tool_count} tool(s) ({', '.join(tool_names)})"
+            elif tool_names:
+                tools_str = f"{tool_count} tool(s) ({', '.join(tool_names[:3])}, ...)"
+            else:
+                tools_str = f"{tool_count} tool(s)"
+            lines.append(f"- **{name}** ({transport}) [{status}] — {tools_str}")
+        content = "\n".join(lines)
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -681,6 +725,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/mcp", cmd_mcp)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
     router.prefix("/pairing ", cmd_pairing)
