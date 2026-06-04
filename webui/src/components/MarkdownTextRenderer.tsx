@@ -17,7 +17,11 @@ import remarkMath from "remark-math";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
-import { FileReferenceChip, isLikelyFilePath } from "@/components/FileReferenceChip";
+import {
+  FileReferenceChip,
+  isFilePatternReference,
+  isLikelyFilePath,
+} from "@/components/FileReferenceChip";
 import { inferMediaKind } from "@/lib/media";
 import { faviconUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -216,10 +220,17 @@ function cleanFileReferenceTarget(value: string): string {
 }
 
 function isPreviewableFileTarget(value: string): boolean {
+  if (isFilePatternReference(value)) return false;
   if (isLikelyFilePath(value)) return true;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return false;
   if (/[\\/]/.test(value)) return false;
   return /^[^?#]+\.[a-z0-9][a-z0-9_-]{0,12}$/i.test(value);
+}
+
+function isNonNavigableFilePatternLink(href: string | undefined): boolean {
+  if (!href || /^https?:\/\//i.test(href) || href.startsWith("#")) return false;
+  const target = cleanFileReferenceTarget(href);
+  return Boolean(target && isFilePatternReference(target));
 }
 
 function fileReferenceFromLink(href: string | undefined): string | null {
@@ -468,6 +479,9 @@ export default function MarkdownTextRenderer({
               onOpen={onOpenFilePreview}
             />
           );
+        }
+        if (isNonNavigableFilePatternLink(href)) {
+          return <>{markdownChildren}</>;
         }
         return (
           <a

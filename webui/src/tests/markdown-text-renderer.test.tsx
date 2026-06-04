@@ -49,6 +49,30 @@ describe("MarkdownTextRenderer", () => {
     );
   });
 
+  it("renders glob file links as plain text instead of preview targets", () => {
+    const onOpenFilePreview = vi.fn();
+    const { container } = render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"原始对话通常还在 [*.json](*.json)。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "*.json" })).not.toBeInTheDocument();
+    expect(container).toHaveTextContent("*.json");
+  });
+
+  it("keeps glob inline code as code instead of a file preview chip", () => {
+    render(
+      <MarkdownTextRenderer>
+        {"检查 `src/**/*.json`。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
+  });
+
   it("does not wrap complete fenced code blocks in an extra pre", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>

@@ -127,6 +127,7 @@ export function isLikelyFilePath(value: string): boolean {
   const raw = value.trim();
   if (!raw || raw.includes("\n")) return false;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return false;
+  if (isFilePatternReference(raw)) return false;
   if (!/[\\/]/.test(raw) && !/^(dockerfile|makefile|readme|package-lock\.json)$/i.test(raw)) {
     return false;
   }
@@ -135,6 +136,10 @@ export function isLikelyFilePath(value: string): boolean {
   if (!name || name === "." || name === "..") return false;
   if (/^(dockerfile|makefile|readme|package-lock\.json)$/i.test(name)) return true;
   return /\.[a-z0-9][a-z0-9_-]{0,12}$/i.test(name);
+}
+
+export function isFilePatternReference(value: string): boolean {
+  return /[*?[\]{}]/.test(value.trim());
 }
 
 export function splitFilePath(path: string): { directory: string; name: string } {
