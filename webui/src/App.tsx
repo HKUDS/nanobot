@@ -813,6 +813,7 @@ function Shell({
     navigate(defaultShellRoute());
     setDraftWorkspaceScope(null);
     setWorkspaceError(null);
+    setSessionSearchOpen(false);
     setMobileSidebarOpen(false);
   }, [navigate]);
 
