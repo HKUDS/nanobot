@@ -812,6 +812,7 @@ class _StreamingFileEditState:
 def _stream_key(payload: dict[str, Any]) -> str:
     index = payload.get("index")
     if isinstance(index, int):
+        # hex_str = f"{number:05x}"
         return f"idx:{index}"
     if isinstance(index, str) and index:
         return f"idx:{index}"
