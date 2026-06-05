@@ -2,6 +2,15 @@
 
 Use nanobot as a library — no CLI, no gateway, just Python.
 
+Before debugging SDK code, prove the same config works from the CLI:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so provider,
+model, tools, and workspace behavior match the CLI unless you override them.
+
 ## Quick Start
 
 ```python
@@ -18,8 +27,6 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
-
-`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so the SDK follows the same provider, model, tools, and workspace defaults as the CLI unless you override them.
 
 Use `async with` when possible so MCP connections and background cleanup work are closed before the event loop exits. If you manage the instance manually, call `await bot.aclose()` in a `finally` block.
 

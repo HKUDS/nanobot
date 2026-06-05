@@ -2,6 +2,19 @@
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
 
+Before configuring a chat app, make sure the local CLI path works:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+If that fails, fix installation, config, provider, or model setup first with
+[`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and
+[`troubleshooting.md`](./troubleshooting.md). Chat apps require
+`nanobot gateway` to stay running after the channel is configured.
+
+Most examples below are snippets to merge into `~/.nanobot/config.json`.
+
 | Channel | What you need |
 |---------|---------------|
 | **Telegram** | Bot token from @BotFather |

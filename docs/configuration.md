@@ -2,14 +2,23 @@
 
 Config file: `~/.nanobot/config.json`
 
-If this is your first install, start with [`quick-start.md`](./quick-start.md)
-and come back here when you need a specific provider, channel, tool, or runtime
-option. The JSON examples below are usually partial snippets to merge into your
-existing config, not full replacement files.
+This is the full reference. If this is your first install, start with
+[`quick-start.md`](./quick-start.md). If you are trying to choose a model or
+fix provider/model matching, use [`providers.md`](./providers.md) first and
+come back here for exact fields and advanced options.
+
+The JSON examples below are usually partial snippets to merge into your
+existing config, not full replacement files. For the mental model behind
+config, workspace, gateway, channels, sessions, tools, and memory, see
+[`concepts.md`](./concepts.md).
 
 The generated `config.json` uses camelCase keys such as `apiKey` and
 `intervalS`. snake_case keys are also accepted for compatibility, but the docs
 prefer camelCase because that is what nanobot writes back to disk.
+
+For setup and runtime failures, follow the diagnosis order in
+[`troubleshooting.md`](./troubleshooting.md) before changing multiple config
+areas at once.
 
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
@@ -147,7 +156,9 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
+| `volcengine_coding_plan` | LLM (VolcEngine Coding Plan subscription endpoint) | [volcengine.com](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) |
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
+| `byteplus_coding_plan` | LLM (BytePlus Coding Plan subscription endpoint) | [byteplus.com](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
@@ -164,7 +175,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
-| `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
+| `xiaomi_mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
 | `ant_ling` | LLM (Ant Ling / 蚂蚁百灵) | [developer.ant-ling.com](https://developer.ant-ling.com/en/docs/api-reference/openai/) |
 | `ollama` | LLM (local, Ollama) | — |
@@ -174,6 +185,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `nvidia` | LLM (NVIDIA NIM) | [build.nvidia.com](https://build.nvidia.com/) |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |

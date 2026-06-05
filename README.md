@@ -144,13 +144,13 @@
 - **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
 - **2026-02-16** 🦞 nanobot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
 - **2026-02-15** 🔑 nanobot now supports OpenAI Codex provider with OAuth login support.
-- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
+- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](./docs/configuration.md#mcp-model-context-protocol) for details.
 - **2026-02-13** 🎉 Released **v0.1.3.post7** — includes security hardening and multiple improvements. **Please upgrade to the latest version to address security issues**. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7) for more details.
 - **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/HKUDS/nanobot/discussions/566) about it!
 - **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
 - **2026-02-10** 🎉 Released **v0.1.3.post6** with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
 - **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
-- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
+- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](./docs/configuration.md#providers).
 - **2026-02-07** 🚀 Released **v0.1.3.post5** with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
 - **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
@@ -260,11 +260,14 @@ If that works, start an interactive chat:
 nanobot agent
 ```
 
-Need help with `PATH`, API keys, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md).
+Need help with `PATH`, API keys, provider/model matching, or JSON errors?
+See the fuller [Install and Quick Start](./docs/quick-start.md) and
+[Troubleshooting](./docs/troubleshooting.md).
 
 
-- Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
-- Want to run locally? Use [Atomic Chat](./docs/configuration.md#atomic-chat-local), [vLLM](./docs/configuration.md#vllm-local-openai-compatible), [Ollama](./docs/configuration.md#ollama-local), and [others](./docs/configuration.md#local-providers).
+- Want different LLM providers or local models? See [Providers and Models](./docs/providers.md)
+- Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run locally? See [Ollama](./docs/providers.md#ollama), [vLLM or another local OpenAI-compatible server](./docs/providers.md#vllm-or-other-local-openai-compatible-server), and the full [provider reference](./docs/configuration.md#providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
@@ -334,6 +337,11 @@ The WebUI is served by the WebSocket channel on port `8765` by default. The gate
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
+- Start from zero: [Install and Quick Start](./docs/quick-start.md)
+- Understand the runtime model: [Concepts](./docs/concepts.md)
+- Read the source-level map: [Architecture](./docs/architecture.md)
+- Choose a provider/model: [Providers and Models](./docs/providers.md)
+- Debug setup and runtime failures: [Troubleshooting](./docs/troubleshooting.md)
 - Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
 - Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
 - Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
