@@ -148,6 +148,49 @@ async def test_group_user_isolation_true_separates_sessions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_allow_from_skips_sender_check() -> None:
+    """Group allowlist bypasses sender-level allow_from check."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["other_user"], group_allow_from=["conv123"]
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    await channel._on_message(
+        "hello",
+        sender_id="unauthorized_user",
+        sender_name="Bob",
+        conversation_type="2",
+        conversation_id="conv123",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "unauthorized_user"
+    assert msg.chat_id == "group:conv123"
+
+
+@pytest.mark.asyncio
+async def test_group_not_in_allow_list_rejects_even_sender_allowed() -> None:
+    """Group not in allowlist is rejected even if sender is in allow_from."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["user1"], group_allow_from=[]
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    await channel._on_message(
+        "hello",
+        sender_id="user1",
+        sender_name="Alice",
+        conversation_type="2",
+        conversation_id="conv999",
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(bus.consume_inbound(), timeout=0.1)
+
+
+@pytest.mark.asyncio
 async def test_group_send_uses_group_messages_api() -> None:
     config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
     channel = DingTalkChannel(config, MessageBus())

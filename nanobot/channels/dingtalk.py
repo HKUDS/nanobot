@@ -14,7 +14,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import httpx
 from pydantic import Field
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
@@ -696,20 +696,40 @@ class DingTalkChannel(BaseChannel):
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
 
-            if is_group:
-                group_allow_list = getattr(self.config, "group_allow_from", None) or []
-                if "*" not in group_allow_list:
-                    if str(conversation_id) not in group_allow_list:
-                        self.logger.warning(
-                            "Access denied for group {}. "
-                            "Add it to groupAllowFrom list in config to grant access.",
-                            conversation_id,
-                        )
-                        return
-
             session_key = None
             if is_group and self.config.group_user_isolation:
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
+
+            if is_group:
+                group_allow_list = getattr(self.config, "group_allow_from", None) or []
+                if "*" in group_allow_list or str(conversation_id) in group_allow_list:
+                    # Group allowlisted; skip sender-level allow_from check
+                    meta: dict[str, Any] = {
+                        "sender_name": sender_name,
+                        "platform": "dingtalk",
+                        "conversation_type": conversation_type,
+                    }
+                    if self.supports_streaming:
+                        meta = {**meta, "_wants_stream": True}
+                    msg = InboundMessage(
+                        channel=self.name,
+                        sender_id=str(sender_id),
+                        chat_id=chat_id,
+                        content=str(content),
+                        media=[],
+                        metadata=meta,
+                        session_key_override=session_key,
+                    )
+                    await self.bus.publish_inbound(msg)
+                    return
+                self.logger.warning(
+                    "Access denied for group {}. "
+                    "Add it to groupAllowFrom list in config to grant access.",
+                    conversation_id,
+                )
+                return
+
+            # Single chat: use BaseChannel permission check
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
