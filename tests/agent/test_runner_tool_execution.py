@@ -7,12 +7,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
 
 class _DelayTool(Tool):
     def __init__(
@@ -59,8 +61,6 @@ class _DelayTool(Tool):
 
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
-
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.05, read_only=True, shared_events=shared_events)
@@ -98,8 +98,6 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_batch_exclusive_read_only_tools():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
-
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.03, read_only=True, shared_events=shared_events)
@@ -140,9 +138,72 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
 
 
 @pytest.mark.asyncio
-async def test_runner_blocks_repeated_external_fetches():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+async def test_runner_rejects_near_miss_tool_name_without_executing():
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_second_call: list[dict] = []
 
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_1",
+                        name="readFile",
+                        arguments={"path": "notes.txt"},
+                    )
+                ],
+                finish_reason="tool_calls",
+                usage={},
+            )
+        captured_second_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "read_file",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read notes"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert result.tools_used == ["readFile"]
+    assert shared_events == []
+    assistant_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "assistant" and msg.get("tool_calls")
+    ][0]
+    assert assistant_message["tool_calls"][0]["function"]["name"] == "readFile"
+    tool_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1"
+    ][0]
+    assert tool_message["name"] == "readFile"
+    assert "Tool 'readFile' not found" in tool_message["content"]
+    assert "Did you mean 'read_file'?" in tool_message["content"]
+    replayed_assistant = [
+        msg for msg in captured_second_call
+        if msg.get("role") == "assistant" and msg.get("tool_calls")
+    ][0]
+    assert replayed_assistant["tool_calls"][0]["function"]["name"] == "readFile"
+
+
+@pytest.mark.asyncio
+async def test_runner_blocks_repeated_external_fetches():
     provider = MagicMock()
     captured_final_call: list[dict] = []
     call_count = {"n": 0}
