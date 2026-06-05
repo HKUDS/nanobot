@@ -311,6 +311,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("goal", "Start a sustained objective (long-running task)"),
         BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
         BotCommand("model", "Switch runtime model preset"),
+        BotCommand("skill", "List enabled skills"),
         BotCommand("dream", "Run Dream memory consolidation now"),
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
@@ -320,7 +321,7 @@ class TelegramChannel(BaseChannel):
     # Regex for slash commands routed to AgentLoop via ``_forward_command``.
     # Hyphenated ``dream-*`` commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        r"^/(?:new|stop|restart|status|dream|history|goal|pairing|model)(?:@\w+)?(?:\s+.*)?$"
+        r"^/(?:new|stop|restart|status|dream|history|goal|pairing|model|skill)(?:@\w+)?(?:\s+.*)?$"
     )
 
     @classmethod
@@ -869,7 +870,9 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        if not self.is_allowed(self._sender_id(user)):
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
@@ -881,7 +884,10 @@ class TelegramChannel(BaseChannel):
         """Handle /help command for allowed users only."""
         if not update.message or not update.effective_user:
             return
-        if not self.is_allowed(self._sender_id(update.effective_user)):
+        user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(build_help_text())
 
@@ -890,6 +896,17 @@ class TelegramChannel(BaseChannel):
         """Build sender_id with username for allowlist matching."""
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
+
+    async def _send_pairing_code_if_private(self, sender_id: str, message, user) -> None:
+        if message.chat.type != "private":
+            return
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(message.chat_id),
+            content="",
+            metadata=self._build_message_metadata(message, user),
+            is_dm=True,
+        )
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
@@ -1149,6 +1166,7 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, message, user)
             return
         self._remember_thread_context(message)
 
@@ -1186,6 +1204,7 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, message, user)
             return
         self._remember_thread_context(message)
 

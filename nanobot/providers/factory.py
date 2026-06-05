@@ -44,8 +44,8 @@ def _make_provider_core(
     backend = spec.backend if spec else "openai_compat"
 
     if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
-            raise ValueError("Azure OpenAI requires api_key and api_base in config.")
+        if not p or not p.api_base:
+            raise ValueError("Azure OpenAI requires api_base in config.")
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
         needs_key = not (p and p.api_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
@@ -60,7 +60,7 @@ def _make_provider_core(
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
         provider = AzureOpenAIProvider(
-            api_key=p.api_key,
+            api_key=p.api_key or "",
             api_base=p.api_base,
             default_model=model,
         )

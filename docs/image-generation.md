@@ -23,7 +23,7 @@ The feature is disabled by default. Enable it in `~/.nanobot/config.json`, confi
 }
 ```
 
-See [Provider Notes](#provider-notes) for AIHubMix, MiniMax, Gemini, Ollama, StepFun, and Zhipu configuration examples.
+See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Ollama, StepFun, and Zhipu configuration examples.
 
 > [!TIP]
 > Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
@@ -46,7 +46,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -83,6 +83,46 @@ OpenRouter uses a chat-completions style image response. Configure:
 ```
 
 Use a model that supports image generation and image editing if you want reference-image edits.
+
+### Custom (OpenAI-compatible)
+
+Use the `custom` provider for services that implement the synchronous OpenAI Images API:
+
+```text
+POST /v1/images/generations
+```
+
+The response must include generated images in `data[].b64_json` or `data[].url`. Native prediction APIs, such as Replicate's `/v1/models/{owner}/{model}/predictions`, are not directly compatible unless you put an OpenAI-compatible gateway in front of them.
+
+Configure:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "${CUSTOM_IMAGE_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "custom",
+      "model": "your-model-name"
+    }
+  }
+}
+```
+
+The `apiBase` is required. The provider sends requests to `{apiBase}/images/generations` using the OpenAI Images API format with `response_format: "b64_json"`. The `apiKey` is optional for local or unauthenticated endpoints. Reference-image edits are not supported by the generic `custom` provider.
+
+`extraBody` can adapt provider-specific quirks because it is merged last into the request body. Examples:
+
+- Agnes AI documents URL responses, so use `"extraBody": {"response_format": "url"}`.
+- Together AI documents `"response_format": "base64"`, so override the default.
+- Volcengine Ark Seedream models may require size hints such as `"2K"`, `"3K"`, `"4K"`, or explicit dimensions. Set `tools.imageGeneration.defaultImageSize` or `providers.custom.extraBody.size` to a value supported by the selected model.
+
+For compatibility with the default nanobot setting, custom maps `defaultImageSize: "1K"` to `1024x1024`. Other explicit size hints are passed through unchanged.
 
 ### AIHubMix
 
@@ -324,7 +364,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
+| `unsupported image generation provider` | Use `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, or `zhipu` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |

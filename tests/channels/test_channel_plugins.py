@@ -1016,6 +1016,8 @@ async def test_validate_allow_from_allows_empty_list():
 
     # Should not raise — empty list defers to pairing store
     mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config.allow_from == []
 
 
 @pytest.mark.asyncio
@@ -1033,6 +1035,8 @@ async def test_validate_allow_from_passes_with_asterisk():
 
     # Should not raise
     mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config.allow_from == ["*"]
 
 
 @pytest.mark.asyncio
@@ -1049,6 +1053,8 @@ async def test_validate_allow_from_allows_empty_dict_allow_from():
     mgr._dispatch_task = None
 
     mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config["allow_from"] == []
 
 
 @pytest.mark.asyncio
@@ -1079,6 +1085,8 @@ async def test_validate_allow_from_allows_missing_allow_from():
 
     # Should not raise — pairing-only mode
     mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert "allow_from" not in mgr.channels["test"].config
 
 
 @pytest.mark.asyncio
@@ -1206,6 +1214,8 @@ async def test_start_channel_logs_error_on_failure():
 
     # Should not raise, just log error
     await mgr._start_channel("failing", ch)
+    assert mgr.channels == {}
+    assert mgr._dispatch_task is None
 
 
 @pytest.mark.asyncio
@@ -1237,6 +1247,8 @@ async def test_stop_all_handles_channel_exception():
 
     # Should not raise even if channel.stop() raises
     await mgr.stop_all()
+    assert list(mgr.channels) == ["stopfailing"]
+    assert mgr._dispatch_task is None
 
 
 @pytest.mark.asyncio

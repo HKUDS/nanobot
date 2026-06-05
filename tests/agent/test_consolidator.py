@@ -9,6 +9,7 @@ from nanobot.agent.memory import (
     Consolidator,
     MemoryStore,
 )
+from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
 from nanobot.utils.prompt_templates import render_template
 
@@ -497,11 +498,12 @@ class TestCompactIdleSession:
 
         # Use a slow LLM response to ensure the lock is held while we check
         started = asyncio.Event()
+        release_chat = asyncio.Event()
 
         async def slow_chat(**kwargs):
             started.set()
-            await asyncio.sleep(0.1)
-            return MagicMock(content="Summary.", finish_reason="stop")
+            await release_chat.wait()
+            return LLMResponse(content="Summary.", finish_reason="stop")
 
         mock_provider.chat_with_retry = slow_chat
 
@@ -520,6 +522,7 @@ class TestCompactIdleSession:
         )
         await started.wait()
         assert lock.locked()
+        release_chat.set()
         await task
         assert not lock.locked()
 

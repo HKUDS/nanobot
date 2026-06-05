@@ -6,13 +6,14 @@ import asyncio
 import inspect
 import os
 from contextlib import suppress
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -272,6 +273,57 @@ class AgentRunner:
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
+        context = AgentRunHookContext(messages=deepcopy(messages))
+
+        try:
+            await hook.before_run(context)
+            result = await self._run_core(spec, hook, messages)
+        except asyncio.CancelledError as exc:
+            context.messages = deepcopy(messages)
+            context.stop_reason = "cancelled"
+            context.error = None
+            context.exception = exc
+            raise
+        except Exception as exc:
+            context.messages = deepcopy(messages)
+            context.stop_reason = "error"
+            context.error = f"Error: {type(exc).__name__}: {exc}"
+            context.exception = exc
+            await hook.on_error(context)
+            raise
+        else:
+            context.messages = deepcopy(result.messages)
+            context.final_content = result.final_content
+            context.tools_used = list(result.tools_used)
+            context.usage = dict(result.usage)
+            context.stop_reason = result.stop_reason
+            context.error = result.error
+            context.tool_events = deepcopy(result.tool_events)
+            context.had_injections = result.had_injections
+            context.exception = None
+            if context.error is not None:
+                await hook.on_error(context)
+            await hook.after_run(context)
+            return result
+        finally:
+            context.messages = deepcopy(messages)
+            if context.exception is None:
+                await hook.on_finally(context)
+            else:
+                try:
+                    await hook.on_finally(context)
+                except Exception:
+                    logger.exception(
+                        "AgentHook.on_finally error after {}",
+                        context.stop_reason or "run exception",
+                    )
+
+    async def _run_core(
+        self,
+        spec: AgentRunSpec,
+        hook: AgentHook,
+        messages: list[dict[str, Any]],
+    ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}

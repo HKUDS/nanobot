@@ -233,7 +233,7 @@ async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
         assert on_stream_end is not None
         await on_stream("planning")
         await on_stream_end(resuming=True)
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0)
         await on_stream(" final")
         await on_stream_end(resuming=False)
         return "planning final"

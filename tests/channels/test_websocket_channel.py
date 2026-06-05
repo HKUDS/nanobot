@@ -295,6 +295,87 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
 
 
 @pytest.mark.asyncio
+async def test_webui_message_envelope_persists_user_transcript_for_refresh(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    async def answer_during_publish(_msg: Any) -> None:
+        await channel.send(OutboundMessage(channel="websocket", chat_id="chat-1", content="hi back"))
+
+    bus.publish_inbound.side_effect = answer_during_publish
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
+    )
+
+    lines = read_transcript_lines("websocket:chat-1")
+    assert [line["event"] for line in lines] == ["user", "message"]
+
+    body = build_webui_thread_response("websocket:chat-1")
+    assert body is not None
+    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
+    assert [message["content"] for message in body["messages"]] == ["hello", "hi back"]
+
+
+@pytest.mark.asyncio
+async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nanobot.webui.transcript import read_transcript_lines
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-1", "content": "/stop", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == "/stop"
+    assert read_transcript_lines("websocket:chat-1") == []
+
+
+@pytest.mark.asyncio
+async def test_webui_user_transcript_append_failure_does_not_block_inbound(
+    bus: MagicMock,
+    monkeypatch,
+) -> None:
+    def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nanobot.channels.websocket.append_transcript_object", fail_append)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.chat_id == "chat-1"
+    assert msg.content == "hello"
+
+
+@pytest.mark.asyncio
 async def test_plain_websocket_message_does_not_mark_webui(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = MagicMock()
@@ -686,6 +767,7 @@ async def test_send_missing_connection_is_noop_without_error() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     msg = OutboundMessage(channel="websocket", chat_id="missing", content="x")
     await channel.send(msg)
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1006,7 +1088,7 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
     await channel.send_reasoning_delta("unattached", "thinking", None)
     await channel.send_reasoning_end("unattached", None)
-    # No subscribers, no exception, no send.
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1299,6 +1381,7 @@ async def test_send_delta_missing_connection_is_noop() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
     # No exception, no error — just a no-op
     await channel.send_delta("nonexistent", "chunk", {"_stream_delta": True, "_stream_id": "s1"})
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1308,6 +1391,7 @@ async def test_stop_is_idempotent() -> None:
     # stop() before start() should not raise
     await channel.stop()
     await channel.stop()
+    assert channel._subs == {}
 
 
 @pytest.mark.asyncio
@@ -1489,7 +1573,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         providers = {provider["name"]: provider for provider in body["providers"]}
         assert providers["openai"]["configured"] is True
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
-        assert providers["azure_openai"]["api_key_required"] is True
+        assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
         assert providers["skywork"]["label"] == "Skywork"
@@ -2408,3 +2492,47 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert len(body["messages"]) == 1
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["content"] == "hi"
+
+
+def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    key = "websocket:c-legacy"
+    session = sessions.get_or_create(key)
+    session.add_message("user", "legacy question")
+    session.add_message("assistant", "legacy answer")
+    sessions.save(session)
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "c-legacy", "text": "legacy answer"},
+    )
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
+    )
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
+    assert [message["content"] for message in body["messages"]] == [
+        "legacy question",
+        "legacy answer",
+    ]

@@ -483,7 +483,12 @@ class FeishuChannel(BaseChannel):
 
         for mention in mentions:
             key = mention.key or None
-            if not key or key not in text:
+            if not key:
+                continue
+            # Feishu placeholders are numbered keys like @_user_1. Keep
+            # punctuation-adjacent mentions valid without matching @_user_10.
+            pattern = rf"{re.escape(key)}(?![A-Za-z0-9_])"
+            if not re.search(pattern, text):
                 continue
 
             user_id_obj = mention.id or None
@@ -502,7 +507,40 @@ class FeishuChannel(BaseChannel):
             else:
                 replacement = f"@{name}"
 
-            text = text.replace(key, replacement)
+            text = re.sub(pattern, replacement, text)
+
+        return text
+
+    def _is_bot_mention_event(self, mention: Any) -> bool:
+        mid = getattr(mention, "id", None)
+        if not mid:
+            return False
+
+        mention_open_id = getattr(mid, "open_id", None) or ""
+        bot_open_id = getattr(self, "_bot_open_id", None) or ""
+        if bot_open_id:
+            return mention_open_id == bot_open_id
+
+        # Fallback heuristic when bot open_id is unavailable.
+        return not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_")
+
+    def _strip_leading_bot_mention(
+        self, text: str, mentions: list[MentionEvent] | None
+    ) -> str:
+        """Remove a required leading bot mention before slash command routing."""
+        if not mentions or not text:
+            return text
+
+        candidate = text.lstrip()
+        for mention in mentions:
+            key = getattr(mention, "key", None) or ""
+            if not key or not re.match(rf"{re.escape(key)}(?![A-Za-z0-9_])", candidate):
+                continue
+            if not self._is_bot_mention_event(mention):
+                continue
+
+            stripped = candidate[len(key) :].strip()
+            return stripped or text
 
         return text
 
@@ -513,17 +551,8 @@ class FeishuChannel(BaseChannel):
             return True
 
         for mention in getattr(message, "mentions", None) or []:
-            mid = getattr(mention, "id", None)
-            if not mid:
-                continue
-            mention_open_id = getattr(mid, "open_id", None) or ""
-            if self._bot_open_id:
-                if mention_open_id == self._bot_open_id:
-                    return True
-            else:
-                # Fallback heuristic when bot open_id is unavailable
-                if not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_"):
-                    return True
+            if self._is_bot_mention_event(mention):
+                return True
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
@@ -1747,6 +1776,7 @@ class FeishuChannel(BaseChannel):
                 text = content_json.get("text", "")
                 if text:
                     mentions = getattr(message, "mentions", None)
+                    text = self._strip_leading_bot_mention(text, mentions)
                     text = self._resolve_mentions(text, mentions)
                     content_parts.append(text)
 
