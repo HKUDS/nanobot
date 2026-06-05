@@ -996,6 +996,8 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
             body["size"] = size
 
         body.update(self.extra_body)
+        # Drop null-valued params so extraBody can opt out of defaults like response_format.
+        body = {key: value for key, value in body.items() if value is not None}
 
         logger.info("OpenAI Images API request: POST {}/images/generations body={}", self.api_base, body)
 
