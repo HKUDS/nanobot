@@ -609,9 +609,6 @@ class WeixinChannel(BaseChannel):
         if not from_user_id:
             return
 
-        if not self.is_allowed(from_user_id):
-            return
-
         # Deduplication by message_id
         if msg_id in self._processed_ids:
             return
@@ -619,8 +616,51 @@ class WeixinChannel(BaseChannel):
         while len(self._processed_ids) > 1000:
             self._processed_ids.popitem(last=False)
 
-        # Cache context_token (required for all replies — inbound.ts:23-27)
         ctx_token = msg.get("context_token", "")
+        if not self.is_allowed(from_user_id):
+            if from_user_id.endswith("@chatroom"):
+                await self._handle_message(
+                    sender_id=from_user_id,
+                    chat_id=from_user_id,
+                    content="",
+                    metadata={"message_id": msg_id},
+                    is_dm=False,
+                )
+                return
+
+            if not ctx_token:
+                self.logger.warning(
+                    "Access denied for sender {}; cannot send WeChat pairing code without context_token",
+                    from_user_id,
+                )
+                return
+
+            had_ctx_token = from_user_id in self._context_tokens
+            previous_ctx_token = self._context_tokens.get(from_user_id, "")
+            had_ctx_token_at = from_user_id in self._context_token_at
+            previous_ctx_token_at = self._context_token_at.get(from_user_id, 0.0)
+            self._context_tokens[from_user_id] = ctx_token
+            self._context_token_at[from_user_id] = time.time()
+            try:
+                await self._handle_message(
+                    sender_id=from_user_id,
+                    chat_id=from_user_id,
+                    content="",
+                    metadata={"message_id": msg_id},
+                    is_dm=True,
+                )
+            finally:
+                if had_ctx_token:
+                    self._context_tokens[from_user_id] = previous_ctx_token
+                else:
+                    self._context_tokens.pop(from_user_id, None)
+                if had_ctx_token_at:
+                    self._context_token_at[from_user_id] = previous_ctx_token_at
+                else:
+                    self._context_token_at.pop(from_user_id, None)
+            return
+
+        # Cache context_token (required for all replies — inbound.ts:23-27)
         if ctx_token:
             self._context_tokens[from_user_id] = ctx_token
             self._context_token_at[from_user_id] = time.time()
