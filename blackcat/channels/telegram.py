@@ -879,7 +879,9 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        if not self.is_allowed(self._sender_id(user)):
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm blackcat.\n\n"
@@ -891,7 +893,10 @@ class TelegramChannel(BaseChannel):
         """Handle /help command for allowed users only."""
         if not update.message or not update.effective_user:
             return
-        if not self.is_allowed(self._sender_id(update.effective_user)):
+        user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, update.message, user)
             return
         await update.message.reply_text(build_help_text())
 
@@ -900,6 +905,17 @@ class TelegramChannel(BaseChannel):
         """Build sender_id with username for allowlist matching."""
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
+
+    async def _send_pairing_code_if_private(self, sender_id: str, message, user) -> None:
+        if message.chat.type != "private":
+            return
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(message.chat_id),
+            content="",
+            metadata=self._build_message_metadata(message, user),
+            is_dm=True,
+        )
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
@@ -1159,6 +1175,7 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, message, user)
             return
         self._remember_thread_context(message)
 
@@ -1196,6 +1213,7 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
+            await self._send_pairing_code_if_private(sender_id, message, user)
             return
         self._remember_thread_context(message)
 

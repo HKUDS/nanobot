@@ -130,14 +130,24 @@ async def test_process_message_caches_context_token_and_send_uses_it() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_message_ignores_unauthorized_sender_before_side_effects(tmp_path) -> None:
+async def test_process_message_pairs_unauthorized_sender_before_media_side_effects(
+    monkeypatch,
+    tmp_path,
+) -> None:
     bus = MessageBus()
     channel = WeixinChannel(
         WeixinConfig(enabled=True, allow_from=["allowed-user"], state_dir=str(tmp_path)),
         bus,
     )
+    channel._client = object()
+    channel._token = "token"
     channel._download_media_item = AsyncMock(return_value="/tmp/test.jpg")
     channel._start_typing = AsyncMock()
+    channel._get_typing_ticket = AsyncMock(return_value="")
+    channel._send_text = AsyncMock()
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
 
     await channel._process_message(
         {
@@ -154,6 +164,11 @@ async def test_process_message_ignores_unauthorized_sender_before_side_effects(t
     assert channel._context_tokens == {}
     channel._download_media_item.assert_not_awaited()
     channel._start_typing.assert_not_awaited()
+    channel._send_text.assert_awaited_once()
+    send_args = channel._send_text.await_args.args
+    assert send_args[0] == "blocked-user"
+    assert "ABCD-EFGH" in send_args[1]
+    assert send_args[2] == "ctx-blocked"
     assert bus.inbound_size == 0
 
 
