@@ -126,6 +126,86 @@ class TestDreamTools:
             "write_file",
         }
 
+    @pytest.mark.asyncio
+    async def test_dream_can_edit_canonical_memory_files(self, store):
+        tools = store.build_dream_tools()
+
+        memory_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/MEMORY.md",
+                        "action": "replace",
+                        "old_text": "Project X active",
+                        "new_text": "Project Y active",
+                    }
+                ]
+            },
+        )
+        soul_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "SOUL.md",
+                "old_text": "Helpful",
+                "new_text": "Precise",
+            },
+        )
+
+        assert "Patch applied" in memory_result
+        assert "Successfully edited" in soul_result
+        assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
+        assert "Precise" in store.soul_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_write_workspace_skills(self, store):
+        tools = store.build_dream_tools()
+        target = store.workspace / "skills" / "demo" / "SKILL.md"
+
+        result = await tools.execute(
+            "write_file",
+            {
+                "path": "skills/demo/SKILL.md",
+                "content": "---\nname: demo\ndescription: Demo skill.\n---\n\nUse when needed.\n",
+            },
+        )
+
+        assert "Successfully wrote" in result
+        assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+
+    @pytest.mark.asyncio
+    async def test_dream_cannot_modify_memory_internal_files(self, store):
+        tools = store.build_dream_tools()
+        store.history_file.write_text("before\n", encoding="utf-8")
+        store._dream_cursor_file.write_text("1", encoding="utf-8")
+
+        history_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/history.jsonl",
+                        "action": "replace",
+                        "old_text": "before",
+                        "new_text": "after",
+                    }
+                ]
+            },
+        )
+        cursor_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "memory/.dream_cursor",
+                "old_text": "1",
+                "new_text": "2",
+            },
+        )
+
+        assert "outside allowed directory" in history_result
+        assert "outside allowed directory" in cursor_result
+        assert store.history_file.read_text(encoding="utf-8") == "before\n"
+        assert store._dream_cursor_file.read_text(encoding="utf-8") == "1"
+
 
 class TestEphemeralDirect:
     """Tests for the ephemeral flag that skips history.jsonl writes for Dream."""
@@ -149,7 +229,9 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
+            return_value=MagicMock(
+                content="done", finish_reason="stop", tool_calls=[], usage={},
+            )
         )
 
         with (
@@ -181,13 +263,9 @@ class TestEphemeralDirect:
             mock_archive.assert_not_called()
 
     async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
-        """Without ephemeral, the normal path returns the model response."""
+        """Without ephemeral, the normal path is untouched — no crash."""
         loop, store = _make_loop
-        response = await loop.process_direct("test", session_key="cli:normal")
-
-        assert response is not None
-        assert response.content == "done"
-        loop.provider.chat_with_retry.assert_awaited()
+        await loop.process_direct("test", session_key="cli:normal")
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""

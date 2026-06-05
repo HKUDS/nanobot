@@ -509,19 +509,19 @@ class MemoryStore:
         tools.register(ReadFileTool(
             workspace=workspace,
             allowed_dir=workspace,
-            extra_allowed_dirs=extra_read,
+            extra_read_allowed_dirs=extra_read,
             file_states=file_states,
         ))
         tools.register(EditFileTool(
             workspace=workspace,
-            allowed_dir=self.memory_dir,
-            extra_allowed_dirs=editable_roots,
+            allowed_dir=self.memory_file,
+            extra_write_allowed_dirs=editable_roots,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
-            allowed_dir=self.memory_dir,
-            extra_allowed_dirs=editable_roots,
+            allowed_dir=self.memory_file,
+            extra_write_allowed_dirs=editable_roots,
             file_states=file_states,
         ))
         tools.register(WriteFileTool(
