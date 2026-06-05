@@ -212,6 +212,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
     assert any(cmd.command == "history" for cmd in app.bot.commands)
+    assert any(cmd.command == "skill" for cmd in app.bot.commands)
     assert any(cmd.command == "dream" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
@@ -1426,6 +1427,8 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/goal ship the feature")
     assert pat.fullmatch("/pairing list")
     assert pat.fullmatch("/model fast")
+    assert pat.fullmatch("/skill")
+    assert pat.fullmatch("/skill@blackcat_bot")
     assert pat.fullmatch("/new@blackcat_bot")
     assert pat.fullmatch("/goal@blackcat_bot refine objective")
     assert pat.fullmatch("/dream-log deadbeef") is None
@@ -1447,6 +1450,7 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+    assert "/skill" in help_text
     assert "/dream" in help_text
     assert "/dream-log" in help_text
     assert "/goal" in help_text
