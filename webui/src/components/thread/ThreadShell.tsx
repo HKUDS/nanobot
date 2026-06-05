@@ -25,8 +25,6 @@ import {
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
-  CliAppInfo,
-  McpPresetInfo,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -166,6 +164,63 @@ interface PendingFirstMessage {
   options?: SendOptions;
 }
 
+interface InstalledSettingItemsOptions<Payload, Item> {
+  token: string;
+  eventName: string;
+  fetchPayload: (token: string) => Promise<Payload>;
+  isPayload: (value: unknown) => value is Payload;
+  selectItems: (payload: Payload) => Item[];
+}
+
+function useInstalledSettingItems<Payload, Item>({
+  token,
+  eventName,
+  fetchPayload,
+  isPayload,
+  selectItems,
+}: InstalledSettingItemsOptions<Payload, Item>): Item[] {
+  const [items, setItems] = useState<Item[]>([]);
+
+  const refresh = useCallback(async (isCancelled?: () => boolean) => {
+    try {
+      const payload = await fetchPayload(token);
+      if (!isCancelled?.()) setItems(selectItems(payload));
+    } catch {
+      if (!isCancelled?.()) setItems([]);
+    }
+  }, [fetchPayload, selectItems, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void refresh(() => cancelled);
+
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    };
+    const refreshOnChanged = (event: Event) => {
+      const payload = (event as CustomEvent<unknown>).detail;
+      if (isPayload(payload)) {
+        setItems(selectItems(payload));
+        return;
+      }
+      void refresh();
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    window.addEventListener(eventName, refreshOnChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+      window.removeEventListener(eventName, refreshOnChanged);
+    };
+  }, [eventName, isPayload, refresh, selectItems]);
+
+  return items;
+}
+
 export function ThreadShell({
   session,
   title,
@@ -200,8 +255,20 @@ export function ThreadShell({
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
-  const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
-  const [mcpPresets, setMcpPresets] = useState<McpPresetInfo[]>([]);
+  const cliApps = useInstalledSettingItems({
+    token,
+    eventName: CLI_APPS_CHANGED_EVENT,
+    fetchPayload: fetchCliApps,
+    isPayload: isCliAppsPayload,
+    selectItems: installedCliAppsFromPayload,
+  });
+  const mcpPresets = useInstalledSettingItems({
+    token,
+    eventName: MCP_PRESETS_CHANGED_EVENT,
+    fetchPayload: fetchMcpPresets,
+    isPayload: isMcpPresetsPayload,
+    selectItems: installedMcpPresetsFromPayload,
+  });
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -436,94 +503,6 @@ export function ThreadShell({
       cancelled = true;
     };
   }, [token]);
-
-  const refreshCliApps = useCallback(async () => {
-    try {
-      const payload = await fetchCliApps(token);
-      setCliApps(installedCliAppsFromPayload(payload));
-    } catch {
-      setCliApps([]);
-    }
-  }, [token]);
-
-  const refreshMcpPresets = useCallback(async () => {
-    try {
-      const payload = await fetchMcpPresets(token);
-      setMcpPresets(installedMcpPresetsFromPayload(payload));
-    } catch {
-      setMcpPresets([]);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const payload = await fetchCliApps(token);
-        if (!cancelled) setCliApps(installedCliAppsFromPayload(payload));
-      } catch {
-        if (!cancelled) setCliApps([]);
-      }
-    };
-    load();
-
-    const refreshOnFocus = () => {
-      if (document.visibilityState === "hidden") return;
-      void refreshCliApps();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    const refreshOnCliAppsChanged = (event: Event) => {
-      const payload = (event as CustomEvent<unknown>).detail;
-      if (isCliAppsPayload(payload)) {
-        setCliApps(installedCliAppsFromPayload(payload));
-        return;
-      }
-      void refreshCliApps();
-    };
-    window.addEventListener(CLI_APPS_CHANGED_EVENT, refreshOnCliAppsChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-      window.removeEventListener(CLI_APPS_CHANGED_EVENT, refreshOnCliAppsChanged);
-    };
-  }, [refreshCliApps, token]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const payload = await fetchMcpPresets(token);
-        if (!cancelled) setMcpPresets(installedMcpPresetsFromPayload(payload));
-      } catch {
-        if (!cancelled) setMcpPresets([]);
-      }
-    };
-    load();
-
-    const refreshOnFocus = () => {
-      if (document.visibilityState === "hidden") return;
-      void refreshMcpPresets();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    const refreshOnMcpPresetsChanged = (event: Event) => {
-      const payload = (event as CustomEvent<unknown>).detail;
-      if (isMcpPresetsPayload(payload)) {
-        setMcpPresets(installedMcpPresetsFromPayload(payload));
-        return;
-      }
-      void refreshMcpPresets();
-    };
-    window.addEventListener(MCP_PRESETS_CHANGED_EVENT, refreshOnMcpPresetsChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-      window.removeEventListener(MCP_PRESETS_CHANGED_EVENT, refreshOnMcpPresetsChanged);
-    };
-  }, [refreshMcpPresets, token]);
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[], options?: SendOptions) => {

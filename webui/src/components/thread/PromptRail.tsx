@@ -160,8 +160,7 @@ export function PromptRail({
       )}
       style={{ bottom: Math.max(80, bottomOffset) }}
     >
-      {markers.map((marker) => {
-        const index = markers.indexOf(marker);
+      {markers.map((marker, index) => {
         const active = marker.ids.includes(activePromptId ?? "");
         const nearActive = activeMarkerIndex < 0 || Math.abs(index - activeMarkerIndex) <= 1;
         return (
