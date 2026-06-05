@@ -485,7 +485,9 @@ class FeishuChannel(BaseChannel):
             key = mention.key or None
             if not key:
                 continue
-            pattern = rf"{re.escape(key)}(?=\s|$)"
+            # Feishu placeholders are numbered keys like @_user_1. Keep
+            # punctuation-adjacent mentions valid without matching @_user_10.
+            pattern = rf"{re.escape(key)}(?![A-Za-z0-9_])"
             if not re.search(pattern, text):
                 continue
 
@@ -532,7 +534,7 @@ class FeishuChannel(BaseChannel):
         candidate = text.lstrip()
         for mention in mentions:
             key = getattr(mention, "key", None) or ""
-            if not key or not re.match(rf"{re.escape(key)}(?=\s|$)", candidate):
+            if not key or not re.match(rf"{re.escape(key)}(?![A-Za-z0-9_])", candidate):
                 continue
             if not self._is_bot_mention_event(mention):
                 continue
