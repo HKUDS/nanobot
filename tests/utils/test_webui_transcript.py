@@ -5,6 +5,7 @@ from __future__ import annotations
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_transcript_object,
+    build_webui_thread_response,
     read_transcript_lines,
     replay_transcript_to_ui_messages,
 )
@@ -64,6 +65,98 @@ def test_replay_uses_stream_end_final_text() -> None:
     )
 
     assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
+
+
+def test_build_response_backfills_legacy_sse_only_transcripts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-legacy"
+    for ev in (
+        {"event": "delta", "chat_id": "t-legacy", "text": "first answer"},
+        {"event": "stream_end", "chat_id": "t-legacy"},
+        {"event": "turn_end", "chat_id": "t-legacy"},
+        {"event": "message", "chat_id": "t-legacy", "text": "second answer"},
+        {"event": "turn_end", "chat_id": "t-legacy"},
+    ):
+        append_transcript_object(key, ev)
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": "second question"},
+            {"role": "assistant", "content": "second answer"},
+        ],
+    )
+
+    assert out is not None
+    assert [message["role"] for message in out["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert [message["content"] for message in out["messages"]] == [
+        "first question",
+        "first answer",
+        "second question",
+        "second answer",
+    ]
+
+
+def test_backfill_does_not_duplicate_existing_user_transcript(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-current"
+    for ev in (
+        {"event": "user", "chat_id": "t-current", "text": "already stored"},
+        {"event": "message", "chat_id": "t-current", "text": "answer"},
+        {"event": "turn_end", "chat_id": "t-current"},
+    ):
+        append_transcript_object(key, ev)
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[{"role": "user", "content": "already stored"}],
+    )
+
+    assert out is not None
+    assert [message["role"] for message in out["messages"]] == ["user", "assistant"]
+    assert out["messages"][0]["content"] == "already stored"
+
+
+def test_backfill_does_not_misalign_when_session_only_has_transcript_tail(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-tail"
+    for ev in (
+        {"event": "message", "chat_id": "t-tail", "text": "old answer"},
+        {"event": "turn_end", "chat_id": "t-tail"},
+        {"event": "message", "chat_id": "t-tail", "text": "tail answer"},
+        {"event": "turn_end", "chat_id": "t-tail"},
+    ):
+        append_transcript_object(key, ev)
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": "tail question"},
+            {"role": "assistant", "content": "tail answer"},
+        ],
+    )
+
+    assert out is not None
+    assert [message["role"] for message in out["messages"]] == [
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert [message["content"] for message in out["messages"]] == [
+        "old answer",
+        "tail question",
+        "tail answer",
+    ]
 
 
 def test_replay_infers_video_media_from_attachment_name() -> None:
