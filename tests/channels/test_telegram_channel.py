@@ -1360,6 +1360,23 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_command_pairs_unauthorized_private_user(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._forward_command(_make_telegram_update(text="/new", chat_type="private"), None)
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -1439,55 +1456,69 @@ async def test_on_help_includes_restart_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_start_ignores_unauthorized_user_silently() -> None:
+async def test_on_start_sends_pairing_code_to_unauthorized_private_user(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
         MessageBus(),
     )
+    channel._app = _FakeApp(lambda: None)
     update = _make_telegram_update(text="/start", chat_type="private")
     update.message.reply_text = AsyncMock()
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
 
     await channel._on_start(update, None)
 
     update.message.reply_text.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_on_help_ignores_unauthorized_user_silently() -> None:
+async def test_on_help_sends_pairing_code_to_unauthorized_private_user(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
         MessageBus(),
     )
+    channel._app = _FakeApp(lambda: None)
     update = _make_telegram_update(text="/help", chat_type="private")
     update.message.reply_text = AsyncMock()
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
 
     await channel._on_help(update, None)
 
     update.message.reply_text.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_on_message_ignores_unauthorized_user_before_side_effects() -> None:
+async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
+    monkeypatch,
+) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
         MessageBus(),
     )
     channel._app = _FakeApp(lambda: None)
     started_typing: list[str] = []
-    handled: list[dict] = []
     channel._start_typing = lambda chat_id: started_typing.append(chat_id)
     channel._add_reaction = AsyncMock(return_value=None)
-
-    async def capture_handle(**kwargs) -> None:
-        handled.append(kwargs)
-
-    channel._handle_message = capture_handle
+    channel._download_message_media = AsyncMock(return_value=([], []))
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
 
     await channel._on_message(_make_telegram_update(text="hello", chat_type="private"), None)
 
     assert started_typing == []
     channel._add_reaction.assert_not_awaited()
-    assert handled == []
+    channel._download_message_media.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio
