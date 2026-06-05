@@ -44,6 +44,12 @@ class TestResolveMentions:
         assert "@_user_1" not in result
         assert "@_user_2" not in result
 
+    def test_mention_before_punctuation_replaced(self):
+        text = "hello @_user_1, are you there?"
+        mentions = [_mention("@_user_1", "Alice", open_id="ou_a")]
+        result = FeishuChannel._resolve_mentions(text, mentions)
+        assert result == "hello @Alice (ou_a), are you there?"
+
     def test_no_mentions_returns_text(self):
         assert FeishuChannel._resolve_mentions("hello world", None) == "hello world"
         assert FeishuChannel._resolve_mentions("hello world", []) == "hello world"
