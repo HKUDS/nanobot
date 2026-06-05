@@ -999,7 +999,7 @@ class OpenAICompatProvider(LLMProvider):
             if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
-            if not reasoning_content and msg0.get("reasoning"):
+            if reasoning_content is None and msg0.get("reasoning"):
                 reasoning_content = self._extract_text_content(msg0.get("reasoning"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
@@ -1011,7 +1011,7 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason = str(ch_map["finish_reason"])
                 if not content:
                     content = self._extract_text_content(m.get("content"))
-                if not reasoning_content:
+                if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
 
             parsed_tool_calls = []
@@ -1074,8 +1074,8 @@ class OpenAICompatProvider(LLMProvider):
                 function_provider_specific_fields=fn_prov,
             ))
 
-        reasoning_content = getattr(msg, "reasoning_content", None) or None
-        if not reasoning_content and getattr(msg, "reasoning", None):
+        reasoning_content = getattr(msg, "reasoning_content", None)
+        if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
 
         return LLMResponse(

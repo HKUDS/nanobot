@@ -51,6 +51,32 @@ def test_parse_dict_reasoning_content_none_when_absent() -> None:
     assert result.reasoning_content is None
 
 
+def test_parse_dict_reasoning_content_empty_string_preserved() -> None:
+    """reasoning_content=\"\" is preserved, not coerced to None.
+
+    Some providers (e.g. DeepSeek) require the reasoning_content key to
+    be present in subsequent requests even when empty.  Coercing \"\" to
+    None drops the key downstream and causes API errors.
+    """
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {
+                "content": "answer",
+                "reasoning_content": "",
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+    }
+
+    result = provider._parse(response)
+
+    assert result.reasoning_content == ""
+
+
 # ── _parse_chunks: streaming dict branch ─────────────────────────────────
 
 
