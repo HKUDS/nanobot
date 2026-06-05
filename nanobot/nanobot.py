@@ -101,4 +101,13 @@ class Nanobot:
             messages=capture.messages,
         )
 
+    async def aclose(self) -> None:
+        """Release resources held by this instance (MCP connections, etc.)."""
+        await self._loop.close_mcp()
+
+    async def __aenter__(self) -> Nanobot:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
 
