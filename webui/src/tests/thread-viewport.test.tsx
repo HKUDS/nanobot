@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -207,7 +207,10 @@ describe("ThreadViewport", () => {
 
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to prompt: message 3" }));
+    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
+
+    fireEvent.click(targetPrompt);
 
     expect(scrollTo).toHaveBeenCalledWith({
       top: 1064,

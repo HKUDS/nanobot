@@ -19,6 +19,7 @@ interface PromptRailProps {
 interface PromptAnchor {
   id: string;
   label: string;
+  preview: string;
 }
 
 interface MeasuredPrompt extends PromptAnchor {
@@ -30,6 +31,7 @@ interface PromptMarker {
   count: number;
   ids: string[];
   label: string;
+  preview: string;
   topPercent: number;
 }
 
@@ -165,26 +167,46 @@ export function PromptRail({
           <button
             key={marker.ids.join("|")}
             type="button"
-            title={marker.label}
             aria-label={`Jump to prompt: ${marker.label}`}
             onClick={() => jumpToPrompt(scrollRef.current, marker.ids[marker.ids.length - 1])}
             className={cn(
-              "absolute right-0 h-[3px] -translate-y-1/2 rounded-full",
-              "bg-foreground/20 transition-[background-color,opacity,transform,width] duration-200",
-              "hover:bg-blue-500/70 hover:opacity-100 hover:scale-x-110",
-              "focus-visible:bg-blue-500 focus-visible:opacity-100 focus-visible:scale-x-110",
+              "group/marker absolute right-0 h-5 -translate-y-1/2 overflow-visible rounded-full",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
-              marker.count > 1 && "bg-foreground/30",
-              active && "h-1 bg-foreground/65 opacity-80 shadow-sm",
-              !active && nearActive && "opacity-25 group-hover:opacity-55",
-              !active && !nearActive && !revealed && "opacity-0 group-hover:opacity-40",
-              !active && !nearActive && revealed && "opacity-35",
             )}
             style={{
               top: `${marker.topPercent}%`,
               width: markerWidth(marker.count, maxMarkerCount, active),
             }}
-          />
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "absolute right-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full",
+                "bg-foreground/20 transition-[background-color,opacity,transform,height] duration-200",
+                "group-hover/marker:bg-blue-500/70 group-hover/marker:opacity-100 group-hover/marker:scale-x-110",
+                "group-focus-visible/marker:bg-blue-500 group-focus-visible/marker:opacity-100 group-focus-visible/marker:scale-x-110",
+                marker.count > 1 && "bg-foreground/30",
+                active && "h-1 bg-foreground/65 opacity-80 shadow-sm",
+                !active && nearActive && "opacity-25 group-hover:opacity-55",
+                !active && !nearActive && !revealed && "opacity-0 group-hover:opacity-40",
+                !active && !nearActive && revealed && "opacity-35",
+              )}
+            />
+            <span
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute right-9 top-1/2 z-30 w-64 -translate-y-1/2 rounded-lg px-3 py-2 text-left",
+                "bg-background/95 text-xs leading-5 text-foreground shadow-lg ring-1 ring-border/80 backdrop-blur",
+                "opacity-0 translate-x-1 transition-[opacity,transform] duration-150",
+                "group-hover/marker:opacity-100 group-hover/marker:translate-x-0",
+                "group-focus-visible/marker:opacity-100 group-focus-visible/marker:translate-x-0",
+              )}
+            >
+              <span className="block max-h-24 overflow-hidden whitespace-pre-wrap break-words">
+                {marker.preview}
+              </span>
+            </span>
+          </button>
         );
       })}
     </div>
@@ -197,6 +219,7 @@ function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
     .map((message, index) => ({
       id: message.id,
       label: promptLabel(message.content, index),
+      preview: promptPreview(message.content, index),
     }));
 }
 
@@ -204,6 +227,12 @@ function promptLabel(content: string, index: number): string {
   const text = content.replace(/\s+/g, " ").trim();
   if (!text) return `Prompt ${index + 1}`;
   return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function promptPreview(content: string, index: number): string {
+  const text = content.replace(/\n{3,}/g, "\n\n").trim();
+  if (!text) return `Prompt ${index + 1}`;
+  return text.length > 320 ? `${text.slice(0, 317)}...` : text;
 }
 
 function measurePrompts(
@@ -243,12 +272,14 @@ function groupPromptMarkers(
       last.count += 1;
       last.ids.push(prompt.id);
       last.label = groupedPromptLabel(last.count, prompt.label);
+      last.preview = groupedPromptPreview(last.count, prompt.preview);
       continue;
     }
     groups.push({
       count: 1,
       ids: [prompt.id],
       label: prompt.label,
+      preview: prompt.preview,
       topPercent: prompt.topPercent,
     });
   }
@@ -289,6 +320,9 @@ function bucketPromptMarkers(
       label: bucket.length === 1
         ? latest.label
         : groupedPromptLabel(bucket.length, latest.label),
+      preview: bucket.length === 1
+        ? latest.preview
+        : groupedPromptPreview(bucket.length, latest.preview),
       topPercent,
     }];
   });
@@ -313,6 +347,10 @@ function activePromptForScroll(
 
 function groupedPromptLabel(count: number, latestLabel: string): string {
   return `${count} prompts, latest: ${latestLabel}`;
+}
+
+function groupedPromptPreview(count: number, latestPreview: string): string {
+  return `${count} prompts\n\n${latestPreview}`;
 }
 
 function markerWidth(count: number, maxCount: number, active: boolean): number {
