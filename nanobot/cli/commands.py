@@ -1581,16 +1581,25 @@ def _run_gateway(
                     recipients = cron.get("recipients", [])
                     errors = cron.get("errors", [])
 
+                    _cron_descriptions = {
+                        "abandoned_cart": "Email carrello abbandonato — clienti che hanno iniziato il checkout ma non hanno completato l'acquisto (attesa >1h)",
+                        "review_request": "Email richiesta recensione — clienti con ordine consegnato da >7 giorni senza recensione",
+                        "reengagement": "Email riattivazione — clienti attivi senza acquisti da >90 giorni e nessuna email negli ultimi 30",
+                    }
+
                     telegram_cfg = config.channels.telegram
                     tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
                     chat_id = str(tg_allow[0]) if tg_allow else ""
 
                     if chat_id:
                         icon = "⚠️" if errors else "✅"
-                        msg_text = (
-                            f"{icon} Cron email — {cron_name}\n"
-                            f"Inviate: {sent}"
-                        )
+                        description = _cron_descriptions.get(cron_name, cron_name)
+                        msg_text = f"{icon} {description}\nInviate: {sent}"
+                        if recipients:
+                            recipient_lines = "\n".join(f"  • {r}" for r in recipients[:10])
+                            msg_text += f"\nDestinatari:\n{recipient_lines}"
+                            if len(recipients) > 10:
+                                msg_text += f"\n  ... e altri {len(recipients) - 10}"
                         if errors:
                             error_lines = "\n".join(f"  • {e}" for e in errors[:5])
                             msg_text += f"\nErrori ({len(errors)}):\n{error_lines}"
