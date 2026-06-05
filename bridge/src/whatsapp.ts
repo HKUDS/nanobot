@@ -111,6 +111,13 @@ export class WhatsAppClient {
         console.log('\n📱 Scan this QR code with WhatsApp (Linked Devices):\n');
         qrcode.generate(qr, { small: true });
         this.options.onQR(qr);
+        // Also save raw QR to file for image generation
+        try {
+          const { writeFile } = await import('fs/promises');
+          const { join } = await import('path');
+          await writeFile(join(this.options.authDir, '..', 'qr-latest.txt'), qr);
+          console.log(`QR raw saved.`);
+        } catch {}
       }
 
       if (connection === 'close') {

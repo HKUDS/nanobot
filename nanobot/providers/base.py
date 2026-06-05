@@ -294,6 +294,10 @@ class LLMProvider(ABC):
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()
+        # An empty or bare "error calling llm:" message means the provider dropped
+        # the connection without a body — treat as transient so we retry.
+        if not err or err == "error calling llm:":
+            return True
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
 
     @classmethod

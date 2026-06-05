@@ -563,6 +563,34 @@ class AgentLoop:
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)
 
+    async def _build_fallback_callback(
+        self, msg: InboundMessage
+    ) -> Callable[[str], Awaitable[None]]:
+        """Build a fallback-notification callback that publishes to the message bus."""
+
+        async def _on_fallback(content: str) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_retry_wait"] = True
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _on_fallback
+
+    def _attach_fallback_callback(
+        self, msg: InboundMessage, callback: Callable[[str], Awaitable[None]]
+    ) -> None:
+        """Attach the fallback notification callback to the provider if it supports it."""
+        from nanobot.providers.fallback_provider import FallbackProvider
+        provider = self.runner.provider
+        if isinstance(provider, FallbackProvider):
+            provider.on_fallback = callback
+
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -1420,6 +1448,8 @@ class AgentLoop:
             ctx.on_progress = await self._build_bus_progress_callback(ctx.msg)
         if ctx.on_retry_wait is None:
             ctx.on_retry_wait = await self._build_retry_wait_callback(ctx.msg)
+        fallback_cb = await self._build_fallback_callback(ctx.msg)
+        self._attach_fallback_callback(ctx.msg, fallback_cb)
 
         return "ok"
 

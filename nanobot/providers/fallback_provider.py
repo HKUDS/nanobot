@@ -83,6 +83,8 @@ class FallbackProvider(LLMProvider):
         self._has_fallbacks = bool(fallback_presets)
         self._primary_failures = 0
         self._primary_tripped_at: float | None = None
+        # Set externally (e.g. by AgentLoop) to receive user-visible notifications.
+        self.on_fallback: Callable[[str], Any] | None = None
 
     @property
     def generation(self):
@@ -144,8 +146,13 @@ class FallbackProvider(LLMProvider):
         if self._primary_available():
             response = await call(self._primary, kwargs)
             if response.finish_reason != "error":
+                previously_tripped = self._primary_tripped_at is not None
                 self._primary_failures = 0
                 self._primary_tripped_at = None
+                if previously_tripped:
+                    await self._notify(
+                        f"✅ {primary_model} è di nuovo disponibile, continuo su di lui."
+                    )
                 return response
 
             if has_streamed is not None and has_streamed[0]:
@@ -183,10 +190,16 @@ class FallbackProvider(LLMProvider):
                     "Primary model '{}' circuit open, trying fallback '{}'",
                     primary_model, fallback_model,
                 )
+                await self._notify(
+                    f"⚠️ {primary_model} non disponibile (circuit open), passo a {fallback_model}."
+                )
             elif idx == 0:
                 logger.info(
                     "Primary model '{}' failed, trying fallback '{}'",
                     primary_model, fallback_model,
+                )
+                await self._notify(
+                    f"⚠️ {primary_model} ha restituito un errore, passo a {fallback_model}."
                 )
             else:
                 logger.info(
@@ -226,6 +239,10 @@ class FallbackProvider(LLMProvider):
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,
                 )
+                await self._notify(
+                    f"✅ {fallback_model} ha risposto correttamente. Continuo su questo modello "
+                    f"finché {primary_model} non torna disponibile."
+                )
                 return fallback_response
 
             last_response = fallback_response
@@ -248,6 +265,17 @@ class FallbackProvider(LLMProvider):
             finish_reason="error",
         )
 
+    async def _notify(self, message: str) -> None:
+        """Fire the on_fallback callback if set, ignoring any errors."""
+        if self.on_fallback is None:
+            return
+        try:
+            result = self.on_fallback(message)
+            if hasattr(result, "__await__"):
+                await result
+        except Exception:
+            pass
+
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
         if response.error_should_retry is False:
@@ -269,5 +297,9 @@ class FallbackProvider(LLMProvider):
         if status is not None and (status in {408, 409, 429} or 500 <= status <= 599):
             return True
         if kind in _FALLBACK_ERROR_KINDS:
+            return True
+        # Empty or bare "error calling llm:" means the provider dropped the connection
+        # without a body — always try fallback.
+        if not text or text == "error calling llm:":
             return True
         return any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS)

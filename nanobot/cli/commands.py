@@ -1,7 +1,9 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import datetime as _datetime
 import os
+import pathlib as _pathlib
 import select
 import signal
 import sys
@@ -1210,6 +1212,23 @@ def _run_gateway(
         except Exception as e:
             logger.error("customer_bot_send failed: {}", e)
 
+    async def _get_order_ref_from_stripe_session(stripe_session_id: str) -> str | None:
+        """Resolve a Stripe checkout session ID to a Foolish orderRef via the storefront API."""
+        import os as _os
+        import urllib.request as _req
+        import urllib.parse as _up
+        import json as _j
+        storefront_url = _os.environ.get("FOOLISH_WOO_BASE_URL", "https://thefoolishbutcher.com").rstrip("/")
+        url = f"{storefront_url}/api/stripe/session?session_id={_up.quote(stripe_session_id)}"
+        try:
+            loop = asyncio.get_event_loop()
+            res = await loop.run_in_executor(None, lambda: _req.urlopen(url, timeout=10))
+            data = _j.loads(res.read())
+            return data.get("orderRef") or None
+        except Exception as e:
+            logger.error("_get_order_ref_from_stripe_session failed: {}", e)
+            return None
+
     async def _cms_get_order_by_ref(order_ref: str) -> dict | None:
         """Fetch a Foolish order from Payload CMS by orderNumber."""
         import os as _os
@@ -1282,16 +1301,17 @@ def _run_gateway(
                 stripe_session = payload_param[8:] if payload_param.startswith("session_") else None
                 order = await _cms_get_order_by_ref(order_ref) if order_ref else None
                 if not order and stripe_session:
-                    # Try lookup by stripeSessionId if we add that field later; for now greet generically
-                    pass
+                    order_ref = await _get_order_ref_from_stripe_session(stripe_session)
+                    if order_ref:
+                        order = await _cms_get_order_by_ref(order_ref)
                 if order:
                     await _cms_patch_order(str(order["id"]), {"customerTelegramId": chat_id})
                     await _customer_bot_send(
                         chat_id,
-                        f"Ciao {customer_name} 👋\n\n"
-                        f"Sei collegato all'ordine <b>{order_ref}</b>.\n"
-                        f"Ti aggiornerò qui su produzione e spedizione.\n\n"
-                        f"— Alessandro, The Foolish Butcher",
+                        f"Ciao {customer_name}.\n\n"
+                        f"Ordine <b>{order_ref}</b> collegato.\n"
+                        f"Da qui ti aggiorno su spedizione e tracking. Se hai domande, scrivimi.\n\n"
+                        f"— Frank, The Foolish Butcher",
                     )
                     # Notify Alessandro
                     tg_allow = (config.channels.telegram.get("allowFrom") or []) if isinstance(config.channels.telegram, dict) else []
@@ -1305,17 +1325,15 @@ def _run_gateway(
                             )
                         ))
                 else:
-                    await _customer_bot_send(
-                        chat_id,
-                        "Non ho trovato un ordine con questo riferimento. Scrivi direttamente qui se hai bisogno.",
-                    )
+                    # Order not found — let Frank handle it conversationally
+                    text = f"[primo contatto — ordine non trovato per ref: {order_ref or stripe_session}] Ciao, sono {customer_name}."
+                    # falls through to the free-message handler below
             else:
-                await _customer_bot_send(
-                    chat_id,
-                    f"Ciao {customer_name}! Sono il canale diretto di The Foolish Butcher.\n"
-                    "Se hai acquistato, usa il link nell'email di conferma per collegarti al tuo ordine.",
-                )
-            return
+                # /start with no payload — open conversation
+                text = f"[primo contatto — nessun riferimento ordine] Ciao, sono {customer_name}."
+                # falls through to the free-message handler below
+            if text.startswith("/start"):
+                return  # order was found and handled above, nothing left to do
 
         # --- Free message → route through Frank as Foolish Butcher ---
         alessandros_chat = ""
@@ -1323,39 +1341,57 @@ def _run_gateway(
         if tg_allow:
             alessandros_chat = str(tg_allow[0])
 
-        system_context = (
-            "[Contesto: sei il canale clienti di The Foolish Butcher — Alessandro Boscarato, "
-            "artigiano di tattoo practice skin a Chieri, Torino. "
-            "Rispondi in italiano, tono diretto e artigianale, senza fronzoli corporate. "
-            "Se il cliente chiede dello stato dell'ordine o spedizione, "
-            "di' che Alessandro lo aggiornerà a breve. "
-            "Firma sempre come 'Alessandro — The Foolish Butcher'.]\n\n"
-            f"Messaggio cliente: {text}"
+        # The Frank persona and tone are defined in the always-loaded skill
+        # `foolish-customer-bot`. Pass only the raw customer message so Frank
+        # responds AS Frank TO the customer, not back to Alessandro.
+        customer_context = (
+            f"[canale: foolish_customer_bot | cliente: {customer_name} | chat_id: {chat_id}]\n"
+            f"{text}"
         )
         session_key = f"foolish_customer:{chat_id}"
         try:
             response = await asyncio.wait_for(
                 agent.process_direct(
-                    system_context,
+                    customer_context,
                     session_key=session_key,
-                    channel="api",
+                    channel="foolish_customer_bot",
                     chat_id=chat_id,
                 ),
                 timeout=30.0,
             )
-            reply = response.content if response else "Messaggio ricevuto, ti rispondo presto."
+            proposed = response.content if response else "Messaggio ricevuto, ti rispondo a breve."
         except Exception:
-            reply = "Messaggio ricevuto. Alessandro ti risponde appena possibile."
+            proposed = "Messaggio ricevuto. Ti rispondo a breve."
 
-        await _customer_bot_send(chat_id, reply)
+        # --- Approval flow (same pattern as WhatsApp) ---
+        # Save pending state per-customer, notify Alessandro, do NOT reply to customer yet.
+        import os as _os, json as _json_mod
+        pending_dir = _os.path.expanduser("~/.nanobot/memory")
+        _os.makedirs(pending_dir, exist_ok=True)
+        pending_path = _os.path.join(pending_dir, f"fb_pending_{chat_id.replace(':', '_')}.json")
+        with open(pending_path, "w", encoding="utf-8") as _f:
+            _json_mod.dump({
+                "chat_id": chat_id,
+                "proposed": proposed,
+                "customer_message": text,
+                "customer_name": customer_name,
+            }, _f, ensure_ascii=False, indent=2)
 
-        # Forward to Alessandro with context
+        short_id = chat_id[-4:] if len(chat_id) >= 4 else chat_id
         if alessandros_chat:
             asyncio.create_task(_deliver_to_channel(
                 OutboundMessage(
                     channel="telegram",
                     chat_id=alessandros_chat,
-                    content=f"💬 Messaggio cliente (Telegram {chat_id}):\n\"{text}\"\n\nRisposto: {reply[:200]}",
+                    content=(
+                        f"💬 Foolish Bot — {customer_name} (#{short_id})\n\n"
+                        f"Messaggio:\n{text}\n\n"
+                        f"💡 Proposta Frank:\n{proposed}\n\n"
+                        f"Rispondi:\n"
+                        f"• \"fb ok\" → invio la proposta\n"
+                        f"• \"fb [testo]\" → invio il testo che scrivi\n"
+                        f"• \"fb ignora\" → non rispondo"
+                    ),
                 )
             ))
 
@@ -1406,18 +1442,51 @@ def _run_gateway(
                     tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
                     chat_id = str(tg_allow[0]) if tg_allow else ""
 
+                    # Scrivi scribble in memoria per consapevolezza futura
+                    _order_ref = order.get('externalRef') or order.get('stripeSessionId', 'N/A')
+                    _customer = f"{order.get('customerName', 'N/A')} <{order.get('customerEmail', 'N/A')}>"
+                    _amount = f"{order.get('amount', 0):.2f} {order.get('currency', 'EUR')}"
+                    _cms_ok = "✅ registrato nel CMS" if not order.get('cmsError') else "🚨 NON registrato nel CMS"
+                    _scribble_dir = _pathlib.Path("/home/ab/.nanobot/memory/scribble")
+                    _scribble_dir.mkdir(parents=True, exist_ok=True)
+                    _today = _datetime.datetime.now().strftime("%Y-%m-%d")
+                    _scribble_path = _scribble_dir / f"ordini-{_today}.md"
+                    _scribble_line = (
+                        f"- [{_datetime.datetime.now().strftime('%H:%M')}] Ordine {_order_ref} — "
+                        f"{_customer} — {_amount} — {_cms_ok}\n"
+                        f"  Prodotti: {items_text.strip()}\n"
+                    )
+                    try:
+                        with open(_scribble_path, "a") as _f:
+                            _f.write(_scribble_line)
+                    except Exception as _e:
+                        logger.warning("foolish-storefront-order: scribble write failed: {}", _e)
+
                     if chat_id:
-                        msg_text = (
-                            f"🛒 Nuovo ordine — {order.get('externalRef', 'N/A')}\n\n"
-                            f"Cliente: {order.get('customerName', 'N/A')} "
-                            f"({order.get('customerEmail', 'N/A')})\n"
-                            f"Totale: {order.get('amount', 0):.2f} {order.get('currency', 'EUR')}\n\n"
-                            f"Prodotti:\n{items_text}"
-                        )
+                        cms_error = order.get("cmsError")
+                        if cms_error:
+                            msg_text = (
+                                f"🚨 ORDINE NON SALVATO NEL CMS — intervento manuale richiesto\n\n"
+                                f"Ordine: {_order_ref}\n"
+                                f"Cliente: {order.get('customerName', 'N/A')} ({order.get('customerEmail', 'N/A')})\n"
+                                f"Totale: {_amount}\n\n"
+                                f"Prodotti:\n{items_text}\n\n"
+                                f"⚠️ Il pagamento Stripe è andato a buon fine ma la registrazione nel CMS ha fallito dopo 4 tentativi.\n"
+                                f"Errore: {cms_error[:300]}"
+                            )
+                            logger.error("foolish-storefront-order: CMS creation failed for {}", _order_ref)
+                        else:
+                            msg_text = (
+                                f"🛒 Nuovo ordine — {_order_ref}\n\n"
+                                f"Cliente: {order.get('customerName', 'N/A')} "
+                                f"({order.get('customerEmail', 'N/A')})\n"
+                                f"Totale: {_amount}\n\n"
+                                f"Prodotti:\n{items_text}"
+                            )
                         asyncio.create_task(_deliver_to_channel(
                             OutboundMessage(channel="telegram", chat_id=chat_id, content=msg_text),
                         ))
-                        logger.info("foolish-storefront-order hook: notified telegram {}", chat_id)
+                        logger.info("foolish-storefront-order hook: notified telegram {} cmsError={}", chat_id, bool(cms_error))
 
                     body = _json.dumps({"ok": True})
                     resp = (

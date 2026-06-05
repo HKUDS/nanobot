@@ -305,6 +305,10 @@ class ToolsConfig(Base):
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+    subconscious_vault: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("subconsciousVault", "subconscious_vault"),
+    )  # Path to the Obsidian vault for the subconscious memory bridge
 
 
 class Config(BaseSettings):
