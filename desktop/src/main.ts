@@ -19,6 +19,10 @@ import {
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 
 import { UnixWebSocketClient } from "./unixWebSocket.js";
+import {
+  clearDesktopNotificationBadge,
+  handleDesktopNotificationFrame,
+} from "./notifications.js";
 
 type EngineStatus = "starting" | "ready" | "restarting" | "stopped" | "crashed";
 
@@ -547,6 +551,7 @@ function createWindow(): BrowserWindow {
   });
 
   win.once("ready-to-show", () => win.show());
+  win.on("focus", clearDesktopNotificationBadge);
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalIfSafe(url);
     return { action: "deny" };
@@ -622,7 +627,10 @@ function registerIpcHandlers(): void {
     const id = randomBytes(12).toString("hex");
     const client = new UnixWebSocketClient(runtime.socketPath, url, {
       onOpen: () => sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "open" }),
-      onMessage: (data) => sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "message", data }),
+      onMessage: (data) => {
+        handleDesktopNotificationFrame(data, { getWindow: () => mainWindow });
+        sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "message", data });
+      },
       onError: (message) => sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "error", message }),
       onClose: (code, reason) => {
         hostSockets.delete(id);
