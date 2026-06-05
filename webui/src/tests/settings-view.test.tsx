@@ -120,6 +120,7 @@ function renderSettingsView(
   options: {
     initialSection?: "overview" | "apps" | "advanced" | "models";
     onSettingsChange?: (payload: SettingsPayload) => void;
+    onNativeEngineRestart?: () => Promise<string>;
   } = {},
 ) {
   render(
@@ -131,6 +132,7 @@ function renderSettingsView(
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
+        onNativeEngineRestart={options.onNativeEngineRestart}
       />
     </ClientProvider>,
   );
@@ -765,5 +767,65 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
     expect(screen.getByText("Allow Full Access shell commands to reach services on this Mac.")).toBeInTheDocument();
+  });
+
+  it("refreshes settings with a fresh token after native engine restart", async () => {
+    const payload = {
+      ...settingsPayload(),
+      surface: "native" as const,
+      runtime_surface: "native" as const,
+      runtime_capabilities: {
+        can_restart_engine: true,
+        can_pick_folder: true,
+        can_open_logs: true,
+        can_export_diagnostics: true,
+      },
+    };
+    const restartedPayload = {
+      ...payload,
+      advanced: { ...payload.advanced, webui_allow_local_service_access: false },
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    };
+    const refreshedPayload = {
+      ...restartedPayload,
+      requires_restart: false,
+      restart_required_sections: [],
+    };
+    const restartEngine = vi.fn(async () => "fresh-token");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      if (url === "/api/settings" && auth === "Bearer fresh-token") {
+        return jsonResponse(refreshedPayload);
+      }
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (url === "/api/settings/network-safety/update?webui_allow_local_service_access=false&webui_default_access_mode=default") {
+        return jsonResponse(restartedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({
+      initialSection: "advanced",
+      onNativeEngineRestart: restartEngine,
+    });
+
+    expect(await screen.findByText("App safety")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer fresh-token" },
+        }),
+      ),
+    );
   });
 });

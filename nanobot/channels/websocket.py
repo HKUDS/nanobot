@@ -860,20 +860,21 @@ class WebSocketChannel(BaseChannel):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
-            return
         if msg.metadata.get("_goal_state_sync"):
-            blob = msg.metadata.get("goal_state")
-            await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+            if conns:
+                blob = msg.metadata.get("goal_state")
+                await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
             return
         if msg.metadata.get("_goal_status"):
-            status = msg.metadata.get("goal_status")
-            if status in ("running", "idle"):
-                started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
-                await self.send_goal_status(
-                    msg.chat_id,
-                    status,
-                    started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
-                )
+            if conns:
+                status = msg.metadata.get("goal_status")
+                if status in ("running", "idle"):
+                    started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
+                    await self.send_goal_status(
+                        msg.chat_id,
+                        status,
+                        started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
+                    )
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):
@@ -889,11 +890,12 @@ class WebSocketChannel(BaseChannel):
             )
             return
         if msg.metadata.get("_session_updated"):
-            scope = msg.metadata.get("_session_update_scope")
-            await self.send_session_updated(
-                msg.chat_id,
-                scope=scope if isinstance(scope, str) else None,
-            )
+            if conns:
+                scope = msg.metadata.get("_session_update_scope")
+                await self.send_session_updated(
+                    msg.chat_id,
+                    scope=scope if isinstance(scope, str) else None,
+                )
             return
         if msg.metadata.get("_file_edit_events"):
             edits = msg.metadata.get("_file_edit_events")
@@ -946,6 +948,8 @@ class WebSocketChannel(BaseChannel):
             transcript_overrides={"text": text},
         )
         raw = json.dumps(payload, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
 
@@ -961,7 +965,7 @@ class WebSocketChannel(BaseChannel):
         until the matching ``reasoning_end`` arrives.
         """
         conns = list(self._subs.get(chat_id, ()))
-        if not conns or not delta:
+        if not delta:
             return
         meta = metadata or {}
         body: dict[str, Any] = {
@@ -979,6 +983,8 @@ class WebSocketChannel(BaseChannel):
             phase="reasoning",
         )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning ")
 
@@ -989,8 +995,6 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Close the current reasoning stream segment for in-place renderers."""
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         meta = metadata or {}
         body: dict[str, Any] = {
             "event": "reasoning_end",
@@ -1006,6 +1010,8 @@ class WebSocketChannel(BaseChannel):
             phase="reasoning",
         )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning_end ")
 
@@ -1016,8 +1022,6 @@ class WebSocketChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         payload: dict[str, Any] = {
             "event": "file_edit",
             "chat_id": chat_id,
@@ -1030,6 +1034,8 @@ class WebSocketChannel(BaseChannel):
             phase="activity",
         )
         raw = json.dumps(payload, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" file_edit ")
 
@@ -1040,8 +1046,6 @@ class WebSocketChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         meta = metadata or {}
         stream_key = (chat_id, str(meta.get("_stream_id") or ""))
         if meta.get("_stream_end"):
@@ -1069,6 +1073,8 @@ class WebSocketChannel(BaseChannel):
             phase="answer",
         )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
@@ -1082,8 +1088,6 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
         if latency_ms is not None:
             body["latency_ms"] = int(latency_ms)
@@ -1096,6 +1100,8 @@ class WebSocketChannel(BaseChannel):
             phase="complete",
         )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
 

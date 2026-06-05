@@ -287,6 +287,7 @@ interface SettingsViewProps {
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
+  onNativeEngineRestart?: () => Promise<string>;
   isRestarting?: boolean;
   hostChromeInset?: boolean;
 }
@@ -458,6 +459,7 @@ export function SettingsView({
   onSectionChange,
   onLogout,
   onRestart,
+  onNativeEngineRestart,
   isRestarting = false,
   hostChromeInset = false,
 }: SettingsViewProps) {
@@ -744,12 +746,15 @@ export function SettingsView({
 
   const restartViaSettingsSurface = useCallback(async () => {
     const isNativeHost = (settings?.surface ?? settings?.runtime_surface) === "native";
-    const hostApi = getHostApi();
-    if (isNativeHost && settings?.runtime_capabilities?.can_restart_engine && hostApi) {
+    if (
+      isNativeHost &&
+      settings?.runtime_capabilities?.can_restart_engine &&
+      onNativeEngineRestart
+    ) {
       setHostEngineApplying(true);
       try {
-        await hostApi.restartEngine();
-        const payload = await fetchSettings(token);
+        const nextToken = await onNativeEngineRestart();
+        const payload = await fetchSettings(nextToken);
         applyPayload(payload);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
@@ -761,21 +766,25 @@ export function SettingsView({
       return;
     }
     onRestart?.();
-  }, [applyPayload, onRestart, settings, token]);
+  }, [applyPayload, onNativeEngineRestart, onRestart, settings]);
 
   const maybeRestartHostEngine = useCallback(
     async (payload: RestartAwarePayload) => {
       const surface = payload.surface ?? payload.runtime_surface ?? settings?.surface ?? settings?.runtime_surface;
       const capabilities = payload.runtime_capabilities ?? settings?.runtime_capabilities;
       const isNativeHost = surface === "native";
-      const hostApi = getHostApi();
-      if (!payload.requires_restart || !isNativeHost || !capabilities?.can_restart_engine || !hostApi) {
+      if (
+        !payload.requires_restart ||
+        !isNativeHost ||
+        !capabilities?.can_restart_engine ||
+        !onNativeEngineRestart
+      ) {
         return;
       }
       setHostEngineApplying(true);
       try {
-        await hostApi.restartEngine();
-        const refreshed = await fetchSettings(token);
+        const nextToken = await onNativeEngineRestart();
+        const refreshed = await fetchSettings(nextToken);
         applyPayload(refreshed);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
@@ -785,7 +794,7 @@ export function SettingsView({
         setHostEngineApplying(false);
       }
     },
-    [applyPayload, settings, token],
+    [applyPayload, onNativeEngineRestart, settings],
   );
 
   const saveModelSettings = async () => {

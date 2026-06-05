@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
+  getHostApi,
   toRuntimeSurface,
 } from "@/lib/runtime";
 import { projectNameFromPath } from "@/lib/workspace";
@@ -341,6 +342,36 @@ export default function App() {
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
 
+  const refreshReadyClient = useCallback(
+    async (client: NanobotClient, fallbackSurface: RuntimeSurface) => {
+      const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+      const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+      const runtimeSurface = boot.runtime_surface
+        ? toRuntimeSurface(boot.runtime_surface)
+        : fallbackSurface;
+      const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
+      const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
+      if (runtimeHost.socketFactory) {
+        client.updateUrl(url, runtimeHost.socketFactory);
+      } else {
+        client.updateUrl(url);
+      }
+      setState((current) =>
+        current.status === "ready" && current.client === client
+          ? {
+              ...current,
+              token: boot.token,
+              tokenExpiresAt,
+              modelName: boot.model_name ?? current.modelName,
+              runtimeSurface,
+            }
+          : current,
+      );
+      return { token: boot.token, url };
+    },
+    [],
+  );
+
   const bootstrapWithSecret = useCallback(
     (secret: string) => {
       let cancelled = false;
@@ -358,37 +389,8 @@ export default function App() {
             socketFactory: runtimeHost.socketFactory,
             onReauth: async () => {
               try {
-                const refreshed = await fetchBootstrap("", bootstrapSecretRef.current);
-                const refreshedUrl = deriveWsUrl(
-                  refreshed.ws_path,
-                  refreshed.token,
-                  refreshed.ws_url,
-                );
-                const refreshedSurface = refreshed.runtime_surface
-                  ? toRuntimeSurface(refreshed.runtime_surface)
-                  : runtimeSurface;
-                const refreshedHost = createRuntimeHost(
-                  refreshedSurface,
-                  refreshed.runtime_capabilities,
-                );
-                const tokenExpiresAt = bootstrapTokenExpiresAt(refreshed.expires_in);
-                if (refreshedHost.socketFactory) {
-                  client.updateUrl(refreshedUrl, refreshedHost.socketFactory);
-                } else {
-                  client.updateUrl(refreshedUrl);
-                }
-                setState((current) =>
-                  current.status === "ready" && current.client === client
-                    ? {
-                        ...current,
-                        token: refreshed.token,
-                        tokenExpiresAt,
-                        modelName: refreshed.model_name ?? current.modelName,
-                        runtimeSurface: refreshedSurface,
-                      }
-                    : current,
-                );
-                return refreshedUrl;
+                const refreshed = await refreshReadyClient(client, runtimeSurface);
+                return refreshed.url;
               } catch {
                 return null;
               }
@@ -418,7 +420,7 @@ export default function App() {
         cancelled = true;
       };
     },
-    [],
+    [refreshReadyClient],
   );
 
   useEffect(() => {
@@ -426,29 +428,7 @@ export default function App() {
     const client = state.client;
     const timer = window.setTimeout(async () => {
       try {
-        const boot = await fetchBootstrap("", bootstrapSecretRef.current);
-        const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-        const runtimeSurface = boot.runtime_surface
-          ? toRuntimeSurface(boot.runtime_surface)
-          : state.runtimeSurface;
-        const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-        const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
-        if (runtimeHost.socketFactory) {
-          client.updateUrl(url, runtimeHost.socketFactory);
-        } else {
-          client.updateUrl(url);
-        }
-        setState((current) =>
-          current.status === "ready" && current.client === client
-            ? {
-                ...current,
-                token: boot.token,
-                tokenExpiresAt,
-                modelName: boot.model_name ?? current.modelName,
-                runtimeSurface,
-              }
-            : current,
-        );
+        await refreshReadyClient(client, state.runtimeSurface);
       } catch (e) {
         const msg = (e as Error).message;
         if (msg.includes("HTTP 401") || msg.includes("HTTP 403")) {
@@ -457,7 +437,7 @@ export default function App() {
       }
     }, tokenRefreshDelayMs(state.tokenExpiresAt));
     return () => window.clearTimeout(timer);
-  }, [state]);
+  }, [refreshReadyClient, state]);
 
   useEffect(() => {
     const saved = loadSavedSecret();
@@ -515,6 +495,16 @@ export default function App() {
     setState({ status: "auth" });
   };
 
+  const handleNativeEngineRestart = async (): Promise<string> => {
+    const hostApi = getHostApi();
+    if (!hostApi?.restartEngine) {
+      throw new Error("native engine restart is unavailable");
+    }
+    await hostApi.restartEngine();
+    const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
+    return refreshed.token;
+  };
+
   return (
     <ClientProvider
       client={state.client}
@@ -525,6 +515,7 @@ export default function App() {
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
+        onNativeEngineRestart={handleNativeEngineRestart}
       />
     </ClientProvider>
   );
@@ -534,10 +525,12 @@ function Shell({
   runtimeSurface,
   onModelNameChange,
   onLogout,
+  onNativeEngineRestart,
 }: {
   runtimeSurface: RuntimeSurface;
   onModelNameChange: (modelName: string | null) => void;
   onLogout: () => void;
+  onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
   const { client, token } = useClient();
@@ -1519,6 +1512,7 @@ function Shell({
                   onSectionChange={onSettingsSectionChange}
                   onLogout={onLogout}
                   onRestart={onRestart}
+                  onNativeEngineRestart={onNativeEngineRestart}
                   isRestarting={isRestarting}
                   hostChromeInset={showHostChrome}
                 />

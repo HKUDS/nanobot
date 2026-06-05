@@ -1167,6 +1167,37 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_transcript_persists_without_subscribers() -> None:
+    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+
+    await channel.send_delta("chat-1", "hello", {"_stream_delta": True, "_stream_id": "s1"})
+    await channel.send_delta("chat-1", " world", {"_stream_delta": True, "_stream_id": "s1"})
+    await channel.send_delta("chat-1", "", {"_stream_end": True, "_stream_id": "s1"})
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True, "latency_ms": 42},
+    ))
+
+    assert channel._subs == {}
+    lines = read_transcript_lines("websocket:chat-1")
+    assert [line["event"] for line in lines] == ["delta", "delta", "stream_end", "turn_end"]
+    body = build_webui_thread_response("websocket:chat-1")
+    assert body is not None
+    assert body["messages"][-1]["role"] == "assistant"
+    assert body["messages"][-1]["content"] == "hello world"
+    assert body["messages"][-1]["latencyMs"] == 42
+
+
+@pytest.mark.asyncio
 async def test_send_turn_end_emits_turn_end_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
@@ -2598,6 +2629,15 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
+
+
+def test_file_preview_normalizes_windows_file_url() -> None:
+    from nanobot.webui.file_preview import _clean_preview_path
+
+    assert _clean_preview_path("file:///C:/Users/me/project/app.py") == (
+        "C:/Users/me/project/app.py"
+    )
+    assert _clean_preview_path("file:///tmp/project/app.py") == "/tmp/project/app.py"
 
 
 def test_handle_file_preview_rejects_paths_outside_workspace(tmp_path) -> None:

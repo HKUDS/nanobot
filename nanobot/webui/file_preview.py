@@ -90,6 +90,8 @@ def _clean_preview_path(raw_path: str | None) -> str:
     if value.startswith("file://"):
         parsed = urlparse(value)
         value = unquote(parsed.path)
+        if re.match(r"^/[A-Za-z]:[\\/]", value):
+            value = value[1:]
     else:
         value = unquote(value)
     value = value.split("?", 1)[0].split("#", 1)[0].strip()

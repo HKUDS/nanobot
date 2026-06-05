@@ -14,6 +14,7 @@ type WsMessageFrame = {
   event?: unknown;
   kind?: unknown;
   source?: NotificationSource;
+  stream_id?: unknown;
   text?: unknown;
 };
 
@@ -25,15 +26,17 @@ const MAX_NOTIFICATION_BODY_LENGTH = 180;
 const MAX_NOTIFICATION_TITLE_LENGTH = 80;
 
 let unreadNotificationCount = 0;
+const streamTextBuffers = new Map<string, string>();
 
 export function handleDesktopNotificationFrame(
   data: string,
   options: DesktopNotifierOptions,
 ): void {
   const frame = parseWsMessageFrame(data);
-  if (!frame || !isAssistantNotificationFrame(frame)) return;
+  const notificationFrame = frame ? notificationFrameFromWsFrame(frame) : null;
+  if (!notificationFrame) return;
   if (!shouldNotify(options.getWindow())) return;
-  showDesktopNotification(frame, options);
+  showDesktopNotification(notificationFrame, options);
 }
 
 export function clearDesktopNotificationBadge(): void {
@@ -65,6 +68,36 @@ function isAssistantNotificationFrame(frame: WsMessageFrame): frame is WsMessage
     frame.kind !== "progress" &&
     frame.kind !== "reasoning"
   );
+}
+
+function notificationFrameFromWsFrame(frame: WsMessageFrame): WsMessageFrame & {
+  chat_id: string;
+  text: string;
+} | null {
+  if (isAssistantNotificationFrame(frame)) return frame;
+  if (frame.event === "delta") {
+    if (typeof frame.chat_id === "string" && typeof frame.text === "string") {
+      const key = streamNotificationKey(frame);
+      streamTextBuffers.set(key, `${streamTextBuffers.get(key) ?? ""}${frame.text}`);
+    }
+    return null;
+  }
+  if (frame.event === "stream_end" && typeof frame.chat_id === "string") {
+    const key = streamNotificationKey(frame);
+    const text = typeof frame.text === "string"
+      ? frame.text
+      : streamTextBuffers.get(key) ?? "";
+    streamTextBuffers.delete(key);
+    return text.trim().length > 0
+      ? { ...frame, chat_id: frame.chat_id, text }
+      : null;
+  }
+  return null;
+}
+
+function streamNotificationKey(frame: WsMessageFrame): string {
+  const streamId = typeof frame.stream_id === "string" ? frame.stream_id : "";
+  return `${frame.chat_id ?? ""}\u0000${streamId}`;
 }
 
 function shouldNotify(win: BrowserWindow | null): boolean {
