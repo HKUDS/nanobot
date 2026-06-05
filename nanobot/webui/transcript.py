@@ -246,7 +246,7 @@ class WebUITranscriptRecorder:
         try:
             dup = json.loads(json.dumps(event, ensure_ascii=False))
             append_transcript_object(f"websocket:{chat_id}", dup)
-        except (ValueError, TypeError) as e:
+        except (OSError, ValueError, TypeError) as e:
             self._log.warning("webui transcript append failed: {}", e)
 
     def _next_turn_seq(self, chat_id: str, turn_id: str) -> int:
@@ -1276,84 +1276,6 @@ def replay_transcript_to_ui_messages(
         m.pop("isStreaming", None)
         m.pop("reasoningStreaming", None)
     return messages
-
-
-def _session_content_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, Mapping):
-                if item.get("type") == "text" and isinstance(item.get("text"), str):
-                    parts.append(str(item["text"]))
-                elif isinstance(item.get("content"), str):
-                    parts.append(str(item["content"]))
-        return "\n".join(parts)
-    return ""
-
-
-def _session_user_to_transcript_event(message: Mapping[str, Any]) -> dict[str, Any]:
-    event: dict[str, Any] = {
-        "event": "user",
-        "text": _session_content_text(message.get("content")),
-    }
-    media = message.get("media")
-    if isinstance(media, list) and media:
-        event["media_paths"] = [str(path) for path in media if path]
-    cli_apps = message.get("cli_apps")
-    if isinstance(cli_apps, list) and cli_apps:
-        event["cli_apps"] = [dict(app) for app in cli_apps if isinstance(app, dict)]
-    mcp_presets = message.get("mcp_presets")
-    if isinstance(mcp_presets, list) and mcp_presets:
-        event["mcp_presets"] = [dict(preset) for preset in mcp_presets if isinstance(preset, dict)]
-    return event
-
-
-def _restore_session_user_events(
-    lines: list[dict[str, Any]],
-    session_messages: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    """Interleave missing user events for legacy transcripts that only persisted replies."""
-    if not session_messages:
-        return lines
-    session_user_count = sum(1 for m in session_messages if m.get("role") == "user")
-    transcript_user_count = sum(1 for line in lines if line.get("event") == "user")
-    if session_user_count == 0 or transcript_user_count >= session_user_count:
-        return lines
-
-    non_user_lines = [line for line in lines if line.get("event") != "user"]
-    line_index = 0
-
-    def pop_assistant_turn() -> list[dict[str, Any]]:
-        nonlocal line_index
-        turn: list[dict[str, Any]] = []
-        while line_index < len(non_user_lines):
-            current = non_user_lines[line_index]
-            line_index += 1
-            turn.append(current)
-            ev = current.get("event")
-            if ev == "turn_end":
-                break
-            if ev in {"message", "stream_end"} and (
-                line_index >= len(non_user_lines)
-                or non_user_lines[line_index].get("event") != "turn_end"
-            ):
-                break
-        return turn
-
-    restored: list[dict[str, Any]] = []
-    for session_message in session_messages:
-        role = session_message.get("role")
-        if role == "user":
-            restored.append(_session_user_to_transcript_event(session_message))
-            continue
-        if role == "assistant":
-            restored.extend(pop_assistant_turn())
-
-    if line_index < len(non_user_lines):
-        restored.extend(non_user_lines[line_index:])
-    return restored
 
 
 def build_webui_thread_response(

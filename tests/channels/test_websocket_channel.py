@@ -27,7 +27,7 @@ from nanobot.channels.websocket import (
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.session import webui_turns as wth
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
@@ -378,7 +378,7 @@ async def test_webui_user_transcript_append_failure_does_not_block_inbound(
     def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("nanobot.channels.websocket.append_transcript_object", fail_append)
+    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", fail_append)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)

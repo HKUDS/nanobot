@@ -151,18 +151,20 @@ def test_build_response_restores_session_users_for_legacy_transcript(
         key,
         {"event": "message", "chat_id": "legacy-users", "text": "assistant one"},
     )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "legacy-users"})
     append_transcript_object(
         key,
         {"event": "message", "chat_id": "legacy-users", "text": "assistant two"},
     )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "legacy-users"})
 
     out = build_webui_thread_response(
         key,
         session_messages=[
             {"role": "user", "content": "prompt one", "timestamp": "2026-06-02T10:00:00"},
-            {"role": "assistant", "content": "session one"},
+            {"role": "assistant", "content": "assistant one"},
             {"role": "user", "content": "prompt two", "timestamp": "2026-06-02T10:01:00"},
-            {"role": "assistant", "content": "session two"},
+            {"role": "assistant", "content": "assistant two"},
         ],
     )
 
@@ -185,19 +187,21 @@ def test_build_response_restores_session_users_without_duplicating_new_transcrip
         key,
         {"event": "message", "chat_id": "mixed-users", "text": "old assistant"},
     )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "mixed-users"})
     append_transcript_object(key, {"event": "user", "chat_id": "mixed-users", "text": "new prompt"})
     append_transcript_object(
         key,
         {"event": "message", "chat_id": "mixed-users", "text": "new assistant"},
     )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "mixed-users"})
 
     out = build_webui_thread_response(
         key,
         session_messages=[
             {"role": "user", "content": "old prompt"},
-            {"role": "assistant", "content": "old session assistant"},
+            {"role": "assistant", "content": "old assistant"},
             {"role": "user", "content": "new prompt"},
-            {"role": "assistant", "content": "new session assistant"},
+            {"role": "assistant", "content": "new assistant"},
         ],
     )
 
