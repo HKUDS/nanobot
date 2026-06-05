@@ -810,6 +810,9 @@
     },
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load earlier messages",
+    "fork": {
+      "failed": "Could not fork this chat. Try again."
+    },
     "promptNavigator": {
       "open": "Open prompt navigator",
       "title": "Prompts",
@@ -849,6 +852,9 @@
     "imageAttachment": "Image attachment",
     "automationSourceFallback": "Automation",
     "automationTriggered": "Triggered automatically",
+    "copyMessage": "Copy message",
+    "copiedMessage": "Copied message",
+    "forkFromHere": "Fork from here",
     "copyReply": "Copy reply",
     "copiedReply": "Copied reply",
     "turnLatencyTitle": "Response time (end-to-end)"

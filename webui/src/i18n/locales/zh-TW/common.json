@@ -810,6 +810,9 @@
     },
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息",
+    "fork": {
+      "failed": "無法分叉這個對話，請重試。"
+    },
     "promptNavigator": {
       "open": "開啟輸入導覽",
       "title": "輸入列表",
@@ -835,6 +838,9 @@
     "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
     "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
     "imageAttachment": "圖片附件",
+    "copyMessage": "複製訊息",
+    "copiedMessage": "已複製訊息",
+    "forkFromHere": "從這裡分叉",
     "copyReply": "複製回覆",
     "copiedReply": "已複製回覆",
     "turnLatencyTitle": "本輪耗時（端到端）",

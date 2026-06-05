@@ -144,6 +144,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         error: null,
         refresh: refreshSpy,
         createChat: createChatSpy,
+        forkChat: async () => "fork-chat",
         deleteChat: async (key: string) => {
           await deleteChatSpy(key);
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));

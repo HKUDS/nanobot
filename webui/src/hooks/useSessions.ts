@@ -20,6 +20,7 @@ export function useSessions(): {
   error: string | null;
   refresh: () => Promise<void>;
   createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
+  forkChat: (sourceChatId: string, beforeUserIndex: number) => Promise<string>;
   deleteChat: (key: string) => Promise<void>;
 } {
   const { client, token } = useClient();
@@ -88,6 +89,29 @@ export function useSessions(): {
     return chatId;
   }, [client]);
 
+  const forkChat = useCallback(async (
+    sourceChatId: string,
+    beforeUserIndex: number,
+  ): Promise<string> => {
+    const chatId = await client.forkChat(sourceChatId, beforeUserIndex);
+    const key = `websocket:${chatId}`;
+    optimisticKeysRef.current.add(key);
+    setSessions((prev) => [
+      {
+        key,
+        channel: "websocket",
+        chatId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        title: "",
+        preview: "",
+        workspaceScope: null,
+      },
+      ...prev.filter((s) => s.key !== key),
+    ]);
+    return chatId;
+  }, [client]);
+
   const deleteChat = useCallback(
     async (key: string) => {
       await apiDeleteSession(tokenRef.current, key);
@@ -97,7 +121,7 @@ export function useSessions(): {
     [],
   );
 
-  return { sessions, loading, error, refresh, createChat, deleteChat };
+  return { sessions, loading, error, refresh, createChat, forkChat, deleteChat };
 }
 
 /** Lazy-load a session's on-disk messages the first time the UI displays it. */

@@ -34,6 +34,7 @@ function fakeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),

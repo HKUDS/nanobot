@@ -8,6 +8,7 @@ import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
+  allMessages?: UIMessage[];
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
   hiddenMessageCount?: number;
@@ -15,6 +16,7 @@ interface ThreadMessagesProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
+  onForkFromMessage?: (beforeUserIndex: number) => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -62,15 +64,21 @@ export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
 
 export function ThreadMessages({
   messages,
+  allMessages,
   isStreaming = false,
   hiddenMessageCount = 0,
   onLoadEarlier,
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
+  onForkFromMessage,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  const assistantForkIndexById = useMemo(
+    () => assistantForkIndexByMessageId(allMessages ?? messages),
+    [allMessages, messages],
+  );
   const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
@@ -137,6 +145,16 @@ export function ThreadMessages({
                 cliApps={cliApps}
                 mcpPresets={mcpPresets}
                 onOpenFilePreview={onOpenFilePreview}
+                onForkFromHere={
+                  onForkFromMessage
+                    ? forkHandlerForAssistantMessage(
+                        unit.message,
+                        copyFlags[index],
+                        assistantForkIndexById,
+                        onForkFromMessage,
+                      )
+                    : undefined
+                }
               />
             )}
           </div>
@@ -144,6 +162,34 @@ export function ThreadMessages({
       })}
     </div>
   );
+}
+
+function assistantForkIndexByMessageId(messages: UIMessage[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let nextUserIndex = 0;
+  for (const message of messages) {
+    if (message.role === "user") {
+      nextUserIndex += 1;
+    } else if (message.role === "assistant") {
+      out.set(message.id, nextUserIndex);
+    }
+  }
+  return out;
+}
+
+function forkHandlerForAssistantMessage(
+  message: UIMessage,
+  canForkAssistant: boolean,
+  assistantForkIndexById: Map<string, number>,
+  onForkFromMessage: NonNullable<ThreadMessagesProps["onForkFromMessage"]>,
+): (() => void) | undefined {
+  if (message.role === "assistant" && canForkAssistant) {
+    const beforeUserIndex = assistantForkIndexById.get(message.id);
+    return beforeUserIndex === undefined
+      ? undefined
+      : () => onForkFromMessage(beforeUserIndex);
+  }
+  return undefined;
 }
 
 function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
