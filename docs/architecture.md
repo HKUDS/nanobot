@@ -8,14 +8,20 @@ For the product-level mental model, read [`concepts.md`](./concepts.md) first.
 
 ## Core Flow
 
-```text
-Channel -> MessageBus -> AgentLoop -> AgentRunner -> Provider
-                                  |          |
-                                  |          +-> Tools
-                                  |
-                                  +-> Session, memory, hooks, context
+```mermaid
+flowchart LR
+    Channel["Channel<br/>CLI, WebUI, chat apps"] --> Bus["MessageBus<br/>InboundMessage"]
+    Bus --> Loop["AgentLoop<br/>session, workspace, context"]
+    Loop --> Runner["AgentRunner<br/>provider/tool loop"]
+    Runner --> Provider["Provider<br/>LLM backend"]
+    Provider --> Runner
+    Runner --> Tools["Tools<br/>files, shell, web, MCP, cron"]
+    Tools --> Runner
+    Runner --> Loop
+    Loop --> Outbound["MessageBus<br/>OutboundMessage"]
+    Outbound --> Channel
 
-Outbound reply <- MessageBus <- AgentLoop <- AgentRunner
+    Loop -. reads/writes .-> State["Session, memory,<br/>hooks, skills, templates"]
 ```
 
 Main files:
