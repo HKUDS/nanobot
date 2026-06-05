@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -46,6 +46,9 @@ const APP_HOST = "app";
 const HOST_SOCKET_PROTOCOL = "nanobot-host:";
 const HOST_SOCKET_HOST = "engine";
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
+const GATEWAY_REQUEST_TIMEOUT_MS = 12_000;
+const GATEWAY_REQUEST_RETRIES = 2;
+const GATEWAY_RETRY_DELAY_MS = 80;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -274,6 +277,30 @@ async function fetchGateway(
     method: string;
   },
 ): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= GATEWAY_REQUEST_RETRIES; attempt += 1) {
+    try {
+      return await fetchGatewayOnce(current, requestPath, init);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientGatewayError(error) || attempt >= GATEWAY_REQUEST_RETRIES) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, GATEWAY_RETRY_DELAY_MS));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("gateway request failed");
+}
+
+async function fetchGatewayOnce(
+  current: HostRuntime,
+  requestPath: string,
+  init: {
+    body?: ArrayBuffer;
+    headers?: Headers | Record<string, string>;
+    method: string;
+  },
+): Promise<Response> {
   const body = init.body ? Buffer.from(init.body) : undefined;
   const headers: http.OutgoingHttpHeaders = {};
   if (init.headers instanceof Headers) {
@@ -288,6 +315,12 @@ async function fetchGateway(
   if (body) headers["content-length"] = String(body.length);
 
   return await new Promise<Response>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     const req = http.request(
       {
         socketPath: current.socketPath,
@@ -299,6 +332,8 @@ async function fetchGateway(
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
         res.on("end", () => {
+          if (settled) return;
+          settled = true;
           const responseHeaders = new Headers();
           for (const [key, value] of Object.entries(res.headers)) {
             if (Array.isArray(value)) {
@@ -317,16 +352,36 @@ async function fetchGateway(
         });
       },
     );
-    req.on("error", reject);
+    req.setTimeout(GATEWAY_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`gateway request timed out after ${GATEWAY_REQUEST_TIMEOUT_MS}ms`));
+    });
+    req.on("error", fail);
     if (body) req.write(body);
     req.end();
   });
+}
+
+function isTransientGatewayError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null
+    ? (error as { code?: unknown }).code
+    : undefined;
+  if (
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "EPIPE" ||
+    code === "ETIMEDOUT"
+  ) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("socket hang up") || message.includes("timed out");
 }
 
 async function startGateway(): Promise<HostRuntime> {
   const root = repoRoot();
   const dirs = await ensureAppDirs();
   const socketPath = engineSocketPath();
+  await rm(socketPath, { force: true });
   const secret = randomBytes(32).toString("base64url");
   const python = pythonExecutable();
   const args = [
@@ -460,11 +515,18 @@ async function proxyToGateway(request: Request): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.arrayBuffer();
   }
-  const response = await fetchGateway(
-    runtime,
-    `${requestUrl.pathname}${requestUrl.search}`,
-    init,
-  );
+  let response: Response;
+  try {
+    response = await fetchGateway(
+      runtime,
+      `${requestUrl.pathname}${requestUrl.search}`,
+      init,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`gateway proxy request failed: ${message}`);
+    return new Response("Engine unavailable", { status: 503 });
+  }
   if (requestUrl.pathname !== "/webui/bootstrap" || !response.ok) {
     return response;
   }
