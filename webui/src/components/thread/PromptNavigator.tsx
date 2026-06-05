@@ -47,23 +47,19 @@ export function PromptNavigator({
 
   return (
     <>
-      <div
-        className="pointer-events-none absolute right-3 top-2 z-20"
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "host-no-drag h-8 w-8 rounded-full text-muted-foreground/80",
+          "hover:bg-accent/40 hover:text-foreground",
+        )}
+        aria-label={t("thread.promptNavigator.open")}
+        onClick={() => setOpen(true)}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "pointer-events-auto h-8 w-8 rounded-full text-muted-foreground/80",
-            "hover:bg-accent/40 hover:text-foreground",
-          )}
-          aria-label={t("thread.promptNavigator.open")}
-          onClick={() => setOpen(true)}
-        >
-          <ListTree className="h-4 w-4" />
-        </Button>
-      </div>
+        <ListTree className="h-4 w-4" />
+      </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent

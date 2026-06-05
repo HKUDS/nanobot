@@ -14,6 +14,7 @@ interface ThreadHeaderProps {
   hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   minimal?: boolean;
+  promptNavigatorAction?: ReactNode;
   sessionInfoAction?: ReactNode;
 }
 
@@ -26,6 +27,7 @@ export function ThreadHeader({
   hostChromeTitleInset = false,
   hideThemeButton = false,
   minimal = false,
+  promptNavigatorAction,
   sessionInfoAction,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
@@ -60,6 +62,7 @@ export function ThreadHeader({
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {sessionInfoAction}
+        {promptNavigatorAction}
         {!hideThemeButton ? (
           <ThemeButton
             theme={theme}

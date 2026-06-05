@@ -3,11 +3,12 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
-import { ThreadViewport } from "@/components/thread/ThreadViewport";
+import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
@@ -211,6 +212,7 @@ export function ThreadShell({
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
+  const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
@@ -717,6 +719,12 @@ export function ThreadShell({
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
+  const promptNavigatorAction = historyKey ? (
+    <PromptNavigator
+      messages={displayMessages}
+      onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
+    />
+  ) : undefined;
 
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -731,10 +739,12 @@ export function ThreadShell({
             hostChromeTitleInset={hostChromeTitleInset}
             hideThemeButton={hideThemeButton}
             minimal={!session && !loading}
+            promptNavigatorAction={promptNavigatorAction}
             sessionInfoAction={sessionInfoAction}
           />
         ) : null}
         <ThreadViewport
+          ref={viewportRef}
           messages={displayMessages}
           isStreaming={isStreaming}
           emptyState={emptyState}

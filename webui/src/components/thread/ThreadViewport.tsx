@@ -1,7 +1,9 @@
 import {
+  forwardRef,
   type ReactNode,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -10,7 +12,6 @@ import {
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
@@ -21,6 +22,10 @@ import {
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+
+export interface ThreadViewportHandle {
+  jumpToUserPrompt: (promptId: string) => void;
+}
 
 interface ThreadViewportProps {
   messages: UIMessage[];
@@ -54,7 +59,7 @@ export function windowMessages(messages: UIMessage[], visibleCount: number): UIM
   return messages.slice(start);
 }
 
-export function ThreadViewport({
+export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages,
   isStreaming,
   composer,
@@ -65,7 +70,7 @@ export function ThreadViewport({
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
-}: ThreadViewportProps) {
+}, ref) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -160,6 +165,8 @@ export function ThreadViewport({
     setAtBottom(false);
     setVisibleMessageCount((count) => Math.max(count, messages.length - index));
   }, [messages]);
+
+  useImperativeHandle(ref, () => ({ jumpToUserPrompt }), [jumpToUserPrompt]);
 
   const measureComposerDock = useCallback(() => {
     const el = composerDockRef.current;
@@ -330,13 +337,6 @@ export function ThreadViewport({
         />
       ) : null}
 
-      {hasMessages ? (
-        <PromptNavigator
-          messages={messages}
-          onJumpToPrompt={jumpToUserPrompt}
-        />
-      ) : null}
-
       {showScrollToBottomButton && !atBottom && (
         <Button
           variant="outline"
@@ -356,4 +356,4 @@ export function ThreadViewport({
       )}
     </div>
   );
-}
+});
