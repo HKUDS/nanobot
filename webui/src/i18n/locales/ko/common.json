@@ -779,7 +779,6 @@
     "promptNavigator": {
       "open": "프롬프트 탐색기 열기",
       "title": "프롬프트",
-      "description": "사용자 프롬프트 {{count}}개",
       "search": "프롬프트 검색",
       "noResults": "일치하는 프롬프트가 없습니다.",
       "jumpTo": "프롬프트로 이동: {{label}}",

@@ -779,7 +779,6 @@
     "promptNavigator": {
       "open": "プロンプトナビゲーターを開く",
       "title": "プロンプト",
-      "description": "{{count}} 件のユーザープロンプト",
       "search": "プロンプトを検索",
       "noResults": "一致するプロンプトがありません。",
       "jumpTo": "プロンプトへ移動: {{label}}",

@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
@@ -18,13 +17,11 @@ import type { UIMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface PromptNavigatorProps {
-  bottomOffset: number;
   messages: UIMessage[];
   onJumpToPrompt: (promptId: string) => void;
 }
 
 export function PromptNavigator({
-  bottomOffset,
   messages,
   onJumpToPrompt,
 }: PromptNavigatorProps) {
@@ -51,16 +48,15 @@ export function PromptNavigator({
   return (
     <>
       <div
-        className="pointer-events-none absolute right-4 z-20"
-        style={{ bottom: Math.max(104, bottomOffset + 12) }}
+        className="pointer-events-none absolute right-3 top-2 z-20"
       >
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="icon"
           className={cn(
-            "pointer-events-auto h-8 w-8 rounded-full border-border/70 bg-background/90 shadow-md backdrop-blur",
-            "text-muted-foreground hover:text-foreground",
+            "pointer-events-auto h-8 w-8 rounded-full text-muted-foreground/80",
+            "hover:bg-accent/40 hover:text-foreground",
           )}
           aria-label={t("thread.promptNavigator.open")}
           onClick={() => setOpen(true)}
@@ -72,15 +68,18 @@ export function PromptNavigator({
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="right"
+          aria-describedby={undefined}
           className="w-[min(92vw,24rem)] gap-0 p-0 sm:max-w-[24rem]"
         >
           <div className="border-b px-5 pb-4 pt-5">
-            <SheetTitle className="text-base font-medium">
-              {t("thread.promptNavigator.title")}
-            </SheetTitle>
-            <SheetDescription className="mt-1 text-xs">
-              {t("thread.promptNavigator.description", { count: prompts.length })}
-            </SheetDescription>
+            <div className="flex items-center justify-between gap-3">
+              <SheetTitle className="text-base font-medium">
+                {t("thread.promptNavigator.title")}
+              </SheetTitle>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                {prompts.length}
+              </span>
+            </div>
             <div className="relative mt-4">
               <Search
                 aria-hidden

@@ -334,7 +334,6 @@ export function ThreadViewport({
         <PromptNavigator
           messages={messages}
           onJumpToPrompt={jumpToUserPrompt}
-          bottomOffset={scrollButtonBottom}
         />
       ) : null}
 
