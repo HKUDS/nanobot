@@ -68,14 +68,9 @@ export function PromptNavigator({
           className="w-[min(92vw,24rem)] gap-0 p-0 sm:max-w-[24rem]"
         >
           <div className="border-b px-5 pb-4 pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <SheetTitle className="text-base font-medium">
-                {t("thread.promptNavigator.title")}
-              </SheetTitle>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                {prompts.length}
-              </span>
-            </div>
+            <SheetTitle className="text-base font-medium">
+              {t("thread.promptNavigator.title")}
+            </SheetTitle>
             <div className="relative mt-4">
               <Search
                 aria-hidden
