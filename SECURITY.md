@@ -147,7 +147,7 @@ For production use:
 1. **Isolate the Environment**
    ```bash
    # Run in a container or VM
-   docker run --rm -it python:3.11
+   docker run --rm -it python:3.13
    pip install nanobot-ai
    ```
 

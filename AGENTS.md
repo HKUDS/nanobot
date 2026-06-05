@@ -67,7 +67,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full two-branch model (`main`
 
 ## Code Style
 
-- Python 3.11+, asyncio throughout.
+- Python 3.13+, asyncio throughout.
 - Line length: 100.
 - Linting: `ruff` with rules E, F, I, N, W (E501 ignored).
 - pytest with `asyncio_mode = "auto"`.
