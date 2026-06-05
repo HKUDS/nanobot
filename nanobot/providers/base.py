@@ -5,6 +5,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -69,11 +70,11 @@ class LLMResponse:
 
     @property
     def should_execute_tools(self) -> bool:
-        """Tools execute only when has_tool_calls AND finish_reason is ``tool_calls`` / ``stop``.
+        """Tools execute only when has_tool_calls AND finish_reason is a tool-capable stop.
         Blocks gateway-injected calls under ``refusal`` / ``content_filter`` / ``error`` (#3220)."""
         if not self.has_tool_calls:
             return False
-        return self.finish_reason in ("tool_calls", "stop")
+        return self.finish_reason in ("tool_calls", "function_call", "stop")
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,7 @@ class LLMProvider(ABC):
         "server error",
         "temporarily unavailable",
         "速率限制",
+        "访问量过大",
     )
     _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
     _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
@@ -313,6 +315,29 @@ class LLMProvider(ABC):
 
         return cls._is_transient_error(response.content)
 
+    @classmethod
+    def is_arrearage_response(cls, response: LLMResponse) -> bool:
+        """Detect API-key arrearage / quota / billing errors that won't clear on retry.
+
+        These surface as HTTP 402 or as billing semantic tokens (e.g.
+        ``insufficient_quota``, ``payment_required``); reuses the same token and
+        text markers the 429 retry policy treats as non-retryable.
+        """
+        if response.error_status_code is not None and int(response.error_status_code) == 402:
+            return True
+
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        if any(
+            token in cls._NON_RETRYABLE_429_ERROR_TOKENS
+            for token in (type_token, code_token)
+            if token is not None
+        ):
+            return True
+
+        content = (response.content or "").lower()
+        return any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS)
+
     @staticmethod
     def _normalize_error_token(value: Any) -> str | None:
         if value is None:
@@ -498,14 +523,22 @@ class LLMProvider(ABC):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Stream a chat completion, calling *on_content_delta* for each text chunk.
+
+        *on_thinking_delta* is reserved for providers that expose incremental
+        thinking/reasoning on the wire; the default fallback invokes neither
+        callback for native deltas (only the optional single *on_content_delta*
+        after :meth:`chat`).
 
         Returns the same ``LLMResponse`` as :meth:`chat`.  The default
         implementation falls back to a non-streaming call and delivers the
         full content as a single delta.  Providers that support native
         streaming should override this method.
         """
+        _ = on_thinking_delta, on_tool_call_delta
         response = await self.chat(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
@@ -534,6 +567,8 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -545,11 +580,22 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
+        has_streamed_content = False
+
+        async def _tracking_delta(text: str) -> None:
+            nonlocal has_streamed_content
+            if text:
+                has_streamed_content = True
+            if on_content_delta:
+                await on_content_delta(text)
+
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
-            on_content_delta=on_content_delta,
+            on_content_delta=_tracking_delta if on_content_delta is not None else None,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
         )
         return await self._run_with_retry(
             self._safe_chat_stream,
@@ -557,6 +603,7 @@ class LLMProvider(ABC):
             messages,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
+            should_retry_guard=lambda: not has_streamed_content,
         )
 
     async def chat_with_retry(
@@ -643,14 +690,12 @@ class LLMProvider(ABC):
                         return value
             return None
 
-        try:
+        with suppress(TypeError, ValueError):
             retry_ms = _header_value("retry-after-ms")
             if retry_ms is not None:
                 value = float(retry_ms) / 1000.0
                 if value > 0:
                     return value
-        except (TypeError, ValueError):
-            pass
 
         retry_after = _header_value("retry-after")
         if retry_after is None:
@@ -705,6 +750,7 @@ class LLMProvider(ABC):
         *,
         retry_mode: str,
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
+        should_retry_guard: Callable[[], bool] | None = None,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -718,6 +764,11 @@ class LLMProvider(ABC):
             if response.finish_reason != "error":
                 return response
             last_response = response
+            if should_retry_guard is not None and not should_retry_guard():
+                logger.warning(
+                    "LLM stream failed after content was emitted; skipping retry"
+                )
+                return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
                 identical_error_count += 1

@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -36,10 +37,18 @@ class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
         self.start_polling_kwargs = None
+        self.start_webhook_kwargs = None
 
     async def start_polling(self, **kwargs) -> None:
         self.start_polling_kwargs = kwargs
         self._on_start_polling()
+
+    async def start_webhook(self, **kwargs) -> None:
+        self.start_webhook_kwargs = kwargs
+        self._on_start_polling()
+
+    async def stop(self) -> None:
+        pass
 
 
 class _FakeBot:
@@ -101,6 +110,12 @@ class _FakeApp:
         pass
 
     async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
         pass
 
 
@@ -232,6 +247,98 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     assert poll_req.kwargs["pool_timeout"] == 10.0
 
 
+def test_webhook_config_requires_https_url_and_secret() -> None:
+    with pytest.raises(ValueError, match="webhook_url is required"):
+        TelegramConfig(enabled=True, token="123:abc", mode="webhook")
+
+    with pytest.raises(ValueError, match="public HTTPS URL"):
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            mode="webhook",
+            webhook_url="http://example.com/telegram",
+            webhook_secret_token="secret",
+        )
+
+    with pytest.raises(ValueError, match="webhook_secret_token is required"):
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            mode="webhook",
+            webhook_url="https://example.com/telegram",
+        )
+
+
+@pytest.mark.asyncio
+async def test_start_webhook_mode(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        mode="webhook",
+        webhook_url="https://example.com/telegram",
+        webhook_listen_host="127.0.0.1",
+        webhook_listen_port=8081,
+        webhook_path="/telegram",
+        webhook_secret_token="secret-token",
+        webhook_max_connections=1,
+    )
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    assert app.updater.start_polling_kwargs is None
+    assert app.updater.start_webhook_kwargs == {
+        "listen": "127.0.0.1",
+        "port": 8081,
+        "url_path": "telegram",
+        "webhook_url": "https://example.com/telegram",
+        "allowed_updates": ["message"],
+        "drop_pending_updates": False,
+        "secret_token": "secret-token",
+        "max_connections": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_running_message_handler_reorders_same_session_updates() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    seen: list[int] = []
+
+    async def fake_process(update, context) -> None:
+        seen.append(update.message.message_id)
+
+    channel._process_message_update = fake_process
+    channel._running = True
+
+    first = _make_telegram_update(text="first")
+    first.update_id = 100
+    first.message.message_id = 1
+    second = _make_telegram_update(text="second")
+    second.update_id = 101
+    second.message.message_id = 2
+
+    await channel._on_message(second, None)
+    await channel._on_message(first, None)
+    await asyncio.sleep(0.3)
+    channel._running = False
+
+    assert seen == [1, 2]
+
+
 @pytest.mark.asyncio
 async def test_send_text_retries_on_timeout() -> None:
     """_send_text retries on TimedOut before succeeding."""
@@ -306,17 +413,19 @@ async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
 
-    assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+    assert recorded == [("warning", "network issue: proxy disconnected")]
 
 
 @pytest.mark.asyncio
@@ -330,13 +439,14 @@ async def test_on_error_summarizes_empty_network_error(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("")))
 
-    assert recorded == [("warning", "Telegram network issue: NetworkError")]
+    assert recorded == [("warning", "network issue: NetworkError")]
 
 
 @pytest.mark.asyncio
@@ -348,17 +458,19 @@ async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> No
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
 
-    assert recorded == [("error", "Telegram error: boom")]
+    assert recorded == [("error", "error: boom")]
 
 
 @pytest.mark.asyncio
@@ -1248,6 +1360,23 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_command_pairs_unauthorized_private_user(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._forward_command(_make_telegram_update(text="/new", chat_type="private"), None)
+
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -1289,6 +1418,20 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     assert handled[0]["content"] == "/dream-restore deadbeef"
 
 
+def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
+    """Bus-routed slash commands must match the Telegram handler regex (see builtin router)."""
+    pat = TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE
+    assert pat.fullmatch("/history")
+    assert pat.fullmatch("/history 5")
+    assert pat.fullmatch("/goal ship the feature")
+    assert pat.fullmatch("/pairing list")
+    assert pat.fullmatch("/model fast")
+    assert pat.fullmatch("/new@nanobot_bot")
+    assert pat.fullmatch("/goal@nanobot_bot refine objective")
+    assert pat.fullmatch("/dream-log deadbeef") is None
+    assert pat.fullmatch("/dream-restore deadbeef") is None
+
+
 @pytest.mark.asyncio
 async def test_on_help_includes_restart_command() -> None:
     channel = TelegramChannel(
@@ -1306,7 +1449,76 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/status" in help_text
     assert "/dream" in help_text
     assert "/dream-log" in help_text
+    assert "/goal" in help_text
+    assert "/pairing" in help_text
+    assert "/model" in help_text
     assert "/dream-restore" in help_text
+
+
+@pytest.mark.asyncio
+async def test_on_start_sends_pairing_code_to_unauthorized_private_user(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    update = _make_telegram_update(text="/start", chat_type="private")
+    update.message.reply_text = AsyncMock()
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._on_start(update, None)
+
+    update.message.reply_text.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_on_help_sends_pairing_code_to_unauthorized_private_user(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    update = _make_telegram_update(text="/help", chat_type="private")
+    update.message.reply_text = AsyncMock()
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._on_help(update, None)
+
+    update.message.reply_text.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
+    monkeypatch,
+) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    started_typing: list[str] = []
+    channel._start_typing = lambda chat_id: started_typing.append(chat_id)
+    channel._add_reaction = AsyncMock(return_value=None)
+    channel._download_message_media = AsyncMock(return_value=([], []))
+    monkeypatch.setattr(
+        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+    )
+
+    await channel._on_message(_make_telegram_update(text="hello", chat_type="private"), None)
+
+    assert started_typing == []
+    channel._add_reaction.assert_not_awaited()
+    channel._download_message_media.assert_not_awaited()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert "ABCD-EFGH" in channel._app.bot.sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio
@@ -1750,3 +1962,32 @@ async def test_send_uses_native_keyboard_when_flag_on() -> None:
     sent = channel._app.bot.sent_messages[0]
     assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
     assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering
+
+
+@pytest.mark.asyncio
+async def test_callback_query_ignores_unauthorized_user_before_side_effects() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+
+    query = SimpleNamespace(
+        id="cb_1",
+        data="Yes",
+        answer=AsyncMock(),
+        message=SimpleNamespace(
+            chat_id=123,
+            edit_reply_markup=AsyncMock(),
+        ),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=12345, username="alice", first_name="Alice"),
+    )
+
+    await channel._on_callback_query(update, None)
+
+    query.answer.assert_not_awaited()
+    query.message.edit_reply_markup.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()

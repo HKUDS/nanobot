@@ -13,6 +13,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
+from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
+from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
 from nanobot.utils.restart import RestartNotice
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,13 @@ def test_channels_config_builtin_fields_removed():
     assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is False
+    assert cfg.extract_document_text is True
+
+
+def test_channels_config_extract_document_text_accepts_camel_alias():
+    cfg = ChannelsConfig.model_validate({"extractDocumentText": False})
+
+    assert cfg.extract_document_text is False
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +116,23 @@ def test_discover_plugins_loads_entry_points():
 
     assert "line" in result
     assert result["line"] is _FakePlugin
+
+
+def test_discover_plugins_skips_names_outside_enabled_set():
+    from nanobot.channels.registry import discover_plugins
+
+    loaded: list[str] = []
+
+    def _load_disabled():
+        loaded.append("disabled")
+        return _FakePlugin
+
+    ep = SimpleNamespace(name="disabled", load=_load_disabled)
+    with patch(_EP_TARGET, return_value=[ep]):
+        result = discover_plugins({"enabled"})
+
+    assert result == {}
+    assert loaded == []
 
 
 def test_discover_plugins_handles_load_error():
@@ -150,6 +176,25 @@ def test_discover_all_includes_external_plugin():
     assert result["line"] is _FakePlugin
 
 
+def test_discover_enabled_imports_only_enabled_builtins():
+    from nanobot.channels.registry import discover_enabled
+
+    loaded: list[str] = []
+
+    def _load_channel(name: str):
+        loaded.append(name)
+        return _FakePlugin
+
+    with (
+        patch("nanobot.channels.registry.load_channel_class", side_effect=_load_channel),
+        patch(_EP_TARGET, return_value=[]),
+    ):
+        result = discover_enabled({"enabled"}, _names=["enabled", "disabled"])
+
+    assert result == {"enabled": _FakePlugin}
+    assert loaded == ["enabled"]
+
+
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
@@ -178,7 +223,7 @@ async def test_manager_loads_plugin_from_dict_config():
     )
 
     with patch(
-        "nanobot.channels.registry.discover_all",
+        "nanobot.channels.registry.discover_enabled",
         return_value={"fakeplugin": _FakePlugin},
     ):
         mgr = ChannelManager.__new__(ChannelManager)
@@ -208,7 +253,7 @@ async def test_manager_propagates_groq_transcription_api_base_to_channels():
     )
 
     with patch(
-        "nanobot.channels.registry.discover_all",
+        "nanobot.channels.registry.discover_enabled",
         return_value={"fakeplugin": _FakePlugin},
     ):
         mgr = ChannelManager.__new__(ChannelManager)
@@ -244,7 +289,7 @@ async def test_manager_propagates_openai_transcription_api_base_to_channels():
     )
 
     with patch(
-        "nanobot.channels.registry.discover_all",
+        "nanobot.channels.registry.discover_enabled",
         return_value={"fakeplugin": _FakePlugin},
     ):
         mgr = ChannelManager.__new__(ChannelManager)
@@ -338,11 +383,10 @@ async def test_base_channel_passes_language_to_groq_transcription_provider():
 # Transcription provider HTTP tests
 # ---------------------------------------------------------------------------
 
-from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
-from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
-
 
 class _StubResponse:
+    status_code = 200
+
     def raise_for_status(self):
         return None
 
@@ -497,10 +541,8 @@ async def test_manager_skips_disabled_plugin():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    with patch(
-        "nanobot.channels.registry.discover_all",
-        return_value={"fakeplugin": _FakePlugin},
-    ):
+    ep = _make_entry_point("fakeplugin", _FakePlugin)
+    with patch(_EP_TARGET, return_value=[ep]):
         mgr = ChannelManager.__new__(ChannelManager)
         mgr.config = fake_config
         mgr.bus = MessageBus()
@@ -791,6 +833,50 @@ async def test_send_with_retry_skips_send_when_streamed():
     assert send_delta_called is False
 
 
+def test_outbound_duplicate_suppression_is_scoped_to_origin_message() -> None:
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {}
+    mgr._dispatch_task = None
+    mgr._origin_reply_fingerprints = {}
+
+    first = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="Done",
+        metadata={"message_id": "msg-1"},
+    )
+    duplicate = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="  Done  ",
+        metadata={"origin_message_id": "msg-1"},
+    )
+    separate_turn = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="Done",
+        metadata={"message_id": "msg-2"},
+    )
+    new_origin_content = OutboundMessage(
+        channel="feishu",
+        chat_id="chat123",
+        content="Done with extra details",
+        metadata={"origin_message_id": "msg-1"},
+    )
+
+    assert mgr._should_suppress_outbound(first) is False
+    assert mgr._should_suppress_outbound(duplicate) is True
+    assert mgr._should_suppress_outbound(separate_turn) is False
+    assert mgr._should_suppress_outbound(new_origin_content) is False
+
+
 @pytest.mark.asyncio
 async def test_send_with_retry_propagates_cancelled_error():
     """_send_with_retry should re-raise CancelledError for graceful shutdown."""
@@ -916,8 +1002,8 @@ class _StartableChannel(BaseChannel):
 
 
 @pytest.mark.asyncio
-async def test_validate_allow_from_raises_on_empty_list():
-    """_validate_allow_from should raise SystemExit when allow_from is empty list."""
+async def test_validate_allow_from_allows_empty_list():
+    """Empty allow_from is valid now — pairing store handles unapproved senders."""
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
@@ -928,10 +1014,10 @@ async def test_validate_allow_from_raises_on_empty_list():
     mgr.channels = {"test": _ChannelWithAllowFrom(fake_config, None, [])}
     mgr._dispatch_task = None
 
-    with pytest.raises(SystemExit) as exc_info:
-        mgr._validate_allow_from()
-
-    assert "empty allowFrom" in str(exc_info.value)
+    # Should not raise — empty list defers to pairing store
+    mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config.allow_from == []
 
 
 @pytest.mark.asyncio
@@ -949,11 +1035,13 @@ async def test_validate_allow_from_passes_with_asterisk():
 
     # Should not raise
     mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config.allow_from == ["*"]
 
 
 @pytest.mark.asyncio
-async def test_validate_allow_from_raises_on_empty_dict_allow_from():
-    """_validate_allow_from should reject empty dict-backed allow_from lists."""
+async def test_validate_allow_from_allows_empty_dict_allow_from():
+    """Empty dict-backed allow_from is valid — pairing store handles approval."""
     fake_config = SimpleNamespace(
         channels=ChannelsConfig(),
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
@@ -964,10 +1052,41 @@ async def test_validate_allow_from_raises_on_empty_dict_allow_from():
     mgr.channels = {"test": _ChannelWithAllowFrom({"enabled": True}, None, [])}
     mgr._dispatch_task = None
 
-    with pytest.raises(SystemExit) as exc_info:
-        mgr._validate_allow_from()
+    mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert mgr.channels["test"].config["allow_from"] == []
 
-    assert "empty allowFrom" in str(exc_info.value)
+
+@pytest.mark.asyncio
+async def test_validate_allow_from_allows_missing_allow_from():
+    """Omitted allowFrom is valid — channel operates in pairing-only mode."""
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    class _NoAllowFromChannel(BaseChannel):
+        name = "noallow"
+        display_name = "No Allow"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.channels = {"test": _NoAllowFromChannel({"enabled": True}, None)}
+    mgr._dispatch_task = None
+
+    # Should not raise — pairing-only mode
+    mgr._validate_allow_from()
+    assert list(mgr.channels) == ["test"]
+    assert "allow_from" not in mgr.channels["test"].config
 
 
 @pytest.mark.asyncio
@@ -1095,6 +1214,8 @@ async def test_start_channel_logs_error_on_failure():
 
     # Should not raise, just log error
     await mgr._start_channel("failing", ch)
+    assert mgr.channels == {}
+    assert mgr._dispatch_task is None
 
 
 @pytest.mark.asyncio
@@ -1126,6 +1247,8 @@ async def test_stop_all_handles_channel_exception():
 
     # Should not raise even if channel.stop() raises
     await mgr.stop_all()
+    assert list(mgr.channels) == ["stopfailing"]
+    assert mgr._dispatch_task is None
 
 
 @pytest.mark.asyncio

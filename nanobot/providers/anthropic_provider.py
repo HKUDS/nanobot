@@ -45,12 +45,20 @@ class AnthropicProvider(LLMProvider):
         if api_key:
             client_kw["api_key"] = api_key
         if api_base:
-            client_kw["base_url"] = api_base
+            client_kw["base_url"] = self._normalize_base_url(api_base)
         if extra_headers:
             client_kw["default_headers"] = extra_headers
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
+
+    @staticmethod
+    def _normalize_base_url(api_base: str) -> str:
+        """Anthropic SDK appends /v1 to request paths internally."""
+        normalized = api_base.rstrip("/")
+        if normalized.endswith("/v1"):
+            return normalized[: -len("/v1")]
+        return normalized
 
     @classmethod
     def _handle_error(cls, e: Exception) -> LLMResponse:
@@ -227,6 +235,13 @@ class AnthropicProvider(LLMProvider):
                 converted = AnthropicProvider._convert_image_block(item)
                 if converted:
                     result.append(converted)
+                continue
+            if not item.get("type"):
+                # Anthropic requires every content block to declare a "type".
+                # A tool that returned a bare dict (or a list of dicts) lands
+                # here; coerce it to a text block instead of emitting a block
+                # the API rejects with "content.0.type: Field required".
+                result.append({"type": "text", "text": str(item)})
                 continue
             result.append(item)
         return result or "(empty)"
@@ -537,6 +552,13 @@ class AnthropicProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_streaming_required_error(e: Exception) -> bool:
+        """Anthropic SDK rejects long non-stream requests with a ValueError
+        whose message starts with 'Streaming is required'. Match defensively
+        on substring so a future SDK message tweak doesn't break detection."""
+        return isinstance(e, ValueError) and "streaming is required" in str(e).lower()
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -555,6 +577,21 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
+            if self._is_streaming_required_error(e):
+                # Anthropic SDK refuses non-stream calls when max_tokens (plus
+                # extended thinking budget) could push the request past the
+                # 10-minute server-side timeout (#2709). Transparently retry
+                # via the streaming path so callers don't need to know the
+                # provider-specific limit.
+                return await self.chat_stream(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -567,6 +604,8 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
             messages, tools, model, max_tokens, temperature,
@@ -575,17 +614,63 @@ class AnthropicProvider(LLMProvider):
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
-                if on_content_delta:
-                    stream_iter = stream.text_stream.__aiter__()
+                if on_content_delta or on_thinking_delta or on_tool_call_delta:
+                    # Idle timeout must track *any* SSE chunk (thinking_delta,
+                    # tool JSON deltas, etc.), not only text_stream tokens.
+                    # Otherwise extended thinking can stall text_stream for minutes
+                    # while the connection is healthy (e.g. MiniMax Anthropic).
+                    tool_blocks: dict[int, dict[str, str]] = {}
                     while True:
                         try:
-                            text = await asyncio.wait_for(
-                                stream_iter.__anext__(),
+                            chunk = await asyncio.wait_for(
+                                stream.__anext__(),
                                 timeout=idle_timeout_s,
                             )
                         except StopAsyncIteration:
                             break
-                        await on_content_delta(text)
+                        if chunk.type == "content_block_start":
+                            block = getattr(chunk, "content_block", None)
+                            if getattr(block, "type", None) == "tool_use":
+                                index = int(getattr(chunk, "index", 0) or 0)
+                                state = {
+                                    "call_id": str(getattr(block, "id", "") or ""),
+                                    "name": str(getattr(block, "name", "") or ""),
+                                }
+                                tool_blocks[index] = state
+                                if on_tool_call_delta:
+                                    await on_tool_call_delta({
+                                        "index": index,
+                                        **state,
+                                        "arguments_delta": "",
+                                    })
+                        elif (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "thinking_delta"
+                        ):
+                            piece = getattr(chunk.delta, "thinking", None) or ""
+                            if piece and on_thinking_delta:
+                                await on_thinking_delta(piece)
+                        elif (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "text_delta"
+                        ):
+                            text = getattr(chunk.delta, "text", None) or ""
+                            if text and on_content_delta:
+                                await on_content_delta(text)
+                        elif (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "input_json_delta"
+                        ):
+                            partial = getattr(chunk.delta, "partial_json", None) or ""
+                            if partial and on_tool_call_delta:
+                                index = int(getattr(chunk, "index", 0) or 0)
+                                state = tool_blocks.get(index, {})
+                                await on_tool_call_delta({
+                                    "index": index,
+                                    "call_id": state.get("call_id", ""),
+                                    "name": state.get("name", ""),
+                                    "arguments_delta": partial,
+                                })
                 response = await asyncio.wait_for(
                     stream.get_final_message(),
                     timeout=idle_timeout_s,

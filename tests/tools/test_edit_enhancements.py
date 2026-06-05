@@ -1,5 +1,5 @@
 """Tests for EditFileTool enhancements: read-before-edit tracking, path suggestions,
-.ipynb detection, and create-file semantics."""
+notebook JSON editing, and create-file semantics."""
 
 import pytest
 
@@ -27,12 +27,16 @@ class TestEditReadTracking:
     """edit_file should warn when file hasn't been read first."""
 
     @pytest.fixture()
-    def read_tool(self, tmp_path):
-        return ReadFileTool(workspace=tmp_path)
+    def file_states(self):
+        return file_state.FileStates()
 
     @pytest.fixture()
-    def edit_tool(self, tmp_path):
-        return EditFileTool(workspace=tmp_path)
+    def read_tool(self, tmp_path, file_states):
+        return ReadFileTool(workspace=tmp_path, file_states=file_states)
+
+    @pytest.fixture()
+    def edit_tool(self, tmp_path, file_states):
+        return EditFileTool(workspace=tmp_path, file_states=file_states)
 
     @pytest.mark.asyncio
     async def test_edit_warns_if_file_not_read_first(self, edit_tool, tmp_path):
@@ -104,22 +108,27 @@ class TestEditCreateFile:
 
 
 # ---------------------------------------------------------------------------
-# .ipynb detection
+# .ipynb editing
 # ---------------------------------------------------------------------------
 
-class TestEditIpynbDetection:
-    """edit_file should refuse .ipynb and suggest notebook_edit."""
+class TestEditIpynbFiles:
+    """edit_file edits notebooks as normal JSON files."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
         return EditFileTool(workspace=tmp_path)
 
     @pytest.mark.asyncio
-    async def test_ipynb_rejected_with_suggestion(self, tool, tmp_path):
+    async def test_ipynb_can_be_edited_as_json(self, tool, tmp_path):
         f = tmp_path / "analysis.ipynb"
         f.write_text('{"cells": []}', encoding="utf-8")
-        result = await tool.execute(path=str(f), old_text="x", new_text="y")
-        assert "notebook" in result.lower()
+        result = await tool.execute(
+            path=str(f),
+            old_text='"cells": []',
+            new_text='"cells": [{"cell_type": "markdown", "source": "hi"}]',
+        )
+        assert "Successfully edited" in result
+        assert '"source": "hi"' in f.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

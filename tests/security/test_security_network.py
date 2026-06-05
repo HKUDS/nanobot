@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import configure_ssrf_whitelist, contains_internal_url, validate_url_target
+from nanobot.security.network import (
+    configure_ssrf_whitelist,
+    contains_internal_url,
+    validate_url_target,
+)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -49,7 +53,7 @@ def test_rejects_missing_domain():
 ])
 def test_blocks_private_ipv4(ip: str, label: str):
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("evil.com", [ip])):
-        ok, err = validate_url_target(f"http://evil.com/path")
+        ok, err = validate_url_target("http://evil.com/path")
         assert not ok, f"Should block {label} ({ip})"
         assert "private" in err.lower() or "blocked" in err.lower()
 
@@ -60,6 +64,54 @@ def test_blocks_ipv6_loopback():
     with patch("nanobot.security.network.socket.getaddrinfo", _resolver):
         ok, err = validate_url_target("http://evil.com/")
         assert not ok
+
+
+# ---------------------------------------------------------------------------
+# validate_url_target — IPv6-mapped IPv4 bypass prevention
+# ---------------------------------------------------------------------------
+
+def _fake_resolve_v6(host: str, results: list[str]):
+    """Like _fake_resolve but returns AF_INET6 tuples for IPv6 addresses."""
+    def _resolver(hostname, port, family=0, type_=0):
+        if hostname == host:
+            entries = []
+            for ip in results:
+                if ":" in ip:
+                    entries.append((socket.AF_INET6, socket.SOCK_STREAM, 0, "", (ip, 0, 0, 0)))
+                else:
+                    entries.append((socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0)))
+            return entries
+        raise socket.gaierror(f"cannot resolve {hostname}")
+    return _resolver
+
+
+def test_blocks_ipv6_mapped_loopback():
+    """::ffff:127.0.0.1 must be blocked just like 127.0.0.1."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+        assert "blocked" in err.lower()
+
+
+def test_blocks_ipv6_mapped_metadata():
+    """::ffff:169.254.169.254 must be blocked just like 169.254.169.254."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:169.254.169.254"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+
+
+def test_blocks_ipv6_mapped_rfc1918():
+    """::ffff:10.0.0.1 must be blocked just like 10.0.0.1."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:10.0.0.1"])):
+        ok, err = validate_url_target("http://evil.com/")
+        assert not ok
+
+
+def test_allows_public_ipv6():
+    """Public IPv6 addresses must still be allowed."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("example.com", ["2606:4700::6810:84e5"])):
+        ok, err = validate_url_target("http://example.com/")
+        assert ok, f"Should allow public IPv6, got: {err}"
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +142,27 @@ def test_detects_curl_metadata():
 def test_detects_wget_localhost():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("localhost", ["127.0.0.1"])):
         assert contains_internal_url("wget http://localhost:8080/secret")
+
+
+def test_loopback_exception_allows_literal_localhost_only():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("localhost", ["127.0.0.1"])):
+        assert not contains_internal_url("curl http://localhost:8765/", allow_loopback=True)
+
+
+def test_loopback_exception_rejects_public_name_resolving_to_loopback():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["127.0.0.1"])):
+        assert contains_internal_url("curl http://example.com:8765/", allow_loopback=True)
+
+
+def test_loopback_exception_rejects_metadata():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("169.254.169.254", ["169.254.169.254"])):
+        assert contains_internal_url("curl http://169.254.169.254/latest/meta-data/", allow_loopback=True)
+
+
+def test_detects_ipv6_mapped_loopback():
+    """contains_internal_url must catch IPv6-mapped loopback in shell commands."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
+        assert contains_internal_url("curl http://evil.com/secret")
 
 
 def test_allows_normal_curl():
@@ -141,5 +214,16 @@ def test_whitelist_invalid_cidr_ignored():
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
             ok, _ = validate_url_target("http://ts.local/api")
             assert ok
+    finally:
+        configure_ssrf_whitelist([])
+
+
+def test_whitelist_allows_ipv6_mapped_cgnat():
+    """Whitelist must work when DNS returns IPv6-mapped CGNAT address."""
+    configure_ssrf_whitelist(["100.64.0.0/10"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("ts.local", ["::ffff:100.100.1.1"])):
+            ok, err = validate_url_target("http://ts.local/api")
+            assert ok, f"Whitelisted IPv6-mapped CGNAT should be allowed, got: {err}"
     finally:
         configure_ssrf_whitelist([])

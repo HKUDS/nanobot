@@ -9,6 +9,29 @@
       "title": "Impossible de joindre nanobot",
       "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
+    "auth": {
+      "title": "Authentification requise",
+      "hint": "Saisissez le secret configuré comme tokenIssueSecret dans la configuration de votre gateway.",
+      "placeholder": "Mot de passe",
+      "submit": "Se connecter",
+      "invalid": "Mot de passe invalide. Réessayez."
+    },
+    "account": {
+      "section": "Compte",
+      "logoutHint": "Déconnecter ce navigateur du gateway.",
+      "logout": "Se déconnecter"
+    },
+    "system": {
+      "section": "Système",
+      "restartHint": "Redémarrez nanobot pour appliquer les changements d’exécution.",
+      "restart": "Redémarrer nanobot",
+      "restarting": "Redémarrage...",
+      "restartEngine": "Redémarrer le moteur",
+      "restartingEngine": "Redémarrage du moteur..."
+    },
+    "restart": {
+      "completed": "Redémarrage terminé en {{seconds}} s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -18,27 +41,436 @@
     }
   },
   "sidebar": {
+    "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
-    "toggleTheme": "Changer de thème",
     "newChat": "Nouvelle discussion",
+    "searchAria": "Rechercher",
+    "searchPlaceholder": "Rechercher",
+    "searchResults": "Résultats",
+    "noSearchResults": "Aucun chat correspondant.",
     "recent": "Récentes",
-    "refreshSessions": "Actualiser les sessions",
+    "settings": "Paramètres",
     "language": {
       "label": "Langue",
       "ariaLabel": "Changer de langue"
+    },
+    "apps": "Apps"
+  },
+  "settings": {
+    "backToChat": "Retour au chat",
+    "sidebar": {
+      "title": "Réglages",
+      "ariaLabel": "Sections des réglages"
+    },
+    "nav": {
+      "general": "Général",
+      "byok": "BYOK",
+      "overview": "Aperçu",
+      "appearance": "Apparence",
+      "models": "Modèles",
+      "providers": "Fournisseurs",
+      "image": "Images",
+      "browser": "Internet",
+      "runtime": "Système",
+      "advanced": "Sécurité",
+      "cliApps": "Apps CLI",
+      "mcp": "MCP",
+      "apps": "Applications"
+    },
+    "sections": {
+      "interface": "Interface utilisateur",
+      "ai": "AI",
+      "system": "Système",
+      "status": "État",
+      "localPreferences": "Préférences locales",
+      "presets": "Préréglages",
+      "imageGeneration": "Génération d’images",
+      "imageDefaults": "Valeurs par défaut",
+      "webSearch": "Recherche web",
+      "webBehavior": "Comportement",
+      "identity": "Identité",
+      "webuiSafety": "Sécurité WebUI",
+      "capabilities": "Capacités",
+      "cliApps": "Applications CLI",
+      "mcp": "Services MCP",
+      "apps": "Applications",
+      "nativeHost": "Hôte natif",
+      "hostSafety": "Sécurité de l’app"
+    },
+    "rows": {
+      "theme": "Thème",
+      "language": "Langue",
+      "provider": "Fournisseur",
+      "model": "Modèle",
+      "restart": "Redémarrer nanobot",
+      "configPath": "Chemin de config",
+      "activePreset": "Préréglage actif",
+      "gateway": "Passerelle",
+      "restartState": "État du redémarrage",
+      "pendingChanges": "Modifications en attente",
+      "selectedPreset": "Préréglage sélectionné",
+      "presetModel": "Modèle du préréglage",
+      "density": "Densité",
+      "activityMode": "Détail d’activité",
+      "codeWrap": "Retour à la ligne du code",
+      "maxResults": "Résultats max.",
+      "timeout": "Délai d’attente",
+      "jinaReader": "Lecteur Jina",
+      "imageGeneration": "Génération d’images",
+      "imageProvider": "Fournisseur d’images",
+      "imageProviderStatus": "État du fournisseur",
+      "imageProviderBase": "Base du fournisseur",
+      "imageModel": "Modèle d’image",
+      "defaultAspectRatio": "Ratio par défaut",
+      "defaultImageSize": "Taille par défaut",
+      "maxImagesPerTurn": "Images max. par tour",
+      "imageSaveDir": "Dossier d’enregistrement",
+      "botName": "Nom du bot",
+      "botIcon": "Icône du bot",
+      "timezone": "Fuseau horaire",
+      "workspacePath": "Espace de travail par défaut",
+      "localServiceAccess": "Services locaux",
+      "webuiDefaultAccess": "Accès par défaut",
+      "currentModel": "Configuration actuelle",
+      "brandLogos": "Logos de marque",
+      "cliAppsCatalog": "Catalogue",
+      "cliAppsFilter": "Filtre",
+      "engine": "Moteur",
+      "logs": "Journaux",
+      "diagnostics": "Diagnostic",
+      "contextWindow": "Fenêtre de contexte"
+    },
+    "help": {
+      "theme": "Basculer entre l’apparence claire et sombre.",
+      "language": "Choisissez la langue utilisée par WebUI.",
+      "provider": "Sélectionnez le fournisseur à utiliser pour les nouvelles requêtes de modèle.",
+      "model": "Définissez le nom du modèle utilisé par défaut par nanobot.",
+      "configPath": "Le fichier de configuration actuellement utilisé par la passerelle.",
+      "selectedPreset": "Les préréglages nommés sont en lecture seule ici ; modifiez-les dans config.json.",
+      "presetModel": "Passez à Default pour modifier le modèle et le fournisseur depuis WebUI.",
+      "density": "Enregistré seulement dans ce navigateur.",
+      "activityMode": "Choisissez le niveau de détail d’activité agent affiché par défaut.",
+      "codeWrap": "Garde les longues lignes de code lisibles sur les petits écrans.",
+      "maxResults": "Résultats renvoyés par chaque appel web_search.",
+      "timeout": "Nombre de secondes avant l’expiration d’une requête de recherche.",
+      "jinaReader": "Utilise Jina Reader pour web_fetch lorsque disponible.",
+      "imageGeneration": "Expose generate_image dans les chats lorsqu’un fournisseur d’image configuré est disponible.",
+      "imageProvider": "Choisissez le fournisseur inscrit utilisé par generate_image.",
+      "imageProviderStatus": "La génération d’images réutilise les identifiants des fournisseurs.",
+      "imageModel": "Nom du modèle envoyé au fournisseur d’images sélectionné.",
+      "defaultAspectRatio": "Utilisé lorsque le prompt ne choisit pas de ratio.",
+      "defaultImageSize": "Indication de taille envoyée aux fournisseurs compatibles.",
+      "maxImagesPerTurn": "Limite supérieure pour une requête generate_image.",
+      "botName": "Affiché là où nanobot utilise un nom visible.",
+      "botIcon": "Emoji ou texte court affiché avec le nom du bot.",
+      "timezone": "Utilisé pour les horaires et les réponses tenant compte du temps.",
+      "localServiceAccess": "Autorise les commandes shell Full Access à atteindre les services localhost.",
+      "webuiDefaultAccess": "Utilisé par les chats web sans permission propre au projet.",
+      "securityManagedControls": "Les récupérations web protègent toujours les services locaux, privés et de métadonnées. La sécurité des canaux principaux reste gérée dans config.json.",
+      "currentModel": "Utilisée pour les nouvelles réponses.",
+      "selectedModelProvider": "Défini par le modèle sélectionné.",
+      "selectedModelValue": "Défini par le modèle sélectionné.",
+      "brandLogos": "Affiche les logos de fournisseurs tiers et CLI dans les Réglages.",
+      "cliAppsCatalog": "Installe uniquement les adaptateurs CLI d’apps que nanobot peut exécuter localement ; les apps natives restent inchangées.",
+      "cliAppsFilter": "Recherchez par app, catégorie ou capacité.",
+      "logs": "Ouvre le dossier des journaux du moteur natif.",
+      "diagnostics": "Exporte un petit rapport d’exécution pour le support.",
+      "localServiceAccessNative": "Autorise les commandes shell Full Access à atteindre les services sur ce Mac.",
+      "webuiDefaultAccessNative": "Utilisé par les chats natifs sans permission propre au projet.",
+      "contextWindow": "Choisissez le budget de contexte par défaut pour cette configuration de modèle."
+    },
+    "values": {
+      "light": "Clair",
+      "dark": "Sombre",
+      "notAvailable": "Indisponible",
+      "enabled": "Activé",
+      "disabled": "Désactivé",
+      "restartPending": "Redémarrage en attente",
+      "ready": "Prêt",
+      "comfortable": "Confortable",
+      "compact": "Compacte",
+      "auto": "Automatique",
+      "expanded": "Développé",
+      "on": "Activé",
+      "off": "Désactivé",
+      "defaultPermission": "Autorisation par défaut",
+      "fullAccess": "Accès complet",
+      "configured": "Configuré",
+      "notConfigured": "Non configuré",
+      "pending": "En attente",
+      "restartingEngine": "Redémarrage"
+    },
+    "status": {
+      "loading": "Chargement des réglages...",
+      "loadError": "Impossible de charger les réglages",
+      "unsaved": "Modifications non enregistrées.",
+      "upToDate": "À jour.",
+      "savedRestart": "Enregistré. Redémarrez nanobot pour appliquer.",
+      "restartAfterSaving": "Enregistrez les changements, puis redémarrez quand vous êtes prêt.",
+      "savedRestartApply": "Enregistré. Redémarrez quand vous êtes prêt.",
+      "imageProviderRestart": "Changements du fournisseur d’image enregistrés. Redémarrez quand vous êtes prêt.",
+      "hostRestartAfterSaving": "En enregistrant, nanobot redémarrera son moteur.",
+      "hostRestartPending": "Enregistré. Le moteur redémarrera lorsqu’il sera prêt.",
+      "hostApiUnavailable": "Les actions de l’hôte ne sont disponibles que dans l’app native.",
+      "logsOpened": "Dossier des journaux ouvert.",
+      "logsOpenFailed": "Impossible d’ouvrir le dossier des journaux.",
+      "diagnosticsExported": "Diagnostic exporté vers {{path}}.",
+      "diagnosticsExportFailed": "Impossible d’exporter le diagnostic."
+    },
+    "actions": {
+      "save": "Enregistrer",
+      "saving": "Enregistrement",
+      "edit": "Modifier",
+      "cancel": "Annuler",
+      "open": "Ouvrir",
+      "export": "Exporter",
+      "opening": "Ouverture...",
+      "exporting": "Exportation..."
+    },
+    "byok": {
+      "description": "Utilisez vos propres clés de fournisseur. Nanobot lit ces valeurs depuis la configuration actuelle, et seuls les fournisseurs configurés peuvent être sélectionnés dans Général.",
+      "configured": "Configuré",
+      "notConfigured": "Non configuré",
+      "configuredSection": "Configurés",
+      "notConfiguredSection": "Non configurés",
+      "showMore": "Afficher {{count}} de plus",
+      "showLess": "Afficher moins",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Saisir l'API key",
+      "apiKeyConfiguredPlaceholder": "Laisser vide pour conserver la key actuelle",
+      "configuredKeyHint": "Key configurée",
+      "apiBasePlaceholder": "Utiliser la valeur par défaut du fournisseur",
+      "apiKeyRequired": "Une API key est requise pour configurer ce fournisseur.",
+      "showApiKey": "Afficher l'API key",
+      "hideApiKey": "Masquer l'API key",
+      "noConfiguredProviders": "Aucun fournisseur configuré",
+      "configureFirst": "Configurez d'abord un fournisseur dans BYOK.",
+      "openByok": "Ouvrir BYOK",
+      "tabs": {
+        "ariaLabel": "Type d'identifiants BYOK",
+        "llm": "LLM",
+        "webSearch": "Recherche web"
+      },
+      "webSearch": {
+        "provider": "Fournisseur de recherche",
+        "providerHelp": "Choisissez le backend utilisé par l'outil web search.",
+        "selectProvider": "Choisir un fournisseur",
+        "credentials": "Identifiants",
+        "noCredentialRequired": "Aucune key requise",
+        "noCredentialHelp": "DuckDuckGo fonctionne sans API key enregistrée.",
+        "apiKeyHelp": "Enregistrée dans la config et masquée après l'enregistrement.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG nécessite l'URL de votre propre instance.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Ce fournisseur de recherche nécessite une API key.",
+        "baseUrlRequired": "SearXNG nécessite une Base URL.",
+        "missingCredential": "Ajoutez l'identifiant requis avant d'enregistrer.",
+        "saveHint": "Les changements s'appliquent aux nouvelles requêtes web search."
+      }
+    },
+    "overview": {
+      "model": "Modèle actuel",
+      "providers": "Fournisseurs",
+      "configuredCount": "{{count}} configurés",
+      "totalProviders": "{{count}} disponibles",
+      "webSearch": "Recherche web",
+      "imageGeneration": "Génération d’images",
+      "workspace": "Espace de travail"
+    },
+    "providers": {
+      "searchPlaceholder": "Rechercher des fournisseurs",
+      "noMatches": "Aucun fournisseur ne correspond.",
+      "saveProvider": "Enregistrer le fournisseur"
+    },
+    "image": {
+      "selectProvider": "Choisir un fournisseur",
+      "selectAspect": "Choisir un ratio",
+      "selectSize": "Choisir une taille",
+      "configureProvider": "Configurer le fournisseur",
+      "missingCredential": "Configura este proveedor antes de activar la generación de imágenes."
+    },
+    "models": {
+      "selectModel": "Choisir un modèle",
+      "addConfiguration": "Ajouter une configuration",
+      "newConfiguration": "Nouvelle configuration de modèle",
+      "newConfigurationHelp": "Enregistre un fournisseur et un modèle comme option en un clic.",
+      "configurationName": "Nom de la configuration",
+      "configurationNameHelp": "Renomme cette configuration de modèle enregistrée.",
+      "configurationNamePlaceholder": "Rédaction rapide",
+      "searchModels": "Rechercher ou saisir un ID de modèle",
+      "useCustomModel": "Utiliser",
+      "loadingModels": "Chargement des modèles...",
+      "searchCatalog": "Rechercher dans le catalogue du fournisseur pour choisir un modèle.",
+      "modelsAvailable": "disponibles",
+      "noModelResults": "Aucun modèle correspondant.",
+      "loadFailed": "Liste des modèles indisponible.",
+      "unsupportedModelList": "Saisissez manuellement un ID de modèle.",
+      "providerNotConfigured": "Configurez ce fournisseur avant de charger les modèles.",
+      "autoProviderCustomOnly": "Le mode fournisseur automatique utilise des IDs de modèle personnalisés."
+    },
+    "timezone": {
+      "select": "Choisir un fuseau horaire",
+      "search": "Rechercher un fuseau horaire",
+      "empty": "Aucun fuseau horaire correspondant."
+    },
+    "cliApps": {
+      "allCategories": "Toutes les catégories",
+      "availableCount": "{{count}} applications",
+      "installedCount": "{{count}} installées",
+      "summary": "{{installed}} CLIs installées sur {{total}}",
+      "filterAll": "Tout",
+      "filterInstalled": "CLIs installées",
+      "filterNotInstalled": "Non installées",
+      "searchPlaceholder": "Rechercher des CLIs",
+      "statusInstalled": "Installée",
+      "statusAvailable": "Disponible",
+      "statusMissing": "Dépendance manquante",
+      "statusUnsupported": "Non compatible",
+      "statusNotInstalled": "Non installée",
+      "unsupported": "Non compatible",
+      "loading": "Chargement des apps CLI...",
+      "empty": "Aucune app CLI ne correspond à ce filtre.",
+      "readyTitle": "@{{name}} est prêt",
+      "readyStatus": "Prêt",
+      "readyPrompt": "Utilisez @{{name}} pour voir ce que ce CLI peut faire.",
+      "readyTry": "Essayer @{{name}}",
+      "readyCopied": "Copié",
+      "openChat": "Ouvrir le chat",
+      "requires": "Requiert",
+      "test": "Tester le CLI",
+      "update": "Mettre à jour le CLI",
+      "uninstall": "Désinstaller le CLI",
+      "install": "Installer le CLI",
+      "unavailable": "Indisponible",
+      "noDescription": "Aucune description disponible."
+    },
+    "mcp": {
+      "allCategories": "Toutes les catégories",
+      "summary": "{{installed}} presets activés sur {{total}}",
+      "filterAll": "Tout",
+      "filterInstalled": "Activés",
+      "filterNotInstalled": "Non activés",
+      "searchPlaceholder": "Rechercher des presets MCP",
+      "moreOptions": "Plus d'options MCP",
+      "moreOptionsSubtitle": "Ajoutez un serveur personnalisé ou importez mcp.json.",
+      "customTitle": "MCP personnalisé",
+      "customSubtitle": "Ajoutez n'importe quel serveur MCP stdio, HTTP ou SSE.",
+      "customAction": "Personnalisé",
+      "importAction": "Importer",
+      "serverName": "Nom du serveur",
+      "serverUrl": "URL",
+      "transport": "Transport",
+      "command": "Commande",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "Délai d'outil",
+      "advancedOptions": "Options avancées",
+      "hideAdvanced": "Masquer les options avancées",
+      "saveCustom": "Enregistrer MCP",
+      "configImport": "Importer mcp.json",
+      "importConfig": "Importer",
+      "restartRequired": "Redémarrez nanobot pour connecter les outils MCP mis à jour.",
+      "toolsFound": "{{count}} outils",
+      "loading": "Chargement des presets MCP...",
+      "empty": "Aucun preset MCP ne correspond à ce filtre.",
+      "openDocs": "Ouvrir la doc",
+      "test": "Tester",
+      "remove": "Supprimer",
+      "enable": "Activer",
+      "enabled": "Activé",
+      "setup": "Connecter",
+      "configure": "Connecter",
+      "connectTitle": "Connecter {{name}}",
+      "connectHint": "Ajoutez la clé depuis les paramètres de votre compte.",
+      "saveAndEnable": "Enregistrer et activer",
+      "updateSetup": "Mettre à jour la configuration",
+      "configured": "configuré",
+      "keepExisting": "Laissez vide pour conserver la valeur actuelle",
+      "statusConfigured": "Configuré",
+      "statusMissingCredentials": "Clé requise",
+      "statusMissingDependency": "Dépendance requise",
+      "statusComingSoon": "Bientôt disponible",
+      "statusNotInstalled": "Non activé",
+      "toolScope": "Outils",
+      "allTools": "Tous",
+      "noTools": "Aucun",
+      "testForTools": "Exécutez Tester pour inspecter et choisir des outils individuels."
+    },
+    "legal": {
+      "thirdPartyBrands": "Les noms, logos et marques de produits appartiennent à leurs propriétaires respectifs. Leur utilisation sert uniquement à l'identification et n'implique aucune approbation."
+    },
+    "apps": {
+      "description": "Ajoutez des CLI d’apps et services MCP utilisables par nanobot depuis le chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Tout",
+      "filterCli": "Apps CLI",
+      "filterMcp": "Services MCP",
+      "enabledSummary": "{{count}} activés",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Rechercher des apps",
+      "featured": "À la une",
+      "loading": "Chargement des apps...",
+      "empty": "Aucune app ne correspond."
+    },
+    "oauth": {
+      "authentication": "Authentification OAuth",
+      "signIn": "Se connecter",
+      "signingIn": "Connexion...",
+      "signInAgain": "Se reconnecter",
+      "signOut": "Se déconnecter",
+      "signedInAs": "Connecté en tant que {{account}}",
+      "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "signInRequired": "Connexion requise",
+      "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
+      "signedIn": "Connecté",
+      "notSignedIn": "Non connecté"
     }
   },
   "chat": {
     "fallbackTitle": "Discussion {{id}}",
     "loading": "Chargement…",
     "noSessions": "Aucune session pour le moment.",
+    "showMore": "Afficher {{count}} de plus",
+    "collapsed": "{{count}} discussions masquées",
+    "showLess": "Afficher moins",
     "actions": "Actions de la discussion {{title}}",
+    "newInProject": "Démarrer une nouvelle discussion dans {{project}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "Supprimer",
-    "newChat": "Nouvelle discussion"
+    "newChat": "Nouvelle discussion",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "projects": "Projects",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
-    "title": "Supprimer « {{title}} » ?",
-    "description": "Le fichier de session sera supprimé du disque. Cette action est irréversible.",
+    "title": "Supprimer cette discussion ?",
+    "description": "Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer"
   },
@@ -53,19 +485,182 @@
   "thread": {
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
-      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil."
+      "greetings": {
+        "workOn": "Sur quoi travaillons-nous ensemble ?",
+        "start": "Par où commence-t-on ?",
+        "build": "Que construisons-nous aujourd'hui ?",
+        "tackle": "Que résout-on ensemble ?"
+      },
+      "quickActions": {
+        "plan": {
+          "title": "Créer un plan de projet",
+          "prompt": "Créez un plan de projet concis pour ce que je devrais construire ensuite."
+        },
+        "analyze": {
+          "title": "Analyser ces données",
+          "prompt": "Aidez-moi à analyser ces données et à faire ressortir les tendances les plus importantes."
+        },
+        "brainstorm": {
+          "title": "Trouver des idées",
+          "prompt": "Proposez quelques idées pratiques et leurs compromis pour ce problème."
+        },
+        "code": {
+          "title": "Écrire du code",
+          "prompt": "Aidez-moi à écrire le code pour cette tâche, en commençant par le plus petit changement utile."
+        },
+        "summarize": {
+          "title": "Résumer ce document",
+          "prompt": "Résumez ce document et listez les points clés à retenir."
+        },
+        "more": {
+          "title": "Plus",
+          "prompt": "Montrez-moi quelques façons utiles dont vous pouvez m’aider dans cet espace de travail."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Créer une icône d’app",
+          "prompt": "Générez une icône d’application 1:1 propre pour nanobot : robot sympathique, style vectoriel simple, palette douce bleu et blanc, sans texte."
+        },
+        "sticker": {
+          "title": "Créer un sticker",
+          "prompt": "Générez une image façon sticker d’un petit assistant robot, avec un fond d’apparence transparente, expressive et ludique."
+        },
+        "poster": {
+          "title": "Créer une affiche",
+          "prompt": "Générez un concept d’affiche soigné pour un assistant IA personnel, composition moderne, hiérarchie visuelle forte, adapté à une landing page."
+        },
+        "product": {
+          "title": "Maquette produit",
+          "prompt": "Générez une maquette produit propre pour une application web d’IA conversationnelle, interface minimale, éclairage premium, cadre d’appareil réaliste."
+        },
+        "portrait": {
+          "title": "Portrait stylisé",
+          "prompt": "Générez un portrait stylisé d’un compagnon IA sympathique, lumière douce, détaillé mais accessible, style illustration moderne."
+        },
+        "edit": {
+          "title": "Modifier une image",
+          "prompt": "Aidez-moi à modifier une image. Demandez-moi d’abord de téléverser ou d’indiquer l’image, puis générez le résultat modifié."
+        }
+      }
     },
     "header": {
-      "toggleSidebar": "Afficher ou masquer la barre latérale"
+      "toggleSidebar": "Afficher ou masquer la barre latérale",
+      "newChat": "Démarrer un nouveau chat",
+      "toggleTheme": "Changer le thème depuis l’en-tête",
+      "settings": "Ouvrir les paramètres"
     },
     "composer": {
       "placeholderThread": "Saisissez votre message…",
       "placeholderHero": "Qu’avez-vous en tête ?",
       "placeholderOpening": "Ouverture d’une nouvelle discussion…",
+      "placeholderStreaming": "Le modèle est en train de répondre…",
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
+      "runRuntimeTitle": "Exécution · {{elapsed}}",
+      "goalStateStrip": "Objectif · {{label}}",
+      "goalStateFallback": "Objectif",
+      "goalStateExpandAria": "Afficher l’objectif complet",
+      "goalStateSheetTitle": "Objectif",
+      "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
+      "stop": "Arrêter la réponse",
+      "queued": {
+        "label": "Guidage en attente",
+        "guide": "Guider",
+        "delete": "Supprimer le guidage",
+        "edit": "Modifier le guidage",
+        "drag": "Faire glisser pour réordonner"
+      },
       "attachImage": "Joindre une image",
+      "imageMode": {
+        "label": "Génération d’image",
+        "toggle": "Activer ou désactiver le mode génération d’image",
+        "placeholder": "Décrire ou modifier une image…",
+        "aspectAria": "Format de l’image",
+        "aspectLabel": "Format de l’image",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Carré 1:1",
+          "3_4": "Portrait 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Paysage 4:3",
+          "16_9": "Large 16:9"
+        }
+      },
+      "tools": {
+        "search": "Rechercher",
+        "reason": "Raisonner",
+        "deepResearch": "Recherche approfondie",
+        "voice": "Entrée vocale"
+      },
+      "slash": {
+        "ariaLabel": "Commandes slash",
+        "label": "commandes",
+        "navigateHint": "↑↓ Naviguer",
+        "selectHint": "Entrée/Tab Insérer",
+        "closeHint": "Échap Fermer",
+        "commands": {
+          "new": {
+            "title": "Nouvelle discussion",
+            "description": "Arrêter la tâche en cours et démarrer une nouvelle conversation."
+          },
+          "stop": {
+            "title": "Arrêter la tâche en cours",
+            "description": "Annuler le tour agent actif pour cette discussion."
+          },
+          "restart": {
+            "title": "Redémarrer nanobot",
+            "description": "Redémarrer le processus du bot sur place."
+          },
+          "status": {
+            "title": "Afficher l’état",
+            "description": "Afficher l’état du runtime, du provider et des channels."
+          },
+          "model": {
+            "title": "Modèle",
+            "description": "Afficher ou changer le préréglage de modèle actif."
+          },
+          "history": {
+            "title": "Afficher l’historique",
+            "description": "Afficher les N derniers messages persistés de la conversation."
+          },
+          "dream": {
+            "title": "Lancer Dream",
+            "description": "Déclencher manuellement la consolidation de la mémoire."
+          },
+          "dream_log": {
+            "title": "Afficher le journal Dream",
+            "description": "Afficher ce que la dernière consolidation Dream a changé."
+          },
+          "dream_restore": {
+            "title": "Restaurer la mémoire",
+            "description": "Revenir à un instantané Dream précédent."
+          },
+          "goal": {
+            "title": "Objectif long terme",
+            "description": "Demandez à l’agent de traiter ceci comme un objectif multi‑étapes durable."
+          },
+          "help": {
+            "title": "Afficher l’aide",
+            "description": "Lister les commandes slash disponibles."
+          },
+          "pairing": {
+            "title": "Appairage",
+            "description": "Gérer les demandes d’appairage."
+          }
+        },
+        "badges": {
+          "current": "Actuel",
+          "recent": "Récent"
+        },
+        "details": {
+          "goalActive": "L’objectif est en cours",
+          "goalReady": "Démarrer un objectif durable",
+          "history": "Afficher les messages récents",
+          "stopRunning": "En cours"
+        }
+      },
       "encoding": "Traitement…",
       "remove": "Retirer la pièce jointe",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -76,16 +671,60 @@
         "decode_failed": "Impossible de décoder cette image",
         "too_large": "Image trop grande — essayez-en une plus petite",
         "io": "Impossible de lire ce fichier"
+      },
+      "mentions": {
+        "ariaLabel": "Apps",
+        "label": "Apps",
+        "cliGroup": "Apps CLI",
+        "mcpGroup": "Services MCP",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Utiliser @{{name}} comme app CLI locale",
+        "mcpDescription": "Utiliser @{{name}} comme serveur MCP"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "Choisir un projet",
+        "projectPlaceholder": "Sélectionner un projet",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
-    "scrollToBottom": "Faire défiler vers le bas"
+    "scrollToBottom": "Faire défiler vers le bas",
+    "loadEarlier": "Charger les messages précédents"
   },
   "message": {
     "streaming": "en cours de génération",
     "assistantTyping": "L’assistant est en train d’écrire",
     "toolSingle": "Utilisation d’un outil",
     "toolMany": "{{count}} outils utilisés",
-    "imageAttachment": "Pièce jointe image"
+    "toolSummary": "{{count}} outil",
+    "toolSummaryMany": "{{count}} outils",
+    "reasoningTools": "Raisonnement · {{count}} outils",
+    "reasoningToolsSingular": "Raisonnement · 1 outil",
+    "reasoning": "Raisonnement",
+    "reasoningStreaming": "En réflexion…",
+    "reasoningSummary": "Raisonnement",
+    "agentActivitySummary": "{{reasoning}} étapes · {{tools}} appels d’outils",
+    "agentActivityToolsOnly": "{{tools}} appels d’outils",
+    "agentActivityLiveSummary": "En cours… · {{reasoning}} étapes · {{tools}} appels d’outils",
+    "agentActivityLiveToolsOnly": "En cours… · {{tools}} appels d’outils",
+    "imageAttachment": "Pièce jointe image",
+    "copyReply": "Copier la réponse",
+    "copiedReply": "Réponse copiée",
+    "turnLatencyTitle": "Temps de réponse (de bout en bout)",
+    "activityThinkingFor": "Réflexion pendant {{duration}}",
+    "activityThought": "Réflexion terminée",
+    "activityThoughtFor": "Réflexion terminée en {{duration}}",
+    "cliActivityRunningOne": "Utilisation de @{{name}}",
+    "cliActivityRanOne": "@{{name}} utilisé",
+    "cliActivityFailedOne": "Échec de @{{name}}",
+    "cliActivityRunningMany": "Utilisation de {{count}} apps CLI",
+    "cliActivityRanMany": "{{count}} apps CLI utilisées",
+    "cliActivityFailedMany": "Échec de {{count}} apps CLI",
+    "cliRunRunning": "Utilisation",
+    "cliRunRan": "Utilisé",
+    "cliRunFailed": "Échec"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
@@ -107,6 +746,19 @@
     "messageTooBig": {
       "title": "Message trop volumineux",
       "body": "Le serveur a rejeté votre dernier message car il dépasse la taille autorisée. Retirez des images ou choisissez des fichiers plus légers, puis renvoyez-le."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "Coller un chemin",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

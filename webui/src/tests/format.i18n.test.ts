@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAppLanguage } from "@/i18n";
-import { fmtDateTime, relativeTime } from "@/lib/format";
+import { fmtDateTime, formatTurnLatency, relativeTime } from "@/lib/format";
 
 describe("localized format helpers", () => {
   beforeEach(() => {
@@ -60,5 +60,23 @@ describe("localized format helpers", () => {
       }).format(date),
     );
     expect(english).not.toBe(french);
+  });
+
+  it("formats turn latency with locale-aware units", async () => {
+    await setAppLanguage("en");
+    const subMinute = formatTurnLatency(2400, "en");
+    expect(subMinute).toBe(
+      new Intl.NumberFormat("en", {
+        style: "unit",
+        unit: "second",
+        unitDisplay: "narrow",
+        maximumFractionDigits: 1,
+        minimumFractionDigits: 0,
+      }).format(2.4),
+    );
+
+    const minutePlus = formatTurnLatency(90_000, "en");
+    expect(minutePlus).toContain("m");
+    expect(minutePlus).toContain("s");
   });
 });

@@ -6,14 +6,39 @@ import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import urlencode
 
 import httpx
 import pytest
 
-from nanobot.channels.websocket import WebSocketChannel
+from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.session.manager import Session, SessionManager
+from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
+
+
+def _make_handler(
+    cfg: dict[str, Any] | WebSocketConfig,
+    bus: Any,
+    *,
+    session_manager: SessionManager | None = None,
+    static_dist_path: Path | None = None,
+    runtime_model_name: Any | None = None,
+) -> GatewayServices:
+    config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
+    workspace = Path.cwd()
+    return build_gateway_services(
+        config=config,
+        bus=bus,
+        session_manager=session_manager,
+        static_dist_path=static_dist_path,
+        workspace_path=workspace,
+        default_restrict_to_workspace=False,
+        runtime_model_name=runtime_model_name,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+    )
 
 
 def _ch(
@@ -22,6 +47,7 @@ def _ch(
     session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
     port: int = _PORT,
+    runtime_model_name: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -33,12 +59,13 @@ def _ch(
         "websocketRequiresToken": False,
     }
     cfg.update(extra)
-    return WebSocketChannel(
-        cfg,
-        bus,
+    gateway = _make_handler(
+        cfg, bus,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
+        runtime_model_name=runtime_model_name,
     )
+    return WebSocketChannel(cfg, bus, gateway=gateway)
 
 
 @pytest.fixture()
@@ -88,6 +115,7 @@ async def test_bootstrap_returns_token_for_localhost(
         body = resp.json()
         assert body["token"].startswith("nbwt_")
         assert body["ws_path"] == "/"
+        assert body["ws_url"] == "ws://127.0.0.1:29901/"
         assert body["expires_in"] > 0
         assert isinstance(body.get("model_name"), str)
     finally:
@@ -134,6 +162,225 @@ async def test_sessions_routes_require_bearer_token(
 
 
 @pytest.mark.asyncio
+async def test_cli_apps_routes_require_token_and_return_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.cli_apps_payload",
+        lambda: {
+            "apps": [
+                {
+                    "name": "gimp",
+                    "display_name": "GIMP",
+                    "category": "image",
+                    "description": "Image editing",
+                    "requires": "Python",
+                    "source": "harness",
+                    "entry_point": "cli-anything-gimp",
+                    "install_supported": True,
+                    "installed": False,
+                    "available": False,
+                    "status": "not_installed",
+                    "logo_url": None,
+                    "brand_color": None,
+                    "skill_installed": False,
+                }
+            ],
+            "installed_count": 0,
+            "catalog_updated_at": "2026-04-18",
+        },
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.cli_apps_action",
+        lambda action, query: {
+            "apps": [],
+            "installed_count": 1,
+            "catalog_updated_at": "2026-04-18",
+            "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
+        },
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29912)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29912/api/settings/cli-apps")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29912/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29912/api/settings/cli-apps",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        assert catalog.json()["apps"][0]["name"] == "gimp"
+
+        installed = await _http_get(
+            "http://127.0.0.1:29912/api/settings/cli-apps/install?name=gimp",
+            headers=auth,
+        )
+        assert installed.status_code == 200
+        assert installed.json()["last_action"]["message"] == "install:gimp"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_mcp_presets_routes_require_token_and_return_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.mcp_presets_payload",
+        lambda: {
+            "presets": [
+                {
+                    "name": "browserbase",
+                    "display_name": "Browserbase",
+                    "category": "browser",
+                    "description": "Cloud browser automation",
+                    "docs_url": "https://docs.browserbase.com/integrations/mcp/configuration",
+                    "transport": "streamableHttp",
+                    "requires": "Browserbase API key",
+                    "note": "",
+                    "install_supported": True,
+                    "installed": False,
+                    "configured": False,
+                    "available": False,
+                    "status": "not_installed",
+                    "logo_url": None,
+                    "brand_color": "#111827",
+                    "required_fields": [],
+                    "connection_summary": "",
+                }
+            ],
+            "installed_count": 0,
+        },
+    )
+    preset_queries: list[tuple[str, dict[str, list[str]]]] = []
+    custom_queries: list[tuple[str, dict[str, list[str]]]] = []
+
+    def _mcp_preset_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        preset_queries.append((action, query))
+        return {
+            "presets": [],
+            "installed_count": 1,
+            "requires_restart": action != "test",
+            "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
+        }
+
+    def _custom_action(action: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        custom_queries.append((action, query))
+        return {
+            "presets": [],
+            "installed_count": 1,
+            "requires_restart": True,
+            "last_action": {
+                "ok": True,
+                "message": f"{action}:{query.get('name', ['config'])[0]}",
+            },
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.mcp_presets_action",
+        _mcp_preset_action,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_presets_api.custom_mcp_action",
+        _custom_action,
+    )
+
+    async def _hot_reload(_bus):
+        return {"ok": True, "message": "MCP config reloaded.", "requires_restart": False}
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_mcp_reload",
+        _hot_reload,
+    )
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29913)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29913/api/settings/mcp-presets")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29913/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        catalog = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets",
+            headers=auth,
+        )
+        assert catalog.status_code == 200
+        assert catalog.json()["presets"][0]["name"] == "browserbase"
+
+        enabled = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"browserbase_api_key": "bb_live_secret"}
+                ),
+            },
+        )
+        assert enabled.status_code == 200
+        assert preset_queries[-1][1]["browserbase_api_key"] == ["bb_live_secret"]
+        body = enabled.json()
+        assert "bb_live_secret" not in enabled.text
+        assert body["last_action"]["message"] == "enable:browserbase MCP config reloaded."
+        assert body["hot_reload"]["ok"] is True
+        assert body["restart_required_sections"] == []
+
+        bad_header = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
+            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
+        )
+        assert bad_header.status_code == 400
+
+        custom = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"name": "docs", "command": "npx"}
+                ),
+            },
+        )
+        assert custom.status_code == 200
+        assert custom_queries[-1][1]["command"] == ["npx"]
+        assert custom.json()["last_action"]["message"] == "custom:docs MCP config reloaded."
+
+        imported = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/import",
+            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
+        )
+        assert imported.status_code == 200
+        assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
+
+        tools = await _http_get(
+            "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
+            headers={
+                **auth,
+                "X-Nanobot-MCP-Values": json.dumps(
+                    {"name": "docs", "enabled_tools": []}
+                ),
+            },
+        )
+        assert tools.status_code == 200
+        assert tools.json()["last_action"]["message"] == "tools:docs MCP config reloaded."
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -171,8 +418,63 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> None:
+async def test_webui_sidebar_state_routes_are_config_dir_scoped(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:sidebar")
+    channel = _ch(bus, session_manager=sm, port=29911)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29911/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        initial = await _http_get(
+            "http://127.0.0.1:29911/api/webui/sidebar-state",
+            headers=auth,
+        )
+        assert initial.status_code == 200
+        assert initial.json()["schema_version"] == 1
+        assert initial.json()["pinned_keys"] == []
+
+        payload = {
+            "pinned_keys": ["websocket:sidebar"],
+            "archived_keys": ["websocket:old"],
+            "title_overrides": {"websocket:sidebar": "Pinned work"},
+            "view": {"density": "compact", "show_archived": True},
+        }
+        query = urlencode({"state": json.dumps(payload)})
+        updated = await _http_get(
+            f"http://127.0.0.1:29911/api/webui/sidebar-state/update?{query}",
+            headers=auth,
+        )
+        assert updated.status_code == 200
+        body = updated.json()
+        assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
+        assert body["view"]["density"] == "compact"
+
+        state_path = tmp_path / "webui" / "sidebar-state.json"
+        assert state_path.is_file()
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
+            "websocket:sidebar"
+        ]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_removes_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
+    from nanobot.webui.transcript import append_transcript_object
+
+    append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -183,6 +485,8 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
 
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
+        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
+        assert webui_path.is_file()
         resp = await _http_get(
             "http://127.0.0.1:29903/api/sessions/websocket:doomed/delete",
             headers=auth,
@@ -190,6 +494,7 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
+        assert not webui_path.exists()
     finally:
         await channel.stop()
         await server_task
@@ -224,6 +529,66 @@ async def test_session_routes_accept_percent_encoded_websocket_keys(
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
         assert not path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_resigns_assistant_media_urls(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    media_root = tmp_path / "media"
+    websocket_media = media_root / "websocket"
+    websocket_media.mkdir(parents=True)
+    external = tmp_path / "clip.mp4"
+    external.write_bytes(b"video")
+
+    def fake_media_dir(channel: str | None = None) -> Path:
+        return websocket_media if channel == "websocket" else media_root
+
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+
+    append_transcript_object(
+        "websocket:video-replay",
+        {"event": "user", "chat_id": "video-replay", "text": "make a video"},
+    )
+    append_transcript_object(
+        "websocket:video-replay",
+        {
+            "event": "message",
+            "chat_id": "video-replay",
+            "text": "video ready",
+            "media": [str(external)],
+            "media_urls": [{"url": "/api/media/old-sig/old-payload", "name": "clip.mp4"}],
+        },
+    )
+
+    channel = _ch(bus, port=29914)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        resp = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket:video-replay/webui-thread",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
+        media = assistant["media"]
+        assert media[0]["kind"] == "video"
+        assert media[0]["name"] == "clip.mp4"
+        assert media[0]["url"].startswith("/api/media/")
+        assert media[0]["url"] != "/api/media/old-sig/old-payload"
+
+        fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
+        assert fetched.status_code == 200
+        assert fetched.content == b"video"
     finally:
         await channel.stop()
         await server_task
@@ -365,17 +730,176 @@ async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> 
     channel = _ch(bus, session_manager=sm, port=29908)
     # Don't start a server — directly inject and validate.
     import time as _time
-    channel._api_tokens["expired"] = _time.monotonic() - 1
-    channel._api_tokens["live"] = _time.monotonic() + 60
+    channel.gateway.tokens.api_tokens["expired"] = _time.monotonic() - 1
+    channel.gateway.tokens.api_tokens["live"] = _time.monotonic() + 60
 
     class _FakeReq:
         path = "/api/sessions"
         headers = {"Authorization": "Bearer expired"}
 
-    assert channel._check_api_token(_FakeReq()) is False
+    assert channel.gateway.tokens.check_api_token(_FakeReq()) is False
 
     class _LiveReq:
         path = "/api/sessions"
         headers = {"Authorization": "Bearer live"}
 
-    assert channel._check_api_token(_LiveReq()) is True
+    assert channel.gateway.tokens.check_api_token(_LiveReq()) is True
+
+
+class _FakeConn:
+    """Minimal connection stub with a configurable remote_address."""
+
+    def __init__(self, remote_address: tuple[str, int]):
+        self.remote_address = remote_address
+
+    def respond(self, status: int, body: str) -> Any:
+        from websockets.http11 import Response
+
+        return Response(status=status, body=body.encode())
+
+
+class _FakeReq:
+    """Minimal request stub with configurable headers."""
+
+    def __init__(self, headers: dict[str, str] | None = None):
+        self.headers = headers or {}
+
+
+_REMOTE = _FakeConn(("192.168.1.5", 12345))
+_LOCAL = _FakeConn(("127.0.0.1", 12345))
+_NO_HEADERS = _FakeReq()
+
+
+def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:
+    import pytest
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="token"):
+        _ch(bus, host="0.0.0.0")
+
+
+def test_wildcard_host_with_token_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", token="my-token")
+    assert channel.config.host == "0.0.0.0"
+
+
+def test_wildcard_host_with_secret_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    assert channel.config.host == "0.0.0.0"
+
+
+def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
+    import pytest
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="token"):
+        _ch(bus, host="::")
+
+
+def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+    )
+    assert resp.status_code == 200
+
+
+def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
+    """When only token (not token_issue_secret) is set, bootstrap accepts it."""
+    channel = _ch(bus, host="0.0.0.0", token="static-tok")
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
+    )
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+
+
+def test_bootstrap_ws_url_uses_forwarded_https_host(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1", port=29931)
+    resp = channel.gateway.http._handle_bootstrap(
+        _LOCAL,
+        _FakeReq({"Host": "nanobot.example", "X-Forwarded-Proto": "https"}),
+    )
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["ws_url"] == "wss://nanobot.example/"
+
+
+def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "live/model"
+
+
+def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "from-disk"
+
+
+def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+
+    def boom():
+        raise RuntimeError("resolver failed")
+
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=boom)
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "from-disk"
+
+
+def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="correct")
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer wrong"})
+    )
+    assert resp.status_code == 401
+
+
+def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer s3cret"})
+    )
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+
+
+def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel.gateway.http._handle_bootstrap(
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+    )
+    assert resp.status_code == 200
+
+
+def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
+    """When secret is set, even localhost must provide it (reverse-proxy safety)."""
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 401

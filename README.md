@@ -1,6 +1,18 @@
-![cover-v5-optimized](./images/GitHub_README.png)
+![nanobot README cover](./images/readme-cover.png)
 
 <div align="center">
+  <p>
+    <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview">English</a> |
+    <a href="https://nanobot.wiki/cn/docs/latest/getting-started/nanobot-overview">简体中文</a> |
+    <a href="https://nanobot.wiki/zh-Hant/docs/latest/getting-started/nanobot-overview">繁體中文</a> |
+    <a href="https://nanobot.wiki/es/docs/latest/getting-started/nanobot-overview">Español</a> |
+    <a href="https://nanobot.wiki/fr/docs/latest/getting-started/nanobot-overview">Français</a> |
+    <a href="https://nanobot.wiki/id/docs/latest/getting-started/nanobot-overview">Bahasa Indonesia</a> |
+    <a href="https://nanobot.wiki/ja/docs/latest/getting-started/nanobot-overview">日本語</a> |
+    <a href="https://nanobot.wiki/ko/docs/latest/getting-started/nanobot-overview">한국어</a> |
+    <a href="https://nanobot.wiki/ru/docs/latest/getting-started/nanobot-overview">Русский</a> |
+    <a href="https://nanobot.wiki/vi/docs/latest/getting-started/nanobot-overview">Tiếng Việt</a>
+  </p>
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
@@ -19,10 +31,45 @@
   </p>
 </div>
 
-🐈 **nanobot** is an open-source and ultra-lightweight AI agent in the spirit of [OpenClaw](https://github.com/openclaw/openclaw), [Claude Code](https://www.anthropic.com/claude-code), and [Codex](https://www.openai.com/codex/). It keeps the core agent loop small and readable while still supporting chat channels, memory, MCP and practical deployment paths, so you can go from local setup to a long-running personal agent with minimal overhead.
+🐈 **nanobot** is an open-source, ultra-lightweight agent runtime for people who want to own their AI agent stack. It gives you a small, readable core plus the practical pieces for real long-running agents: WebUI, chat channels, tools, memory, MCP, model routing, and deployment.
 
 ## 📢 News
 
+- **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
+- **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
+- **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
+- **2026-05-28** 🗂️ Project workspaces, access controls, steadier goals and streaming.
+- **2026-05-27** ⏱️ Codex streams respect idle timeouts during long runs.
+- **2026-05-26** 📡 Telegram webhooks, refreshed Kagi search, cleaner transport errors.
+- **2026-05-25** 🔌 Unified CLI Apps and MCP, Step Plan support, steadier sustained goals.
+- **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
+- **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
+- **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
+
+<details>
+<summary>Earlier news</summary>
+
+- **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
+- **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
+- **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
+- **2026-05-18** 🖌️ Gemini and MiniMax images, Ant Ling, live file-edit activity.
+- **2026-05-17** 🌊 Smoother WebUI streaming, AutoCompact fixes, buffered CLI reasoning.
+- **2026-05-16** 🧠 Atomic Chat provider, goal-aware timeouts, safer exec URL handling.
+- **2026-05-15** 🚀 Released **v0.2.0** — **`/goal`** holds sustained objectives across turns, WebUI now ships inside the wheel, image generation end to end, 5 new providers with `fallback_models`, and a real agent-loop refactor. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.0) for details.
+- **2026-05-14** 🎯 **`/goal`** for long-term objectives, visible multi-step progress, long-horizon missions in chat.
+- **2026-05-13** 🧠 Streaming reasoning before answers, automatic backup models, smoother plug-in reconnects.
+- **2026-05-12** 🎛️ Saved model presets with WebUI badge, simpler plug-in tools, quieter Feishu topic threads.
+- **2026-05-11** 🖥️ NVIDIA NIM support, terminal bot name and icon, streamed reasoning and MiMo toggle clarity.
+- **2026-05-09** 🖼️ Sharper image replay, BYO web-search keys in Settings, Feishu threads routed cleanly.
+- **2026-05-08** ✨ Inline chat image, redesigned Settings and keys, Dream memory aligned with visible history.
+- **2026-05-07** 📜 Locale-aware slash palette in WebUI, LAN login, faithful HTTP streaming responses.
+- **2026-05-06** 🧩 Tunable tool hint, steadier voice and plug-in startups, schedules and reminders that stick.
+- **2026-05-05** 🛡️ Quiet deny for unknown Telegram chats, Dream cleanup, fuller automation summaries.
+- **2026-05-04** 🔐 Safer DingTalk outbound media links, durable cron persistence, DeepSeek polish.
+- **2026-05-03** ⚙️ Predictable shell allow-list behavior, isolated chats mid-reply, cleaner interactive retries.
+- **2026-05-02** 🐈 LongCat support, smarter token sizing hints, clearer bundled upgrade guidance.
+- **2026-05-01** ☁️ Native AWS Bedrock provider, tighter helper handoffs and scoped session files.
+- **2026-04-30** 💬 Feishu threads that honor replies and topics, WhatsApp bridge refresh on source edits.
 - **2026-04-29** 🚀 Released **v0.1.5.post3** — Smarter threads on Feishu, Discord, Slack, and Teams; **DeepSeek-V4**; Hugging Face & Olostep; choices, `/history`, and steadier long chats. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post3) for details.
 - **2026-04-28** 🌐 Olostep web search, Hugging Face provider, safer workspace-tool interruptions.
 - **2026-04-27** 💬 `/history` command, smarter session replay caps, smoother Discord / Slack threads.
@@ -42,11 +89,7 @@
 - **2026-04-13** 🛡️ Agent turn hardened — user messages persisted early, auto-compact skips active tasks.
 - **2026-04-12** 🔒 Lark global domain support, Dream learns discovered skills, shell sandbox tightened.
 - **2026-04-11** ⚡ Context compact shrinks sessions on the fly; Kagi web search; QQ & WeCom full media.
-
-<details>
-<summary>Earlier news</summary>
-
-- **2026-04-10** 📓 Notebook editing tool, multiple MCP servers, Feishu streaming & done-emoji.
+- **2026-04-10** 📓 Multiple MCP servers, Feishu streaming & done-emoji.
 - **2026-04-09** 🔌 WebSocket channel, unified cross-channel session, `disabled_skills` config.
 - **2026-04-08** 📤 API file uploads, OpenAI reasoning auto-routing with Responses fallback.
 - **2026-04-07** 🧠 Anthropic adaptive thinking, MCP resources & prompts exposed as tools.
@@ -118,12 +161,13 @@
 </details>
 
 
-## 💡 Key Features of nanobot
+## 💡 Why nanobot
 
-- **Ultra-lightweight**: stable long-running agent behavior with a small, readable core.
-- **Research-ready**: the codebase is intentionally simple enough to study, modify, and extend.
-- **Practical**: chat channels, API, memory, MCP, and deployment paths are already built in.
-- **Hackable**: you can start fast, then go deeper through repo docs instead of a monolithic landing page.
+- **Persistent workflows**: goals, memory, tools, and chat context survive long-running work.
+- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, and email.
+- **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
+- **Small core**: readable internals with MCP, memory, deployment, and automation built in.
+- **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
 
 ## 📦 Install
 
@@ -197,13 +241,13 @@ nanobot agent
 
 
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run locally? Use [Atomic Chat](./docs/configuration.md#atomic-chat-local), [vLLM](./docs/configuration.md#vllm-local-openai-compatible), [Ollama](./docs/configuration.md#ollama-local), and [others](./docs/configuration.md#local-providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
-## 🧪 WebUI (Development)
+## 🌐 WebUI
 
-> [!NOTE]
-> The WebUI development workflow currently requires a source checkout and is not yet shipped together with the official packaged release. See [WebUI Document](./webui/README.md) for full WebUI development docs and build steps.
+The WebUI ships **inside the published wheel** — no extra build step. Just enable the WebSocket channel and open it in your browser.
 
 <p align="center">
   <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
@@ -221,13 +265,12 @@ nanobot agent
 nanobot gateway
 ```
 
-**3. Start the webui dev server**
+**3. Open the WebUI**
 
-```bash
-cd webui
-bun install
-bun run dev
-```
+Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs → LAN access](./webui/README.md#access-from-another-device-lan).
+
+> [!TIP]
+> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the Vite dev server (HMR) workflow.
 
 ## 🏗️ Architecture
 

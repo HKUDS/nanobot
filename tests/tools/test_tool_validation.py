@@ -3,6 +3,9 @@ import subprocess
 import sys
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from nanobot.agent.tools import (
     ArraySchema,
     IntegerSchema,
@@ -14,7 +17,8 @@ from nanobot.agent.tools import (
 )
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+from nanobot.security.network import configure_ssrf_whitelist
 
 
 class SampleTool(Tool):
@@ -218,6 +222,39 @@ def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
     assert "/bin/python" not in paths
 
 
+def test_exec_extract_absolute_paths_ignores_urls() -> None:
+    cmd = 'curl -s -o /dev/null -w "%{http_code}" https://www.google.com'
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert paths == ["/dev/null"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'curl -s -o /dev/null -w "%{http_code}" https://www.google.com',
+        'wget -q -O - http://example.com 2>&1 | head -c 100',
+        'python3 -c "import urllib.request; print(urllib.request.urlopen(\'http://example.com\').read()[:100])"',
+    ],
+)
+def test_exec_guard_allows_public_urls(tmp_path, command: str) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(command, str(tmp_path))
+    assert error is None
+
+
+def test_exec_guard_allows_whitelisted_internal_urls(tmp_path) -> None:
+    configure_ssrf_whitelist(["10.10.10.0/24"])
+    try:
+        tool = ExecTool(restrict_to_workspace=True)
+        error = tool._guard_command(
+            'curl -s -H "Authorization: Bearer ..." http://10.10.10.3:8123/api/',
+            str(tmp_path),
+        )
+        assert error is None
+    finally:
+        configure_ssrf_whitelist([])
+
+
 def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     cmd = "cat /tmp/data.txt > /tmp/out.txt"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -242,13 +279,21 @@ def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
 def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command("cat ~/.nanobot/config.json", str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
 
 
 def test_exec_guard_allows_media_path_outside_workspace(tmp_path, monkeypatch) -> None:
@@ -300,7 +345,39 @@ def test_exec_guard_blocks_windows_drive_root_outside_workspace(monkeypatch) -> 
 
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command("dir E:\\", "E:\\workspace")
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
+
+
+def test_exec_guard_allows_dev_null_redirect(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "file.txt").write_text("ok", encoding="utf-8")
+    error = tool._guard_command(f'rm "{ws / "file.txt"}" 2>/dev/null', str(ws))
+    assert error is None
+
+
+def test_exec_guard_allows_dev_urandom(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat /dev/urandom | head -c 16 > random.bin", str(tmp_path))
+    assert error is None
+
+
+def test_exec_guard_blocks_non_benign_dev_path(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat /dev/sda", str(tmp_path))
+    assert error is not None
+    assert "path outside working dir" in error
+
+
+def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
+    cmd = "python query.py --query '{job=\"app\"} |~ \"error\"'"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert not any(p.startswith("~") for p in paths)
 
 
 # --- cast_params tests ---
@@ -585,6 +662,26 @@ async def test_exec_timeout_capped_at_max() -> None:
     # Should not raise — just clamp to 600
     result = await tool.execute(command="echo ok", timeout=9999)
     assert "Exit code: 0" in result
+
+
+def test_exec_config_timeout_uncapped_and_zero() -> None:
+    """Config timeout is no longer capped at 600 and accepts 0 = no limit (#3595)."""
+    assert ExecToolConfig(timeout=0).timeout == 0
+    assert ExecToolConfig(timeout=3600).timeout == 3600
+    with pytest.raises(ValidationError):
+        ExecToolConfig(timeout=-1)
+
+
+def test_resolve_timeout_config_uncapped_and_unlimited() -> None:
+    """Config timeout drives the hard timeout uncapped; 0 means no limit (#3595)."""
+    assert ExecTool(timeout=3600)._resolve_timeout(None) == 3600
+    assert ExecTool(timeout=0)._resolve_timeout(None) is None
+
+
+def test_resolve_timeout_per_call_still_capped() -> None:
+    """Per-call (LLM) timeout stays capped at _MAX_TIMEOUT even with unlimited config."""
+    assert ExecTool(timeout=0)._resolve_timeout(9999) == ExecTool._MAX_TIMEOUT
+    assert ExecTool(timeout=60)._resolve_timeout(120) == 120
 
 
 # --- _resolve_type and nullable param tests ---

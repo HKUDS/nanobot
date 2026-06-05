@@ -8,37 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.agent.tools import file_state
+from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
+from nanobot.agent.tools.path_utils import resolve_workspace_path
+from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
-from nanobot.config.paths import get_media_dir
-
-
-def _resolve_path(
-    path: str,
-    workspace: Path | None = None,
-    allowed_dir: Path | None = None,
-    extra_allowed_dirs: list[Path] | None = None,
-) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
-        if not any(_is_under(resolved, d) for d in all_dirs):
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
-    return resolved
-
-
-def _is_under(path: Path, directory: Path) -> bool:
-    try:
-        path.relative_to(directory.resolve())
-        return True
-    except ValueError:
-        return False
 
 
 class _FsTool(Tool):
@@ -49,13 +28,66 @@ class _FsTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         extra_allowed_dirs: list[Path] | None = None,
+        file_states: FileStates | None = None,
+        restrict_to_workspace: bool | None = None,
+        sandbox_restricts_workspace: bool = False,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs
+        self._restrict_to_workspace = (
+            bool(restrict_to_workspace)
+            if restrict_to_workspace is not None
+            else allowed_dir is not None
+        )
+        self._sandbox_restricts_workspace = sandbox_restricts_workspace
+        # Explicit state is used by isolated runners like Dream/subagents.
+        # Main AgentLoop tools leave this unset and resolve state from the
+        # current async task, which keeps shared tool instances session-safe.
+        self._explicit_file_states = file_states
+        self._fallback_file_states = FileStates()
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        restrict = (
+            ctx.config.restrict_to_workspace
+            or ctx.config.exec.sandbox
+        )
+        sandbox_restricts = bool(ctx.config.exec.sandbox)
+        allowed_dir = Path(ctx.workspace) if restrict else None
+        extra_read = [BUILTIN_SKILLS_DIR]
+        return cls(
+            workspace=Path(ctx.workspace),
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_read,
+            file_states=ctx.file_state_store,
+            restrict_to_workspace=ctx.config.restrict_to_workspace,
+            sandbox_restricts_workspace=sandbox_restricts,
+        )
+
+    @property
+    def _file_states(self) -> FileStates:
+        if self._explicit_file_states is not None:
+            return self._explicit_file_states
+        return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+        access = current_tool_workspace(
+            self._workspace,
+            restrict_to_workspace=self._restrict_to_workspace,
+            sandbox_restricts_workspace=self._sandbox_restricts_workspace,
+        )
+        return resolve_workspace_path(
+            path,
+            access.project_path,
+            access.allowed_root,
+            self._extra_allowed_dirs,
+        )
+
+    def _display_workspace(self) -> Path | None:
+        return current_tool_workspace(self._workspace).project_path
 
 
 # ---------------------------------------------------------------------------
@@ -120,11 +152,16 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
             minimum=1,
         ),
         pages=StringSchema("Page range for PDF files, e.g. '1-5' (default: all, max 20 pages)"),
+        force=BooleanSchema(
+            description="Bypass same-file read deduplication and return content again.",
+            default=False,
+        ),
         required=["path"],
     )
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
@@ -141,7 +178,11 @@ class ReadFileTool(_FsTool):
             "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
             "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Use find_files/list_dir first when the path is uncertain. "
+            "Read the relevant range before editing so replacements or patches "
+            "are based on current content. "
             "Use offset and limit for large text files. "
+            "Use force=true to re-read content even if unchanged. "
             "Reads exceeding ~128K chars are truncated."
         )
 
@@ -149,7 +190,15 @@ class ReadFileTool(_FsTool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, pages: str | None = None, **kwargs: Any) -> Any:
+    async def execute(
+        self,
+        path: str | None = None,
+        offset: int = 1,
+        limit: int | None = None,
+        pages: str | None = None,
+        force: bool = False,
+        **kwargs: Any,
+    ) -> Any:
         try:
             if not path:
                 return "Error reading file: Unknown path"
@@ -184,30 +233,36 @@ class ReadFileTool(_FsTool):
 
             # Read dedup: same path + offset + limit + unchanged mtime → stub
             # Always check for external modifications before dedup
-            entry = file_state._state.get(str(fp.resolve()))
+            entry = self._file_states.get(fp)
             try:
                 current_mtime = os.path.getmtime(fp)
             except OSError:
                 current_mtime = 0.0
-            if entry and entry.can_dedup and entry.offset == offset and entry.limit == limit:
+            if (
+                not force
+                and entry
+                and entry.can_dedup
+                and entry.offset == offset
+                and entry.limit == limit
+            ):
                 if current_mtime != entry.mtime:
                     # File was modified externally - force full read and mark as not dedupable
                     entry.can_dedup = False
-                    file_state.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
+                    self._file_states.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
                     # Continue to read full content (don't return dedup message)
                 else:
                     # File unchanged - return dedup message
                     # But only if content is actually unchanged (not just mtime)
-                    current_hash = file_state._hash_file(str(fp))
+                    current_hash = _hash_file(str(fp))
                     if current_hash == entry.content_hash:
                         return f"[File unchanged since last read: {path}]"
                     else:
                         # Content changed despite same mtime - force full read
                         entry.can_dedup = False
-                        file_state.record_read(fp, offset=offset, limit=limit)
+                        self._file_states.record_read(fp, offset=offset, limit=limit)
             else:
                 # No previous state or marked as not dedupable - read full content
-                file_state.record_read(fp, offset=offset, limit=limit)
+                self._file_states.record_read(fp, offset=offset, limit=limit)
                 # Force full read by setting can_dedup to False for this read
                 if entry:
                     entry.can_dedup = False
@@ -256,7 +311,7 @@ class ReadFileTool(_FsTool):
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:
                 result += f"\n\n(End of file — {total} lines total)"
-            file_state.record_read(fp, offset=offset, limit=limit)
+            self._file_states.record_read(fp, offset=offset, limit=limit)
             return result
         except PermissionError as e:
             return f"Error: {e}"
@@ -343,6 +398,7 @@ class ReadFileTool(_FsTool):
 )
 class WriteFileTool(_FsTool):
     """Write content to a file."""
+    _scopes = {"core", "subagent", "memory"}
 
     @property
     def name(self) -> str:
@@ -351,9 +407,10 @@ class WriteFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Write content to a file. Overwrites if the file already exists; "
-            "creates parent directories as needed. "
-            "For partial edits, prefer edit_file instead."
+            "Create a new file or intentionally replace an entire file with "
+            "the provided content. Overwrites existing files and creates parent "
+            "directories as needed. For code changes or partial edits, prefer "
+            "apply_patch; use edit_file only for small exact replacements."
         )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
@@ -365,7 +422,7 @@ class WriteFileTool(_FsTool):
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
-            file_state.record_write(fp)
+            self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
@@ -580,11 +637,6 @@ def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
     return []
 
 
-def _find_match_line_numbers(content: str, old_text: str) -> list[int]:
-    """Return 1-based starting line numbers for the current matching strategies."""
-    return [match.line for match in _find_matches(content, old_text)]
-
-
 def _collapse_internal_whitespace(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in text.splitlines())
 
@@ -648,11 +700,30 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
         old_text=StringSchema("The text to find and replace"),
         new_text=StringSchema("The text to replace with"),
         replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
+        occurrence=IntegerSchema(
+            1,
+            description="Optional 1-based occurrence to replace when old_text appears multiple times.",
+            minimum=1,
+            nullable=True,
+        ),
+        line_hint=IntegerSchema(
+            1,
+            description="Optional 1-based line hint used to choose the nearest match.",
+            minimum=1,
+            nullable=True,
+        ),
+        expected_replacements=IntegerSchema(
+            1,
+            description="Optional guard for the number of replacements that must be made.",
+            minimum=1,
+            nullable=True,
+        ),
         required=["path", "old_text", "new_text"],
     )
 )
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
@@ -664,10 +735,13 @@ class EditFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Edit a file by replacing old_text with new_text. "
-            "Tolerates minor whitespace/indentation differences and curly/straight quote mismatches. "
-            "If old_text matches multiple times, you must provide more context "
-            "or set replace_all=true. Shows a diff of the closest match on failure."
+            "Perform a small, exact replacement in one file by replacing "
+            "old_text with new_text. Use this for narrow text substitutions "
+            "with old_text copied from read_file. For multi-file, structural, "
+            "or generated code edits, prefer apply_patch. If old_text matches "
+            "multiple times, provide more context or set occurrence, line_hint, "
+            "replace_all, and expected_replacements. Shows closest-match "
+            "diagnostics on failure."
         )
 
     @staticmethod
@@ -678,7 +752,8 @@ class EditFileTool(_FsTool):
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
         new_text: str | None = None,
-        replace_all: bool = False, **kwargs: Any,
+        replace_all: bool = False, occurrence: int | None = None,
+        line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
     ) -> str:
         try:
             if not path:
@@ -687,10 +762,12 @@ class EditFileTool(_FsTool):
                 raise ValueError("Unknown old_text")
             if new_text is None:
                 raise ValueError("Unknown new_text")
-
-            # .ipynb detection
-            if path.endswith(".ipynb"):
-                return "Error: This is a Jupyter notebook. Use the notebook_edit tool instead of edit_file."
+            if occurrence is not None and occurrence < 1:
+                return "Error: occurrence must be >= 1."
+            if line_hint is not None and line_hint < 1:
+                return "Error: line_hint must be >= 1."
+            if expected_replacements is not None and expected_replacements < 1:
+                return "Error: expected_replacements must be >= 1."
 
             fp = self._resolve(path)
 
@@ -699,7 +776,7 @@ class EditFileTool(_FsTool):
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")
-                    file_state.record_write(fp)
+                    self._file_states.record_write(fp)
                     return f"Successfully created {fp}"
                 return self._file_not_found_msg(path, fp)
 
@@ -718,11 +795,11 @@ class EditFileTool(_FsTool):
                 if content.strip():
                     return f"Error: Cannot create file — {path} already exists and is not empty."
                 fp.write_text(new_text, encoding="utf-8")
-                file_state.record_write(fp)
+                self._file_states.record_write(fp)
                 return f"Successfully edited {fp}"
 
             # Read-before-edit check
-            warning = file_state.check_read(fp)
+            warning = self._file_states.check_read(fp)
 
             raw = fp.read_bytes()
             uses_crlf = b"\r\n" in raw
@@ -733,15 +810,42 @@ class EditFileTool(_FsTool):
             if not matches:
                 return self._not_found_msg(old_text, content, path)
             count = len(matches)
+            if replace_all and occurrence is not None:
+                return "Error: occurrence cannot be used with replace_all=true."
+            if replace_all and line_hint is not None:
+                return "Error: line_hint cannot be used with replace_all=true."
+            if occurrence is not None and line_hint is not None:
+                return "Error: line_hint cannot be used with occurrence."
             if count > 1 and not replace_all:
-                line_numbers = [match.line for match in matches]
-                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                if len(line_numbers) > 3:
-                    preview += ", ..."
-                location_hint = f" at {preview}" if preview else ""
+                if occurrence is not None:
+                    if occurrence > count:
+                        return (
+                            f"Error: occurrence {occurrence} is out of range; "
+                            f"old_text appears {count} times."
+                        )
+                elif line_hint is not None:
+                    nearest = min(matches, key=lambda match: abs(match.line - line_hint))
+                    distance = abs(nearest.line - line_hint)
+                    if sum(1 for match in matches if abs(match.line - line_hint) == distance) > 1:
+                        return (
+                            f"Error: line_hint {line_hint} is ambiguous; "
+                            f"old_text appears {count} times."
+                        )
+                else:
+                    line_numbers = [match.line for match in matches]
+                    preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                    if len(line_numbers) > 3:
+                        preview += ", ..."
+                    location_hint = f" at {preview}" if preview else ""
+                    return (
+                        f"Warning: old_text appears {count} times{location_hint}. "
+                        "Provide more context, set occurrence to choose one match, "
+                        "or set replace_all=true."
+                    )
+            elif occurrence is not None and occurrence > count:
                 return (
-                    f"Warning: old_text appears {count} times{location_hint}. "
-                    "Provide more context to make it unique, or set replace_all=true."
+                    f"Error: occurrence {occurrence} is out of range; "
+                    f"old_text appears {count} time."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
@@ -750,7 +854,17 @@ class EditFileTool(_FsTool):
             if fp.suffix.lower() not in self._MARKDOWN_EXTS:
                 norm_new = self._strip_trailing_ws(norm_new)
 
-            selected = matches if replace_all else matches[:1]
+            if replace_all:
+                selected = matches
+            elif line_hint is not None:
+                selected = [min(matches, key=lambda match: abs(match.line - line_hint))]
+            else:
+                selected = [matches[occurrence - 1 if occurrence else 0]]
+            if expected_replacements is not None and len(selected) != expected_replacements:
+                return (
+                    f"Error: expected {expected_replacements} replacements but "
+                    f"would make {len(selected)}."
+                )
             new_content = content
             for match in reversed(selected):
                 replacement = _preserve_quote_style(norm_old, match.text, norm_new)
@@ -767,7 +881,7 @@ class EditFileTool(_FsTool):
                 new_content = new_content.replace("\n", "\r\n")
 
             fp.write_bytes(new_content.encode("utf-8"))
-            file_state.record_write(fp)
+            self._file_states.record_write(fp)
             msg = f"Successfully edited {fp}"
             if warning:
                 msg = f"{warning}\n{msg}"
@@ -836,6 +950,7 @@ class EditFileTool(_FsTool):
 )
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
+    _scopes = {"core", "subagent"}
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {

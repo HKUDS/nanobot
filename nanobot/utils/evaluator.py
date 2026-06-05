@@ -44,12 +44,12 @@ async def evaluate_response(
     task_context: str,
     provider: LLMProvider,
     model: str,
+    default_notify: bool = True,
 ) -> bool:
     """Decide whether a background-task result should be delivered to the user.
 
-    Uses a lightweight tool-call LLM request (same pattern as heartbeat
-    ``_decide()``).  Falls back to ``True`` (notify) on any failure so
-    that important messages are never silently dropped.
+    On any failure, falls back to ``default_notify`` (cron reminders fail open;
+    heartbeat passes ``False`` to fail closed).
     """
     try:
         llm_response = await provider.chat_with_retry(
@@ -71,19 +71,24 @@ async def evaluate_response(
         if not llm_response.should_execute_tools:
             if llm_response.has_tool_calls:
                 logger.warning(
-                    "evaluate_response: ignoring tool calls under finish_reason='{}', defaulting to notify",
+                    "evaluate_response: ignoring tool calls under finish_reason='{}', "
+                    "defaulting to notify={}",
                     llm_response.finish_reason,
+                    default_notify,
                 )
             else:
-                logger.warning("evaluate_response: no tool call returned, defaulting to notify")
-            return True
+                logger.warning(
+                    "evaluate_response: no tool call returned, defaulting to notify={}",
+                    default_notify,
+                )
+            return default_notify
 
         args = llm_response.tool_calls[0].arguments
-        should_notify = args.get("should_notify", True)
+        should_notify = args.get("should_notify", default_notify)
         reason = args.get("reason", "")
         logger.info("evaluate_response: should_notify={}, reason={}", should_notify, reason)
         return bool(should_notify)
 
     except Exception:
-        logger.exception("evaluate_response failed, defaulting to notify")
-        return True
+        logger.exception("evaluate_response failed, defaulting to notify={}", default_notify)
+        return default_notify
