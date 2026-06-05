@@ -175,6 +175,7 @@ export const ChatList = memo(function ChatList({
   const running = new Set(runningChatIds);
   const completed = new Set(completedChatIds);
   const compact = density === "compact";
+  const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
 
   return (
     <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
@@ -192,12 +193,11 @@ export const ChatList = memo(function ChatList({
 
           return (
             <section key={group.id} aria-label={group.label}>
-              {group.kind === "project"
-                && limitedGroups[index - 1]?.kind !== "project" ? (
-                  <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
-                    {labels.projects}
-                  </div>
-                ) : null}
+              {index === firstProjectGroupIndex ? (
+                <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
+                  {labels.projects}
+                </div>
+              ) : null}
               {group.kind === "project" ? (
                 <ProjectGroupHeader
                   label={group.label}

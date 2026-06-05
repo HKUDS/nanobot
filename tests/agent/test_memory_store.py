@@ -129,6 +129,33 @@ class TestHistoryWithCursor:
         cursor = store.append_history("new event")
         assert cursor == 1
 
+    def test_append_history_allocates_unique_cursors_under_concurrent_writes(self, store):
+        """Regression: concurrent appends must not allocate duplicate cursors."""
+        import threading
+
+        writers = 16
+        start = threading.Barrier(writers)
+        cursors: list[int] = []
+        lock = threading.Lock()
+
+        def worker(i):
+            start.wait()
+            c = store.append_history(f"event {i}")
+            with lock:
+                cursors.append(c)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(writers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(cursors) == writers
+        assert len(set(cursors)) == writers, f"duplicate cursors: {sorted(cursors)}"
+        assert sorted(cursors) == list(range(1, writers + 1))
+        persisted = store.read_unprocessed_history(since_cursor=0)
+        assert sorted(e["cursor"] for e in persisted) == list(range(1, writers + 1))
+
     def test_compact_history_drops_oldest(self, tmp_path):
         store = MemoryStore(tmp_path, max_history_entries=2)
         store.append_history("event 1")

@@ -37,6 +37,7 @@ class _MockChannel(BaseChannel):
         self._send_mock = AsyncMock()
         self._delta_mock = AsyncMock()
         self._end_mock = AsyncMock()
+        self._file_edit_mock = AsyncMock()
 
     async def start(self):  # pragma: no cover - not exercised
         pass
@@ -53,12 +54,41 @@ class _MockChannel(BaseChannel):
     async def send_reasoning_end(self, chat_id, metadata=None):
         return await self._end_mock(chat_id, metadata)
 
+    async def send_file_edit_events(self, chat_id, edits, metadata=None):
+        return await self._file_edit_mock(chat_id, edits, metadata)
+
 
 @pytest.fixture
 def manager() -> ChannelManager:
     mgr = ChannelManager(Config(), MessageBus())
     mgr.channels["mock"] = _MockChannel({}, mgr.bus)
     return mgr
+
+
+def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "nanobot.webui.workspaces.read_webui_default_access_mode",
+        lambda: "default",
+    )
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"workspace": str(tmp_path)}},
+            "tools": {"restrictToWorkspace": True},
+            "channels": {
+                "websocket": {
+                    "enabled": True,
+                    "websocketRequiresToken": False,
+                },
+            },
+        }
+    )
+
+    mgr = ChannelManager(config, MessageBus(), webui_static_dist=False)
+    channel = mgr.channels["websocket"]
+
+    scope = channel.gateway.workspaces.default_scope()
+    assert scope.project_path == tmp_path
+    assert scope.restrict_to_workspace is True
 
 
 @pytest.mark.asyncio
@@ -193,6 +223,44 @@ async def test_base_channel_reasoning_primitives_are_noop_safe():
     assert await channel.send_reasoning(
         OutboundMessage(channel="plain", chat_id="c", content="x", metadata={})
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_file_edit_events_route_to_channel_capability(manager):
+    channel = manager.channels["mock"]
+    edits = [{"version": 1, "phase": "start", "path": "src/app.py"}]
+    msg = OutboundMessage(
+        channel="mock",
+        chat_id="c1",
+        content="",
+        metadata={"_progress": True, "_file_edit_events": edits},
+    )
+
+    await manager._send_once(channel, msg)
+
+    channel._file_edit_mock.assert_awaited_once_with(
+        "c1", edits, {"_progress": True, "_file_edit_events": edits}
+    )
+    channel._send_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_base_channel_file_edit_events_are_noop_safe():
+    class _Plain(BaseChannel):
+        name = "plain"
+        display_name = "Plain"
+
+        async def start(self):  # pragma: no cover
+            pass
+
+        async def stop(self):  # pragma: no cover
+            pass
+
+        async def send(self, msg):  # pragma: no cover
+            raise AssertionError("file edit events should not call send")
+
+    channel = _Plain({}, MessageBus())
+    assert await channel.send_file_edit_events("c", [{"path": "a.py"}]) is None
 
 
 @pytest.mark.asyncio

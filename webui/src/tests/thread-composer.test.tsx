@@ -386,6 +386,7 @@ describe("ThreadComposer", () => {
     expect(status).toHaveTextContent(/2:05/);
     expect(status.parentElement).toHaveClass("composer-status-strip");
     expect(status.parentElement).toHaveAttribute("data-state", "enter");
+    expect(status.querySelector(".run-pulse-icon")).not.toBeNull();
 
     vi.useRealTimers();
   });

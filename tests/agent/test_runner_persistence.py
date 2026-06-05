@@ -123,6 +123,54 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
 
     assert "[tool output persisted]" in persisted
     assert warnings and "Failed to clean stale tool result buckets" in warnings[0]
+
+
+async def test_read_file_result_is_not_offloaded(tmp_path):
+    """read_file must not trigger generic offloading (prevents persist->read->persist loops)."""
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+    captured_second_call: list[dict] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="reading",
+                tool_calls=[ToolCallRequest(id="call_rf", name="read_file", arguments={"path": "big.txt"})],
+                usage={"prompt_tokens": 5, "completion_tokens": 3},
+            )
+        captured_second_call[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="x" * 20_000)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read big file"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        workspace=tmp_path,
+        session_key="test:runner",
+        max_tool_result_chars=2048,
+    ))
+
+    assert result.final_content == "done"
+    tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
+    # read_file result must NOT be offloaded to a file
+    assert "[tool output persisted]" not in tool_message["content"]
+    # read_file manages its own size; generic truncation must NOT apply
+    assert len(tool_message["content"]) == 20_000
+    # no file should have been written for this read_file call
+    offload_dir = tmp_path / ".nanobot" / "tool-results"
+    assert not any(offload_dir.rglob("call_rf.txt")) if offload_dir.exists() else True
+
+
 async def test_runner_keeps_going_when_tool_result_persistence_fails():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

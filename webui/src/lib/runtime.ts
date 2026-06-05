@@ -51,6 +51,11 @@ type HostSocketBridge = Required<Pick<
   "closeSocket" | "onSocketEvent" | "openSocket" | "sendSocket"
 >>;
 
+const HOST_WS_CONNECTING = 0;
+const HOST_WS_OPEN = 1;
+const HOST_WS_CLOSING = 2;
+const HOST_WS_CLOSED = 3;
+
 declare global {
   interface Window {
     nanobotHost?: NanobotHostApi;
@@ -122,7 +127,7 @@ class HostWebSocket {
   onerror: ((this: WebSocket, ev: Event) => unknown) | null = null;
   onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null = null;
   onopen: ((this: WebSocket, ev: Event) => unknown) | null = null;
-  readyState: number = WebSocket.CONNECTING;
+  readyState: number = HOST_WS_CONNECTING;
   readonly url: string;
 
   private id: string | null = null;
@@ -140,7 +145,7 @@ class HostWebSocket {
         this.id = id;
       },
       () => {
-        this.readyState = WebSocket.CLOSED;
+        this.readyState = HOST_WS_CLOSED;
         this.onerror?.call(this as unknown as WebSocket, new Event("error"));
         this.onclose?.call(this as unknown as WebSocket, closeEvent());
         this.unsubscribe();
@@ -149,14 +154,14 @@ class HostWebSocket {
   }
 
   close(): void {
-    if (this.readyState === WebSocket.CLOSING || this.readyState === WebSocket.CLOSED) {
+    if (this.readyState === HOST_WS_CLOSING || this.readyState === HOST_WS_CLOSED) {
       return;
     }
-    this.readyState = WebSocket.CLOSING;
+    this.readyState = HOST_WS_CLOSING;
     if (this.id) {
       void this.api.closeSocket(this.id);
     } else {
-      this.readyState = WebSocket.CLOSED;
+      this.readyState = HOST_WS_CLOSED;
       this.unsubscribe();
     }
   }
@@ -165,7 +170,7 @@ class HostWebSocket {
     if (typeof data !== "string") {
       throw new Error("Host WebSocket bridge only supports text frames");
     }
-    if (this.readyState === WebSocket.OPEN && this.id) {
+    if (this.readyState === HOST_WS_OPEN && this.id) {
       void this.api.sendSocket(this.id, data);
       return;
     }
@@ -175,7 +180,7 @@ class HostWebSocket {
   private handleEvent(event: HostSocketEvent): void {
     if (!this.id || event.id !== this.id) return;
     if (event.type === "open") {
-      this.readyState = WebSocket.OPEN;
+      this.readyState = HOST_WS_OPEN;
       this.onopen?.call(this as unknown as WebSocket, new Event("open"));
       while (this.queued.length > 0 && this.id) {
         const data = this.queued.shift();
@@ -194,7 +199,7 @@ class HostWebSocket {
       this.onerror?.call(this as unknown as WebSocket, new Event("error"));
       return;
     }
-    this.readyState = WebSocket.CLOSED;
+    this.readyState = HOST_WS_CLOSED;
     this.onclose?.call(
       this as unknown as WebSocket,
       closeEvent(event.code, event.reason),

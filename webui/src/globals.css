@@ -89,6 +89,75 @@
     -webkit-app-region: no-drag;
   }
 
+  html.native-host,
+  html.native-host body,
+  html.native-host #root {
+    background: transparent;
+  }
+
+  html.native-host body {
+    overflow: hidden;
+  }
+
+  .host-window-shell,
+  .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--background) / 0.42);
+    --host-glass-start: hsl(var(--sidebar) / 0.5);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+    background:
+      radial-gradient(
+        circle at 18% 0%,
+        var(--host-glass-spot),
+        transparent 34rem
+      ),
+      linear-gradient(
+        180deg,
+        var(--host-glass-start),
+        var(--host-glass-end)
+      );
+    background-attachment: fixed, fixed;
+    -webkit-backdrop-filter: saturate(185%) blur(34px);
+    backdrop-filter: saturate(185%) blur(34px);
+  }
+
+  .host-sidebar-glass {
+    box-shadow:
+      inset -1px 0 0 hsl(var(--border) / 0.36),
+      inset 1px 0 0 hsl(var(--background) / 0.34),
+      18px 0 44px -42px rgb(0 0 0 / 0.42);
+  }
+
+  .dark .host-window-shell,
+  .dark .host-sidebar-glass {
+    --host-glass-spot: hsl(var(--foreground) / 0.06);
+    --host-glass-start: hsl(var(--sidebar) / 0.48);
+    --host-glass-end: hsl(var(--sidebar) / 0.3);
+  }
+
+  .dark .host-sidebar-glass {
+    box-shadow:
+      inset -1px 0 0 hsl(var(--border) / 0.42),
+      inset 1px 0 0 hsl(var(--foreground) / 0.05),
+      18px 0 46px -42px rgb(0 0 0 / 0.72);
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .host-sidebar-glass {
+      background: hsl(var(--sidebar) / 0.92);
+    }
+  }
+
+  html.native-host * {
+    scrollbar-width: none;
+    scrollbar-gutter: auto !important;
+  }
+
+  html.native-host *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
   .shadow-inner-right {
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
@@ -232,6 +301,50 @@
   .composer-status-strip[data-state="exit"] {
     animation: composer-status-strip-exit 180ms ease-in both;
   }
+  @keyframes run-pulse-dot {
+    0%,
+    100% {
+      transform: scale(0.9);
+      opacity: 0.76;
+    }
+    50% {
+      transform: scale(1.08);
+      opacity: 1;
+    }
+  }
+  @keyframes run-pulse-ring {
+    0% {
+      transform: scale(0.42);
+      opacity: 0.34;
+    }
+    100% {
+      transform: scale(1.28);
+      opacity: 0;
+    }
+  }
+  .run-pulse-icon {
+    color: hsl(204 82% 46%);
+  }
+  .run-pulse-icon__ring,
+  .run-pulse-icon__dot {
+    display: block;
+    border-radius: 999px;
+    pointer-events: none;
+  }
+  .run-pulse-icon__ring {
+    position: absolute;
+    height: 12px;
+    width: 12px;
+    background: hsl(204 82% 46% / 0.22);
+    animation: run-pulse-ring 1.55s ease-out infinite;
+  }
+  .run-pulse-icon__dot {
+    height: 6px;
+    width: 6px;
+    background: currentColor;
+    box-shadow: 0 0 0 1px hsl(204 82% 46% / 0.14);
+    animation: run-pulse-dot 1.55s ease-in-out infinite;
+  }
   @keyframes queued-prompt-row-enter {
     0% {
       opacity: 0;
@@ -251,6 +364,18 @@
     }
     .composer-status-strip[data-state] {
       animation: none;
+    }
+    .run-pulse-icon,
+    .run-pulse-icon * {
+      animation: none;
+    }
+    .run-pulse-icon__ring {
+      opacity: 0.18;
+      transform: scale(1);
+    }
+    .run-pulse-icon__dot {
+      opacity: 1;
+      transform: scale(1);
     }
     .queued-prompt-row {
       animation: none;

@@ -73,6 +73,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "jina", "label": "Jina", "credential": "api_key"},
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -244,8 +245,8 @@ def _resolve_env_placeholders(value: str | None) -> str | None:
 
 
 def _provider_requires_api_key(spec: Any) -> bool:
-    if spec.backend == "azure_openai":
-        return True
+    if spec.name == "azure_openai":
+        return False
     if spec.is_oauth:
         return False
     if spec.is_local or spec.is_direct:
@@ -304,6 +305,8 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
+    if spec.name == "azure_openai":
+        return bool(provider_config.api_base)
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
     return bool(
@@ -741,9 +744,6 @@ def settings_payload(
             },
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
-                "max_batch_size": defaults.dream.max_batch_size,
-                "max_iterations": defaults.dream.max_iterations,
-                "annotate_line_ages": defaults.dream.annotate_line_ages,
             },
             "unified_session": defaults.unified_session,
         },

@@ -3,6 +3,7 @@
 import asyncio
 import html
 import imaplib
+import mimetypes
 import re
 import smtplib
 import ssl
@@ -186,6 +187,11 @@ class EmailChannel(BaseChannel):
             self.logger.warning("SMTP host not configured")
             return
 
+        # Skip progress messages to prevent sending an empty email after each tool call
+        if (msg.metadata or {}).get("_progress"):
+            self.logger.debug("Skip progress message to {}", msg.chat_id)
+            return
+
         to_addr = msg.chat_id.strip()
         if not to_addr:
             self.logger.warning("Missing recipient address")
@@ -207,11 +213,61 @@ class EmailChannel(BaseChannel):
             if override:
                 subject = override
 
+        attachments: list[tuple[bytes, str, str, str]] = []
+        failed_attachments: list[str] = []
+        max_attachment_size = max(0, int(self.config.max_attachment_size))
+        max_attachment_count = max(0, int(self.config.max_attachments_per_email))
+        for media_path in msg.media or []:
+            path = Path(media_path)
+            filename = path.name or "attachment"
+            if len(attachments) >= max_attachment_count:
+                failed_attachments.append(f"[attachment: {filename} - too many attachments]")
+                self.logger.warning("Attachment count limit reached, skipping: {}", media_path)
+                continue
+            if not path.is_file():
+                failed_attachments.append(f"[attachment: {filename} - send failed]")
+                self.logger.warning("Attachment not found, skipping: {}", media_path)
+                continue
+            try:
+                size = path.stat().st_size
+                if max_attachment_size <= 0 or size > max_attachment_size:
+                    failed_attachments.append(f"[attachment: {filename} - too large]")
+                    self.logger.warning(
+                        "Attachment too large, skipping: {} ({} > {} bytes)",
+                        media_path,
+                        size,
+                        max_attachment_size,
+                    )
+                    continue
+                data = path.read_bytes()
+                ctype, _ = mimetypes.guess_type(str(path))
+                if ctype is None:
+                    ctype = "application/octet-stream"
+                maintype, subtype = ctype.split("/", 1)
+                attachments.append((data, maintype, subtype, filename))
+                self.logger.info("Attached file: {}", filename)
+            except Exception:
+                failed_attachments.append(f"[attachment: {filename} - send failed]")
+                self.logger.exception("Failed to attach file {}", media_path)
+
+        content = msg.content or ""
+        if failed_attachments:
+            fallback = "\n".join(failed_attachments)
+            content = f"{content.rstrip()}\n\n{fallback}" if content.strip() else fallback
+
         email_msg = EmailMessage()
         email_msg["From"] = self.config.from_address or self.config.smtp_username or self.config.imap_username
         email_msg["To"] = to_addr
         email_msg["Subject"] = subject
-        email_msg.set_content(msg.content or "")
+        email_msg.set_content(content)
+
+        for data, maintype, subtype, filename in attachments:
+            email_msg.add_attachment(
+                data,
+                maintype=maintype,
+                subtype=subtype,
+                filename=filename,
+            )
 
         in_reply_to = self._last_message_id_by_chat.get(to_addr)
         if in_reply_to:

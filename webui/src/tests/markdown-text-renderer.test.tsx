@@ -4,6 +4,14 @@ import { describe, expect, it } from "vitest";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
 describe("MarkdownTextRenderer", () => {
+  it("renders clickable markdown links in blue", () => {
+    render(<MarkdownTextRenderer>[local server](http://127.0.0.1:7891/)</MarkdownTextRenderer>);
+
+    const link = screen.getByRole("link", { name: "local server" });
+    expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
+    expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+  });
+
   it("does not wrap complete fenced code blocks in an extra pre", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
@@ -66,6 +74,47 @@ describe("MarkdownTextRenderer", () => {
 
     expect(screen.getByLabelText("File attachment")).toHaveTextContent("index.html");
     expect(screen.queryByRole("img", { name: "index.html" })).not.toBeInTheDocument();
+  });
+
+  it("renders title plus url list items as compact link rows", () => {
+    render(
+      <MarkdownTextRenderer>
+        {
+          "Sources:\n\n- Polymarket — “When will GPT-5.6 be released?”\n  https://polymarket.com/event/when-will-gpt-5pt6-be-released\n- Polymarket — “GPT-5.6 released by...?”\n  https://polymarket.com/event/gpt-5pt6-released-by"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — When will GPT-5.6 be released?",
+      }),
+    ).toHaveAttribute(
+      "href",
+      "https://polymarket.com/event/when-will-gpt-5pt6-be-released",
+    );
+    expect(
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — GPT-5.6 released by...?",
+      }),
+    ).toHaveAttribute("href", "https://polymarket.com/event/gpt-5pt6-released-by");
+    expect(screen.queryByText("Polymarket · polymarket.com")).not.toBeInTheDocument();
+  });
+
+  it("does not require a source heading for compact link rows", () => {
+    render(
+      <MarkdownTextRenderer>
+        {
+          "Useful links:\n\n- Polymarket — “When will GPT-5.6 be released?”\n  https://polymarket.com/event/when-will-gpt-5pt6-be-released"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(
+      screen.getByRole("link", {
+        name: "Open link: Polymarket — When will GPT-5.6 be released?",
+      }),
+    ).toHaveAttribute("href", "https://polymarket.com/event/when-will-gpt-5pt6-be-released");
   });
 
   it("renders media attachments without an extra preview/code wrapper", () => {

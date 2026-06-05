@@ -98,8 +98,17 @@ export function ThreadMessages({
           && next?.type === "message"
           && next.message.role === "assistant";
 
+        const userPromptId =
+          unit.type === "message" && unit.message.role === "user"
+            ? unit.message.id
+            : undefined;
+
         return (
-          <div key={unitKey(unit, index)} className={marginTop}>
+          <div
+            key={unitKey(unit, index)}
+            className={marginTop}
+            data-user-prompt-id={userPromptId}
+          >
             {unit.type === "activity" ? (
               <AgentActivityCluster
                 messages={unit.messages}
@@ -137,10 +146,6 @@ function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
       if (!markedCurrentActivity) {
         indices.add(i);
         markedCurrentActivity = true;
-        continue;
-      }
-      if (activityHasLiveFileEdit(unit)) {
-        indices.add(i);
       }
       continue;
     }
@@ -148,13 +153,6 @@ function currentActivityClusterIndices(units: DisplayUnit[]): Set<number> {
     if (unit.message.role === "user") break;
   }
   return indices;
-}
-
-function activityHasLiveFileEdit(unit: Extract<DisplayUnit, { type: "activity" }>): boolean {
-  return unit.messages.some((message) => (
-    message.kind === "trace"
-    && message.fileEdits?.some((edit) => edit.status === "editing" || edit.pending || !edit.path)
-  ));
 }
 
 function unitKey(unit: DisplayUnit, index: number): string {

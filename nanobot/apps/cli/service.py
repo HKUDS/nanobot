@@ -699,15 +699,31 @@ class CliAppManager:
             return None
         return args[0]
 
+    @staticmethod
+    def _pip_available() -> bool:
+        """Return True if pip is importable for the current interpreter."""
+        from importlib.util import find_spec
+
+        return find_spec("pip") is not None
+
     def _pip_install_argv(self, app: dict[str, Any], *, update: bool = False) -> list[str]:
         install_cmd = str(app.get("install_cmd") or "")
         if not _is_pip_install_command(install_cmd) or _has_shell_meta(install_cmd):
             raise CliAppError("unsupported pip install command")
         tokens = shlex.split(install_cmd)
         args = tokens[2:] if tokens[:2] == ["pip", "install"] else tokens[4:]
-        prefix = [sys.executable, "-m", "pip", "install"]
+        pip_available = self._pip_available()
+        if pip_available:
+            prefix = [sys.executable, "-m", "pip", "install"]
+        elif shutil.which("uv"):
+            prefix = ["uv", "pip", "install", "--python", sys.executable]
+        else:
+            raise CliAppError("pip is not available and uv is not installed")
         if update:
-            prefix.extend(["--upgrade", "--force-reinstall"])
+            if pip_available:
+                prefix.extend(["--upgrade", "--force-reinstall"])
+            else:
+                prefix.extend(["--upgrade", "--reinstall"])
         return prefix + args
 
     def _pip_uninstall_argv(
@@ -715,18 +731,24 @@ class CliAppManager:
         app: dict[str, Any],
         installed_entry: dict[str, Any] | None = None,
     ) -> list[str]:
+        if self._pip_available():
+            prefix = [sys.executable, "-m", "pip", "uninstall", "-y"]
+        elif shutil.which("uv"):
+            prefix = ["uv", "pip", "uninstall", "--python", sys.executable]
+        else:
+            raise CliAppError("pip is not available and uv is not installed")
         distribution = str((installed_entry or {}).get("pip_distribution") or "").strip()
         if distribution:
-            return [sys.executable, "-m", "pip", "uninstall", "-y", distribution]
+            return [*prefix, distribution]
         uninstall_cmd = str(app.get("uninstall_cmd") or "")
         packages = _pip_uninstall_args_from_command(uninstall_cmd)
         if packages:
-            return [sys.executable, "-m", "pip", "uninstall", "-y", *packages]
+            return [*prefix, *packages]
         package = str(app.get("pip_package") or "").strip() or self._pip_package_from_install(app)
         if not package:
             entry_point = str(app.get("entry_point") or "").strip()
             package = entry_point if entry_point.startswith("cli-anything-") else f"cli-anything-{_brand_key(str(app['name']))}"
-        return [sys.executable, "-m", "pip", "uninstall", "-y", package]
+        return [*prefix, package]
 
     def _npm_argv(self, app: dict[str, Any], action: str) -> list[str]:
         npm = shutil.which("npm")

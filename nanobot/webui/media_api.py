@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-import email.utils
 import hashlib
 import hmac
-import http
 import mimetypes
 import re
 import shutil
@@ -16,14 +14,24 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
+from nanobot.webui.http_utils import (
+    case_insensitive_header as _case_insensitive_header,
+)
+from nanobot.webui.http_utils import (
+    http_error as _http_error,
+)
+from nanobot.webui.http_utils import (
+    http_response as _http_response,
+)
 
 MediaDirProvider = Callable[[str | None], Path]
+SignedMediaPath = Callable[[Path], dict[str, str] | None]
+SignedMediaUrl = Callable[[Path], str | None]
 
 
 def b64url_encode(data: bytes) -> str:
@@ -63,43 +71,6 @@ _SVG_MEDIA_HEADERS: tuple[tuple[str, str], ...] = (
 )
 
 _BYTE_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
-
-
-def _http_response(
-    body: bytes,
-    *,
-    status: int = 200,
-    content_type: str = "text/plain; charset=utf-8",
-    extra_headers: list[tuple[str, str]] | None = None,
-) -> Response:
-    headers = [
-        ("Date", email.utils.formatdate(usegmt=True)),
-        ("Connection", "close"),
-        ("Content-Length", str(len(body))),
-        ("Content-Type", content_type),
-    ]
-    if extra_headers:
-        headers.extend(extra_headers)
-    reason = http.HTTPStatus(status).phrase
-    return Response(status, reason, Headers(headers), body)
-
-
-def _http_error(status: int, message: str | None = None) -> Response:
-    body = (message or http.HTTPStatus(status).phrase).encode("utf-8")
-    return _http_response(body, status=status)
-
-
-def _case_insensitive_header(headers: Any, key: str) -> str:
-    try:
-        value = headers.get(key)
-    except Exception:
-        value = None
-    if value is None:
-        try:
-            value = headers.get(key.lower())
-        except Exception:
-            value = None
-    return str(value or "").strip()
 
 
 def _parse_single_byte_range(range_header: str, size: int) -> tuple[int, int]:
@@ -170,6 +141,64 @@ def sign_or_stage_media_path(
     if signed is None:
         return None
     return {"url": signed, "name": path.name}
+
+
+def media_attachment_kind(name: str) -> str:
+    """Infer the WebUI media attachment kind from a filename."""
+    mime, _ = mimetypes.guess_type(name)
+    if mime and mime.startswith("video/"):
+        return "video"
+    if mime and mime.startswith("image/"):
+        return "image"
+    return "file"
+
+
+def signed_media_attachments(
+    paths: list[str],
+    *,
+    sign_path: SignedMediaPath,
+) -> list[dict[str, Any]]:
+    """Map persisted media paths to WebUI attachment dicts with fresh signed URLs."""
+    out: list[dict[str, Any]] = []
+    for pstr in paths:
+        path = Path(pstr)
+        att = sign_path(path)
+        if att is None:
+            continue
+        url = att.get("url")
+        if not url:
+            continue
+        name = att.get("name") or path.name
+        out.append({"kind": media_attachment_kind(name), "url": url, "name": name})
+    return out
+
+
+def attach_signed_media_urls(
+    payload: dict[str, Any],
+    *,
+    sign_path: SignedMediaUrl,
+) -> None:
+    """Replace raw media path lists in a WebUI session payload with signed URLs."""
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        media = msg.get("media")
+        if not isinstance(media, list) or not media:
+            continue
+        urls: list[dict[str, str]] = []
+        for entry in media:
+            if not isinstance(entry, str) or not entry:
+                continue
+            signed = sign_path(Path(entry))
+            if signed is None:
+                continue
+            urls.append({"url": signed, "name": Path(entry).name})
+        if urls:
+            msg["media_urls"] = urls
+        msg.pop("media", None)
 
 
 def serve_signed_media(

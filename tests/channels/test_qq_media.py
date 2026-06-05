@@ -118,11 +118,13 @@ async def test_send_exception_caught_not_raised() -> None:
     channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
     channel._client = _FakeClient()
 
-    with patch.object(channel, "_send_text_only", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+    with patch.object(
+        channel, "_send_text_only", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+    ) as send_text:
         await channel.send(
             OutboundMessage(channel="qq", chat_id="user1", content="hello")
         )
-    # No exception raised — test passes if we get here.
+    send_text.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -183,7 +185,7 @@ async def test_send_media_failure_falls_back_to_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_message_ignores_unauthorized_sender_before_attachments_and_ack() -> None:
+async def test_on_message_unauthorized_c2c_pairs_before_attachments_and_ack() -> None:
     channel = QQChannel(
         QQConfig(
             app_id="app",
@@ -207,8 +209,44 @@ async def test_on_message_ignores_unauthorized_sender_before_attachments_and_ack
     await channel._on_message(data, is_group=False)
 
     channel._handle_attachments.assert_not_awaited()
+    channel._handle_message.assert_awaited_once_with(
+        sender_id="blocked-user",
+        chat_id="blocked-user",
+        content="",
+        is_dm=True,
+    )
+    assert channel._client.api.c2c_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_unauthorized_group_before_attachments_and_ack() -> None:
+    channel = QQChannel(
+        QQConfig(
+            app_id="app",
+            secret="secret",
+            allow_from=["allowed-user"],
+            ack_message="Processing...",
+        ),
+        MessageBus(),
+    )
+    channel._client = _FakeClient()
+    channel._handle_attachments = AsyncMock(return_value=(["/tmp/a.png"], ["file"], []))
+    channel._handle_message = AsyncMock()
+
+    data = SimpleNamespace(
+        id="msg-blocked-group",
+        content="hello",
+        group_openid="group123",
+        author=SimpleNamespace(member_openid="blocked-user"),
+        attachments=[SimpleNamespace(filename="a.png")],
+    )
+
+    await channel._on_message(data, is_group=True)
+
+    channel._handle_attachments.assert_not_awaited()
     channel._handle_message.assert_not_awaited()
     assert channel._client.api.c2c_calls == []
+    assert channel._client.api.group_calls == []
 
 
 # ── _on_message() exception handling ────────────────────────────────
@@ -224,6 +262,8 @@ async def test_on_message_exception_caught_not_raised() -> None:
     bad_data = SimpleNamespace(id="x1", content="hi")
     # Should not raise
     await channel._on_message(bad_data, is_group=False)
+    assert channel._client.api.c2c_calls == []
+    assert channel._client.api.group_calls == []
 
 
 @pytest.mark.asyncio

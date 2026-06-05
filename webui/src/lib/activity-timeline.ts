@@ -55,8 +55,15 @@ export function normalizeActivityTimeline(messages: UIMessage[]): TurnUnit[] {
   const flushTurn = () => {
     if (turnMessages.length === 0) return;
 
-    const activityMessages: UIMessage[] = [];
-    const visibleMessages: UIMessage[] = [];
+    const visibleMessages = visibleMessagesForTurn(turnMessages);
+    let visibleIndex = 0;
+    let activityMessages: UIMessage[] = [];
+
+    const flushActivityMessages = () => {
+      if (!activityMessages.length) return;
+      pushActivityUnits(units, activityMessages, visibleMessages.slice(visibleIndex));
+      activityMessages = [];
+    };
 
     for (const message of turnMessages) {
       if (isAgentActivityMember(message)) {
@@ -66,19 +73,18 @@ export function normalizeActivityTimeline(messages: UIMessage[]): TurnUnit[] {
 
       if (assistantHasInlineReasoning(message)) {
         activityMessages.push(reasoningOnlyMessageFromAnswer(message));
-        visibleMessages.push(stripInlineReasoning(message));
+        flushActivityMessages();
+        units.push({ type: "message", message: stripInlineReasoning(message) });
+        visibleIndex += 1;
         continue;
       }
 
-      visibleMessages.push(message);
-    }
-
-    pushActivityUnits(units, activityMessages, visibleMessages);
-
-    for (const message of visibleMessages) {
+      flushActivityMessages();
       units.push({ type: "message", message });
+      visibleIndex += 1;
     }
 
+    flushActivityMessages();
     turnMessages = [];
   };
 
@@ -96,9 +102,19 @@ export function normalizeActivityTimeline(messages: UIMessage[]): TurnUnit[] {
   return units;
 }
 
+function visibleMessagesForTurn(messages: UIMessage[]): UIMessage[] {
+  const visibleMessages: UIMessage[] = [];
+  for (const message of messages) {
+    if (isAgentActivityMember(message)) continue;
+    visibleMessages.push(assistantHasInlineReasoning(message) ? stripInlineReasoning(message) : message);
+  }
+  return visibleMessages;
+}
+
 function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], visibleMessages: UIMessage[]) {
   let runMessages: UIMessage[] = [];
   let runBucket: "file" | "other" | undefined;
+  let runSegmentId: string | undefined;
 
   const flushRun = () => {
     if (!runMessages.length) return;
@@ -110,14 +126,23 @@ function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], vis
     });
     runMessages = [];
     runBucket = undefined;
+    runSegmentId = undefined;
   };
 
   for (const message of activityMessages) {
     const bucket = isFileEditActivityMessage(message) ? "file" : "other";
-    if (runBucket && bucket !== runBucket) {
+    const segmentId = message.activitySegmentId;
+    const segmentChanged =
+      bucket === "file"
+      && runBucket === "file"
+      && !!runSegmentId
+      && !!segmentId
+      && runSegmentId !== segmentId;
+    if ((runBucket && bucket !== runBucket) || segmentChanged) {
       flushRun();
     }
     runBucket = bucket;
+    if (segmentId) runSegmentId = segmentId;
     runMessages.push(message);
   }
 

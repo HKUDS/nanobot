@@ -11,6 +11,10 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.turn_continuation import (
+    INTERNAL_CONTINUATION_META,
+    INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
+)
 from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
     TITLE_GENERATION_REASONING_EFFORT,
@@ -35,7 +39,13 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
-    return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    WebuiTurnCoordinator(
+        bus=loop.bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: loop._schedule_background(coro),
+    ).subscribe(loop.runtime_events)
+    return loop
 
 
 def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
@@ -558,6 +568,226 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
         {"role": "assistant", "content": "done"},
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_internal_continuation_queues_turn_without_fake_user_history(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("feishu:c-auto")
+    session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "Finish the long goal.",
+    }
+    loop.sessions.save(session)
+
+    calls: list[dict] = []
+
+    async def fake_run_agent_loop(initial_messages, *, metadata=None, **_kwargs):
+        calls.append({"initial_messages": initial_messages, "metadata": metadata})
+        if len(calls) == 1:
+            return (
+                "paused",
+                [],
+                [*initial_messages, {"role": "assistant", "content": "paused"}],
+                "max_iterations",
+                False,
+            )
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+    pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+
+    first = await loop._process_message(
+        InboundMessage(
+            channel="feishu",
+            sender_id="u1",
+            chat_id="c-auto",
+            content="start the goal",
+        ),
+        pending_queue=pending,
+    )
+
+    assert first is None
+    queued = pending.get_nowait()
+    assert queued.sender_id == "system:continuation"
+    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+    assert "Finish the long goal." in queued.content
+
+    session = loop.sessions.get_or_create("feishu:c-auto")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [{"role": "user", "content": "start the goal"}]
+
+    second = await loop._process_message(queued, pending_queue=asyncio.Queue())
+
+    assert second is not None
+    assert second.content == "done"
+    session = loop.sessions.get_or_create("feishu:c-auto")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [
+        {"role": "user", "content": "start the goal"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_internal_continuation_preserves_streaming_route_metadata(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("feishu:c-stream")
+    session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "Finish the streamed long goal.",
+    }
+    loop.sessions.save(session)
+
+    calls = 0
+
+    async def fake_run_agent_loop(initial_messages, *, on_stream=None, on_stream_end=None, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return (
+                "paused",
+                [],
+                [*initial_messages, {"role": "assistant", "content": "paused"}],
+                "max_iterations",
+                False,
+            )
+        assert on_stream is not None
+        assert on_stream_end is not None
+        await on_stream("done")
+        await on_stream_end(resuming=False)
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    await loop._dispatch(InboundMessage(
+        channel="feishu",
+        sender_id="u1",
+        chat_id="c-stream",
+        content="start the goal",
+        metadata={
+            "_wants_stream": True,
+            "message_id": "om_001",
+            "origin_message_id": "root_001",
+            "_stream_id": "old-stream",
+        },
+    ))
+
+    assert loop.bus.outbound_size == 0
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+    assert queued.metadata["_wants_stream"] is True
+    assert queued.metadata["message_id"] == "om_001"
+    assert queued.metadata["origin_message_id"] == "root_001"
+    assert "_stream_id" not in queued.metadata
+
+    await loop._dispatch(queued)
+
+    outbound = []
+    while loop.bus.outbound_size:
+        outbound.append(await loop.bus.consume_outbound())
+    deltas = [m for m in outbound if m.metadata.get("_stream_delta")]
+    ends = [m for m in outbound if m.metadata.get("_stream_end")]
+    streamed_markers = [m for m in outbound if m.metadata.get("_streamed")]
+
+    assert [m.content for m in deltas] == ["done"]
+    assert len(ends) == 1
+    assert ends[0].metadata["_resuming"] is False
+    assert ends[0].metadata["message_id"] == "om_001"
+    assert ends[0].metadata["origin_message_id"] == "root_001"
+    assert isinstance(ends[0].metadata.get("_stream_id"), str)
+    assert streamed_markers and streamed_markers[-1].content == "done"
+
+
+@pytest.mark.asyncio
+async def test_websocket_internal_continuation_keeps_single_visible_run(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("websocket:c-auto")
+    session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "Finish the long goal.",
+    }
+    loop.sessions.save(session)
+
+    calls = 0
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return (
+                "paused",
+                [],
+                [*initial_messages, {"role": "assistant", "content": "paused"}],
+                "max_iterations",
+                False,
+            )
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    await loop._dispatch(InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="c-auto",
+        content="start the goal",
+        metadata={"webui": True},
+    ))
+
+    first_outbound = []
+    while loop.bus.outbound_size:
+        first_outbound.append(await loop.bus.consume_outbound())
+    first_statuses = [m.metadata for m in first_outbound if m.metadata.get("_goal_status")]
+    assert [m["goal_status"] for m in first_statuses] == ["running"]
+    assert not [m for m in first_outbound if m.metadata.get("_turn_end")]
+    started_at = first_statuses[0]["started_at"]
+
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+    assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == started_at
+
+    await loop._dispatch(queued)
+
+    second_outbound = []
+    while loop.bus.outbound_size:
+        second_outbound.append(await loop.bus.consume_outbound())
+    second_statuses = [m.metadata for m in second_outbound if m.metadata.get("_goal_status")]
+    assert [m["goal_status"] for m in second_statuses] == ["running", "idle"]
+    assert second_statuses[0]["started_at"] == started_at
+    turn_end = [m for m in second_outbound if m.metadata.get("_turn_end")]
+    assert len(turn_end) == 1
+    assert isinstance(turn_end[0].metadata.get("latency_ms"), int)
 
 
 @pytest.mark.asyncio

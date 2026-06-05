@@ -81,9 +81,6 @@ function settingsPayload(): SettingsPayload {
       },
       dream: {
         schedule: "every 2h",
-        max_batch_size: 20,
-        max_iterations: 15,
-        annotate_line_ages: true,
       },
       unified_session: false,
     },
@@ -243,6 +240,40 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+  });
+
+  it("can close the new configuration dialog without trapping the settings page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [], installed_count: 0 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "models" });
+
+    const configurationButton = await screen.findByRole("button", { name: "Current configuration" });
+    fireEvent.pointerDown(configurationButton!);
+    fireEvent.click(await screen.findByText("Add configuration"));
+
+    expect(await screen.findByRole("heading", { name: "New model configuration" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "New model configuration" })).not.toBeInTheDocument(),
+    );
+    expect(document.body.style.pointerEvents).not.toBe("none");
+
+    fireEvent.pointerDown(configurationButton!);
+    expect(await screen.findByText("Add configuration")).toBeInTheDocument();
   });
 
   it("loads provider models and lets users choose one without typing the id manually", async () => {

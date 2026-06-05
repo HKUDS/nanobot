@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _oauth_provider_status,
@@ -17,7 +18,6 @@ from nanobot.webui.settings_api import (
     update_model_configuration,
     update_network_safety_settings,
 )
-from nanobot.providers.registry import find_by_name
 
 
 def test_create_model_configuration_writes_label_and_selects(
@@ -461,3 +461,119 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     assert payload["agent"]["model_preset"] == "codex"
     saved = load_config(config_path)
     assert saved.model_presets["codex"].provider == "openai_codex"
+
+
+# ---------------------------------------------------------------------------
+# Azure OpenAI: settings contract for static-key vs AAD (DefaultAzureCredential)
+# ---------------------------------------------------------------------------
+
+
+def test_settings_payload_azure_openai_with_api_key_is_configured(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Static-key mode: api_key + api_base both set -> configured."""
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.azure_openai.api_key = "k"
+    config.providers.azure_openai.api_base = "https://r.openai.azure.com"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    azure = next(row for row in payload["providers"] if row["name"] == "azure_openai")
+
+    assert azure["configured"] is True
+    assert azure["api_key_required"] is False
+    assert azure["auth_type"] == "api_key"
+    assert azure["api_base"] == "https://r.openai.azure.com"
+
+
+def test_settings_payload_azure_openai_aad_mode_is_configured(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AAD mode: only api_base set (no api_key) -> still configured."""
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.azure_openai.api_base = "https://r.openai.azure.com"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    azure = next(row for row in payload["providers"] if row["name"] == "azure_openai")
+
+    assert azure["configured"] is True
+    assert azure["api_key_required"] is False
+    assert azure["api_base"] == "https://r.openai.azure.com"
+    assert azure["api_key_hint"] is None
+
+
+def test_settings_payload_azure_openai_missing_base_not_configured(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """api_key alone (no api_base) is NOT a working config -> not configured."""
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.azure_openai.api_key = "k"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    azure = next(row for row in payload["providers"] if row["name"] == "azure_openai")
+
+    assert azure["configured"] is False
+
+
+def test_create_model_configuration_accepts_azure_openai_aad_mode(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider-validation accepts azure_openai with only api_base (AAD mode)."""
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.azure_openai.api_base = "https://r.openai.azure.com"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = create_model_configuration(
+        {
+            "label": ["Azure AAD"],
+            "provider": ["azure_openai"],
+            "model": ["my-deployment"],
+        }
+    )
+
+    assert payload["agent"]["model_preset"] == "azure-aad"
+    saved = load_config(config_path)
+    assert saved.model_presets["azure-aad"].provider == "azure_openai"
+    assert saved.model_presets["azure-aad"].model == "my-deployment"
+
+
+def test_create_model_configuration_rejects_azure_openai_without_base(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """azure_openai without api_base must still be rejected as not configured."""
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="provider is not configured"):
+        create_model_configuration(
+            {
+                "label": ["Azure"],
+                "provider": ["azure_openai"],
+                "model": ["my-deployment"],
+            }
+        )
+
+
+def test_azure_openai_spec_no_longer_requires_api_key() -> None:
+    """Contract guard: api_key is optional for azure_openai (AAD fallback)."""
+    from nanobot.webui.settings_api import _provider_requires_api_key
+
+    spec = find_by_name("azure_openai")
+    assert spec is not None
+    assert _provider_requires_api_key(spec) is False

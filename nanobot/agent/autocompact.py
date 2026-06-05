@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
+    _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
@@ -37,13 +38,17 @@ class AutoCompact:
     def _format_summary(text: str, last_active: datetime) -> str:
         return f"Previous conversation summary (last active {last_active.isoformat()}):\n{text}"
 
+    @classmethod
+    def _is_internal_session(cls, key: str) -> bool:
+        return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
+
     def check_expired(self, schedule_background: Callable[[Coroutine], None],
                       active_session_keys: Collection[str] = ()) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
         for info in self.sessions.list_sessions():
             key = info.get("key", "")
-            if not key or key in self._archiving:
+            if not key or self._is_internal_session(key) or key in self._archiving:
                 continue
             if key in active_session_keys:
                 continue
@@ -52,6 +57,9 @@ class AutoCompact:
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
+        if self._is_internal_session(key):
+            self._archiving.discard(key)
+            return
         try:
             summary = await self.consolidator.compact_idle_session(
                 key, self._RECENT_SUFFIX_MESSAGES,
@@ -70,6 +78,10 @@ class AutoCompact:
             self._archiving.discard(key)
 
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
+        if self._is_internal_session(key):
+            self._archiving.discard(key)
+            self._summaries.pop(key, None)
+            return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)

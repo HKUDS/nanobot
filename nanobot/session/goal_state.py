@@ -43,6 +43,19 @@ def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
     return isinstance(goal, dict) and goal.get("status") == "active"
 
 
+def sustained_goal_turn(
+    metadata: Mapping[str, Any] | None,
+    *,
+    message_metadata: Mapping[str, Any] | None = None,
+) -> bool:
+    """True when this turn should use sustained-goal runtime limits."""
+    if sustained_goal_active(metadata):
+        return True
+    if not message_metadata:
+        return False
+    return str(message_metadata.get("original_command") or "").strip() == "/goal"
+
+
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:
     if blob is None:
         return None
@@ -98,14 +111,16 @@ def runner_wall_llm_timeout_s(
     session_key: str | None,
     *,
     metadata: Mapping[str, Any] | None = None,
+    message_metadata: Mapping[str, Any] | None = None,
 ) -> float | None:
     """Wall-clock cap for :class:`~nanobot.agent.runner.AgentRunner` when streaming an LLM.
 
-    Returns ``0.0`` to disable ``asyncio.wait_for`` around the request when a sustained goal is
-    active; ``None`` means use ``NANOBOT_LLM_TIMEOUT_S``. Pass in-memory ``metadata`` when the
-    caller already holds :attr:`~nanobot.session.manager.Session.metadata` for this turn.
+    Returns ``0.0`` to disable ``asyncio.wait_for`` around the request when this is a
+    sustained-goal turn; ``None`` means use ``NANOBOT_LLM_TIMEOUT_S``. Pass in-memory
+    ``metadata`` when the caller already holds :attr:`~nanobot.session.manager.Session.metadata`
+    for this turn.
     """
     meta: Mapping[str, Any] | None = metadata
     if meta is None and session_key:
         meta = sessions.get_or_create(session_key).metadata
-    return 0.0 if sustained_goal_active(meta) else None
+    return 0.0 if sustained_goal_turn(meta, message_metadata=message_metadata) else None

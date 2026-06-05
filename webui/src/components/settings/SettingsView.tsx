@@ -271,6 +271,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   onWorkspaceSettingsChange?: () => void | Promise<void>;
+  onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
   isRestarting?: boolean;
@@ -319,6 +320,7 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   onWorkspaceSettingsChange,
+  onSectionChange,
   onLogout,
   onRestart,
   isRestarting = false,
@@ -392,6 +394,14 @@ export function SettingsView({
   useEffect(() => {
     setActiveSection(initialSection);
   }, [initialSection]);
+
+  const selectSection = useCallback(
+    (section: SettingsSectionKey) => {
+      setActiveSection(section);
+      onSectionChange?.(section);
+    },
+    [onSectionChange],
+  );
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
   const [form, setForm] = useState<AgentSettingsDraft>({
@@ -1128,7 +1138,7 @@ export function SettingsView({
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
             showBrandLogos={localPrefs.brandLogos}
-            onSelectSection={setActiveSection}
+            onSelectSection={selectSection}
           />
         );
       case "appearance":
@@ -1199,7 +1209,7 @@ export function SettingsView({
             saving={imageGenerationSaving}
             onChangeForm={setImageGenerationForm}
             onSave={saveImageGenerationSettings}
-            onOpenProviders={() => setActiveSection("models")}
+            onOpenProviders={() => selectSection("models")}
             showBrandLogos={localPrefs.brandLogos}
             onRestart={restartViaSettingsSurface}
             isRestarting={isRestarting || hostEngineApplying}
@@ -1318,7 +1328,7 @@ export function SettingsView({
       {showSidebar ? (
         <SettingsSidebar
           activeSection={activeSection}
-          onSelectSection={setActiveSection}
+          onSelectSection={selectSection}
           onBackToChat={onBackToChat}
           onLogout={onLogout}
           hostChromeInset={hostChromeInset}
@@ -4277,7 +4287,7 @@ function ProviderPicker({
   const disabled = providers.length === 0;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <Button
           type="button"
@@ -4745,7 +4755,7 @@ function timezonesWithCurrent(current: string): string[] {
   const intl = Intl as typeof Intl & {
     supportedValuesOf?: (key: "timeZone") => string[];
   };
-  let values: string[] = [];
+  let values: string[];
   try {
     values = intl.supportedValuesOf?.("timeZone") ?? [];
   } catch {
@@ -5098,11 +5108,12 @@ function ModelPresetPicker({
   const selectedPreset = presets.find((preset) => preset.name === value) ?? presets[0] ?? null;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild disabled={!presets.length}>
         <Button
           type="button"
           variant="outline"
+          aria-label={tx("settings.rows.currentModel", "Current configuration")}
           disabled={!presets.length}
           className={cn(
             "h-12 w-[min(430px,72vw)] justify-between rounded-full border-input bg-background px-3.5 text-[13px] font-normal shadow-none",
@@ -5155,7 +5166,9 @@ function ModelPresetPicker({
         })}
         <div className="mt-1 border-t border-border/55 pt-1">
           <DropdownMenuItem
-            onSelect={onCreateConfiguration}
+            onSelect={() => {
+              window.setTimeout(onCreateConfiguration, 0);
+            }}
             className={cn(
               "flex cursor-default items-center gap-2 rounded-[12px] px-2.5 py-2 text-[13px] font-medium",
               "text-foreground focus:bg-muted/85 focus:text-foreground",

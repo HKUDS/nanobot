@@ -231,12 +231,14 @@ class TestModifyRestricted:
     async def test_modify_string_int_coerced(self):
         tool = _make_tool()
         result = await tool.execute(action="set", key="max_iterations", value="80")
+        assert "Set max_iterations" in result
         assert tool._runtime_state.max_iterations == 80
 
     @pytest.mark.asyncio
     async def test_modify_context_window_valid(self):
         tool = _make_tool()
         result = await tool.execute(action="set", key="context_window_tokens", value=131072)
+        assert "Set context_window_tokens" in result
         assert tool._runtime_state.context_window_tokens == 131072
 
     @pytest.mark.asyncio
@@ -337,12 +339,14 @@ class TestModifyFree:
     async def test_modify_allows_list(self):
         tool = _make_tool()
         result = await tool.execute(action="set", key="items", value=[1, 2, 3])
+        assert result == "Set scratchpad.items = [1, 2, 3]"
         assert tool._runtime_state._runtime_vars["items"] == [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_modify_allows_dict(self):
         tool = _make_tool()
         result = await tool.execute(action="set", key="data", value={"a": 1})
+        assert result == "Set scratchpad.data = {'a': 1}"
         assert tool._runtime_state._runtime_vars["data"] == {"a": 1}
 
     @pytest.mark.asyncio
@@ -743,7 +747,10 @@ class TestSubagentHookStatus:
 
         hook = _SubagentHook("test")
         context = AgentHookContext(iteration=1, messages=[])
-        await hook.after_iteration(context)  # should not raise
+        result = await hook.after_iteration(context)
+
+        assert result is None
+        assert context.iteration == 1
 
 
 # ---------------------------------------------------------------------------

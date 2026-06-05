@@ -30,6 +30,14 @@ type MarkdownAstNode = {
   };
 };
 
+type InlineLinkPreview = {
+  href: string;
+  origin: string;
+  prefix?: string;
+  title: string;
+  initials: string;
+};
+
 const SAFE_INLINE_HTML_TAGS = new Set(["mark", "sub", "sup"]);
 
 function extensionOf(value: string): string {
@@ -179,6 +187,119 @@ function nodeText(value: ReactNode): string {
     .join("");
 }
 
+function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
+  let text = "";
+  let href: string | undefined;
+  for (const child of Children.toArray(value)) {
+    if (typeof child === "string" || typeof child === "number") {
+      text += String(child);
+      continue;
+    }
+    if (!isValidElement(child)) {
+      continue;
+    }
+    const props = child.props as { href?: unknown; children?: ReactNode };
+    if (!href && typeof props.href === "string" && /^https?:\/\//i.test(props.href)) {
+      href = props.href;
+    }
+    const nested = linkPreviewParts(props.children);
+    text += nested.text;
+    href ||= nested.href;
+  }
+  return { text, href };
+}
+
+function cleanLinkPreviewText(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
+    .trim();
+}
+
+function linkPreviewInitials(value: string): string {
+  const clean = value
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\.[a-z]{2,}$/i, "");
+  const parts = clean.split(/[\s.-]+/).filter(Boolean);
+  return (parts.length > 1 ? parts.slice(0, 2).map((part) => part[0]).join("") : clean.slice(0, 2))
+    .toUpperCase();
+}
+
+function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview | null {
+  const { text: rawText, href } = linkPreviewParts(children);
+  if (!href) return null;
+
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  const strippedUrl = rawText
+    .replace(/\s+/g, " ")
+    .replace(href, "")
+    .replace(url.toString(), "")
+    .replace(/https?:\/\/\S+/i, "")
+    .trim();
+  if (!strippedUrl || strippedUrl.length < 4) return null;
+
+  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(strippedUrl);
+  const prefix = sourceMatch?.[1] ? cleanLinkPreviewText(sourceMatch[1]) : undefined;
+  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? strippedUrl);
+  if (!title || /^https?:\/\//i.test(title)) return null;
+
+  return {
+    href,
+    origin: url.origin,
+    prefix,
+    title,
+    initials: linkPreviewInitials(prefix || url.hostname),
+  };
+}
+
+function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
+  const label = link.prefix
+    ? `${link.prefix} — ${link.title}`
+    : link.title;
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noreferrer noopener"
+      aria-label={`Open link: ${label}`}
+      className={cn(
+        "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
+        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
+      )}
+    >
+      <span
+        className={cn(
+          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
+          "border border-border/65 bg-background text-[0.5rem] font-semibold text-muted-foreground",
+        )}
+        aria-hidden
+      >
+        {link.initials}
+        <img
+          src={`${link.origin}/favicon.ico`}
+          alt=""
+          className="absolute h-3 w-3 rounded-[2px] object-contain"
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.style.display = "none";
+          }}
+        />
+      </span>
+      <span className="min-w-0 truncate leading-normal">
+        {label}
+      </span>
+    </a>
+  );
+}
+
 function isRenderedCodeBlock(value: ReactNode): boolean {
   if (!isValidElement(value)) return false;
   const props = value.props as { code?: unknown };
@@ -289,11 +410,26 @@ export default function MarkdownTextRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-primary underline underline-offset-2 hover:opacity-80"
+            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
             {...props}
           >
             {markdownChildren}
           </a>
+        );
+      },
+      li({ children: markdownChildren, className: itemClassName }) {
+        const link = inlineLinkPreviewFromChildren(markdownChildren);
+        if (link) {
+          return (
+            <li className={cn("list-none pl-0", itemClassName)}>
+              <InlineLinkPreviewRow link={link} />
+            </li>
+          );
+        }
+        return (
+          <li className={itemClassName}>
+            {markdownChildren}
+          </li>
         );
       },
       input({ type, checked }) {
@@ -372,7 +508,7 @@ export default function MarkdownTextRenderer({
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-primary prose-a:underline-offset-2 hover:prose-a:opacity-80",
+        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",

@@ -658,7 +658,7 @@ describe("useNanobotStream", () => {
     }]);
   });
 
-  it("keeps interrupted pre-tool text inside activity before the final answer", async () => {
+  it("keeps interrupted pre-tool text as assistant output before activity", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-stream-segments", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -692,9 +692,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(3);
     expect(result.current.messages[0]).toMatchObject({
       role: "assistant",
-      content: "",
-      reasoning: "I created the files.",
-      isStreaming: false,
+      content: "I created the files.",
     });
     expect(result.current.messages[1]).toMatchObject({
       role: "tool",
@@ -739,9 +737,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(3);
     expect(result.current.messages[0]).toMatchObject({
       role: "assistant",
-      content: "",
-      reasoning: "I will inspect the project first.",
-      isStreaming: false,
+      content: "I will inspect the project first.",
     });
     expect(result.current.messages[1]).toMatchObject({
       role: "tool",
@@ -753,6 +749,51 @@ describe("useNanobotStream", () => {
       content: "Done. Open index.html to play.",
       isStreaming: true,
     });
+  });
+
+  it("splits live assistant output around tool hints without moving it into reasoning", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-live-segments", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-live-segments", {
+        event: "delta",
+        chat_id: "chat-live-segments",
+        text: "Lint passed; now rendering the video.",
+      });
+      fake.emit("chat-live-segments", {
+        event: "message",
+        chat_id: "chat-live-segments",
+        text: 'exec({"cmd":"hyperframes render"})',
+        kind: "tool_hint",
+      });
+      fake.emit("chat-live-segments", {
+        event: "delta",
+        chat_id: "chat-live-segments",
+        text: "Rendered successfully.",
+      });
+    });
+
+    await flushStreamFrame();
+
+    expect(result.current.messages).toHaveLength(3);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Lint passed; now rendering the video.",
+    });
+    expect(result.current.messages[0].reasoning).toBeUndefined();
+    expect(result.current.messages[1]).toMatchObject({
+      role: "tool",
+      kind: "trace",
+      traces: ['exec({"cmd":"hyperframes render"})'],
+    });
+    expect(result.current.messages[2]).toMatchObject({
+      role: "assistant",
+      content: "Rendered successfully.",
+    });
+    expect(result.current.messages[2].reasoning).toBeUndefined();
   });
 
   it("opens a new activity segment for reasoning after file edit activity", async () => {
@@ -967,7 +1008,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].reasoningStreaming).toBe(false);
   });
 
-  it("attaches post-hoc reasoning to the same assistant turn above the answer", () => {
+  it("starts a new Thought block when reasoning arrives after visible output", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-r5", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -988,12 +1029,96 @@ describe("useNanobotStream", () => {
       fake.emit("chat-r5", { event: "reasoning_end", chat_id: "chat-r5" });
     });
 
-    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("hi~");
-    expect(result.current.messages[0].reasoning).toBe(
+    expect(result.current.messages[0].reasoning).toBeUndefined();
+    expect(result.current.messages[1].content).toBe("");
+    expect(result.current.messages[1].reasoning).toBe(
       "This reasoning arrived after the answer stream.",
     );
-    expect(result.current.messages[0].reasoningStreaming).toBe(false);
+    expect(result.current.messages[1].reasoningStreaming).toBe(false);
+  });
+
+  it("stamps completed live Thought blocks with their own latency", async () => {
+    const dateNow = vi.spyOn(Date, "now");
+    let now = Date.UTC(2026, 5, 1, 0, 0, 0);
+    dateNow.mockImplementation(() => now);
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(() => useNanobotStream("chat-r5-lat", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+      await act(async () => {});
+
+      act(() => {
+        fake.emit("chat-r5-lat", {
+          event: "reasoning_delta",
+          chat_id: "chat-r5-lat",
+          text: "Thinking through the tests.",
+        });
+      });
+      await act(async () => {
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      });
+
+      expect(result.current.messages[0].createdAt).toBe(now);
+      now += 2100;
+      act(() => {
+        fake.emit("chat-r5-lat", { event: "reasoning_end", chat_id: "chat-r5-lat" });
+      });
+
+      expect(result.current.messages[0].reasoningStreaming).toBe(false);
+      expect(result.current.messages[0].latencyMs).toBe(2100);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
+  it("keeps alternating reasoning and answer deltas in separate ordered blocks", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-r5b", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-r5b", {
+        event: "reasoning_delta",
+        chat_id: "chat-r5b",
+        text: "Plan first.",
+      });
+      fake.emit("chat-r5b", {
+        event: "delta",
+        chat_id: "chat-r5b",
+        text: "Visible progress.",
+      });
+      fake.emit("chat-r5b", {
+        event: "reasoning_delta",
+        chat_id: "chat-r5b",
+        text: "Think again.",
+      });
+      fake.emit("chat-r5b", {
+        event: "delta",
+        chat_id: "chat-r5b",
+        text: "Final visible text.",
+      });
+    });
+
+    await flushStreamFrame();
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      reasoning: "Plan first.",
+      content: "Visible progress.",
+    });
+    expect(result.current.messages[1]).toMatchObject({
+      role: "assistant",
+      reasoning: "Think again.",
+      content: "Final visible text.",
+    });
+    expect(result.current.messages[1].activitySegmentId).not.toBe(
+      result.current.messages[0].activitySegmentId,
+    );
   });
 
   it("does not attach a new turn's reasoning across the latest user boundary", async () => {

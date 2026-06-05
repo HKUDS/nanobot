@@ -69,6 +69,7 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
         workspace: Path | None = None,
+        include_memory_recent_history: bool = True,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -94,14 +95,15 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
-        if entries:
-            capped = entries[-self._MAX_RECENT_HISTORY:]
-            history_text = "\n".join(
-                f"- [{e['timestamp']}] {e['content']}" for e in capped
-            )
-            history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
-            parts.append("# Recent History\n\n" + history_text)
+        if include_memory_recent_history:
+            entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+            if entries:
+                capped = entries[-self._MAX_RECENT_HISTORY:]
+                history_text = "\n".join(
+                    f"- [{e['timestamp']}] {e['content']}" for e in capped
+                )
+                history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
+                parts.append("# Recent History\n\n" + history_text)
 
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
@@ -193,6 +195,7 @@ class ContextBuilder:
         runtime_state: Any | None = None,
         inbound_message: Any | None = None,
         skip_runtime_lines: bool = False,
+        include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -228,6 +231,7 @@ class ContextBuilder:
                     channel=channel,
                     session_summary=session_summary,
                     workspace=root,
+                    include_memory_recent_history=include_memory_recent_history,
                 ),
             },
             *history,

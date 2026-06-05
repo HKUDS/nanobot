@@ -170,6 +170,103 @@ describe("ThreadViewport", () => {
     expect(screen.getByText("message 299")).toBeInTheDocument();
   });
 
+  it("renders a prompt rail that jumps to user messages", async () => {
+    const promptMessages = makeLongMessages(5);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    expect(promptEls).toHaveLength(5);
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 360,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to prompt: message 3" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 1064,
+      behavior: "smooth",
+    });
+  });
+
+  it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
+    const promptMessages = makeLongMessages(100);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 10000 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    expect(promptEls).toHaveLength(100);
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 90,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    const promptMarkers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    expect(promptMarkers.length).toBeGreaterThan(3);
+    expect(promptMarkers.length).toBeLessThan(100);
+    expect(
+      promptMarkers.some((marker) =>
+        marker.getAttribute("aria-label")?.includes("prompts, latest"),
+      ),
+    ).toBe(true);
+
+    fireEvent.click(promptMarkers[promptMarkers.length - 1]);
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 8894,
+      behavior: "smooth",
+    });
+  });
+
   it("expands the window start to avoid cutting an agent activity cluster", () => {
     const clustered = makeLongMessages(200);
     clustered.splice(

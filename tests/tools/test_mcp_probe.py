@@ -1,13 +1,13 @@
 """Tests for MCP HTTP probe guard (prevents event-loop crash on unreachable servers)."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.agent.tools.mcp import _probe_http_url, connect_mcp_servers
 from nanobot.agent.tools.registry import ToolRegistry
-
 
 # ---------------------------------------------------------------------------
 # _probe_http_url unit tests
@@ -101,6 +101,3 @@ async def test_probe_not_called_for_stdio():
         await connect_mcp_servers({"s": cfg}, registry)
 
     assert not called, "probe should not be called for stdio transport"
-
-
-import asyncio
