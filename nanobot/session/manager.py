@@ -14,9 +14,9 @@ from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
+    drop_orphan_tool_results,
     ensure_dir,
     estimate_message_tokens,
-    find_legal_message_start,
     image_placeholder_text,
     safe_filename,
     strip_think,
@@ -164,10 +164,8 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
-        start = find_legal_message_start(sliced)
-        if start:
-            sliced = sliced[start:]
+        # Drop orphan tool results.
+        sliced = drop_orphan_tool_results(sliced)
 
         out: list[dict[str, Any]] = []
         for message in sliced:
@@ -264,10 +262,8 @@ class Session:
                 if recovered_user is not None:
                     kept = out[recovered_user:]
 
-            # And keep a legal tool-call boundary at the front.
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
+            # And drop any orphan tool results.
+            kept = drop_orphan_tool_results(kept)
             out = kept
         return out
 
@@ -315,17 +311,13 @@ class Session:
             if latest_user is not None:
                 retained = list(self.messages[latest_user: latest_user + max_messages])
 
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
+        # Mirror get_history(): avoid persisting orphan tool results.
+        retained = drop_orphan_tool_results(retained)
 
         # Hard-cap guarantee: never keep more than max_messages.
         if len(retained) > max_messages:
             retained = retained[-max_messages:]
-            start = find_legal_message_start(retained)
-            if start:
-                retained = retained[start:]
+            retained = drop_orphan_tool_results(retained)
 
         # Compute actually-dropped messages using identity comparison so that
         # even when retained is a non-contiguous slice of original (the else

@@ -19,10 +19,10 @@ from loguru import logger
 from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    drop_orphan_tool_results,
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    find_legal_message_start,
     strip_think,
     truncate_text,
 )
@@ -656,9 +656,9 @@ class Consolidator:
                 sliced = sliced[start:]
                 break
 
-        legal_start = find_legal_message_start([message for _idx, message in sliced])
-        if legal_start:
-            sliced = sliced[legal_start:]
+        kept_messages = drop_orphan_tool_results([message for _idx, message in sliced])
+        kept_ids = {id(message) for message in kept_messages}
+        sliced = [pair for pair in sliced if id(pair[1]) in kept_ids]
         if not sliced:
             return len(session.messages)
 
