@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Moon, PanelLeft, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
@@ -282,17 +289,13 @@ function HostChrome({
   onSidebarPreviewEnter,
   onSidebarPreviewLeave,
   sidebarOpen = true,
-  theme,
-  onToggleTheme,
-  showThemeButton = true,
+  rightAction,
 }: {
   onToggleSidebar?: () => void;
   onSidebarPreviewEnter?: () => void;
   onSidebarPreviewLeave?: () => void;
   sidebarOpen?: boolean;
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-  showThemeButton?: boolean;
+  rightAction?: ReactNode;
 }) {
   const { t } = useTranslation();
 
@@ -315,24 +318,11 @@ function HostChrome({
           <PanelLeft className="h-[15px] w-[15px]" strokeWidth={1.75} />
         </Button>
       ) : null}
-      {showThemeButton ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("thread.header.toggleTheme")}
-          onClick={onToggleTheme}
-          className="host-no-drag pointer-events-auto absolute right-3 top-2 h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </Button>
-      ) : (
-        null
-      )}
+      {rightAction ? (
+        <div className="host-no-drag pointer-events-auto absolute right-3 top-2">
+          {rightAction}
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -1369,8 +1359,24 @@ function Shell({
             onSidebarPreviewEnter={openHostSidebarPreview}
             onSidebarPreviewLeave={scheduleHostSidebarPreviewClose}
             sidebarOpen={hostSidebarOpen}
-            theme={theme}
-            onToggleTheme={toggle}
+            rightAction={
+              view === "chat" ? undefined : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("thread.header.toggleTheme")}
+                  onClick={toggle}
+                  className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+                >
+                  {theme === "dark" ? (
+                    <Sun className="h-4 w-4" />
+                  ) : (
+                    <Moon className="h-4 w-4" />
+                  )}
+                </Button>
+              )
+            }
           />
         ) : null}
         <div
@@ -1484,7 +1490,6 @@ function Shell({
                 onToggleTheme={toggle}
                 hideSidebarToggleForHostChrome
                 hostChromeTitleInset={hostSidebarCollapsed}
-                hideThemeButton={showHostChrome}
                 hideHeader={false}
                 workspaceScope={activeWorkspaceScope}
                 workspaceDefaultScope={workspaces?.default_scope ?? null}
