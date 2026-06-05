@@ -40,6 +40,7 @@ type HostRuntime = {
 let runtime: HostRuntime | null = null;
 let mainWindow: BrowserWindow | null = null;
 let crashRestartAttempts = 0;
+let isQuitting = false;
 const hostSockets = new Map<string, UnixWebSocketClient>();
 const APP_PROTOCOL = "nanobot-app:";
 const APP_HOST = "app";
@@ -614,6 +615,11 @@ function createWindow(): BrowserWindow {
 
   win.once("ready-to-show", () => win.show());
   win.on("focus", clearDesktopNotificationBadge);
+  win.on("close", (event) => {
+    if (process.platform !== "darwin" || isQuitting) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalIfSafe(url);
     return { action: "deny" };
@@ -749,6 +755,11 @@ app.whenReady().then(async () => {
   await loadAppWindow(mainWindow);
 
   app.on("activate", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();
       void loadAppWindow(mainWindow);
@@ -764,6 +775,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   if (runtime) runtime.status = "stopped";
   if (runtime?.gateway.exitCode === null) {
     runtime.gateway.kill("SIGTERM");
