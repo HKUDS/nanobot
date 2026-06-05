@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",
-    "loadEarlier": "Charger les messages précédents"
+    "loadEarlier": "Charger les messages précédents",
+    "promptNavigator": {
+      "open": "Ouvrir le navigateur de prompts",
+      "title": "Prompts",
+      "description": "{{count}} prompts utilisateur",
+      "search": "Rechercher des prompts",
+      "noResults": "Aucun prompt correspondant.",
+      "jumpTo": "Aller au prompt : {{label}}",
+      "promptNumber": "Prompt {{number}}"
+    }
   },
   "message": {
     "streaming": "en cours de génération",

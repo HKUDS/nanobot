@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "Scroll to bottom",
-    "loadEarlier": "Load earlier messages"
+    "loadEarlier": "Load earlier messages",
+    "promptNavigator": {
+      "open": "Open prompt navigator",
+      "title": "Prompts",
+      "description": "{{count}} user prompts",
+      "search": "Search prompts",
+      "noResults": "No matching prompts.",
+      "jumpTo": "Jump to prompt: {{label}}",
+      "promptNumber": "Prompt {{number}}"
+    }
   },
   "message": {
     "streaming": "streaming",

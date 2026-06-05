@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
-    "loadEarlier": "Tải tin nhắn trước đó"
+    "loadEarlier": "Tải tin nhắn trước đó",
+    "promptNavigator": {
+      "open": "Mở trình điều hướng prompt",
+      "title": "Prompt",
+      "description": "{{count}} prompt của người dùng",
+      "search": "Tìm prompt",
+      "noResults": "Không có prompt phù hợp.",
+      "jumpTo": "Nhảy tới prompt: {{label}}",
+      "promptNumber": "Prompt {{number}}"
+    }
   },
   "message": {
     "streaming": "đang truyền",

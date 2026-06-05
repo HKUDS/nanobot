@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "맨 아래로 스크롤",
-    "loadEarlier": "이전 메시지 불러오기"
+    "loadEarlier": "이전 메시지 불러오기",
+    "promptNavigator": {
+      "open": "프롬프트 탐색기 열기",
+      "title": "프롬프트",
+      "description": "사용자 프롬프트 {{count}}개",
+      "search": "프롬프트 검색",
+      "noResults": "일치하는 프롬프트가 없습니다.",
+      "jumpTo": "프롬프트로 이동: {{label}}",
+      "promptNumber": "프롬프트 {{number}}"
+    }
   },
   "message": {
     "streaming": "생성 중",

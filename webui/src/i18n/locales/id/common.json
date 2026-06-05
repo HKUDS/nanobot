@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "Gulir ke bawah",
-    "loadEarlier": "Muat pesan sebelumnya"
+    "loadEarlier": "Muat pesan sebelumnya",
+    "promptNavigator": {
+      "open": "Buka navigator prompt",
+      "title": "Prompt",
+      "description": "{{count}} prompt pengguna",
+      "search": "Cari prompt",
+      "noResults": "Tidak ada prompt yang cocok.",
+      "jumpTo": "Lompat ke prompt: {{label}}",
+      "promptNumber": "Prompt {{number}}"
+    }
   },
   "message": {
     "streaming": "sedang mengalir",

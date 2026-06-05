@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "滚动到底部",
-    "loadEarlier": "加载更早消息"
+    "loadEarlier": "加载更早消息",
+    "promptNavigator": {
+      "open": "打开输入导航",
+      "title": "输入列表",
+      "description": "{{count}} 条用户输入",
+      "search": "搜索输入",
+      "noResults": "没有匹配的输入。",
+      "jumpTo": "跳转到输入：{{label}}",
+      "promptNumber": "第 {{number}} 条"
+    }
   },
   "message": {
     "streaming": "流式输出中",

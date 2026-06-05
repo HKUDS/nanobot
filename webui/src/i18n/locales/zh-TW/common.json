@@ -775,7 +775,16 @@
       }
     },
     "scrollToBottom": "捲動到底部",
-    "loadEarlier": "載入更早訊息"
+    "loadEarlier": "載入更早訊息",
+    "promptNavigator": {
+      "open": "開啟輸入導覽",
+      "title": "輸入列表",
+      "description": "{{count}} 則使用者輸入",
+      "search": "搜尋輸入",
+      "noResults": "沒有符合的輸入。",
+      "jumpTo": "跳到輸入：{{label}}",
+      "promptNumber": "第 {{number}} 則"
+    }
   },
   "message": {
     "streaming": "串流輸出中",

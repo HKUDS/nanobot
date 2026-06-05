@@ -10,10 +10,15 @@ import {
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { Button } from "@/components/ui/button";
+import {
+  findPromptElement,
+  jumpToPrompt,
+} from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
@@ -68,6 +73,7 @@ export function ThreadViewport({
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
   const pendingConversationScrollRef = useRef(true);
+  const pendingPromptJumpRef = useRef<string | null>(null);
   const scrollFrameIdsRef = useRef<number[]>([]);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
@@ -141,6 +147,20 @@ export function ThreadViewport({
     );
   }, [messages.length]);
 
+  const jumpToUserPrompt = useCallback((promptId: string) => {
+    const scrollEl = scrollRef.current;
+    if (scrollEl && findPromptElement(scrollEl, promptId)) {
+      jumpToPrompt(scrollEl, promptId);
+      return;
+    }
+    const index = messages.findIndex((message) => message.id === promptId);
+    if (index < 0) return;
+    pendingPromptJumpRef.current = promptId;
+    userReadingHistoryRef.current = true;
+    setAtBottom(false);
+    setVisibleMessageCount((count) => Math.max(count, messages.length - index));
+  }, [messages]);
+
   const measureComposerDock = useCallback(() => {
     const el = composerDockRef.current;
     if (!el) return;
@@ -180,6 +200,15 @@ export function ThreadViewport({
     if (!el) return;
     const delta = el.scrollHeight - pending.height;
     el.scrollTop = pending.top + delta;
+  }, [visibleMessages.length]);
+
+  useLayoutEffect(() => {
+    const promptId = pendingPromptJumpRef.current;
+    const scrollEl = scrollRef.current;
+    if (!promptId || !scrollEl || !findPromptElement(scrollEl, promptId)) return;
+    pendingPromptJumpRef.current = null;
+    const frame = window.requestAnimationFrame(() => jumpToPrompt(scrollEl, promptId));
+    return () => window.cancelAnimationFrame(frame);
   }, [visibleMessages.length]);
 
   useLayoutEffect(() => {
@@ -297,6 +326,14 @@ export function ThreadViewport({
         <PromptRail
           messages={visibleMessages}
           scrollRef={scrollRef}
+          bottomOffset={scrollButtonBottom}
+        />
+      ) : null}
+
+      {hasMessages ? (
+        <PromptNavigator
+          messages={messages}
+          onJumpToPrompt={jumpToUserPrompt}
           bottomOffset={scrollButtonBottom}
         />
       ) : null}

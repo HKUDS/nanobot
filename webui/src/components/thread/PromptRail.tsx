@@ -9,17 +9,18 @@ import {
 
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
+import {
+  findPromptElement,
+  jumpToPrompt,
+  type PromptAnchor,
+  promptTop,
+  userPromptAnchors,
+} from "@/components/thread/promptNavigation";
 
 interface PromptRailProps {
   bottomOffset: number;
   messages: UIMessage[];
   scrollRef: RefObject<HTMLDivElement>;
-}
-
-interface PromptAnchor {
-  id: string;
-  label: string;
-  preview: string;
 }
 
 interface MeasuredPrompt extends PromptAnchor {
@@ -213,28 +214,6 @@ export function PromptRail({
   );
 }
 
-function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
-  return messages
-    .filter((message) => message.role === "user")
-    .map((message, index) => ({
-      id: message.id,
-      label: promptLabel(message.content, index),
-      preview: promptPreview(message.content, index),
-    }));
-}
-
-function promptLabel(content: string, index: number): string {
-  const text = content.replace(/\s+/g, " ").trim();
-  if (!text) return `Prompt ${index + 1}`;
-  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
-}
-
-function promptPreview(content: string, index: number): string {
-  const text = content.replace(/\n{3,}/g, "\n\n").trim();
-  if (!text) return `Prompt ${index + 1}`;
-  return text.length > 320 ? `${text.slice(0, 317)}...` : text;
-}
-
 function measurePrompts(
   scrollEl: HTMLElement,
   anchors: PromptAnchor[],
@@ -359,33 +338,6 @@ function markerWidth(count: number, maxCount: number, active: boolean): number {
   const width = MARKER_BASE_WIDTH_PX
     + (MARKER_MAX_WIDTH_PX - MARKER_BASE_WIDTH_PX) * density;
   return Math.round(active ? width + 4 : width);
-}
-
-function jumpToPrompt(scrollEl: HTMLElement | null, promptId: string | undefined): void {
-  if (!scrollEl || !promptId) return;
-  const target = findPromptElement(scrollEl, promptId);
-  if (!target) return;
-  scrollEl.scrollTo({
-    top: Math.max(0, promptTop(scrollEl, target) - 16),
-    behavior: "smooth",
-  });
-}
-
-function findPromptElement(scrollEl: HTMLElement, promptId: string): HTMLElement | null {
-  const candidates = scrollEl.querySelectorAll<HTMLElement>("[data-user-prompt-id]");
-  return Array.from(candidates).find(
-    (candidate) => candidate.dataset.userPromptId === promptId,
-  ) ?? null;
-}
-
-function promptTop(scrollEl: HTMLElement, target: HTMLElement): number {
-  const scrollRect = scrollEl.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const hasLayoutRect = scrollRect.top !== 0 || targetRect.top !== 0;
-  if (hasLayoutRect) {
-    return targetRect.top - scrollRect.top + scrollEl.scrollTop;
-  }
-  return target.offsetTop;
 }
 
 function clamp(value: number, min: number, max: number): number {

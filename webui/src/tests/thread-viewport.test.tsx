@@ -218,6 +218,72 @@ describe("ThreadViewport", () => {
     });
   });
 
+  it("opens a prompt navigator list and jumps to a selected prompt", async () => {
+    const promptMessages = makeLongMessages(5);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 360,
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Prompts")).toBeInTheDocument();
+    expect(within(dialog).getByText("message 4")).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search prompts" }), {
+      target: { value: "message 4" },
+    });
+    expect(within(dialog).queryByText("message 1")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 4" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 1424,
+      behavior: "smooth",
+    });
+  });
+
+  it("expands the history window before jumping to an older prompt from the navigator", async () => {
+    const longMessages = makeLongMessages(300);
+    render(
+      <ThreadViewport
+        messages={longMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    expect(screen.queryByText("message 20")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 20" }));
+
+    await waitFor(() => expect(screen.getByText("message 20")).toBeInTheDocument());
+  });
+
   it("renders the prompt rail for compact scroll ranges", async () => {
     const promptMessages = makeLongMessages(3);
     const { container } = render(
