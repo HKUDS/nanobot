@@ -1046,7 +1046,13 @@ class CustomImageGenerationClient(ImageGenerationProvider):
 
     @staticmethod
     def _custom_size(aspect_ratio: str | None, image_size: str | None) -> str:
-        return _openai_size("gpt-image-2", aspect_ratio, image_size)
+        if image_size:
+            requested = image_size.strip()
+            if requested:
+                if requested.lower() == "1k":
+                    return "1024x1024"
+                return requested
+        return _openai_size("gpt-image-2", aspect_ratio, None)
 
     async def generate(
         self,

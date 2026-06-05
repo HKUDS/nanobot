@@ -844,6 +844,67 @@ async def test_custom_generate_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_custom_generate_preserves_provider_size_hint() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = CustomImageGenerationClient(
+        api_key="sk-custom-test",
+        api_base="https://custom.example/v1",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="a cat on the moon",
+        model="custom-image-model",
+        image_size="2K",
+    )
+
+    assert fake.calls[0]["json"]["size"] == "2K"
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_maps_one_k_to_openai_dimension() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = CustomImageGenerationClient(
+        api_key="sk-custom-test",
+        api_base="https://custom.example/v1",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="a cat on the moon",
+        model="custom-image-model",
+        image_size="1K",
+    )
+
+    assert fake.calls[0]["json"]["size"] == "1024x1024"
+
+
+@pytest.mark.asyncio
+async def test_custom_generate_extra_body_can_override_defaults() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"url": "https://images.example/cat.png"}]}))
+    fake.get_response = FakeResponse({}, content=PNG_BYTES)
+    client = CustomImageGenerationClient(
+        api_key="sk-custom-test",
+        api_base="https://custom.example/v1",
+        extra_body={"response_format": "url", "size": "2K"},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="a cat on the moon",
+        model="custom-image-model",
+        image_size="1K",
+    )
+
+    expected_data_url = f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('ascii')}"
+    assert response.images == [expected_data_url]
+    assert fake.get_calls[0]["url"] == "https://images.example/cat.png"
+    body = fake.calls[0]["json"]
+    assert body["response_format"] == "url"
+    assert body["size"] == "2K"
+
+
+@pytest.mark.asyncio
 async def test_custom_generate_without_api_key_omits_authorization() -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = CustomImageGenerationClient(
