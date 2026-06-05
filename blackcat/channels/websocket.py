@@ -50,6 +50,7 @@ from blackcat.webui.http_utils import (
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from blackcat.webui.transcript import append_transcript_object
 from blackcat.webui.websocket_logging import websockets_server_logger
+from blackcat.webui.transcript import append_transcript_object, build_user_transcript_event
 
 
 class WebSocketConfig(Base):
@@ -768,6 +769,14 @@ class WebSocketChannel(BaseChannel):
                     "enabled": True,
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
+            if envelope.get("webui") is True and self.is_allowed(client_id):
+                self._try_append_webui_user_transcript(
+                    cid,
+                    content,
+                    media_paths=media_paths,
+                    cli_apps=cli_apps,
+                    mcp_presets=mcp_presets,
+                )
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,
@@ -833,8 +842,30 @@ class WebSocketChannel(BaseChannel):
         try:
             dup = json.loads(json.dumps(wire, ensure_ascii=False))
             append_transcript_object(sk, dup)
-        except (ValueError, TypeError) as e:
+        except (OSError, ValueError, TypeError) as e:
             self.logger.warning("webui transcript append failed: {}", e)
+
+    def _try_append_webui_user_transcript(
+        self,
+        chat_id: str,
+        content: str,
+        *,
+        media_paths: list[str],
+        cli_apps: list[dict[str, Any]],
+        mcp_presets: list[dict[str, Any]],
+    ) -> None:
+        if content.strip() == "/stop" and not media_paths:
+            return
+        payload = build_user_transcript_event(
+            chat_id,
+            content,
+            media_paths=media_paths,
+            cli_apps=cli_apps,
+            mcp_presets=mcp_presets,
+        )
+        if payload is None:
+            return
+        self._try_append_webui_transcript(chat_id, payload)
 
     async def send(self, msg: OutboundMessage) -> None:
         if msg.metadata.get("_runtime_model_updated"):
