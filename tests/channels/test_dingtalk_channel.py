@@ -80,7 +80,7 @@ class _NetworkErrorHttp:
 
 @pytest.mark.asyncio
 async def test_group_message_keeps_sender_id_and_routes_chat_id() -> None:
-    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"])
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"], group_allow_from=["conv123"])
     bus = MessageBus()
     channel = DingTalkChannel(config, bus)
 
@@ -102,7 +102,7 @@ async def test_group_message_keeps_sender_id_and_routes_chat_id() -> None:
 async def test_group_user_isolation_false_uses_shared_session() -> None:
     """By default group messages share the same session_key."""
     config = DingTalkConfig(
-        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=False
+        client_id="app", client_secret="secret", allow_from=["*"], group_allow_from=["conv123"], group_user_isolation=False
     )
     bus = MessageBus()
     channel = DingTalkChannel(config, bus)
@@ -126,7 +126,7 @@ async def test_group_user_isolation_false_uses_shared_session() -> None:
 async def test_group_user_isolation_true_separates_sessions() -> None:
     """When group_user_isolation is True, each user gets their own session_key."""
     config = DingTalkConfig(
-        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=True
+        client_id="app", client_secret="secret", allow_from=["*"], group_allow_from=["conv123"], group_user_isolation=True
     )
     bus = MessageBus()
     channel = DingTalkChannel(config, bus)
@@ -171,7 +171,7 @@ async def test_group_send_uses_group_messages_api() -> None:
 async def test_handler_uses_voice_recognition_text_when_text_is_empty(monkeypatch) -> None:
     bus = MessageBus()
     channel = DingTalkChannel(
-        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"], group_allow_from=["conv123"]),
         bus,
     )
     handler = NanobotDingTalkHandler(channel)

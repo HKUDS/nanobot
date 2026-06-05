@@ -158,6 +158,7 @@ class DingTalkConfig(Base):
     client_id: str = ""
     client_secret: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    group_allow_from: list[str] = Field(default_factory=list)
     allow_remote_media_redirects: bool = False
     remote_media_redirect_allowed_hosts: list[str] = Field(default_factory=list)
     group_user_isolation: bool = False  # If True, each user in group chat gets their own session
@@ -694,6 +695,18 @@ class DingTalkChannel(BaseChannel):
             self.logger.info("inbound: {} from {}", content, sender_name)
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
+
+            if is_group:
+                group_allow_list = getattr(self.config, "group_allow_from", None) or []
+                if "*" not in group_allow_list:
+                    if str(conversation_id) not in group_allow_list:
+                        self.logger.warning(
+                            "Access denied for group {}. "
+                            "Add it to groupAllowFrom list in config to grant access.",
+                            conversation_id,
+                        )
+                        return
+
             session_key = None
             if is_group and self.config.group_user_isolation:
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
