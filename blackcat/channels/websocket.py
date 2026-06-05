@@ -45,6 +45,11 @@ from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from blackcat.webui.transcript import (
+    delete_webui_transcript,
+    fork_transcript_before_user_index,
+    write_session_messages_as_transcript,
+)
 from blackcat.webui.transcription_ws import webui_transcription_event
 from blackcat.webui.websocket_logging import websockets_server_logger
 
@@ -657,6 +662,61 @@ class WebSocketChannel(BaseChannel):
             if scope is None:
                 return
             self._workspaces.persist_scope(new_id, scope)
+            self._attach(connection, new_id)
+            await self._send_event(connection, "attached", chat_id=new_id)
+            await self._send_event(
+                connection,
+                "session_updated",
+                chat_id=new_id,
+                scope="metadata",
+                workspace_scope=scope.payload(),
+            )
+            await self._hydrate_after_subscribe(new_id)
+            return
+        if t == "fork_chat":
+            source_chat_id = envelope.get("source_chat_id")
+            raw_index = envelope.get("before_user_index")
+            if not _is_valid_chat_id(source_chat_id):
+                await self._send_event(connection, "error", detail="invalid source_chat_id")
+                return
+            if (
+                isinstance(raw_index, bool)
+                or not isinstance(raw_index, int)
+                or raw_index < 0
+            ):
+                await self._send_event(connection, "error", detail="invalid before_user_index")
+                return
+            if self.gateway.session_manager is None:
+                await self._send_event(connection, "error", detail="session_manager_unavailable")
+                return
+
+            new_id = str(uuid.uuid4())
+            source_key = f"websocket:{source_chat_id}"
+            target_key = f"websocket:{new_id}"
+            try:
+                forked = self.gateway.session_manager.fork_session_before_user_index(
+                    source_key,
+                    target_key,
+                    raw_index,
+                )
+                if forked is None:
+                    await self._send_event(connection, "error", detail="invalid fork source or index")
+                    return
+                transcript_ok = fork_transcript_before_user_index(
+                    source_key,
+                    target_key,
+                    raw_index,
+                )
+                if not transcript_ok:
+                    write_session_messages_as_transcript(target_key, forked.messages)
+            except Exception as exc:
+                delete_webui_transcript(target_key)
+                self.gateway.session_manager.delete_session(target_key)
+                self.logger.warning("fork_chat failed: {}", exc)
+                await self._send_event(connection, "error", detail="fork_chat_failed")
+                return
+
+            scope = self._workspaces.scope_for_session_key(target_key)
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._send_event(

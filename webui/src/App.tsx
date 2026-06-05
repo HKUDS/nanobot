@@ -526,7 +526,7 @@ function Shell({
   const { t, i18n } = useTranslation();
   const { client, token } = useClient();
   const { theme, toggle } = useTheme();
-  const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
+  const { sessions, loading, refresh, createChat, forkChat, deleteChat } = useSessions();
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
   const initialRouteRef = useRef<ShellRoute | null>(null);
@@ -884,6 +884,25 @@ function Shell({
       return null;
     }
   }, [activeWorkspaceScope, createChat, navigate, t]);
+
+  const onForkChat = useCallback(async (
+    sourceChatId: string,
+    beforeUserIndex: number,
+  ) => {
+    try {
+      const chatId = await forkChat(sourceChatId, beforeUserIndex);
+      navigate({
+        view: "chat",
+        activeKey: `websocket:${chatId}`,
+        settingsSection: "overview",
+      });
+      setMobileSidebarOpen(false);
+      return chatId;
+    } catch (e) {
+      console.error("Failed to fork chat", e);
+      return null;
+    }
+  }, [forkChat, navigate]);
 
   const onNewChat = useCallback(() => {
     navigate(defaultShellRoute());
@@ -1486,6 +1505,7 @@ function Shell({
                 onToggleSidebar={toggleSidebar}
                 onNewChat={onNewChat}
                 onCreateChat={onCreateChat}
+                onForkChat={onForkChat}
                 onTurnEnd={onTurnEnd}
                 theme={theme}
                 onToggleTheme={toggle}

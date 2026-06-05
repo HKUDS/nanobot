@@ -5,14 +5,29 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type SVGProps,
 } from "react";
-import { Check, ChevronRight, Clock3, Copy, ImageIcon, Sparkles, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Clock3,
+  Copy,
+  ImageIcon,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
@@ -34,6 +49,7 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
+  onForkFromHere?: () => void;
 }
 
 /**
@@ -51,6 +67,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
+  onForkFromHere,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -73,7 +90,7 @@ export function MessageBubble({
     };
   }, []);
 
-  const onCopyAssistantReply = useCallback(() => {
+  const onCopyMessage = useCallback(() => {
     void copyTextToClipboard(message.content).then((ok) => {
       if (!ok) return;
       setCopied(true);
@@ -97,6 +114,11 @@ export function MessageBubble({
     const hasImages = images.length > 0;
     const hasMedia = media.length > 0;
     const hasText = message.content.trim().length > 0;
+    const showUserActions = hasText;
+    const timeLabel = formatMessageClock(message.createdAt);
+    const copyLabel = copied
+      ? t("message.copiedMessage", { defaultValue: "Copied message" })
+      : t("message.copyMessage", { defaultValue: "Copy message" });
     return (
       <div
         className={cn(
@@ -122,6 +144,43 @@ export function MessageBubble({
             />
           </p>
         ) : null}
+        {showUserActions ? (
+          <TooltipProvider delayDuration={180} skipDelayDuration={80}>
+            <div
+              className={cn(
+                "mt-0.5 flex h-8 items-center justify-end gap-1 self-end",
+                "text-[13px] text-muted-foreground/65 opacity-0 transition-opacity duration-150",
+                "group-focus-within:opacity-100 group-hover:opacity-100",
+              )}
+            >
+              {hasText ? (
+                <MessageActionTooltip label={copyLabel}>
+                  <button
+                    type="button"
+                    onClick={onCopyMessage}
+                    aria-label={copyLabel}
+                    className={cn(
+                      "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                      "transition-colors hover:bg-muted/55 hover:text-foreground",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                  </button>
+                </MessageActionTooltip>
+              ) : null}
+              {timeLabel ? (
+                <span className="ml-1 shrink-0 select-none tabular-nums" title={timeLabel}>
+                  {timeLabel}
+                </span>
+              ) : null}
+            </div>
+          </TooltipProvider>
+        ) : null}
       </div>
     );
   }
@@ -138,13 +197,16 @@ export function MessageBubble({
 
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
   const showCopyButton = showAssistantCopyAction && showAssistantActions;
+  const showForkButton = showAssistantActions && !!onForkFromHere;
+  const copyReplyLabel = copied ? t("message.copiedReply") : t("message.copyReply");
+  const forkLabel = t("message.forkFromHere");
   const latencyMs = message.latencyMs;
   const showLatencyFooter =
     message.role === "assistant"
     && latencyMs != null
     && !message.isStreaming
     && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterRow = showCopyButton || showLatencyFooter;
+  const showAssistantFooterRow = showCopyButton || showForkButton || showLatencyFooter;
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -173,39 +235,79 @@ export function MessageBubble({
           </MarkdownText>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
-            <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-              {showCopyButton ? (
-                <button
-                  type="button"
-                  onClick={onCopyAssistantReply}
-                  aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
-                  title={copied ? t("message.copiedReply") : t("message.copyReply")}
-                  className={cn(
-                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    "transition-colors hover:bg-muted/55 hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4" aria-hidden />
-                  ) : (
-                    <Copy className="h-4 w-4" aria-hidden />
-                  )}
-                </button>
-              ) : null}
-              {showLatencyFooter ? (
-                <span
-                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                  title={t("message.turnLatencyTitle")}
-                >
-                  {formatTurnLatency(latencyMs)}
-                </span>
-              ) : null}
-            </div>
+            <TooltipProvider delayDuration={180} skipDelayDuration={80}>
+              <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                {showCopyButton ? (
+                  <MessageActionTooltip label={copyReplyLabel}>
+                    <button
+                      type="button"
+                      onClick={onCopyMessage}
+                      aria-label={copyReplyLabel}
+                      className={cn(
+                        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                        "transition-colors hover:bg-muted/55 hover:text-foreground",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      )}
+                    >
+                      {copied ? (
+                        <Check className="h-4 w-4" aria-hidden />
+                      ) : (
+                        <Copy className="h-4 w-4" aria-hidden />
+                      )}
+                    </button>
+                  </MessageActionTooltip>
+                ) : null}
+                {showForkButton ? (
+                  <MessageActionTooltip label={forkLabel}>
+                    <button
+                      type="button"
+                      onClick={onForkFromHere}
+                      aria-label={forkLabel}
+                      className={cn(
+                        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                        "transition-colors hover:bg-muted/55 hover:text-foreground",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      )}
+                    >
+                      <ForkFromHereIcon className="h-4 w-4" aria-hidden />
+                    </button>
+                  </MessageActionTooltip>
+                ) : null}
+                {showLatencyFooter ? (
+                  <span
+                    className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                    title={t("message.turnLatencyTitle")}
+                  >
+                    {formatTurnLatency(latencyMs)}
+                  </span>
+                ) : null}
+              </div>
+            </TooltipProvider>
           ) : null}
         </>
       )}
     </div>
+  );
+}
+
+function MessageActionTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="center"
+        className="rounded-full border-border/70 bg-background px-2.5 py-1 text-[12px] font-medium text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
+      >
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -225,6 +327,39 @@ function AutomationSourceBadge({ label, triggerLabel }: { label: string; trigger
       <span className="text-current/45" aria-hidden>·</span>
       <span className="shrink-0">{triggerLabel}</span>
     </div>
+  );
+}
+
+function formatMessageClock(createdAt: number): string {
+  if (!Number.isFinite(createdAt) || createdAt <= 0) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(createdAt));
+  } catch {
+    return "";
+  }
+}
+
+function ForkFromHereIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+  // Tabler Icons "arrow-fork" (MIT, Copyright Paweł Kuna).
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M16 3h5v5" />
+      <path d="M8 3h-5v5" />
+      <path d="M21 3l-7.536 7.536a5 5 0 0 0 -1.464 3.534v6.93" />
+      <path d="M3 3l7.536 7.536a5 5 0 0 1 1.464 3.534v.93" />
+    </svg>
   );
 }
 

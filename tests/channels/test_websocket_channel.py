@@ -45,6 +45,7 @@ from blackcat.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
 from blackcat.webui.settings_api import settings_payload, update_provider_settings
+from blackcat.webui.transcript import append_transcript_object, read_transcript_lines
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -104,7 +105,7 @@ def bus() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         "blackcat.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
@@ -278,7 +279,7 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
 
 @pytest.mark.asyncio
 async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
-    from nanobot.webui.transcript import read_transcript_lines
+    from blackcat.webui.transcript import read_transcript_lines
 
     channel = _ch(bus)
     conn = MagicMock()
@@ -319,9 +320,9 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -352,9 +353,9 @@ async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from nanobot.webui.transcript import read_transcript_lines
+    from blackcat.webui.transcript import read_transcript_lines
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -378,7 +379,7 @@ async def test_webui_user_transcript_append_failure_does_not_block_inbound(
     def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", fail_append)
+    monkeypatch.setattr("blackcat.webui.transcript.append_transcript_object", fail_append)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -1168,7 +1169,7 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_transcript_persists_without_subscribers() -> None:
-    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
 
     bus = MagicMock()
     channel = WebSocketChannel(
@@ -1679,7 +1680,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         providers = {provider["name"]: provider for provider in body["providers"]}
         assert providers["openai"]["configured"] is True
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
-        assert providers["azure_openai"]["api_key_required"] is True
+        assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
         assert providers["skywork"]["label"] == "Skywork"
@@ -2386,6 +2387,216 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_fork_chat_copies_only_prefix_session_and_transcript(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    source = sessions.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2 fork me")
+    source.add_message("assistant", "answer2")
+    source.add_message("user", "round3 must not appear")
+    sessions.save(source)
+    for ev in (
+        {"event": "user", "chat_id": "source", "text": "round1"},
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+        {"event": "turn_end", "chat_id": "source"},
+        {"event": "user", "chat_id": "source", "text": "round2 fork me"},
+        {"event": "message", "chat_id": "source", "text": "answer2"},
+        {"event": "user", "chat_id": "source", "text": "round3 must not appear"},
+    ):
+        append_transcript_object("websocket:source", ev)
+
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
+    )
+
+    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    attached = next(item for item in sent if item["event"] == "attached")
+    fork_id = attached["chat_id"]
+    saved = sessions.read_session_file(f"websocket:{fork_id}")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
+    assert all(line.get("chat_id") == fork_id for line in fork_lines)
+    assert "round3 must not appear" not in json.dumps(saved, ensure_ascii=False)
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fork_chat_falls_back_to_session_prefix_when_transcript_lacks_user_rows(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    source = sessions.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2 fork me")
+    source.add_message("assistant", "answer2")
+    source.add_message("user", "round3 must not appear")
+    sessions.save(source)
+    append_transcript_object(
+        "websocket:source",
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+    )
+
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
+    )
+
+    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    attached = next(item for item in sent if item["event"] == "attached")
+    fork_id = attached["chat_id"]
+    saved = sessions.read_session_file(f"websocket:{fork_id}")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1"]
+    assert "round3 must not appear" not in json.dumps(fork_lines, ensure_ascii=False)
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fork_chat_allows_index_equal_to_user_count(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    source = sessions.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    sessions.save(source)
+    append_transcript_object("websocket:source", {"event": "user", "chat_id": "source", "text": "round1"})
+    append_transcript_object(
+        "websocket:source",
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+    )
+
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
+    )
+
+    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    attached = next(item for item in sent if item["event"] == "attached")
+    fork_id = attached["chat_id"]
+    saved = sessions.read_session_file(f"websocket:{fork_id}")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1"]
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fork_chat_rejects_invalid_source_and_index(bus: MagicMock, tmp_path) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "fork_chat", "source_chat_id": "bad/source", "before_user_index": 0},
+    )
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "invalid source_chat_id"
+
+    conn.reset_mock()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "fork_chat", "source_chat_id": "missing", "before_user_index": -1},
+    )
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "invalid before_user_index"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webui_message_envelope_appends_user_transcript(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "source",
+            "content": "round1",
+            "webui": True,
+        },
+    )
+
+    [line] = read_transcript_lines("websocket:source")
+    assert {
+        "event": line.get("event"),
+        "chat_id": line.get("chat_id"),
+        "text": line.get("text"),
+    } == {"event": "user", "chat_id": "source", "text": "round1"}
+    assert isinstance(line.get("turn_id"), str)
+    assert line.get("turn_phase") == "user"
+    assert line.get("turn_seq") == 1
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.chat_id == "source"
+    assert inbound.content == "round1"
+
+
+@pytest.mark.asyncio
 async def test_multiplex_two_chats_isolated(bus: MagicMock) -> None:
     port = 29932
     channel = _ch(bus, port=port)
@@ -2607,7 +2818,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     from websockets.http11 import Request
 
     workspace = tmp_path / "workspace"
-    source = workspace / "nanobot" / "agent" / "hook.py"
+    source = workspace / "blackcat" / "agent" / "hook.py"
     source.parent.mkdir(parents=True)
     source.write_text("print('hello')\n", encoding="utf-8")
 
@@ -2615,7 +2826,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
     key = "websocket:file-preview"
     enc = quote(key, safe="")
-    path = quote("nanobot/agent/hook.py:12", safe="")
+    path = quote("blackcat/agent/hook.py:12", safe="")
     req = Request(
         f"/api/sessions/{enc}/file-preview?path={path}",
         Headers([("Authorization", "Bearer tok")]),
@@ -2625,14 +2836,14 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["display_path"] == "nanobot/agent/hook.py"
+    assert body["display_path"] == "blackcat/agent/hook.py"
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
 
 
 def test_file_preview_normalizes_windows_file_url() -> None:
-    from nanobot.webui.file_preview import _clean_preview_path
+    from blackcat.webui.file_preview import _clean_preview_path
 
     assert _clean_preview_path("file:///C:/Users/me/project/app.py") == (
         "C:/Users/me/project/app.py"
@@ -2674,9 +2885,9 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     workspace = tmp_path / "workspace"
     sessions = SessionManager(workspace)
     key = "websocket:c-legacy"

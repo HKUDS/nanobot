@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -59,6 +59,7 @@ function makeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
@@ -720,6 +721,267 @@ describe("ThreadShell", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+  });
+
+  it("forks assistant replies using the global user message index rather than the visible window index", async () => {
+    const client = makeClient();
+    const onForkChat = vi.fn().mockResolvedValue("chat-fork");
+    const rows = Array.from({ length: 165 }, (_, index) => [
+      { role: "user" as const, content: `question ${index}` },
+      { role: "assistant" as const, content: `answer ${index}` },
+    ]).flat();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Along-chat/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages(rows));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("long-chat")}
+          title="Long chat"
+          onToggleSidebar={() => {}}
+          onForkChat={onForkChat}
+        />,
+      ),
+    );
+
+    const targetText = await screen.findByText("answer 100");
+    fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
+      name: "Fork from here",
+    }));
+
+    await waitFor(() =>
+      expect(onForkChat).toHaveBeenCalledWith("long-chat", 101),
+    );
+  });
+
+  it("shows an error without changing the draft when assistant fork fails", async () => {
+    const client = makeClient();
+    const onForkChat = vi.fn().mockResolvedValue(null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "fork me" },
+            { role: "assistant", content: "answer" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onForkChat={onForkChat}
+        />,
+      ),
+    );
+
+    const targetText = await screen.findByText("answer");
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "keep my current draft" },
+    });
+    fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
+      name: "Fork from here",
+    }));
+
+    await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 1));
+    expect(screen.getByLabelText("Message input")).toHaveValue("keep my current draft");
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not fork this chat");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a successful fork from canonical history without later source messages", async () => {
+    const client = makeClient();
+    const onForkChat = vi.fn().mockResolvedValue("chat-fork");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "round1" },
+            { role: "assistant", content: "answer1" },
+            { role: "user", content: "round2 fork me" },
+            { role: "assistant", content: "answer2" },
+            { role: "user", content: "round3 must not appear" },
+          ]));
+        }
+        if (url.includes("websocket%3Achat-fork/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "round1" },
+            { role: "assistant", content: "answer1" },
+            { role: "user", content: "round2 fork me" },
+            { role: "assistant", content: "answer2" },
+          ]));
+        }
+        if (url.includes("websocket%3Achat-other/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "other chat" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onForkChat={onForkChat}
+        />,
+      ),
+    );
+
+    const targetText = await screen.findByText("answer2");
+    fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
+      name: "Fork from here",
+    }));
+
+    await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 2));
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-fork")}
+            title="Chat chat-fork"
+            onToggleSidebar={() => {}}
+            onForkChat={onForkChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText("answer1")).toBeInTheDocument());
+    expect(screen.getByText("answer2")).toBeInTheDocument();
+    expect(screen.queryByText("round3 must not appear")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-other")}
+            title="Chat chat-other"
+            onToggleSidebar={() => {}}
+            onForkChat={onForkChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Message input")).toHaveValue(""),
+    );
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={null}
+            title="New chat"
+            onToggleSidebar={() => {}}
+            onForkChat={onForkChat}
+          />,
+        ),
+      );
+    });
+
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+  });
+
+  it("forks from completed assistant replies without pre-filling the assistant text", async () => {
+    const client = makeClient();
+    const onForkChat = vi.fn().mockResolvedValue("chat-fork");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "round1" },
+            { role: "assistant", content: "answer1" },
+          ]));
+        }
+        if (url.includes("websocket%3Achat-fork/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([
+            { role: "user", content: "round1" },
+            { role: "assistant", content: "answer1" },
+          ]));
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onForkChat={onForkChat}
+        />,
+      ),
+    );
+
+    await screen.findByText("answer1");
+    fireEvent.click(screen.getAllByRole("button", { name: "Fork from here" }).at(-1)!);
+
+    await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 1));
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-fork")}
+            title="Chat chat-fork"
+            onToggleSidebar={() => {}}
+            onForkChat={onForkChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText("answer1")).toBeInTheDocument());
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
   });
 
   it("does not cache optimistic messages under the next chat during a session switch", async () => {

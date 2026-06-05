@@ -810,6 +810,9 @@
     },
     "scrollToBottom": "滚动到底部",
     "loadEarlier": "加载更早消息",
+    "fork": {
+      "failed": "无法分叉这个对话，请重试。"
+    },
     "promptNavigator": {
       "open": "打开输入导航",
       "title": "输入列表",
@@ -849,6 +852,9 @@
     "imageAttachment": "图片附件",
     "automationSourceFallback": "自动化",
     "automationTriggered": "自动触发",
+    "copyMessage": "复制消息",
+    "copiedMessage": "已复制消息",
+    "forkFromHere": "从这里分叉",
     "copyReply": "复制回复",
     "copiedReply": "已复制回复",
     "turnLatencyTitle": "本轮耗时（端到端）"

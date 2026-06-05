@@ -810,6 +810,9 @@
     },
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む",
+    "fork": {
+      "failed": "このチャットを分岐できませんでした。もう一度お試しください。"
+    },
     "promptNavigator": {
       "open": "プロンプトナビゲーターを開く",
       "title": "プロンプト",
@@ -835,6 +838,9 @@
     "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
     "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
     "imageAttachment": "画像の添付",
+    "copyMessage": "メッセージをコピー",
+    "copiedMessage": "メッセージをコピーしました",
+    "forkFromHere": "ここから分岐",
     "copyReply": "返信をコピー",
     "copiedReply": "返信をコピーしました",
     "turnLatencyTitle": "応答時間（全行程）",

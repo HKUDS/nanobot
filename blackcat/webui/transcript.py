@@ -274,6 +274,125 @@ class WebUITranscriptRecorder:
             self._turn_sequences.pop((chat_id, turn_id), None)
 
 
+def _chat_id_from_session_key(session_key: str) -> str | None:
+    if not session_key.startswith("websocket:"):
+        return None
+    chat_id = session_key.split(":", 1)[1].strip()
+    return chat_id or None
+
+
+def _is_user_transcript_row(row: dict[str, Any]) -> bool:
+    return row.get("event") == "user" or row.get("role") == "user"
+
+
+def fork_transcript_before_user_index(
+    source_key: str,
+    target_key: str,
+    before_user_index: int,
+) -> bool:
+    """Copy transcript rows before a zero-based global user-message index.
+
+    ``before_user_index == user_count`` copies the full transcript prefix. WebUI
+    uses that when forking from an assistant reply at the end of a chat.
+    """
+    if before_user_index < 0:
+        return False
+    lines = read_transcript_lines(source_key)
+    if not lines:
+        return False
+
+    target_chat_id = _chat_id_from_session_key(target_key)
+    copied: list[dict[str, Any]] = []
+    user_index = 0
+    found_target = False
+    for row in lines:
+        if _is_user_transcript_row(row):
+            if user_index == before_user_index:
+                found_target = True
+                break
+            user_index += 1
+        dup = json.loads(json.dumps(row, ensure_ascii=False))
+        if target_chat_id is not None:
+            dup["chat_id"] = target_chat_id
+        copied.append(dup)
+    if user_index == before_user_index:
+        found_target = True
+
+    if not found_target:
+        return False
+
+    path = webui_transcript_path(target_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".jsonl.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for row in copied:
+                raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+                    raise ValueError("webui transcript line too large")
+                f.write(raw + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return True
+
+
+def write_session_messages_as_transcript(
+    target_key: str,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Write a minimal WebUI transcript from already-truncated session messages."""
+    target_chat_id = _chat_id_from_session_key(target_key)
+    path = webui_transcript_path(target_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".jsonl.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content")
+                text = content if isinstance(content, str) else ""
+                if role == "user":
+                    row: dict[str, Any] = {
+                        "event": "user",
+                        "chat_id": target_chat_id,
+                        "text": text,
+                    }
+                    media = msg.get("media")
+                    if isinstance(media, list) and media:
+                        row["media_paths"] = [str(p) for p in media if isinstance(p, str) and p]
+                    for key in ("cli_apps", "mcp_presets"):
+                        value = msg.get(key)
+                        if isinstance(value, list) and value:
+                            row[key] = json.loads(json.dumps(value, ensure_ascii=False))
+                elif role == "assistant":
+                    if not text.strip():
+                        continue
+                    row = {
+                        "event": "message",
+                        "chat_id": target_chat_id,
+                        "text": text,
+                    }
+                    media = msg.get("media")
+                    if isinstance(media, list) and media:
+                        row["media"] = [str(p) for p in media if isinstance(p, str) and p]
+                else:
+                    continue
+                raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+                    raise ValueError("webui transcript line too large")
+                f.write(raw + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def delete_webui_transcript(session_key: str) -> bool:
     path = webui_transcript_path(session_key)
     if not path.is_file():
