@@ -1,10 +1,13 @@
+import { useRef } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import {
   HISTORY_WINDOW_INCREMENT,
   INITIAL_HISTORY_WINDOW,
   ThreadViewport,
+  type ThreadViewportHandle,
   windowMessages,
 } from "@/components/thread/ThreadViewport";
 import type { UIMessage } from "@/lib/types";
@@ -33,6 +36,24 @@ function makeLongMessages(count: number): UIMessage[] {
     content: `message ${index}`,
     createdAt: index,
   }));
+}
+
+function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
+  const viewportRef = useRef<ThreadViewportHandle | null>(null);
+  return (
+    <div>
+      <PromptNavigator
+        messages={messages}
+        onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
+      />
+      <ThreadViewport
+        ref={viewportRef}
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+      />
+    </div>
+  );
 }
 
 describe("ThreadViewport", () => {
@@ -220,15 +241,9 @@ describe("ThreadViewport", () => {
 
   it("opens a prompt navigator list and jumps to a selected prompt", async () => {
     const promptMessages = makeLongMessages(5);
-    const { container } = render(
-      <ThreadViewport
-        messages={promptMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
+    const { container } = render(<ViewportWithPromptNavigator messages={promptMessages} />);
 
-    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
     const scrollTo = vi.fn();
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 1800 },
@@ -267,13 +282,7 @@ describe("ThreadViewport", () => {
 
   it("expands the history window before jumping to an older prompt from the navigator", async () => {
     const longMessages = makeLongMessages(300);
-    render(
-      <ThreadViewport
-        messages={longMessages}
-        isStreaming={false}
-        composer={<div />}
-      />,
-    );
+    render(<ViewportWithPromptNavigator messages={longMessages} />);
 
     expect(screen.queryByText("message 20")).not.toBeInTheDocument();
 
