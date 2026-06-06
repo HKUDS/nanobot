@@ -3,11 +3,27 @@ from __future__ import annotations
 from typing import Any
 
 from blackcat.agent.tools.base import Tool
+from blackcat.agent.tools.context import ToolContext
 from blackcat.lens import LensClient
-from blackcat.utils.paths import resolve_path
+from blackcat.security.workspace_policy import resolve_path
 
 
-class LensDefinitionTool(Tool):
+class _LensTool(Tool):
+    """Base for all Lens LSP tools — shared create/enabled logic."""
+
+    _plugin_discoverable = True
+    _scopes = {"core"}
+
+    @classmethod
+    def enabled(cls, ctx: ToolContext) -> bool:
+        return ctx.config.lens.enabled
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(client=LensClient(config=ctx.config.lens))
+
+
+class LensDefinitionTool(_LensTool):
     """Find symbol definition via LSP."""
 
     @property
@@ -82,7 +98,7 @@ class LensDefinitionTool(Tool):
             return f"Error finding definition: {str(e)}"
 
 
-class LensReferencesTool(Tool):
+class LensReferencesTool(_LensTool):
     """Find all references to a symbol."""
 
     @property
@@ -157,7 +173,7 @@ class LensReferencesTool(Tool):
             return f"Error finding references: {str(e)}"
 
 
-class LensHoverTool(Tool):
+class LensHoverTool(_LensTool):
     """Get type information and documentation for a symbol."""
 
     @property
@@ -221,7 +237,7 @@ class LensHoverTool(Tool):
             return f"Error getting hover info: {str(e)}"
 
 
-class LensWorkspaceSymbolTool(Tool):
+class LensWorkspaceSymbolTool(_LensTool):
     """Search for symbols across the workspace."""
 
     @property
@@ -287,7 +303,7 @@ class LensWorkspaceSymbolTool(Tool):
             return f"Error searching symbols: {str(e)}"
 
 
-class LensDocumentSymbolTool(Tool):
+class LensDocumentSymbolTool(_LensTool):
     """Get document outline (symbols)."""
 
     @property
@@ -354,7 +370,7 @@ class LensDocumentSymbolTool(Tool):
             return f"Error getting document symbols: {str(e)}"
 
 
-class LensCompletionTool(Tool):
+class LensCompletionTool(_LensTool):
     """Get code completion suggestions at cursor position."""
 
     @property
@@ -433,7 +449,7 @@ class LensCompletionTool(Tool):
             return f"Error getting completions: {str(e)}"
 
 
-class LensRenameTool(Tool):
+class LensRenameTool(_LensTool):
     """Rename a symbol across the entire codebase."""
 
     @property
@@ -518,7 +534,7 @@ class LensRenameTool(Tool):
             return f"Error during rename: {str(e)}"
 
 
-class LensCodeActionTool(Tool):
+class LensCodeActionTool(_LensTool):
     """Get quick fixes and refactorings for a code range."""
 
     @property
@@ -606,7 +622,7 @@ class LensCodeActionTool(Tool):
             return f"Error getting code actions: {str(e)}"
 
 
-class LensFormatTool(Tool):
+class LensFormatTool(_LensTool):
     """Format a document using the LSP formatter."""
 
     @property
@@ -684,7 +700,7 @@ class LensFormatTool(Tool):
             return f"Error formatting: {str(e)}"
 
 
-class LensSignatureHelpTool(Tool):
+class LensSignatureHelpTool(_LensTool):
     """Get function signature help as you type."""
 
     @property
@@ -779,8 +795,13 @@ class LensSignatureHelpTool(Tool):
             return f"Error getting signature help: {str(e)}"
 
 
-class LensDiagnosticsTool(Tool):
+class LensDiagnosticsTool(_LensTool):
     """Get diagnostics (errors, warnings) for a file."""
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        default_source = getattr(ctx.config.lens, "diagnostics_source", "cli")
+        return cls(client=LensClient(config=ctx.config.lens), default_source=default_source)
 
     @property
     def name(self) -> str:
