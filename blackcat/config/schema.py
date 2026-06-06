@@ -47,7 +47,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: Literal["groq", "openai", "openrouter", "xiaomi_mimo"] | None = None
+    provider: str | None = None  # Validated by nanobot.audio.transcription_registry.
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
@@ -202,6 +202,7 @@ class ProvidersConfig(Base):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)  # AssemblyAI voice transcription
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -402,6 +403,8 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
+            if spec.is_transcription_only:
+                continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
@@ -409,6 +412,8 @@ class Config(BaseSettings):
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
+            if spec.is_transcription_only:
+                continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
@@ -435,7 +440,7 @@ class Config(BaseSettings):
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth:
+            if spec.is_oauth or spec.is_transcription_only:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:

@@ -16,6 +16,10 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from blackcat.audio.transcription import resolve_transcription_config
+from blackcat.audio.transcription_registry import (
+    resolve_transcription_provider,
+    transcription_provider_names,
+)
 from blackcat.config.loader import get_config_path, load_config, save_config
 from blackcat.config.schema import ModelPresetConfig
 from blackcat.providers.image_generation import (
@@ -91,7 +95,6 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_TRANSCRIPTION_PROVIDERS = ("groq", "openai", "openrouter", "xiaomi_mimo")
 _CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -424,9 +427,13 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         "fetched_at": time.time(),
     }
     if (
-        spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
-        and spec.name != "minimax_anthropic"
-    ) or spec.is_oauth:
+        spec.is_transcription_only
+        or (
+            spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
+            and spec.name != "minimax_anthropic"
+        )
+        or spec.is_oauth
+    ):
         return {
             **base_payload,
             "status": "unsupported",
@@ -542,6 +549,8 @@ def _validate_configured_provider(config: Any, provider: str) -> None:
     spec = find_by_name(provider)
     if spec is None:
         raise WebUISettingsError("unknown provider")
+    if spec.is_transcription_only:
+        raise WebUISettingsError("provider does not support chat models")
     provider_config = getattr(config.providers, provider, None)
     if (
         provider_config is None
@@ -580,7 +589,7 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
 
 def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for name in _TRANSCRIPTION_PROVIDERS:
+    for name in transcription_provider_names():
         spec = find_by_name(name)
         provider_config = getattr(config.providers, name, None)
         rows.append({
@@ -640,6 +649,7 @@ def settings_payload(
             "api_key_hint": _mask_secret_hint(provider_config.api_key),
             "api_base": provider_config.api_base,
             "default_api_base": spec.default_api_base or None,
+            "model_selectable": not spec.is_transcription_only,
         }
         if oauth_status is not None:
             row["oauth_account"] = oauth_status["account"]
@@ -1357,10 +1367,12 @@ def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
     provider = _query_first(query, "provider")
     if provider is not None:
         provider = provider.strip().lower()
-        if provider not in _TRANSCRIPTION_PROVIDERS:
+        provider_spec = resolve_transcription_provider(provider)
+        if provider_spec is None:
             raise WebUISettingsError("unknown transcription provider")
+        provider = provider_spec.name
         if transcription.provider != provider:
-            transcription.provider = provider  # type: ignore[assignment]
+            transcription.provider = provider
             changed = True
 
     model = _query_first(query, "model")

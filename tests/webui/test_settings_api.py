@@ -299,6 +299,50 @@ def test_settings_payload_exposes_xiaomi_mimo_transcription_provider(
     assert providers["xiaomi_mimo"]["configured"] is True
 
 
+def test_settings_payload_exposes_assemblyai_transcription_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.transcription.provider = "assemblyai"
+    config.providers.assemblyai.api_key = "aai-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    assert payload["transcription"]["provider"] == "assemblyai"
+    assert payload["transcription"]["provider_configured"] is True
+    providers = {provider["name"]: provider for provider in payload["transcription"]["providers"]}
+    assert providers["assemblyai"]["label"] == "AssemblyAI"
+    assert providers["assemblyai"]["configured"] is True
+    assert providers["assemblyai"]["default_api_base"] == "https://api.assemblyai.com/v2"
+    provider_rows = {provider["name"]: provider for provider in payload["providers"]}
+    assert provider_rows["assemblyai"]["configured"] is True
+    assert provider_rows["assemblyai"]["model_selectable"] is False
+
+
+def test_model_configuration_rejects_transcription_only_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.assemblyai.api_key = "aai-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="does not support chat models"):
+        create_model_configuration(
+            {
+                "label": ["Voice only"],
+                "provider": ["assemblyai"],
+                "model": ["universal-3-pro"],
+            }
+        )
+
+
 def test_update_transcription_settings_writes_top_level_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -382,6 +426,30 @@ def test_update_transcription_settings_accepts_xiaomi_mimo(
     assert saved.transcription.model == "mimo-v2.5-asr"
     assert saved.transcription.language == "zh"
     assert payload["transcription"]["provider"] == "xiaomi_mimo"
+    assert payload["transcription"]["provider_configured"] is True
+
+
+def test_update_transcription_settings_accepts_assemblyai(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.assemblyai.api_key = "aai-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_transcription_settings(
+        {
+            "provider": ["assemblyai"],
+            "model": ["universal-3-pro"],
+        }
+    )
+
+    saved = load_config(config_path)
+    assert saved.transcription.provider == "assemblyai"
+    assert saved.transcription.model == "universal-3-pro"
+    assert payload["transcription"]["provider"] == "assemblyai"
     assert payload["transcription"]["provider_configured"] is True
 
 

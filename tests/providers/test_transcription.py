@@ -14,8 +14,14 @@ from blackcat.audio.transcription import (
     resolve_transcription_config,
     transcribe_audio_file,
 )
+from blackcat.audio.transcription_registry import (
+    get_transcription_provider,
+    resolve_transcription_provider,
+    transcription_provider_names,
+)
 from blackcat.config.schema import Config
 from blackcat.providers.transcription import (
+    AssemblyAITranscriptionProvider,
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
     OpenRouterTranscriptionProvider,
@@ -42,6 +48,17 @@ def _raw_response(status: int, content: bytes) -> httpx.Response:
     """Build a Response with a raw, possibly-malformed body (bypasses json= encoding)."""
     request = httpx.Request("POST", "https://example.test/audio/transcriptions")
     return httpx.Response(status_code=status, content=content, request=request)
+
+
+def _json_response(
+    status: int,
+    payload: dict[str, object],
+    *,
+    method: str = "POST",
+    url: str = "https://example.test/audio/transcriptions",
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    return httpx.Response(status_code=status, json=payload, request=request)
 
 
 def test_resolver_uses_legacy_channel_provider_when_top_level_is_unset() -> None:
@@ -128,6 +145,29 @@ def test_resolver_accepts_legacy_xiaomi_transcription_alias() -> None:
     assert resolved.api_key == "mimo-test"
 
 
+def test_transcription_registry_lists_providers_and_aliases() -> None:
+    assert "assemblyai" in transcription_provider_names()
+    assert get_transcription_provider("assemblyai").default_model == "universal-3-pro,universal-2"
+    assert resolve_transcription_provider("mimo").name == "xiaomi_mimo"
+
+
+def test_resolver_supports_assemblyai_provider_config() -> None:
+    config = Config()
+    config.transcription.provider = "assemblyai"
+    config.transcription.model = "universal-3-pro"
+    config.transcription.language = "en"
+    config.providers.assemblyai.api_key = "aai-test"
+    config.providers.assemblyai.api_base = "https://assembly.example/v2"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "assemblyai"
+    assert resolved.model == "universal-3-pro"
+    assert resolved.language == "en"
+    assert resolved.api_key == "aai-test"
+    assert resolved.api_base == "https://assembly.example/v2"
+
+
 @pytest.mark.asyncio
 async def test_transcribe_audio_file_routes_openrouter_provider(audio_file: Path) -> None:
     captured: dict[str, object] = {}
@@ -187,7 +227,7 @@ async def test_transcribe_audio_file_routes_xiaomi_mimo_provider(audio_file: Pat
         max_upload_mb=25,
     )
 
-    with patch("nanobot.providers.transcription.XiaomiMiMoTranscriptionProvider", StubXiaomiMiMo):
+    with patch("blackcat.providers.transcription.XiaomiMiMoTranscriptionProvider", StubXiaomiMiMo):
         result = await transcribe_audio_file(audio_file, config)
 
     assert result == "mimo ok"
@@ -196,6 +236,42 @@ async def test_transcribe_audio_file_routes_xiaomi_mimo_provider(audio_file: Pat
         "api_base": "https://api.xiaomimimo.com/v1",
         "language": "zh",
         "model": "mimo-v2.5-asr",
+        "file_path": audio_file,
+    }
+
+
+@pytest.mark.asyncio
+async def test_transcribe_audio_file_routes_assemblyai_provider(audio_file: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class StubAssemblyAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def transcribe(self, file_path: str | Path) -> str:
+            captured["file_path"] = Path(file_path)
+            return "assembly ok"
+
+    config = EffectiveTranscriptionConfig(
+        enabled=True,
+        provider="assemblyai",
+        model="universal-3-pro",
+        language="en",
+        api_key="aai-test",
+        api_base="https://assembly.example/v2",
+        max_duration_sec=120,
+        max_upload_mb=25,
+    )
+
+    with patch("blackcat.providers.transcription.AssemblyAITranscriptionProvider", StubAssemblyAI):
+        result = await transcribe_audio_file(audio_file, config)
+
+    assert result == "assembly ok"
+    assert captured == {
+        "api_key": "aai-test",
+        "api_base": "https://assembly.example/v2",
+        "language": "en",
+        "model": "universal-3-pro",
         "file_path": audio_file,
     }
 
@@ -626,6 +702,126 @@ async def test_xiaomi_mimo_shares_retry_contract(audio_file: Path) -> None:
         assert await provider.transcribe(audio_file) == "ok"
 
     assert post.await_count == 2
+
+
+def test_assemblyai_defaults_and_base_normalization() -> None:
+    provider = AssemblyAITranscriptionProvider(api_key="aai-test")
+    assert provider.upload_url == "https://api.assemblyai.com/v2/upload"
+    assert provider.transcript_url == "https://api.assemblyai.com/v2/transcript"
+    assert provider.model == "universal-3-pro,universal-2"
+
+    custom = AssemblyAITranscriptionProvider(
+        api_key="aai-test",
+        api_base="https://assembly.example/v2",
+        model="universal-3-pro",
+    )
+    assert custom.upload_url == "https://assembly.example/v2/upload"
+    assert custom.transcript_url == "https://assembly.example/v2/transcript"
+    assert custom.model == "universal-3-pro"
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_uploads_creates_and_polls(audio_file: Path) -> None:
+    provider = AssemblyAITranscriptionProvider(
+        api_key="aai-test",
+        api_base="https://assembly.example/v2",
+        language="en",
+        model="universal-3-pro,universal-2",
+    )
+    post = AsyncMock(
+        side_effect=[
+            _json_response(200, {"upload_url": "https://cdn.example/audio"}, url=provider.upload_url),
+            _json_response(200, {"id": "tr_123"}, url=provider.transcript_url),
+        ]
+    )
+    get = AsyncMock(
+        return_value=_json_response(
+            200,
+            {"status": "completed", "text": "assembly ok"},
+            method="GET",
+            url=f"{provider.transcript_url}/tr_123",
+        )
+    )
+
+    with patch("httpx.AsyncClient.post", post), patch("httpx.AsyncClient.get", get), patch(
+        "asyncio.sleep", AsyncMock()
+    ):
+        result = await provider.transcribe(audio_file)
+
+    assert result == "assembly ok"
+    assert post.await_count == 2
+    assert get.await_count == 1
+    upload_call, create_call = post.await_args_list
+    assert upload_call.args == ("https://assembly.example/v2/upload",)
+    assert upload_call.kwargs["headers"]["Authorization"] == "aai-test"
+    assert upload_call.kwargs["headers"]["Content-Type"] == "application/octet-stream"
+    assert upload_call.kwargs["content"] == audio_file.read_bytes()
+    assert create_call.args == ("https://assembly.example/v2/transcript",)
+    assert create_call.kwargs["json"] == {
+        "audio_url": "https://cdn.example/audio",
+        "speech_models": ["universal-3-pro", "universal-2"],
+        "language_code": "en",
+    }
+    assert get.await_args.args == ("https://assembly.example/v2/transcript/tr_123",)
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_polls_until_completed(audio_file: Path) -> None:
+    provider = AssemblyAITranscriptionProvider(api_key="aai-test")
+    post = AsyncMock(
+        side_effect=[
+            _json_response(200, {"upload_url": "https://cdn.example/audio"}, url=provider.upload_url),
+            _json_response(200, {"id": "tr_123"}, url=provider.transcript_url),
+        ]
+    )
+    get = AsyncMock(
+        side_effect=[
+            _json_response(200, {"status": "processing"}, method="GET"),
+            _json_response(200, {"status": "completed", "text": "done"}, method="GET"),
+        ]
+    )
+    sleep = AsyncMock()
+
+    with patch("httpx.AsyncClient.post", post), patch("httpx.AsyncClient.get", get), patch(
+        "asyncio.sleep", sleep
+    ):
+        assert await provider.transcribe(audio_file) == "done"
+
+    assert get.await_count == 2
+    assert sleep.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_returns_empty_on_failed_transcript(audio_file: Path) -> None:
+    provider = AssemblyAITranscriptionProvider(api_key="aai-test")
+    post = AsyncMock(
+        side_effect=[
+            _json_response(200, {"upload_url": "https://cdn.example/audio"}, url=provider.upload_url),
+            _json_response(200, {"id": "tr_123"}, url=provider.transcript_url),
+        ]
+    )
+    get = AsyncMock(
+        return_value=_json_response(
+            200,
+            {"status": "error", "error": "bad audio"},
+            method="GET",
+        )
+    )
+
+    with patch("httpx.AsyncClient.post", post), patch("httpx.AsyncClient.get", get), patch(
+        "asyncio.sleep", AsyncMock()
+    ):
+        assert await provider.transcribe(audio_file) == ""
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_missing_api_key_short_circuits(audio_file: Path) -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        provider = AssemblyAITranscriptionProvider(api_key=None)
+        post = AsyncMock()
+        with patch("httpx.AsyncClient.post", post):
+            assert await provider.transcribe(audio_file) == ""
+        assert post.await_count == 0
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])

@@ -1,7 +1,7 @@
 """Provider-specific voice transcription adapters.
 
 This module only knows how to call external transcription APIs such as Groq,
-OpenAI Whisper, OpenRouter, and Xiaomi MiMo ASR. Product-level config fallback,
+OpenAI Whisper, OpenRouter, Xiaomi MiMo ASR, and AssemblyAI. Product-level config fallback,
 WebUI upload validation, and channel integration live in
 ``blackcat.audio.transcription``.
 """
@@ -19,6 +19,9 @@ from loguru import logger
 
 _CHAT_COMPLETIONS_PATH = "chat/completions"
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
+_ASSEMBLYAI_DEFAULT_API_BASE = "https://api.assemblyai.com/v2"
+_ASSEMBLYAI_POLL_ATTEMPTS = 60
+_ASSEMBLYAI_POLL_INTERVAL_S = 2.0
 _AUDIO_MIME_OVERRIDES = {
     ".m4a": "audio/mp4",
     ".mpga": "audio/mpeg",
@@ -63,6 +66,11 @@ def _resolve_chat_completions_url(api_base: str | None, default_url: str) -> str
     return f"{base}/{_CHAT_COMPLETIONS_PATH}"
 
 
+def _resolve_api_path(api_base: str | None, default_base: str, path: str) -> str:
+    base = (api_base or default_base).rstrip("/")
+    return f"{base}/{path.lstrip('/')}"
+
+
 def _audio_mime_type(path: Path) -> str:
     return (
         _AUDIO_MIME_OVERRIDES.get(path.suffix.lower())
@@ -91,6 +99,90 @@ _RETRYABLE_EXCEPTIONS = (
     httpx.WriteError,
     httpx.RemoteProtocolError,
 )
+
+
+async def _request_json_with_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    provider_label: str,
+    **kwargs: object,
+) -> dict[str, Any] | None:
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            request = getattr(client, method.lower(), None)
+            if request is None:
+                response = await client.request(method, url, **kwargs)
+            else:
+                response = await request(url, **kwargs)
+        except _RETRYABLE_EXCEPTIONS as e:
+            if attempt < _MAX_RETRIES:
+                logger.warning(
+                    "{} transcription transient error (attempt {}/{}): {}",
+                    provider_label,
+                    attempt + 1,
+                    _MAX_RETRIES + 1,
+                    e,
+                )
+                await asyncio.sleep(_BACKOFF_S[attempt])
+                continue
+            logger.exception(
+                "{} transcription error after {} attempts: {}",
+                provider_label,
+                _MAX_RETRIES + 1,
+                e,
+            )
+            return None
+        except Exception as e:
+            logger.exception("{} transcription error: {}", provider_label, e)
+            return None
+
+        if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+            logger.warning(
+                "{} transcription transient HTTP {} (attempt {}/{})",
+                provider_label,
+                response.status_code,
+                attempt + 1,
+                _MAX_RETRIES + 1,
+            )
+            await asyncio.sleep(_BACKOFF_S[attempt])
+            continue
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            body = response.text.strip().replace("\n", " ")[:500]
+            logger.error(
+                "{} transcription HTTP {}{}{}",
+                provider_label,
+                response.status_code,
+                f" {response.reason_phrase}" if response.reason_phrase else "",
+                f": {body}" if body else "",
+            )
+            return None
+        except Exception as e:
+            logger.exception("{} transcription error: {}", provider_label, e)
+            return None
+
+        try:
+            payload = response.json()
+        except Exception as e:
+            logger.exception(
+                "{} transcription error: malformed response body: {}",
+                provider_label,
+                e,
+            )
+            return None
+        if not isinstance(payload, dict):
+            logger.error(
+                "{} transcription error: unexpected response shape: {!r}",
+                provider_label,
+                type(payload).__name__,
+            )
+            return None
+        return payload
+    return None
 
 
 async def _post_transcription_with_retry(
@@ -303,6 +395,107 @@ def _text_from_chat_payload(payload: dict[str, Any]) -> str:
     except (KeyError, IndexError, TypeError):
         return ""
     return text if isinstance(text, str) else ""
+
+
+def _assemblyai_speech_models(model: str | None) -> list[str]:
+    return [part for part in (part.strip() for part in (model or "").split(",")) if part]
+
+
+class AssemblyAITranscriptionProvider:
+    """Voice transcription provider using AssemblyAI's asynchronous REST API."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        language: str | None = None,
+        model: str | None = None,
+    ):
+        base = api_base or os.environ.get("ASSEMBLYAI_BASE_URL")
+        self.api_key = api_key or os.environ.get("ASSEMBLYAI_API_KEY")
+        self.upload_url = _resolve_api_path(base, _ASSEMBLYAI_DEFAULT_API_BASE, "upload")
+        self.transcript_url = _resolve_api_path(base, _ASSEMBLYAI_DEFAULT_API_BASE, "transcript")
+        self.language = language or None
+        self.model = model or "universal-3-pro,universal-2"
+        logger.debug("AssemblyAI transcription endpoint: {}", self.transcript_url)
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if not self.api_key:
+            logger.warning("AssemblyAI API key not configured for transcription")
+            return ""
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            logger.exception("AssemblyAI transcription error: cannot read audio file: {}", e)
+            return ""
+
+        headers = {"Authorization": self.api_key}
+        async with httpx.AsyncClient() as client:
+            upload = await _request_json_with_retry(
+                client,
+                "POST",
+                self.upload_url,
+                provider_label="AssemblyAI",
+                headers={**headers, "Content-Type": "application/octet-stream"},
+                content=data,
+                timeout=60.0,
+            )
+            upload_url = upload.get("upload_url") if upload else None
+            if not isinstance(upload_url, str) or not upload_url:
+                logger.error("AssemblyAI transcription error: upload_url missing")
+                return ""
+
+            body: dict[str, object] = {"audio_url": upload_url}
+            speech_models = _assemblyai_speech_models(self.model)
+            if speech_models:
+                body["speech_models"] = speech_models
+            if self.language:
+                body["language_code"] = self.language
+
+            transcript = await _request_json_with_retry(
+                client,
+                "POST",
+                self.transcript_url,
+                provider_label="AssemblyAI",
+                headers=headers,
+                json=body,
+                timeout=30.0,
+            )
+            transcript_id = transcript.get("id") if transcript else None
+            if not isinstance(transcript_id, str) or not transcript_id:
+                logger.error("AssemblyAI transcription error: transcript id missing")
+                return ""
+
+            poll_url = f"{self.transcript_url.rstrip('/')}/{transcript_id}"
+            for attempt in range(_ASSEMBLYAI_POLL_ATTEMPTS):
+                payload = await _request_json_with_retry(
+                    client,
+                    "GET",
+                    poll_url,
+                    provider_label="AssemblyAI",
+                    headers=headers,
+                    timeout=30.0,
+                )
+                if not payload:
+                    return ""
+                status = str(payload.get("status") or "").lower()
+                if status == "completed":
+                    text = payload.get("text")
+                    return text if isinstance(text, str) else ""
+                if status in {"error", "failed"}:
+                    logger.error(
+                        "AssemblyAI transcription failed: {}",
+                        payload.get("error") or payload,
+                    )
+                    return ""
+                if attempt < _ASSEMBLYAI_POLL_ATTEMPTS - 1:
+                    await asyncio.sleep(_ASSEMBLYAI_POLL_INTERVAL_S)
+            logger.error("AssemblyAI transcription timed out while polling transcript")
+            return ""
 
 
 class OpenAITranscriptionProvider:

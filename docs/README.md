@@ -28,9 +28,9 @@ Use these when you want deeper customization, integration, or extension details.
 
 | Topic | Repo docs | What it covers |
 |---|---|---|
+| Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Memory | [`memory.md`](./memory.md) | How blackcat stores, consolidates, and restores memory |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Use blackcat programmatically from Python |
-| Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
 | Custom tools | [`my-tool.md`](./my-tool.md) | Inspect and tune runtime state with the `my` tool |
