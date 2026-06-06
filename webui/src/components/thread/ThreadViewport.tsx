@@ -338,21 +338,24 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       ) : null}
 
       {showScrollToBottomButton && !atBottom && (
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => scrollToBottom(true, 1, { force: true })}
-          className={cn(
-            /* Keep clear of sticky composer (textarea + toolbar + optional goal strip). */
-            "absolute left-1/2 z-20 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
-            "bg-background/90 backdrop-blur",
-            "animate-in fade-in-0 zoom-in-95",
-          )}
+        <div
+          className="absolute left-1/2 z-20 -translate-x-1/2"
           style={{ bottom: scrollButtonBottom }}
-          aria-label={t("thread.scrollToBottom")}
         >
-          <ArrowDown className="h-4 w-4" />
-        </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => scrollToBottom(true, 1, { force: true })}
+            className={cn(
+              "h-8 w-8 rounded-full shadow-md",
+              "bg-background/90 backdrop-blur",
+              "animate-in fade-in-0 zoom-in-95",
+            )}
+            aria-label={t("thread.scrollToBottom")}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        </div>
       )}
     </div>
   );

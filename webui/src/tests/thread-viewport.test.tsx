@@ -96,7 +96,9 @@ describe("ThreadViewport", () => {
       });
 
       const button = screen.getByRole("button", { name: "Scroll to bottom" });
-      expect(button).toHaveStyle({ bottom: "192px" });
+      const buttonPositioner = button.parentElement as HTMLElement;
+      expect(button).not.toHaveClass("-translate-x-1/2");
+      expect(buttonPositioner).toHaveStyle({ bottom: "192px" });
 
       const composerDock = screen.getByTestId("thread-composer-dock");
       composerDock.getBoundingClientRect = () =>
@@ -121,7 +123,7 @@ describe("ThreadViewport", () => {
         composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
 
-      expect(button).toHaveStyle({ bottom: "256px" });
+      expect(buttonPositioner).toHaveStyle({ bottom: "256px" });
     } finally {
       vi.stubGlobal("ResizeObserver", originalResizeObserver);
     }
