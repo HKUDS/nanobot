@@ -331,6 +331,7 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
+        extra_query: dict[str, str] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -338,6 +339,7 @@ class OpenAICompatProvider(LLMProvider):
         self._spec = spec
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
+        self._extra_query = extra_query or {}
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -386,6 +388,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
             default_headers=self._default_headers,
+            default_query=self._extra_query or None,
             max_retries=0,
             timeout=timeout_s,
             http_client=http_client,
