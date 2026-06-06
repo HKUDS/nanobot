@@ -1,12 +1,14 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
 import sys
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -1748,6 +1750,106 @@ def status():
 
 
 # ============================================================================
+# Config Commands
+# ============================================================================
+
+config_app = typer.Typer(help="Manage configuration")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("set")
+def config_set(
+    path: str = typer.Argument(..., help="Dot path, e.g. agents.defaults.model"),
+    value: str = typer.Argument(..., help="Value. Use null/true/false or JSON for structured values."),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Set one config value by dot path."""
+    from pydantic import ValidationError
+
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.schema import Config
+
+    resolved_path = Path(config_path).expanduser().resolve() if config_path else get_config_path()
+    if config_path:
+        set_config_path(resolved_path)
+
+    config = load_config(resolved_path)
+    parsed = _parse_config_cli_value(value)
+    try:
+        _set_config_cli_value(config, path, parsed)
+        validated = Config.model_validate(config.model_dump(mode="json", by_alias=True))
+    except (AttributeError, KeyError, TypeError, ValueError, ValidationError) as exc:
+        console.print(f"[red]Could not set config value:[/red] {exc}")
+        raise typer.Exit(1)
+
+    save_config(validated, resolved_path)
+    console.print(f"[green]✓[/green] Set [cyan]{path}[/cyan] = [bold]{value}[/bold]")
+    console.print(f"[dim]Config: {resolved_path}[/dim]")
+    if path in {"agents.defaults.provider", "agents.defaults.model"} and validated.agents.defaults.model_preset:
+        console.print(
+            "[yellow]! agents.defaults.model_preset is set and may override this. "
+            "Clear it with: nanobot config set agents.defaults.model_preset null[/yellow]"
+        )
+
+
+def _parse_config_cli_value(raw: str) -> Any:
+    lowered = raw.strip().lower()
+    if lowered == "null":
+        return None
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    with suppress(Exception):
+        return json.loads(raw)
+    return raw
+
+
+def _resolve_config_field(obj: Any, key: str) -> str:
+    from pydantic import BaseModel
+    from pydantic.alias_generators import to_camel, to_snake
+
+    if not isinstance(obj, BaseModel):
+        return key
+    fields = type(obj).model_fields
+    if key in fields:
+        return key
+    normalized = to_snake(key.replace("-", "_"))
+    if normalized in fields:
+        return normalized
+    for name, field in fields.items():
+        aliases = {
+            to_camel(name),
+            str(field.alias) if field.alias else "",
+            str(field.serialization_alias) if field.serialization_alias else "",
+        }
+        if key in aliases:
+            return name
+    raise AttributeError(f"Unknown config path segment {key!r}")
+
+
+def _set_config_cli_value(config: Any, path: str, value: Any) -> None:
+    parts = [part for part in path.split(".") if part]
+    if not parts:
+        raise ValueError("Config path cannot be empty.")
+
+    current = config
+    for raw_part in parts[:-1]:
+        if isinstance(current, dict):
+            current = current.setdefault(raw_part, {})
+            continue
+        part = _resolve_config_field(current, raw_part)
+        current = getattr(current, part)
+
+    leaf = parts[-1]
+    if isinstance(current, dict):
+        current[leaf] = value
+        return
+    leaf = _resolve_config_field(current, leaf)
+    setattr(current, leaf, value)
+
+
+# ============================================================================
 # OAuth Login
 # ============================================================================
 
@@ -1761,6 +1863,7 @@ _LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
 _PROVIDER_DISPLAY: dict[str, str] = {
     "openai_codex": "OpenAI Codex",
     "github_copilot": "GitHub Copilot",
+    "xai_oauth": "xAI Grok OAuth",
 }
 
 
@@ -1796,7 +1899,9 @@ def _resolve_oauth_provider(provider: str):
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot', 'xai-oauth')"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Print the auth URL instead of opening a browser when supported."),
+    manual_paste: bool = typer.Option(False, "--manual-paste", help="Prompt for a callback URL or fallback code when supported."),
 ):
     """Authenticate with an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -1807,12 +1912,18 @@ def provider_login(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
-    handler()
+    params = signature(handler).parameters
+    kwargs: dict[str, bool] = {}
+    if "no_browser" in params:
+        kwargs["no_browser"] = no_browser
+    if "manual_paste" in params:
+        kwargs["manual_paste"] = manual_paste
+    handler(**kwargs)
 
 
 @provider_app.command("logout")
 def provider_logout(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot', 'xai-oauth')"),
 ):
     """Log out from an OAuth provider."""
     spec = _resolve_oauth_provider(provider)
@@ -1876,6 +1987,24 @@ def _logout_github_copilot() -> None:
     _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["github_copilot"])
 
 
+@_register_logout("xai_oauth")
+def _logout_xai_oauth() -> None:
+    """Clear local OAuth credentials for xAI Grok OAuth."""
+    try:
+        from nanobot.providers.xai_oauth_provider import delete_xai_oauth_credentials
+    except ImportError:
+        console.print("[red]xAI Grok OAuth provider unavailable.[/red]")
+        raise typer.Exit(1)
+
+    removed_paths = delete_xai_oauth_credentials()
+    if not removed_paths:
+        console.print(f"[yellow]! No local OAuth credentials found for {_PROVIDER_DISPLAY['xai_oauth']}[/yellow]")
+        return
+    console.print(f"[green]✓ Logged out from {_PROVIDER_DISPLAY['xai_oauth']}[/green]")
+    for path in removed_paths:
+        console.print(f"[dim]Removed: {path}[/dim]")
+
+
 def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
     """Delete OAuth token and lock files, reporting the result."""
     removed_paths: list[Path] = []
@@ -1914,6 +2043,37 @@ def _login_github_copilot() -> None:
         )
         account = token.account_id or "GitHub"
         console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Authentication error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@_register_login("xai_oauth")
+def _login_xai_oauth(
+    *,
+    no_browser: bool = False,
+    manual_paste: bool = False,
+) -> None:
+    try:
+        from nanobot.providers.xai_oauth_provider import login_xai_oauth_interactive
+        from nanobot.providers.xai_oauth_provider import DEFAULT_XAI_MODEL
+
+        console.print("[cyan]Starting xAI Grok OAuth login...[/cyan]\n")
+        credential = login_xai_oauth_interactive(
+            print_fn=lambda s: console.print(s),
+            prompt_fn=lambda s: typer.prompt(s),
+            open_browser=not no_browser,
+            manual_paste=manual_paste,
+        )
+        account = credential.account_id or "xAI"
+        storage = "OS keychain" if credential.storage == "keyring" else "private file"
+        console.print(f"[green]✓ Authenticated with xAI Grok OAuth[/green]  [dim]{account} · {storage}[/dim]")
+        console.print("[dim]To use it for chat:[/dim]")
+        console.print("[dim]  nanobot config set agents.defaults.model_preset null[/dim]")
+        console.print("[dim]  nanobot config set agents.defaults.provider xai-oauth[/dim]")
+        console.print(f"[dim]  nanobot config set agents.defaults.model {DEFAULT_XAI_MODEL}[/dim]")
+        console.print("[dim]Hosted X Search is enabled by default for xAI OAuth.[/dim]")
+        console.print("[dim]To disable it: nanobot config set providers.xai_oauth.x_search.enable false[/dim]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)

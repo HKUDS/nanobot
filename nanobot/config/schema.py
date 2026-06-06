@@ -181,6 +181,28 @@ class BedrockProviderConfig(ProviderConfig):
     profile: str | None = None  # Optional AWS shared config profile
 
 
+class XaiOAuthXSearchConfig(Base):
+    """xAI hosted X Search configuration."""
+
+    enable: bool = True
+    allowed_x_handles: list[str] | None = None
+    excluded_x_handles: list[str] | None = None
+    from_date: str | None = None
+    to_date: str | None = None
+    enable_image_understanding: bool = False
+    enable_video_understanding: bool = False
+
+
+class XaiOAuthProviderConfig(ProviderConfig):
+    """xAI OAuth provider configuration."""
+
+    x_search: XaiOAuthXSearchConfig = Field(default_factory=XaiOAuthXSearchConfig)
+
+
+def _is_default_xai_oauth_config(value: Any) -> bool:
+    return isinstance(value, XaiOAuthProviderConfig) and value == XaiOAuthProviderConfig()
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -219,6 +241,10 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
+    xai_oauth: XaiOAuthProviderConfig = Field(
+        default_factory=XaiOAuthProviderConfig,
+        exclude_if=_is_default_xai_oauth_config,
+    )  # xAI Grok OAuth
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
 

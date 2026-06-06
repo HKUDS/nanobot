@@ -68,6 +68,10 @@ def _make_provider_core(
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(default_model=model)
+    elif backend == "xai_oauth":
+        from nanobot.providers.xai_oauth_provider import XaiOAuthProvider
+
+        provider = XaiOAuthProvider(default_model=model, config=p)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 

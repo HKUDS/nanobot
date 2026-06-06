@@ -12,6 +12,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "nanobot.providers.openai_compat_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.openai_codex_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.github_copilot_provider", raising=False)
+    monkeypatch.delitem(sys.modules, "nanobot.providers.xai_oauth_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.azure_openai_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.bedrock_provider", raising=False)
 
@@ -21,6 +22,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     assert "nanobot.providers.openai_compat_provider" not in sys.modules
     assert "nanobot.providers.openai_codex_provider" not in sys.modules
     assert "nanobot.providers.github_copilot_provider" not in sys.modules
+    assert "nanobot.providers.xai_oauth_provider" not in sys.modules
     assert "nanobot.providers.azure_openai_provider" not in sys.modules
     assert "nanobot.providers.bedrock_provider" not in sys.modules
     assert providers.__all__ == [
@@ -30,6 +32,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         "OpenAICompatProvider",
         "OpenAICodexProvider",
         "GitHubCopilotProvider",
+        "XaiOAuthProvider",
         "AzureOpenAIProvider",
         "BedrockProvider",
     ]
@@ -50,3 +53,9 @@ def test_openai_codex_supports_progress_deltas() -> None:
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
     assert OpenAICodexProvider.supports_progress_deltas is True
+
+
+def test_xai_oauth_supports_progress_deltas() -> None:
+    from nanobot.providers.xai_oauth_provider import XaiOAuthProvider
+
+    assert XaiOAuthProvider.supports_progress_deltas is True
