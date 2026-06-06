@@ -11,26 +11,20 @@ from __future__ import annotations
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from loguru import logger
 
+from nanobot.audio.transcription_registry import (
+    get_transcription_provider,
+    resolve_transcription_provider,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
-TranscriptionProviderName = Literal["groq", "openai", "openrouter", "xiaomi_mimo"]
+TranscriptionProviderName = str
 
 _DEFAULT_PROVIDER: TranscriptionProviderName = "groq"
-_DEFAULT_MODELS: dict[TranscriptionProviderName, str] = {
-    "groq": "whisper-large-v3",
-    "openai": "whisper-1",
-    "openrouter": "openai/whisper-1",
-    "xiaomi_mimo": "mimo-v2.5-asr",
-}
-_PROVIDER_ALIASES: dict[str, TranscriptionProviderName] = {
-    "mimo": "xiaomi_mimo",
-    "xiaomi": "xiaomi_mimo",
-}
 _MAX_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
 _AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
     "audio/aac",
@@ -72,13 +66,8 @@ class TranscriptionIngressError(Exception):
 
 
 def _as_provider(value: Any) -> TranscriptionProviderName | None:
-    if isinstance(value, str):
-        name = value.strip().lower()
-        if name in _PROVIDER_ALIASES:
-            return _PROVIDER_ALIASES[name]
-        if name in _DEFAULT_MODELS:
-            return name  # type: ignore[return-value]
-    return None
+    spec = resolve_transcription_provider(value)
+    return spec.name if spec else None
 
 
 def _provider_config(config: Any, provider: str) -> Any:
@@ -101,11 +90,17 @@ def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
         or _as_provider(getattr(channels, "transcription_provider", None))
         or _DEFAULT_PROVIDER
     )
+    spec = get_transcription_provider(provider)
+    if spec is None:
+        logger.warning("Unknown transcription provider {}; falling back to {}", provider, _DEFAULT_PROVIDER)
+        provider = _DEFAULT_PROVIDER
+        spec = get_transcription_provider(provider)
+    default_model = spec.default_model if spec else ""
     provider_cfg = _provider_config(config, provider)
     return EffectiveTranscriptionConfig(
         enabled=bool(getattr(top, "enabled", True)),
         provider=provider,
-        model=(getattr(top, "model", None) or _DEFAULT_MODELS[provider]).strip(),
+        model=(getattr(top, "model", None) or default_model).strip(),
         language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
         api_key=getattr(provider_cfg, "api_key", None) or "",
         api_base=getattr(provider_cfg, "api_base", None) or "",
@@ -170,40 +165,14 @@ async def transcribe_audio_file(
     """Transcribe *file_path* using the already-resolved transcription config."""
     if not config.enabled or not config.configured:
         return ""
-    if config.provider == "openai":
-        from nanobot.providers.transcription import OpenAITranscriptionProvider
-
-        provider = OpenAITranscriptionProvider(
-            api_key=config.api_key,
-            api_base=config.api_base or None,
-            language=config.language,
-            model=config.model,
-        )
-    elif config.provider == "openrouter":
-        from nanobot.providers.transcription import OpenRouterTranscriptionProvider
-
-        provider = OpenRouterTranscriptionProvider(
-            api_key=config.api_key,
-            api_base=config.api_base or None,
-            language=config.language,
-            model=config.model,
-        )
-    elif config.provider == "xiaomi_mimo":
-        from nanobot.providers.transcription import XiaomiMiMoTranscriptionProvider
-
-        provider = XiaomiMiMoTranscriptionProvider(
-            api_key=config.api_key,
-            api_base=config.api_base or None,
-            language=config.language,
-            model=config.model,
-        )
-    else:
-        from nanobot.providers.transcription import GroqTranscriptionProvider
-
-        provider = GroqTranscriptionProvider(
-            api_key=config.api_key,
-            api_base=config.api_base or None,
-            language=config.language,
-            model=config.model,
-        )
+    spec = get_transcription_provider(config.provider)
+    if spec is None:
+        logger.warning("Unknown transcription provider: {}", config.provider)
+        return ""
+    provider = spec.load_adapter()(
+        api_key=config.api_key,
+        api_base=config.api_base or None,
+        language=config.language,
+        model=config.model,
+    )
     return await provider.transcribe(file_path)

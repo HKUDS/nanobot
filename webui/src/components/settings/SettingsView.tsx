@@ -779,7 +779,7 @@ export function SettingsView({
   const configuredModelProviderOptions = useMemo(
     () =>
       settings?.providers
-        .filter((provider) => provider.configured)
+        .filter((provider) => provider.configured && provider.model_selectable !== false)
         .map((provider) => ({ name: provider.name, label: provider.label })) ?? [],
     [settings],
   );

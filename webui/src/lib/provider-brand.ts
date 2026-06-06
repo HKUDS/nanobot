@@ -113,6 +113,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   aihubmix: brand("aihubmix.com", "#111827", "AH"),
   ant_ling: brand("ant-ling.com", "#7C3AED", "AL"),
   anthropic: brand("anthropic.com", "#D97757", "A"),
+  assemblyai: brand("assemblyai.com", "#111827", "AA"),
   atomic_chat: brand("atomic.chat", "#111827", "AC"),
   azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
   bedrock: brand("aws.amazon.com", "#FF9900", "AWS"),

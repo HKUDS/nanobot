@@ -343,6 +343,7 @@ export interface SettingsPayload {
     api_key_hint?: string | null;
     api_base?: string | null;
     default_api_base?: string | null;
+    model_selectable?: boolean;
     api_type?: "auto" | "chat_completions" | "responses";
     oauth_account?: string | null;
     oauth_expires_at?: number | null;

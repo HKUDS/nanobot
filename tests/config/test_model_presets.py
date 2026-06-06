@@ -245,3 +245,18 @@ def test_match_provider_routes_forced_novita_model_api_models() -> None:
 
     assert config.get_provider_name() == "novita"
     assert config.get_api_base() == "https://api.novita.ai/openai"
+
+
+def test_transcription_only_provider_is_not_chat_fallback() -> None:
+    config = Config.model_validate({
+        "providers": {
+            "assemblyai": {"apiKey": "aai-test"},
+        },
+        "agents": {
+            "defaults": {
+                "model": "assemblyai/universal-3-pro",
+            }
+        },
+    })
+
+    assert config.get_provider_name() is None

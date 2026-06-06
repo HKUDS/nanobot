@@ -60,6 +60,9 @@ class ProviderSpec:
     # Direct providers skip API-key validation (user supplies everything)
     is_direct: bool = False
 
+    # Provider is listed for shared credentials but cannot serve chat completions.
+    is_transcription_only: bool = False
+
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
@@ -506,6 +509,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Groq",
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
+    ),
+    # AssemblyAI: voice transcription only. It appears in provider settings so
+    # users can manage credentials, but WebUI excludes it from chat model pickers.
+    ProviderSpec(
+        name="assemblyai",
+        keywords=("assemblyai",),
+        env_key="ASSEMBLYAI_API_KEY",
+        display_name="AssemblyAI",
+        backend="openai_compat",
+        default_api_base="https://api.assemblyai.com/v2",
+        is_transcription_only=True,
     ),
     # Qianfan (百度千帆): OpenAI-compatible API
     ProviderSpec(
