@@ -48,10 +48,11 @@ reload. Main/preload changes still require restarting `dev:app`.
 
 ## Checklist
 
-- WebUI source remains product-neutral:
+- WebUI source remains host-neutral: it may branch on generic runtime
+  capabilities, but it must not import Electron or desktop source files.
 
   ```sh
-  rg -n "desktop|Desktop|nanobotDesktop" webui/src
+  rg -n "from ['\\\"]electron|desktop/src|nanobotDesktop" webui/src
   ```
 
   This command should print nothing.

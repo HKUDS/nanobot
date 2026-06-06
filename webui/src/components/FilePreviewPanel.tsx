@@ -4,9 +4,7 @@ import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
-import {
-  splitFilePath,
-} from "@/components/FileReferenceChip";
+import { splitFilePath } from "@/components/FileReferenceChip";
 import { ApiError, fetchFilePreview } from "@/lib/api";
 import type { FilePreviewPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";

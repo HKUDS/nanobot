@@ -77,10 +77,13 @@ permissions.
 ## Data Directory
 
 The host stores config, workspace, sessions, logs, and transient socket files
-under the platform app data directory. On macOS this is:
+under Electron's platform app data directory. In development on macOS this is
+usually:
 
 ```text
-~/Library/Application Support/nanobot/
+~/Library/Application Support/@nanobot/desktop/
 ```
+
+Packaged builds use the packaged app name.
 
 The app bundle is replaceable. User data is not stored in the bundle.

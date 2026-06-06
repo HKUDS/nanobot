@@ -90,7 +90,9 @@ so updating the app replaces code without overwriting local user state.
 
 ## Runtime Contract
 
-- User data lives under the platform app data directory (`~/Library/Application Support/nanobot/` on macOS).
+- User data lives under Electron's platform app data directory. In development
+  this is usually `~/Library/Application Support/@nanobot/desktop/` on macOS;
+  packaged builds use the packaged app name.
 - Fresh installs start the private engine directly. The Python desktop gateway
   creates the first `config.json` with defaults, then shared WebUI settings own
   provider, model, and credential setup.
