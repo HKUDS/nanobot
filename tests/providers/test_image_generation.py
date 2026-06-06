@@ -632,6 +632,28 @@ async def test_openai_payload_and_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_extra_body_null_drops_default_params_only() -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        extra_body={
+            "response_format": None,
+            "seed": 0,
+            "safety_checker": False,
+        },
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="draw", model="dall-e-3")
+
+    body = fake.calls[0]["json"]
+    assert "response_format" not in body
+    assert body["n"] == 1
+    assert body["seed"] == 0
+    assert body["safety_checker"] is False
+
+
+@pytest.mark.asyncio
 async def test_openai_b64_json_response_uses_detected_mime() -> None:
     raw_b64 = base64.b64encode(JPEG_BYTES).decode("ascii")
     fake = FakeClient(FakeResponse({"data": [{"b64_json": raw_b64}]}))
