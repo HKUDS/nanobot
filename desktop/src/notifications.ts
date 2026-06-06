@@ -115,6 +115,9 @@ function showDesktopNotification(
     body: notificationBody(frame.text),
     subtitle: "nanobot",
   });
+  notification.on("failed", (_event, error) => {
+    console.warn(`[nanobot] Desktop notification failed: ${error}`);
+  });
   notification.on("click", () => openChatFromNotification(frame.chat_id, options));
   notification.show();
   unreadNotificationCount += 1;
