@@ -74,12 +74,12 @@ class Schema(ABC):
                 errors.append(f"{label} must be >= {schema['minimum']}")
             if "maximum" in schema and val > schema["maximum"]:
                 errors.append(f"{label} must be <= {schema['maximum']}")
-        if t == "string":
+        if t == "string" and isinstance(val, str):
             if "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
             if "maxLength" in schema and len(val) > schema["maxLength"]:
                 errors.append(f"{label} must be at most {schema['maxLength']} chars")
-        if t == "object":
+        if t == "object" and isinstance(val, dict):
             props = schema.get("properties", {})
             for k in schema.get("required", []):
                 if k not in val:
@@ -87,7 +87,7 @@ class Schema(ABC):
             for k, v in val.items():
                 if k in props:
                     errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
-        if t == "array":
+        if t == "array" and isinstance(val, list):
             if "minItems" in schema and len(val) < schema["minItems"]:
                 errors.append(f"{label} must have at least {schema['minItems']} items")
             if "maxItems" in schema and len(val) > schema["maxItems"]:
@@ -106,7 +106,8 @@ class Schema(ABC):
         # Try to_json_schema first: Schema instances must be distinguished from dicts that are already JSON Schema
         to_js = getattr(value, "to_json_schema", None)
         if callable(to_js):
-            return to_js()
+            result = to_js()
+            return result if isinstance(result, dict) else {}
         if isinstance(value, dict):
             return value
         raise TypeError(f"Expected schema object or dict, got {type(value).__name__}")
@@ -259,6 +260,10 @@ class Tool(ABC):
                 "parameters": self.parameters,
             },
         }
+
+    def set_context(self, _channel: str, _chat_id: str, *_args: Any, **_kwargs: Any) -> None:
+        """Set routing context for tools that need it (optional override)."""
+        pass
 
 
 def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_ToolT]]:

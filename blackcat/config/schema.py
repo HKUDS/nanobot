@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from blackcat.cron.types import CronSchedule
 
@@ -113,11 +113,13 @@ class AgentDefaults(Base):
     workspace: str = "~/.blackcat/workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
-    provider: str = (
-        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    )
+    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    summarizer_model: str | None = None  # Model for summarization (defaults to main model)
     max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    llm_timeout: int = 60  # Timeout for LLM API calls in seconds
+    daily_summary_hour: int = 3  # Hour to run daily summary (0-23, default 3am)
+    # Context management
+    context_window_tokens: int = 65_536  # Token budget for context window
     context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
@@ -271,6 +273,59 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
+class WorkspaceConfig(Base):
+    """Per-workspace Lens configuration."""
+
+    path: str  # absolute path to workspace
+    diagnostics_source: Literal["cli", "vscode"] | None = None
+    """Override global diagnostics_source for this workspace. None = use global default."""
+
+
+def get_workspace_path(ws_config: str | WorkspaceConfig) -> str:
+    """Extract path from workspace config (str or WorkspaceConfig)."""
+    return ws_config.path if isinstance(ws_config, WorkspaceConfig) else ws_config
+
+
+class LensConfig(Base):
+    """Lens LSP bridge configuration."""
+
+    enabled: bool = False
+    workspaces: dict[str, str | WorkspaceConfig] = Field(default_factory=dict)
+    """Workspace name -> path (str) or full config (WorkspaceConfig).
+
+    Examples:
+        # Simple: just a path
+        "black-cat-py": "/path/to/black-cat-py"
+
+        # Full config with overrides
+        "Nomad's Map": {"path": "/path/to/NomadsMap", "diagnostics_source": "vscode"}
+    """
+    diagnostics_source: Literal["cli", "vscode"] = "cli"
+    """Default source for diagnostics.
+
+    - "cli": Run pyright/tsc directly (fresh results, works for healthy codebases)
+    - "vscode": Use VSCode extension (faster but may be stale, fallback for broken codebases)
+
+    Default is "cli" since most projects are healthy. Use "vscode" for large/complex
+    TypeScript projects where tsc --noEmit would be slow or fail.
+
+    Can be overridden per-workspace via WorkspaceConfig.diagnostics_source.
+    """
+
+    def get_workspace_paths(self) -> dict[str, str]:
+        """Get workspace name -> path mapping (normalizes str | WorkspaceConfig)."""
+        return {name: get_workspace_path(cfg) for name, cfg in self.workspaces.items()}
+
+    def get_workspace_source(self, workspace: str) -> Literal["cli", "vscode"]:
+        """Get diagnostics_source for a workspace (with per-workspace override)."""
+        ws_config = self.workspaces.get(workspace)
+        if isinstance(ws_config, WorkspaceConfig) and ws_config.diagnostics_source:
+            return ws_config.diagnostics_source
+        return self.diagnostics_source
+
+class MyToolConfig(Base):
+    """Self-inspection tool configuration."""
+
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
     import importlib
@@ -304,7 +359,17 @@ class ToolsConfig(Base):
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+    lens: LensConfig = Field(default_factory=LensConfig)
+    ssrf_whitelist: list[str] = Field(default_factory=list)
+
+
+class AuthorIdentity(Base): # FIXME: add all the other platforms
+    """Platform identities for an author (like API keys, keep private)."""
+
+    whatsapp: str | None = None
+    telegram: str | None = None
+    discord: str | None = None
+    cli: str | None = None
 
 
 class Config(BaseSettings):
@@ -320,6 +385,9 @@ class Config(BaseSettings):
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
+    authors: dict[str, AuthorIdentity] = Field(
+        default_factory=dict 
+    ) # TODO: messy, simplify this and potentially remove authors from there as it's a channels thing or more specific
 
     def __init__(self, **values: Any) -> None:
         if not type(self).__pydantic_complete__:
@@ -356,10 +424,21 @@ class Config(BaseSettings):
             raise KeyError(f"model_preset {name!r} not found in model_presets")
         return self.model_presets[name]
 
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
+
+    @staticmethod
+    def _is_cloud_model(model: str) -> bool:
+        """Check if model name ends with :cloud suffix (e.g., 'glm-5.1:cloud')."""
+        return model.lower().endswith(":cloud")
+
+    @staticmethod
+    def _strip_cloud_suffix(model: str) -> str:
+        """Remove :cloud suffix from model name for provider matching."""
+        return model[:-6] if model.lower().endswith(":cloud") else model
 
     def _match_provider(
         self, model: str | None = None,
@@ -468,7 +547,12 @@ class Config(BaseSettings):
         """Get API base URL for the given model, falling back to the provider default when present."""
         from blackcat.providers.registry import find_by_name
 
-        p, name = self._match_provider(model, preset=preset)
+        p, name = self._match_provider(model)
+
+        # Ollama cloud routing: models ending with :cloud use ollama.com
+        if name == "ollama" and model and self._is_cloud_model(model):
+            return "https://ollama.com/v1/"
+
         if p and p.api_base:
             return p.api_base
         if name:
@@ -477,7 +561,10 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(
+        env_prefix="BLACKCAT_",
+        env_nested_delimiter="__",
+    )
 
 
 def _resolve_tool_config_refs() -> None:

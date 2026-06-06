@@ -1,7 +1,6 @@
 """Tests for FeishuChannel tool hint formatting."""
 
 import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest

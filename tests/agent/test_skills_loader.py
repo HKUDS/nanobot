@@ -209,12 +209,12 @@ def test_list_skills_filter_unavailable_excludes_unmet_env_requirement(
     _write_skill(
         skills_root,
         "needs_env",
-        metadata_json={"requires": {"env": ["NANOBOT_SKILLS_TEST_ENV_VAR"]}},
+        metadata_json={"requires": {"env": ["BLACKCAT_SKILLS_TEST_ENV_VAR"]}},
     )
     builtin = tmp_path / "builtin"
     builtin.mkdir()
 
-    monkeypatch.delenv("NANOBOT_SKILLS_TEST_ENV_VAR", raising=False)
+    monkeypatch.delenv("BLACKCAT_SKILLS_TEST_ENV_VAR", raising=False)
 
     loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
     assert loader.list_skills(filter_unavailable=True) == []

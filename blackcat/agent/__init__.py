@@ -1,5 +1,6 @@
 """Agent core module."""
 
+from blackcat.agent.consolidate import Consolidator
 from blackcat.agent.context import ContextBuilder
 from blackcat.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from blackcat.agent.loop import AgentLoop
@@ -12,6 +13,7 @@ __all__ = [
     "AgentHookContext",
     "AgentLoop",
     "CompositeHook",
+    "Consolidator",
     "ContextBuilder",
     "MemoryStore",
     "SkillsLoader",

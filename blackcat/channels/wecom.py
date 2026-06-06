@@ -489,7 +489,7 @@ class WecomChannel(BaseChannel):
             self.logger.exception("_upload_media_ws error for {}", file_path)
             return None, None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
         if not self._client:
             self.logger.warning("client not initialized")

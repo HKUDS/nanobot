@@ -1,8 +1,10 @@
 """Tool registry for dynamic tool management."""
 
+from pathlib import Path
 from typing import Any
 
 from blackcat.agent.tools.base import Tool
+from blackcat.utils.exports import export_mcp_tools_md, export_tools_md
 
 
 class ToolRegistry:
@@ -123,3 +125,24 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+    def export_md(self, path: Path) -> None:
+        """
+        Export registered tools to TOOLS.md file for human reading.
+
+        Args:
+            path: Path to write TOOLS.md (typically workspace/TOOLS.md)
+        """
+        export_tools_md(self._tools, path)
+
+    def export_mcp_md(self, path: Path) -> None:
+        """
+        Export MCP tools to MCP.md file for human reading.
+
+        Only includes tools from MCP servers (those with server_name property).
+
+        Args:
+            path: Path to write MCP.md (typically workspace/MCP.md)
+        """
+        export_mcp_tools_md(self._tools, path)
+

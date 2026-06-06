@@ -147,7 +147,6 @@ def _flush_pending_tty_input() -> None:
 
     with suppress(Exception):
         import termios
-
         termios.tcflush(fd, termios.TCIFLUSH)
         return
 
@@ -166,7 +165,6 @@ def _restore_terminal() -> None:
         return
     with suppress(Exception):
         import termios
-
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
@@ -177,7 +175,6 @@ def _init_prompt_session() -> None:
     # Save terminal state so we can restore it on exit
     with suppress(Exception):
         import termios
-
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
 
     from blackcat.config.paths import get_cli_history_path
@@ -433,15 +430,15 @@ def main(
 @app.command()
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize blackcat configuration and workspace."""
     from blackcat.config.loader import get_config_path, load_config, save_config, set_config_path
     from blackcat.config.schema import Config
 
-    if config:
-        config_path = Path(config).expanduser().resolve()
+    if config_file:
+        config_path = Path(config_file).expanduser().resolve()
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
     else:
@@ -625,7 +622,6 @@ def _migrate_cron_store(config: "Config") -> None:
     if legacy_path.is_file() and not new_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
-
         shutil.move(str(legacy_path), str(new_path))
 
 
@@ -923,6 +919,7 @@ def _run_gateway(
         provider_snapshot_loader=load_provider_snapshot,
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
+        config=config,
     )
     WebuiTurnCoordinator(
         bus=bus,
@@ -1301,7 +1298,6 @@ def _run_gateway(
             console.print("\nShutting down...")
         except Exception:
             import traceback
-
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
@@ -1329,7 +1325,7 @@ def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    config_file: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show blackcat runtime logs during chat"),
 ):
@@ -1340,7 +1336,7 @@ def agent(
     from blackcat.cron.service import CronService
     from blackcat.providers.image_generation import image_gen_provider_configs
 
-    config = _load_runtime_config(config, workspace)
+    config = _load_runtime_config(config_file, workspace)
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
@@ -1769,7 +1765,6 @@ def _register_login(name: str):
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
-
     return decorator
 
 
@@ -1830,7 +1825,6 @@ def provider_logout(
 def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
-
         token = None
         with suppress(Exception):
             token = get_token()

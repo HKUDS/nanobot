@@ -13,15 +13,15 @@ from typing import Any
 from loguru import logger
 
 from blackcat.config.paths import get_legacy_sessions_dir
+from blackcat.utils.formatting import strip_think
 from blackcat.utils.helpers import (
     ensure_dir,
-    estimate_message_tokens,
     find_legal_message_start,
-    image_placeholder_text,
     safe_filename,
-    strip_think,
 )
+from blackcat.utils.media import image_placeholder_text
 from blackcat.utils.subagent_channel_display import scrub_subagent_announce_body
+from blackcat.utils.tokens import estimate_message_tokens
 
 FILE_MAX_MESSAGES = 2000
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
@@ -133,7 +133,7 @@ class Session:
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat(),
-            **kwargs
+            **kwargs,
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
@@ -377,6 +377,57 @@ class Session:
             len(archive_chunk),
             len(self.messages),
         )
+    def get_recently_touched_files(self, limit: int = 5) -> list[str]:
+        """Extract file paths from recent tool calls/operations.
+
+        Scans message history for file paths mentioned in tool results
+        or user messages. Returns unique paths ordered by recency.
+
+        Args:
+            limit: Maximum number of file paths to return.
+
+        Returns:
+            List of absolute file paths that were recently accessed.
+        """
+        import re
+
+        file_paths: list[str] = []
+        seen: set[str] = set()
+
+        # Scan from most recent to oldest
+        for msg in reversed(self.messages):
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                continue
+
+            # Match file paths with common code extensions
+            pattern = r"[\w\-/\\]+\.(?:py|ts|js|tsx|jsx|json|toml|md|rs|go|java|cpp|c|h|hpp)"
+            matches = re.findall(pattern, content)
+
+            for match in matches:
+                # Try as absolute first, then relative
+                p = Path(match)
+                if p.is_absolute() and p.exists():
+                    path_str = str(p)
+                else:
+                    # Try relative to common directories
+                    for base in [Path.cwd(), Path.home()]:
+                        full = base / match
+                        if full.exists():
+                            path_str = str(full)
+                            break
+                    else:
+                        continue
+
+                if path_str not in seen:
+                    seen.add(path_str)
+                    file_paths.append(path_str)
+
+                    if len(file_paths) >= limit:
+                        return file_paths
+
+        return file_paths
+
 
 
 class SessionManager:
@@ -457,8 +508,16 @@ class SessionManager:
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+                        created_at = (
+                            datetime.fromisoformat(data["created_at"])
+                            if data.get("created_at")
+                            else None
+                        )
+                        updated_at = (
+                            datetime.fromisoformat(data["updated_at"])
+                            if data.get("updated_at")
+                            else None
+                        )
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -469,13 +528,17 @@ class SessionManager:
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
             repaired = self._repair(key)
             if repaired is not None:
-                logger.info("Recovered session {} from corrupt file ({} messages)", key, len(repaired.messages))
+                logger.info(
+                    "Recovered session {} from corrupt file ({} messages)",
+                    key,
+                    len(repaired.messages),
+                )
             return repaired
 
     def _repair(self, key: str) -> Session | None:
@@ -527,7 +590,7 @@ class SessionManager:
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
             )
         except Exception as e:
             logger.warning("Repair failed for session {}: {}", key, e)
@@ -564,7 +627,7 @@ class SessionManager:
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
                     "metadata": session.metadata,
-                    "last_consolidated": session.last_consolidated
+                    "last_consolidated": session.last_consolidated,
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
                 for msg in session.messages:

@@ -243,7 +243,7 @@ class MSTeamsChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a plain text reply into an existing Teams conversation."""
         if not self._http:
             raise RuntimeError("MSTeams HTTP client not initialized")

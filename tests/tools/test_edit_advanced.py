@@ -8,7 +8,6 @@
 - Stale detection with content-equality fallback
 """
 
-import os
 import time
 
 import pytest
@@ -370,7 +369,6 @@ class TestFileSizeProtection:
         f = tmp_path / "huge.txt"
         f.write_text("x", encoding="utf-8")
         # Monkey-patch the file size check by creating a stat mock
-        original_stat = f.stat
 
         class FakeStat:
             def __init__(self, real_stat):

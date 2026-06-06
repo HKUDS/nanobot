@@ -43,7 +43,7 @@ except ImportError:
     ChatbotMessage = None  # type: ignore[assignment,misc]
 
 
-class NanobotDingTalkHandler(CallbackHandler):
+class BlackcatDingTalkHandler(CallbackHandler):
     """
     Standard DingTalk Stream SDK Callback Handler.
     Parses incoming messages and forwards them to the Blackcat channel.
@@ -224,7 +224,7 @@ class DingTalkChannel(BaseChannel):
             self._client = DingTalkStreamClient(credential)
 
             # Register standard handler
-            handler = NanobotDingTalkHandler(self)
+            handler = BlackcatDingTalkHandler(self)
             self._client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
             self.logger.info("bot started with Stream Mode")
@@ -655,7 +655,7 @@ class DingTalkChannel(BaseChannel):
             {"mediaId": media_id, "fileName": filename, "fileType": file_type},
         )
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
         token = await self._get_access_token()
         if not token:
@@ -685,7 +685,7 @@ class DingTalkChannel(BaseChannel):
         conversation_type: str | None = None,
         conversation_id: str | None = None,
     ) -> None:
-        """Handle incoming message (called by NanobotDingTalkHandler).
+        """Handle incoming message (called by BlackcatDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
         permission checks before publishing to the bus.

@@ -19,7 +19,7 @@ class AutoCompact:
     _INTERNAL_SESSION_PREFIXES = ("dream:",)
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
-                 session_ttl_minutes: int = 0):
+                session_ttl_minutes: int = 0):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes

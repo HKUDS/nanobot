@@ -116,7 +116,7 @@ def _gateway_reasoning_extra_body(style: str, effort: str | None) -> dict[str, A
 
 def _openai_compat_timeout_s() -> float:
     """Return the bounded request timeout used for OpenAI-compatible providers."""
-    return _float_env("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
+    return _float_env("BLACKCAT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
 
 
 def _float_env(name: str, default: float) -> float:

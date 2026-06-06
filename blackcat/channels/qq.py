@@ -239,7 +239,7 @@ class QQChannel(BaseChannel):
     # Outbound (send)
     # ---------------------------
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
         try:
             if not self._client:

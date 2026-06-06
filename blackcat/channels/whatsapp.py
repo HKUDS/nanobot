@@ -164,7 +164,7 @@ class WhatsAppChannel(BaseChannel):
             await self._ws.close()
             self._ws = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
             self.logger.warning("WhatsApp bridge not connected")

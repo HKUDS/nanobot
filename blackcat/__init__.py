@@ -26,7 +26,7 @@ def _resolve_version() -> str:
 
 
 __version__ = _resolve_version()
-__logo__ = "🐈"
+__logo__ = "🐈‍⬛"
 
 _LAZY_EXPORTS = {
     "Blackcat": ".blackcat",

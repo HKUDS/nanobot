@@ -23,7 +23,10 @@ _BLOCKED_NETWORKS = [
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 
-_allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+_allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+    ipaddress.ip_network("127.0.0.1/32"),  # allow localhost for internal lens LSP bridges
+    ipaddress.ip_network("::1/128"),         # allow IPv6 localhost
+]
 
 
 def configure_ssrf_whitelist(cidrs: list[str]) -> None:

@@ -25,17 +25,14 @@ from blackcat.utils.file_edit_events import (
 from blackcat.utils.file_edit_events import (
     prepare_file_edit_tracker as _prepare_file_edit_tracker,
 )
-from blackcat.utils.helpers import (
+from blackcat.utils.formatting import (
     IncrementalThinkExtractor,
     build_assistant_message,
-    estimate_message_tokens,
-    estimate_prompt_tokens_chain,
     extract_reasoning,
-    find_legal_message_start,
-    maybe_persist_tool_result,
     strip_think,
     truncate_text,
 )
+from blackcat.utils.helpers import find_legal_message_start
 from blackcat.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -51,6 +48,11 @@ from blackcat.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
+from blackcat.utils.tokens import (
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+)
+from blackcat.utils.tools import maybe_persist_tool_result
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _ARREARAGE_ERROR_MESSAGE = (
@@ -637,8 +639,8 @@ class AgentRunner:
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
             # request hangs indefinitely (e.g. gateway/network stall).
-            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
-            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
+            # Set BLACKCAT_LLM_TIMEOUT_S=0 to disable.
+            raw = os.environ.get("BLACKCAT_LLM_TIMEOUT_S", "300").strip()
             try:
                 timeout_s = float(raw)
             except (TypeError, ValueError):

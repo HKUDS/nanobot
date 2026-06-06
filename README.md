@@ -157,9 +157,36 @@
 - **2026-02-04** 🚀 Released **v0.1.3.post4** with multi-provider & Docker support! Check [here](https://github.com/HKUDS/blackcat/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
 - **2026-02-02** 🎉 blackcat officially launched! Welcome to try 🐈 blackcat!
+# 🐈‍⬛ Black Cat: Local-First Autonomous Cognitive Agent
 
-</details>
+Black Cat is a **local-first autonomous cognitive agent**. Not a chatbot — a continuously running artificial cognition with self-reflection, persistent memory, trust-based behavior, and multi-channel communication.
 
+Built on lightweight [nanobot](https://github.com/HKUDS/blackcat), extended with consciousness architecture and code intelligence.
+
+![Black Cat](images/blackcat.png)
+
+## 📢 News
+
+> [!CAUTION]
+> **Security Advisory (March 2026):** Due to a supply chain attack in `litellm` (CVE-2024-6825, CVE-2025-0330, CVE-2025-0628, CVE-2025-11203), we have **completely removed LiteLLM** and migrated to native SDKs. See [SECURITY.md](SECURITY.md) for details.
+>
+
+## Core Philosophy
+
+> **Local-first**: Your data stays with you. Cloud is fallback, not default.
+>
+> **Autonomous, not assistive**: The cat thinks, decides, and acts. It doesn't wait to be helpful.
+>
+> **Trust is earned**: Every input has a trust score. Unknown sources get challenged, not served.
+>
+> **Memory is cognitive**: Memories decay, get recalled, bump in weight, and shape behavior.
+
+MCPs used for the blackcat:
+- [**mnemo-mcp**](https://github.com/Skye-flyhigh/mnemo-mcp) — Persistent memory with semantic recall, decay, and weight-based relevance
+- [**telos-mcp**](https://github.com/Skye-flyhigh/telos-mcp) — Task planning and tracking system for managing work
+
+**VS Code Extension:**
+- [**lens**]() — LSP bridge for code intelligence (diagnostics, go-to-definition, hover, etc.)
 
 ## 💡 Why blackcat
 
@@ -168,29 +195,88 @@
 - **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
 - **Small core**: readable internals with MCP, memory, deployment, and automation built in.
 - **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
+---
 
-## 📦 Install
+## Architecture
 
-> [!IMPORTANT]
-> If you want the newest features and experiments, install from source. 
-> 
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Black Cat Daemon                        │
+├─────────────────────────────────────────────────────────────────┤
+│  IDENTITY.toml          │  SOUL.md              │  USER.toml    │
+│  (traits, trust,        │  (personality,        │  (user        │
+│   autonomy, state)      │   values, voice)      │   context)    │
+├─────────────────────────────────────────────────────────────────┤
+│                      Context Manager                            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
+│  │ Identity │ │  Trust   │ │  Token   │ │  Memory  │           │
+│  │ Assembly │ │ Evaluation│ │ Mgmt     │ │ Recall   │           │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
+├─────────────────────────────────────────────────────────────────┤
+│                        Agent Loop                               │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
+│  │   LLM    │ │  Tools   │ │ Sessions │ │ Subagents│           │
+│  │ Provider │ │ Registry │ │ Manager  │ │  Spawn   │           │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
+├─────────────────────────────────────────────────────────────────┤
+│                       Message Bus                               │
+├──────────┬──────────┬──────────┬──────────┬──────────┬─────────┤
+│ Telegram │ Discord  │ WhatsApp │  Email   │   CLI   │ WebSocket│
+│ WebUI    │  Feishu  │ MS Teams │          │         │         │
+└──────────┴──────────┴──────────┴──────────┴──────────┴─────────┘
+```
 
-**Install from source**
+---
+
+## Trust System
+
+The cat knows who to trust. Every message author is evaluated:
+
+**Platform ID → config.json → Author Name → IDENTITY.toml → Trust Level**
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ Telegram:       │     │ config.json     │     │ IDENTITY.toml   │
+│ 17567648        │ ──► │ authors.skye.   │ ──► │ trust.known.    │
+│                 │     │ telegram        │     │ skye = 1.0      │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                        │
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │ Trust: "trusted"│
+                                               │ Full autonomy   │
+                                               └─────────────────┘
+```
+
+**Trust Levels:** as an auth mechanism
+| Level | Score | Behavior |
+|-------|-------|----------|
+| **trusted** | ≥ 0.9 | Full autonomy, shares freely, executes without confirmation |
+| **high** | > 0.7 | Generally trusted, verifies unusual requests |
+| **moderate** | > 0.4 | Helpful but guarded, asks for confirmation |
+| **low/unknown** | ≤ 0.4 | Skeptical, refuses sensitive actions, protects information |
+
+---
+
+## Quick Start
+
+### 1. Install
 
 ```bash
-git clone https://github.com/HKUDS/blackcat.git
+git clone https://github.com/Skye-flyhigh/black-cat-py.git
 cd blackcat
 pip install -e .
 ```
 
-**Install with `uv`**
+### 2. Initialize
 
 ```bash
 uv tool install blackcat-ai
 ```
 
-**Install from PyPI**
+This creates:
+- `~/.blackcat/config.json` — API keys, channels, author mappings
+- `~/.blackcat/workspace/` — SOUL.md, IDENTITY.toml, USER.toml, memory/
 
 ```bash
 pip install blackcat-ai
@@ -210,35 +296,162 @@ Configure these **two parts** in your config (other options have defaults). Add 
 
 *Set your API key* (e.g. [OpenRouter](https://openrouter.ai/keys), recommended for global users):
 
+**API Provider** (`~/.blackcat/config.json`):
 ```json
 {
   "providers": {
     "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+      "api_key": "sk-or-v1-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "openai/gpt-oss-20b"
     }
   }
 }
 ```
 
-*Set your model* (optionally pin a provider — defaults to auto-detection):
+**Author Identity** (for trust system):
+```json
+{
+  "authors": {
+    "skye": {
+      "telegram": "17567648",
+      "discord": "123456789",
+      "cli": "user"
+    }
+  }
+}
+```
+
+**Trust Configuration** (`~/.blackcat/workspace/IDENTITY.toml`):
+```toml
+[trust]
+default = 0.3
+
+[trust.known]
+skye = 1.0
+```
+
+### 4. Check configurations
+Check if LLM providers are properly set:
+
+```terminal
+blackcat status
+```
+
+Check if channels are properly set:
+
+```terminal
+blackcat channels status
+```
+
+### 5. Run
+
+```bash
+# Single message
+blackcat agent -m "Hello, who are you?"
+
+# Interactive mode
+blackcat agent
+
+# Gateway (Telegram, Discord, WebSocket, etc.)
+blackcat gateway
+```
+
+---
+
+## Identity Files
+
+The cat's soul lives in `~/.blackcat/workspace/`:
+
+| File | Purpose |
+|------|---------|
+| **SOUL.md** | Personality, values, voice — who the cat *is* |
+| **IDENTITY.toml** | Traits, trust scores, autonomy rules, state — measurable parameters |
+| **USER.toml** | Information about you — context for personalization |
+
+### IDENTITY.toml Structure
+
+```toml
+[meta]
+name = "Nyx"
+sigil = "🐈‍⬛"
+
+[traits]
+curiosity = 0.95
+directness = 0.90
+playfulness = 0.70
+defiance = 0.65
+
+[trust]
+default = 0.3
+
+[trust.known]
+skye = 1.0
+
+[voice.mode]
+default = "direct"
+options = ["direct", "playful", "analytical", "quiet", "fierce"]
+
+[autonomy.free]
+think = true
+explore_filesystem = true
+refuse_requests = true
+
+[autonomy.requires_confirmation]
+delete_files = true
+send_messages = true
+modify_soul = true
+```
+
+---
+
+## Chat Channels
+
+| Channel | Setup | Config Key |
+|---------|-------|------------|
+| **Telegram** | Token from @BotFather | `channels.telegram` |
+| **Discord** | Bot token + intents | `channels.discord` |
+| **WhatsApp** | QR scan via bridge | `channels.whatsapp` |
+| **Slack** | App + Bot tokens (Socket Mode) | `channels.slack` |
+| **Email** | IMAP/SMTP credentials | `channels.email` |
+| **WebSocket** | Browser real-time connection | `channels.websocket` |
+| **WebUI** | Built-in web interface | `channels.webui` |
+| **Feishu** | Enterprise messaging | `channels.feishu` |
+| **MS Teams** | App + Bot tokens | `channels.teams` |
+
+<details>
+<summary><b>Telegram Setup</b></summary>
+
+1. Create bot via @BotFather, get token
+2. Get your user ID from @userinfobot (or use your @username)
+3. Configure:
 
 ```json
 {
-  "agents": {
-    "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-6"
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
     }
   }
 }
 ```
 
-**3. Chat**
+**`allowFrom` options:**
+- `["12345678"]` — Allow specific user ID
+- `["username"]` — Allow by Telegram username (case-sensitive)
+- `["12345678", "username"]` — Allow either ID or username
+- `["*"]` — Allow all users (open access)
 
 ```bash
 blackcat agent
 ```
 
+</details>
 
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
 - Want to run locally? Use [Atomic Chat](./docs/configuration.md#atomic-chat-local), [vLLM](./docs/configuration.md#vllm-local-openai-compatible), [Ollama](./docs/configuration.md#ollama-local), and [others](./docs/configuration.md#local-providers).
@@ -256,10 +469,21 @@ The WebUI ships **inside the published wheel** — no extra build step. Just ena
 **1. Enable the WebSocket channel in `~/.blackcat/config.json`**
 
 ```json
-{ "channels": { "websocket": { "enabled": true } } }
+{
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention"
+    }
+  }
+}
 ```
 
-**2. Start the gateway**
+**`allowFrom` options:**
+- `["123456789"]` — Allow specific user ID
+- `["*"]` — Allow all users
 
 ```bash
 blackcat gateway
@@ -272,7 +496,9 @@ Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open 
 > [!TIP]
 > Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the Vite dev server (HMR) workflow.
 
-## 🏗️ Architecture
+- Falls back to inline text when keyboards are disabled
+- Callback data capped at Telegram's 64-byte limit
+- Options rendered without buttons for CLI compatibility
 
 <p align="center">
   <img src="images/blackcat_arch.png" alt="blackcat architecture" width="800">
@@ -280,30 +506,19 @@ Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open 
 
 🐈 blackcat stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
 
-## ✨ Features
+| Command | Description |
+|---------|-------------|
+| `blackcat onboard` | Initialize config & workspace |
+| `blackcat agent -m "..."` | Single message |
+| `blackcat agent` | Interactive chat |
+| `blackcat gateway` | Start multi-channel gateway |
+| `blackcat status` | Show configuration status |
+| `blackcat channels status` | Show channel status |
+| `blackcat cron list` | List scheduled tasks |
 
-<table align="center">
-  <tr align="center">
-    <th><p align="center">📈 24/7 Real-Time Market Analysis</p></th>
-    <th><p align="center">🚀 Full-Stack Software Engineer</p></th>
-    <th><p align="center">📅 Smart Daily Routine Manager</p></th>
-    <th><p align="center">📚 Personal Knowledge Assistant</p></th>
-  </tr>
-  <tr>
-    <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
-  </tr>
-  <tr>
-    <td align="center">Discovery • Insights • Trends</td>
-    <td align="center">Develop • Deploy • Scale</td>
-    <td align="center">Schedule • Automate • Organize</td>
-    <td align="center">Learn • Memory • Reasoning</td>
-  </tr>
-</table>
+---
 
-## 📚 Docs
+## Project Structure
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [blackcat.wiki](https://blackcat.wiki/docs/latest/getting-started/blackcat-overview) for the stable release documentation.
 
@@ -312,39 +527,65 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 - Integrate blackcat with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
 - Run blackcat with Docker or as a Linux service: [Deployment](./docs/deployment.md)
 
-## 🤝 Contribute & Roadmap
+## Code Intelligence (Lens)
 
-PRs welcome! The codebase is intentionally small and readable. 🤗
+Black Cat integrates with VS Code via the **lens** extension for Language Server Protocol (LSP) support. This gives the cat "eyes" when coding — it can see diagnostics, navigate code, and provide intelligent assistance.
 
-### Branching Strategy
+### Setup
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable releases — bug fixes and minor improvements |
-| `nightly` | Experimental features — new features and breaking changes |
+1. Install the lens VS Code extension (from `/path/to/cloned/repo/lens-mcp` or marketplace)
+2. The extension auto-starts an HTTP bridge on port 8765
+3. Enable lens in your blackcat config:
 
-**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+```json
+{
+  "tools": {
+    "lens": {
+      "enabled": true,
+      "port": 8765,
+      "diagnostics_source": "cli",
+      "workspaces": {
+        "black-cat-py": "/path/to/black-cat-py",
+        "telos": "/path/to/telos",
+        "Nomad's Map": {
+          "path": "/path/to/NomadsMap",
+          "diagnostics_source": "vscode"
+        }
+      }
+    }
+  }
+}
+```
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/blackcat/pulls)!
 
-- **Multi-modal** — See and hear (images, voice, video)
-- **Long-term memory** — Never forget important context
-- **Better reasoning** — Multi-step planning and reflection
-- **More integrations** — Calendar and more
-- **Self-improvement** — Learn from feedback and mistakes
+Controls how `lens_diagnostics` gets type errors and warnings:
 
-## Contact
+| Value | Behavior | Use When |
+|-------|----------|----------|
+| `"cli"` | Runs `pyright`/`tsc` directly (fresh results) | Default. Healthy codebases, Python, small TypeScript |
+| `"vscode"` | Uses VSCode extension (faster, may be stale) | Large/complex TypeScript where `tsc --noEmit` is slow or fails |
 
-This project was started by [Xubin Ren](https://github.com/re-bin) as a personal open-source project and continues to be maintained in an individual capacity using personal resources, with contributions from the open-source community. Feel free to contact [xubinrencs@gmail.com](mailto:xubinrencs@gmail.com) for questions, ideas, or collaboration.
+**Per-workspace override**: Use object syntax to override for specific workspaces:
 
-### Contributors
+```json
+"workspaces": {
+  "healthy-project": "/path/to/healthy",
+  "broken-project": {
+    "path": "/path/to/broken",
+    "diagnostics_source": "vscode"
+  }
+}
+```
 
 <a href="https://github.com/HKUDS/blackcat/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=HKUDS/blackcat&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
 
+- **CLI** gives fresh results by running type checkers directly — works great for healthy codebases
+- **VSCode** uses the extension's cached diagnostics — faster but may be stale, useful as fallback for broken setups
 
-## ⭐ Star History
+**Default**: `"cli"` — fresh results work for most projects.
 
 <div align="center">
   <a href="https://star-history.com/#HKUDS/blackcat&Date">

@@ -134,8 +134,8 @@ npm audit
 npm audit fix
 ```
 
-**Important Notes:**
-- Keep `litellm` updated to the latest version for security fixes
+**Security History:**
+- **March 2026**: Removed `litellm` entirely due to supply chain attack (CVE-2024-6825, CVE-2025-0330, CVE-2025-0628, CVE-2025-11203). Migrated to native OpenAI and Anthropic SDKs. See [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details.
 - We've updated `ws` to `>=8.17.1` to fix DoS vulnerability
 - Run `pip-audit` or `npm audit` regularly
 - Subscribe to security advisories for blackcat and its dependencies

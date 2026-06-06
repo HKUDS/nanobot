@@ -66,7 +66,7 @@ By default the dev server proxies `/api`, `/webui`, `/auth`, and WebSocket traff
 If your gateway listens on a non-default port, point the dev server at it:
 
 ```bash
-NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
+BLACKCAT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
 
 ### Access from another device (LAN)
@@ -102,6 +102,12 @@ bun run build          # writes to ../blackcat/web/dist
 ```
 
 The gateway picks up the new bundle on the next restart.
+
+This writes the production assets to `../blackcat/web/dist`, which is the
+directory served by `blackcat gateway` and bundled into the Python wheel.
+
+If you are cutting a release, run the build before packaging so the published
+wheel contains the current WebUI assets.
 
 ## Test
 

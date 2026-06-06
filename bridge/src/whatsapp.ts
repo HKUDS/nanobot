@@ -5,12 +5,12 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import makeWASocket, {
-    extractMessageContent as baileysExtractMessageContent,
-    DisconnectReason,
-    downloadMediaMessage,
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    useMultiFileAuthState,
+  extractMessageContent as baileysExtractMessageContent,
+  DisconnectReason,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';

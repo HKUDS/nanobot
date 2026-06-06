@@ -177,7 +177,7 @@ class EmailChannel(BaseChannel):
         """Stop polling loop."""
         self._running = False
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
         if not self.config.consent_granted:
             self.logger.warning("Skip email send: consent_granted is false")

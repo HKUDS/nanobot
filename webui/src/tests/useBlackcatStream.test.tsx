@@ -253,7 +253,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].kind).toBeUndefined();
   });
 
-  it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
+it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-au", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -1365,7 +1365,7 @@ describe("useNanobotStream", () => {
     ]);
   });
 
-  it("keeps assistant html media as a file attachment", () => {
+it("keeps assistant html media as a file attachment", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-html-media", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -1779,5 +1779,4 @@ describe("useNanobotStream", () => {
     });
     expect(result.current.goalState).toEqual({ active: false });
   });
-
 });

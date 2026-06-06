@@ -403,7 +403,7 @@ export default function App() {
     const client = state.client;
     const timer = window.setTimeout(async () => {
       try {
-        const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+const boot = await fetchBootstrap("", bootstrapSecretRef.current);
         const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
         const runtimeSurface = boot.runtime_surface
           ? toRuntimeSurface(boot.runtime_surface)
@@ -445,6 +445,13 @@ export default function App() {
     return (
       <div className="flex h-full w-full items-center justify-center">
         <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
+          <img
+            src="/brand/blackcat_icon.png"
+            alt=""
+            className="h-10 w-10 animate-pulse select-none"
+            aria-hidden
+            draggable={false}
+          />
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
@@ -468,6 +475,13 @@ export default function App() {
     return (
       <div className="flex h-full w-full items-center justify-center px-4 text-center">
         <div className="flex max-w-md flex-col items-center gap-3">
+          <img
+            src="/brand/blackcat_icon.png"
+            alt=""
+            className="h-10 w-10 opacity-60 grayscale select-none"
+            aria-hidden
+            draggable={false}
+          />
           <p className="text-lg font-semibold">{t("app.error.title")}</p>
           <p className="text-sm text-muted-foreground">{state.message}</p>
           <p className="text-xs text-muted-foreground">

@@ -91,6 +91,10 @@ def _make_provider_core(
     else:
         from blackcat.providers.openai_compat_provider import OpenAICompatProvider
 
+        if spec and spec.name == "ollama" and config._is_cloud_model(model):
+            if not p or not p.api_key:
+                raise ValueError(f"No API key configured for Ollama's cloud model {model}")
+
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),

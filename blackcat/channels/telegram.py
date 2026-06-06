@@ -22,7 +22,13 @@ from telegram import (
     Update,
 )
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.request import HTTPXRequest
 
 from blackcat.bus.events import OutboundMessage
@@ -32,7 +38,7 @@ from blackcat.command.builtin import build_help_text
 from blackcat.config.paths import get_media_dir
 from blackcat.config.schema import Base
 from blackcat.security.network import validate_url_target
-from blackcat.utils.helpers import split_message
+from blackcat.utils.formatting import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
@@ -346,14 +352,18 @@ class TelegramChannel(BaseChannel):
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
-        if super().is_allowed(sender_id):
+        allow_list = getattr(self.config, "allow_from", [])
+        if not allow_list:
+            return False
+        if "*" in allow_list:
             return True
 
-        allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list or "*" in allow_list:
-            return False
-
         sender_str = str(sender_id)
+        # Direct match first (supports full "id|username" in allow_from)
+        if sender_str in allow_list:
+            return True
+
+        # Legacy Telegram format: exactly "id|username" (two parts)
         if sender_str.count("|") != 1:
             return False
 
@@ -495,7 +505,7 @@ class TelegramChannel(BaseChannel):
 
         # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):
-            self._stop_typing(chat_id)
+            await self._stop_typing(chat_id)
 
         for task in self._media_group_tasks.values():
             task.cancel()
@@ -532,15 +542,15 @@ class TelegramChannel(BaseChannel):
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
 
-    async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+    async def _send_impl(self, msg: OutboundMessage) -> None:
+        """Internal send implementation - called by BaseChannel.send() after validation."""
         if not self._app:
             self.logger.warning("bot not running")
             return
 
         # Only stop typing indicator and remove reaction for final responses
         if not msg.metadata.get("_progress", False):
-            self._stop_typing(msg.chat_id)
+            await self._stop_typing(msg.chat_id)
             if reply_to_message_id := msg.metadata.get("message_id"):
                 with suppress(ValueError):
                     await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
@@ -718,7 +728,7 @@ class TelegramChannel(BaseChannel):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
-            self._stop_typing(chat_id)
+            await self._stop_typing(chat_id)
             if reply_to_message_id := meta.get("message_id"):
                 with suppress(ValueError):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
@@ -1237,7 +1247,6 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
-        session_key = self._derive_topic_session_key(message)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -1247,9 +1256,8 @@ class TelegramChannel(BaseChannel):
                     "sender_id": sender_id, "chat_id": str_chat_id,
                     "contents": [], "media": [],
                     "metadata": metadata,
-                    "session_key": session_key,
                 }
-                self._start_typing(str_chat_id)
+                await self._start_typing(str_chat_id)
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
@@ -1260,7 +1268,7 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        await self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
@@ -1270,7 +1278,6 @@ class TelegramChannel(BaseChannel):
             content=content,
             media=media_paths,
             metadata=metadata,
-            session_key=session_key,
         )
 
     async def _flush_media_group(self, key: str) -> None:
@@ -1284,22 +1291,25 @@ class TelegramChannel(BaseChannel):
                 sender_id=buf["sender_id"], chat_id=buf["chat_id"],
                 content=content, media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
-                session_key=buf.get("session_key"),
             )
         finally:
             self._media_group_tasks.pop(key, None)
 
-    def _start_typing(self, chat_id: str) -> None:
+    async def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
         # Cancel any existing typing task for this chat
-        self._stop_typing(chat_id)
+        await self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
-    def _stop_typing(self, chat_id: str) -> None:
+    async def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
         """Add emoji reaction to a message (best-effort, non-blocking)."""

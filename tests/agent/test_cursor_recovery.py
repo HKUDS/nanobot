@@ -6,7 +6,6 @@ history.jsonl (e.g. ``"cursor": "abc"``).  The original ``_next_cursor`` and
 ``TypeError`` / ``ValueError``, blocking all subsequent history appends.
 """
 
-import json
 
 import pytest
 

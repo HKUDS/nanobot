@@ -102,7 +102,6 @@ class BaseChannel(ABC):
         """Stop the channel and clean up resources."""
         pass
 
-    @abstractmethod
     async def send(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
@@ -112,6 +111,14 @@ class BaseChannel(ABC):
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
+        """
+        await self._send_impl(msg)
+
+    async def _send_impl(self, msg: OutboundMessage) -> None:
+        """
+        Internal send implementation - override in subclasses.
+
+        Called by :meth:`send` after basic validation.
         """
         pass
 

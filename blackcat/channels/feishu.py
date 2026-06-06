@@ -1392,7 +1392,7 @@ class FeishuChannel(BaseChannel):
             return False
 
     async def send_delta(
-        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+        self, chat_id: str, content: str, metadata: dict[str, Any] | None = None
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
@@ -1481,7 +1481,7 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[stream_key] = buf
-        buf.text += delta
+        buf.text += content
         if not buf.text.strip():
             return
 
@@ -1514,7 +1514,7 @@ class FeishuChannel(BaseChannel):
             )
             buf.last_edit = now
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
             self.logger.warning("client not initialized")

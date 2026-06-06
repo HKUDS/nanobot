@@ -9,7 +9,7 @@
 import asyncio
 import datetime
 import weakref
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import tiktoken
 from loguru import logger
@@ -22,10 +22,13 @@ from blackcat.utils.helpers import find_legal_message_start
 from blackcat.utils.prompt_templates import render_template
 from blackcat.utils.tokens import estimate_message_tokens, estimate_prompt_tokens_chain
 
+if TYPE_CHECKING:
+    from blackcat.providers.base import LLMProvider
+    from blackcat.session.manager import SessionManager
+
+
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
-
-
 
 class Consolidator:
     """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
@@ -381,7 +384,7 @@ class Consolidator:
 
             tail = list(session.messages[session.last_consolidated:])
             if not tail:
-                session.updated_at = datetime.datetime.now()
+                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -398,7 +401,7 @@ class Consolidator:
             archive_msgs = dropped[already_consolidated:]
 
             if not archive_msgs and not kept:
-                session.updated_at = datetime.datetime.now()
+                session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -415,7 +418,7 @@ class Consolidator:
 
             session.messages = kept
             session.last_consolidated = 0
-            session.updated_at = datetime.datetime.now()
+            session.updated_at = datetime.now()
             self.sessions.save(session)
 
             if archive_msgs:
@@ -428,3 +431,4 @@ class Consolidator:
                 )
 
             return summary
+        

@@ -2,16 +2,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [main, nightly]
+    branches: [ blackcat ]
   pull_request:
-    branches: [main, nightly]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
+    branches: [ blackcat ]
 
 jobs:
   test:

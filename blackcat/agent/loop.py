@@ -17,9 +17,9 @@ from loguru import logger
 from blackcat.agent import context as agent_context
 from blackcat.agent import model_presets as preset_helpers
 from blackcat.agent.autocompact import AutoCompact
+from blackcat.agent.consolidate import Consolidator
 from blackcat.agent.context import ContextBuilder
 from blackcat.agent.hook import AgentHook, CompositeHook
-from blackcat.agent.memory import Consolidator
 from blackcat.agent.progress_hook import AgentProgressHook
 from blackcat.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from blackcat.agent.subagent import SubagentManager
@@ -299,8 +299,8 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
+        # BLACKCAT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        _max = int(os.environ.get("BLACKCAT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
@@ -806,8 +806,8 @@ class AgentLoop:
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
-                # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
-                # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
+                # Sustained goals may legitimately exceed BLACKCAT_LLM_TIMEOUT_S; idle stall
+                # is still capped by BLACKCAT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
                     session.key if session is not None else session_key,

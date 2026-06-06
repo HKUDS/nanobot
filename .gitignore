@@ -32,6 +32,16 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+
+# Claude Docs
+CLAUDE.md
+.claude/*
+
+# Apple files
+.DS_Store
+
+test/
 .mypy_cache/
 .ruff_cache/
 .pytype/

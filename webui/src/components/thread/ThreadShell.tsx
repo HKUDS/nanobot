@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-
+import { AskUserPrompt } from "@/components/thread/AskUserPrompt";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";

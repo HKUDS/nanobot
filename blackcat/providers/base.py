@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from blackcat.utils.helpers import image_placeholder_text
+from blackcat.utils.media import image_placeholder_text
 
 
 @dataclass

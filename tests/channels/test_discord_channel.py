@@ -1034,6 +1034,10 @@ async def test_send_stops_typing_after_send() -> None:
     channel._client = client
     channel._running = True
 
+    # Register the channel so _resolve_channel returns it
+    typing_channel = _FakeChannel(channel_id=123)
+    client.channels[123] = typing_channel
+
     start = asyncio.Event()
     release = asyncio.Event()
 
@@ -1041,10 +1045,9 @@ async def test_send_stops_typing_after_send() -> None:
         start.set()
         await release.wait()
 
-    typing_channel = _FakeChannel(channel_id=123)
     typing_channel.typing_enter_hook = slow_typing
 
-    await channel._start_typing(typing_channel)
+    await channel._start_typing("123")
     await asyncio.wait_for(start.wait(), timeout=1.0)
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
@@ -1062,9 +1065,10 @@ async def test_send_stops_typing_after_send() -> None:
         await release.wait()
 
     typing_channel = _FakeChannel(channel_id=123)
+    client.channels[123] = typing_channel
     typing_channel.typing_enter_hook = slow_typing_progress
 
-    await channel._start_typing(typing_channel)
+    await channel._start_typing("123")
     await asyncio.wait_for(start.wait(), timeout=1.0)
 
     await channel.send(
@@ -1088,6 +1092,8 @@ async def test_send_stops_typing_after_send() -> None:
 @pytest.mark.asyncio
 async def test_start_typing_uses_typing_context_when_trigger_typing_missing() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    channel._client = client
     channel._running = True
 
     entered = asyncio.Event()
@@ -1117,7 +1123,8 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
             return _Ctx()
 
     typing_channel = _NoTriggerChannel(channel_id=123)
-    await channel._start_typing(typing_channel)  # type: ignore[arg-type]
+    client.channels[123] = typing_channel
+    await channel._start_typing("123")
     await asyncio.wait_for(entered.wait(), timeout=1.0)
 
     assert "123" in channel._typing_tasks
@@ -1289,6 +1296,10 @@ async def test_send_still_stops_typing_on_error() -> None:
     channel._client = client
     channel._running = True
 
+    # Register the channel so _resolve_channel returns it
+    typing_channel = _FakeChannel(channel_id=123)
+    client.channels[123] = typing_channel
+
     # Start a typing task so we can verify it gets cleaned up
     start = asyncio.Event()
     release = asyncio.Event()
@@ -1297,9 +1308,8 @@ async def test_send_still_stops_typing_on_error() -> None:
         start.set()
         await release.wait()
 
-    typing_channel = _FakeChannel(channel_id=123)
     typing_channel.typing_enter_hook = slow_typing
-    await channel._start_typing(typing_channel)
+    await channel._start_typing("123")
     await asyncio.wait_for(start.wait(), timeout=1.0)
 
     async def _failing_send_outbound(msg: OutboundMessage) -> None:

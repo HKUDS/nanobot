@@ -359,7 +359,7 @@ function findFileEditTraceIndex(
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
  * a streaming flag, and a ``send`` function. Initial history must be seeded
- * separately (e.g. via ``fetchWebuiThread``) since the server only replays
+* separately (e.g. via ``fetchWebuiThread``) since the server only replays
  * live events.
  */
 /** Payload passed to ``send`` when the user attaches one or more images.
@@ -439,7 +439,7 @@ export function useNanobotStream(
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
-  const clearPendingStreamWork = useCallback(() => {
+const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
       streamFrameRef.current = null;
@@ -849,7 +849,7 @@ export function useNanobotStream(
         const media = ev.media_urls?.length
           ? ev.media_urls.map((m) => toMediaAttachment(m))
           : ev.media?.map((url) => toMediaAttachment({ url }));
-        const hasMedia = !!media && media.length > 0;
+const hasMedia = !!media && media.length > 0;
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
@@ -961,7 +961,7 @@ export function useNanobotStream(
       // the image blocks via ``media`` paths.
       if (!hasImages && !content.trim()) return;
 
-      flushPendingStreamEvents();
+flushPendingStreamEvents();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
         buffer.current = null;
