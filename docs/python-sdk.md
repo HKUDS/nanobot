@@ -13,6 +13,8 @@ from blackcat import Blackcat
 async def main() -> None:
     bot = Blackcat.from_config()
     result = await bot.run("What time is it in Tokyo?")
+    async with Nanobot.from_config() as bot:
+        result = await bot.run("What time is it in Tokyo?")
     print(result.content)
 
 
@@ -20,6 +22,8 @@ asyncio.run(main())
 ```
 
 `Blackcat.from_config()` reuses your normal `~/.blackcat/config.json`, so the SDK follows the same provider, model, tools, and workspace defaults as the CLI unless you override them.
+
+Use `async with` when possible so MCP connections and background cleanup work are closed before the event loop exits. If you manage the instance manually, call `await bot.aclose()` in a `finally` block.
 
 ## Common Patterns
 
@@ -82,6 +86,15 @@ Run the agent once and return a `RunResult`.
 | `message` | `str` | *(required)* | The user message to process. |
 | `session_key` | `str` | `"sdk:default"` | Session identifier for conversation isolation. Different keys get independent history. |
 | `hooks` | `list[AgentHook] \| None` | `None` | Lifecycle hooks for this run only. |
+
+### `await bot.aclose()`
+
+Release resources held by the SDK instance, including MCP connections. The async context manager calls this automatically:
+
+```python
+async with Nanobot.from_config() as bot:
+    result = await bot.run("Summarize this repo")
+```
 
 ### `RunResult`
 
