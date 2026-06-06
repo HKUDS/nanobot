@@ -15,7 +15,7 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 
 ## Examples
 
-Recurring reminder:
+Fixed reminder:
 ```
 cron(action="add", message="Time to take a break!", every_seconds=1200)
 ```
@@ -28,11 +28,6 @@ cron(action="add", message="Check HKUDS/nanobot GitHub stars and report", every_
 One-time scheduled task (compute ISO datetime from current time):
 ```
 cron(action="add", message="Remind me about the meeting", at="<ISO datetime>")
-```
-
-One-time relative reminder:
-```
-cron(action="add", message="Remind me to drink water", delay_seconds=60)
 ```
 
 Timezone-aware cron:
@@ -50,10 +45,8 @@ cron(action="remove", job_id="abc123")
 
 | User says | Parameters |
 |-----------|------------|
-| in 20 minutes / after 20 minutes | delay_seconds: 1200 |
-| one hour later | delay_seconds: 3600 |
 | every 20 minutes | every_seconds: 1200 |
-| every hour / repeat hourly | every_seconds: 3600 |
+| every hour | every_seconds: 3600 |
 | every day at 8am | cron_expr: "0 8 * * *" |
 | weekdays at 5pm | cron_expr: "0 17 * * 1-5" |
 | 9am Vancouver time daily | cron_expr: "0 9 * * *", tz: "America/Vancouver" |

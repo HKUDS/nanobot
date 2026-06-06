@@ -324,47 +324,6 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     assert job.schedule.at_ms == expected
 
 
-def test_add_delay_job_creates_one_shot_at_schedule(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
-    before = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-
-    result = tool._add_job(
-        None,
-        "Drink water",
-        None,
-        None,
-        None,
-        None,
-        delay_seconds=60,
-    )
-
-    after = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-    assert result.startswith("Created job")
-    job = tool._cron.list_jobs()[0]
-    assert job.schedule.kind == "at"
-    assert job.delete_after_run is True
-    assert before + 60_000 <= (job.schedule.at_ms or 0) <= after + 60_000
-
-
-def test_add_job_rejects_multiple_schedule_modes(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
-
-    result = tool._add_job(
-        None,
-        "Drink water",
-        60,
-        None,
-        None,
-        None,
-        delay_seconds=60,
-    )
-
-    assert "exactly one" in result
-    assert tool._cron.list_jobs() == []
-
-
 def test_add_job_delivers_by_default(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))

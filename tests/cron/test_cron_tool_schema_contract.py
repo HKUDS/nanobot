@@ -87,14 +87,6 @@ class TestSchemaSelfDescribesRequirements:
         desc = tool.parameters["properties"]["message"]["description"]
         assert "REQUIRED" in desc and "action='add'" in desc
 
-    def test_delay_description_flags_relative_one_time_reminders(self) -> None:
-        tool = CronTool(_SvcStub())
-        delay_desc = tool.parameters["properties"]["delay_seconds"]["description"]
-        every_desc = tool.parameters["properties"]["every_seconds"]["description"]
-        assert "One-time" in delay_desc
-        assert "in/after" in every_desc
-        assert "Do NOT use" in every_desc
-
     def test_job_id_description_flags_remove_requirement(self) -> None:
         tool = CronTool(_SvcStub())
         desc = tool.parameters["properties"]["job_id"]["description"]

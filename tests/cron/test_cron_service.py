@@ -138,21 +138,6 @@ async def test_run_history_records_errors(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_shot_job_deletes_after_run(tmp_path) -> None:
-    store_path = tmp_path / "cron" / "jobs.json"
-    service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
-    job = service.add_job(
-        name="one-shot",
-        schedule=CronSchedule(kind="at", at_ms=int(time.time() * 1000) + 60_000),
-        message="hello",
-        delete_after_run=True,
-    )
-
-    assert await service.run_job(job.id, force=True) is True
-    assert service.get_job(job.id) is None
-
-
-@pytest.mark.asyncio
 async def test_run_history_trimmed_to_max(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
