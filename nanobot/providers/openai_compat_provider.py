@@ -1213,7 +1213,7 @@ class OpenAICompatProvider(LLMProvider):
             ],
             finish_reason=finish_reason,
             usage=usage,
-            reasoning_content="".join(reasoning_parts) or None,
+            reasoning_content="".join(reasoning_parts) or "",
         )
 
     @classmethod
