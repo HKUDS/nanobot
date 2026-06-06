@@ -56,6 +56,7 @@ class ChannelManager:
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        cron_service: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
@@ -64,6 +65,7 @@ class ChannelManager:
         self.config = config
         self.bus = bus
         self._session_manager = session_manager
+        self._cron_service = cron_service
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
@@ -124,9 +126,11 @@ class ChannelManager:
                         static_dist_path=static_path,
                         workspace_path=workspace,
                         default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                        disabled_skills=set(self.config.agents.defaults.disabled_skills),
                         runtime_model_name=self._webui_runtime_model_name,
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
+                        cron_service=self._cron_service,
                         logger=logger,
                     )
                     kwargs["gateway"] = gateway

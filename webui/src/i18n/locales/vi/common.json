@@ -54,7 +54,10 @@
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
     },
-    "apps": "Ứng dụng"
+    "apps": "Ứng dụng",
+    "skills": {
+      "title": "Kỹ năng"
+    }
   },
   "settings": {
     "backToChat": "Quay lại chat",
@@ -75,7 +78,8 @@
       "advanced": "Bảo mật",
       "cliApps": "Ứng dụng CLI",
       "mcp": "MCP",
-      "apps": "Ứng dụng"
+      "apps": "Ứng dụng",
+      "skills": "Kỹ năng"
     },
     "sections": {
       "interface": "Giao diện",
@@ -187,6 +191,9 @@
       "disabled": "Đã tắt",
       "restartPending": "Chờ khởi động lại",
       "ready": "Sẵn sàng",
+      "privateEngine": "Bộ máy riêng",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Workspace mặc định",
       "comfortable": "Thoải mái",
       "compact": "Gọn",
       "auto": "Tự động",
@@ -277,6 +284,31 @@
       "webSearch": "Tìm kiếm web",
       "imageGeneration": "Tạo hình ảnh",
       "workspace": "Không gian làm việc"
+    },
+    "usage": {
+      "title": "Hoạt động token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Mức dùng do nhà cung cấp báo cáo trong 12 tháng gần nhất.",
+      "empty": "Hoạt động token sẽ xuất hiện sau các phản hồi mô hình mới.",
+      "totalTokens": "Tổng token",
+      "peakTokens": "Đỉnh token",
+      "thirtyDayTokens": "Token 30 ngày",
+      "currentStreak": "Chuỗi hiện tại",
+      "longestStreak": "Chuỗi dài nhất",
+      "daysValue": "{{count}} ngày",
+      "last30": "30 ngày",
+      "activeDays": "Ngày hoạt động",
+      "requests": "Yêu cầu",
+      "estimated": "ước tính",
+      "includesEstimates": "bao gồm ước tính",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} yêu cầu",
+      "sources": {
+        "user": "Trò chuyện",
+        "api": "API",
+        "cron": "Tự động hóa",
+        "dream": "Bộ nhớ",
+        "system": "Hệ thống"
+      }
     },
     "providers": {
       "searchPlaceholder": "Tìm nhà cung cấp",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Đã đăng nhập",
       "notSignedIn": "Chưa đăng nhập"
+    },
+    "skills": {
+      "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",
+      "caption": "{{available}} khả dụng · tổng {{total}}",
+      "featured": "Kỹ năng agent",
+      "empty": "Không có kỹ năng nào khả dụng.",
+      "sourceWorkspace": "Tùy chỉnh",
+      "sourceBuiltin": "Tích hợp",
+      "statusAvailable": "Khả dụng",
+      "statusUnavailable": "Không khả dụng",
+      "unavailableReason": "Thiếu: {{reason}}",
+      "openDetails": "Mở chi tiết {{name}}",
+      "loadingDetail": "Đang tải chi tiết kỹ năng...",
+      "loadFailed": "Không tải được chi tiết kỹ năng.",
+      "descriptionTitle": "Mô tả",
+      "source": "Nguồn",
+      "status": "Trạng thái",
+      "requirements": "Yêu cầu",
+      "noRequirements": "Không có yêu cầu rõ ràng.",
+      "commands": "Lệnh",
+      "environment": "Biến môi trường",
+      "missingCommands": "Thiếu CLI",
+      "missingEnvironment": "Thiếu ENV",
+      "unavailableReasonLabel": "Lý do không khả dụng",
+      "rawInstructions": "SKILL.md gốc",
+      "rawInstructionsEmpty": "Không có hướng dẫn gốc.",
+      "detailDescription": "Chi tiết cho {{name}}."
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "Bật/tắt thanh bên",
       "newChat": "Bắt đầu chat mới",
       "toggleTheme": "Chuyển chủ đề từ header",
-      "settings": "Mở cài đặt"
+      "settings": "Mở cài đặt",
+      "sessionInfo": "Chi tiết phiên"
+    },
+    "sessionInfo": {
+      "title": "Phiên",
+      "untitled": "Chat chưa đặt tên",
+      "automations": "Tự động hóa",
+      "count": "{{count}}",
+      "loading": "Đang tải tự động hóa...",
+      "loadFailed": "Không thể tải tự động hóa.",
+      "empty": "Phiên này chưa có tự động hóa.",
+      "disabled": "Tắt",
+      "schedule": {
+        "at": "Lúc {{time}}",
+        "every": "Mỗi {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Lịch tùy chỉnh"
+      },
+      "next": {
+        "label": "Tiếp theo {{time}}",
+        "disabled": "Đã tạm dừng",
+        "none": "Không có lần chạy tiếp theo"
+      }
     },
     "composer": {
       "placeholderThread": "Nhập tin nhắn…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "Đóng mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "modelNotConfigured": "Chưa cấu hình mô hình",
+      "configureModel": "Cấu hình mô hình",
       "queued": {
         "label": "Hướng dẫn đang chờ",
         "guide": "Hướng dẫn",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "Cuộn xuống cuối",
-    "loadEarlier": "Tải tin nhắn trước đó"
+    "loadEarlier": "Tải tin nhắn trước đó",
+    "promptNavigator": {
+      "open": "Mở trình điều hướng prompt",
+      "title": "Prompt",
+      "search": "Tìm prompt",
+      "noResults": "Không có prompt phù hợp.",
+      "jumpTo": "Nhảy tới prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "đang truyền",
@@ -724,7 +815,9 @@
     "cliActivityFailedMany": "{{count}} ứng dụng CLI thất bại",
     "cliRunRunning": "Đang dùng",
     "cliRunRan": "Đã dùng",
-    "cliRunFailed": "Thất bại"
+    "cliRunFailed": "Thất bại",
+    "automationSourceFallback": "Tự động hóa",
+    "automationTriggered": "Tự động kích hoạt"
   },
   "lightbox": {
     "title": "Xem trước ảnh",
@@ -732,6 +825,15 @@
     "prev": "Ảnh trước",
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
+  },
+  "filePreview": {
+    "aria": "Xem trước tệp",
+    "close": "Đóng xem trước tệp",
+    "loading": "Đang tải bản xem trước...",
+    "failed": "Không thể xem trước tệp này.",
+    "routeMissing": "Xem trước tệp cần gateway mới nhất. Hãy khởi động lại nanobot gateway rồi thử lại.",
+    "resize": "Đổi kích thước bản xem trước tệp",
+    "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },
   "code": {
     "fallbackLanguage": "mã",

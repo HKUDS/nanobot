@@ -14,6 +14,7 @@ interface ThreadMessagesProps {
   onLoadEarlier?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -33,8 +34,13 @@ export function isFinalAssistantSliceBeforeNextUser(
   return true;
 }
 
-export function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
-  return normalizeActivityTimeline(messages);
+export function buildDisplayUnits(
+  messages: UIMessage[],
+  isStreaming = false,
+): DisplayUnit[] {
+  return normalizeActivityTimeline(messages, {
+    preserveTrailingActivity: isStreaming,
+  });
 }
 
 export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
@@ -61,9 +67,10 @@ export function ThreadMessages({
   onLoadEarlier,
   cliApps = [],
   mcpPresets = [],
+  onOpenFilePreview,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
-  const units = useMemo(() => buildDisplayUnits(messages), [messages]);
+  const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
   const copyFlags = useMemo(() => assistantCopyFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming ? currentActivityClusterIndices(units) : new Set<number>(),
@@ -117,6 +124,7 @@ export function ThreadMessages({
                 turnLatencyMs={unit.turnLatencyMs}
                 cliApps={cliApps}
                 mcpPresets={mcpPresets}
+                onOpenFilePreview={onOpenFilePreview}
               />
             ) : (
               <MessageBubble
@@ -128,6 +136,7 @@ export function ThreadMessages({
                 }
                 cliApps={cliApps}
                 mcpPresets={mcpPresets}
+                onOpenFilePreview={onOpenFilePreview}
               />
             )}
           </div>

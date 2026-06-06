@@ -54,7 +54,10 @@
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
     },
-    "apps": "Aplikasi"
+    "apps": "Aplikasi",
+    "skills": {
+      "title": "Skill"
+    }
   },
   "settings": {
     "backToChat": "Kembali ke chat",
@@ -75,7 +78,8 @@
       "advanced": "Keamanan",
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
-      "apps": "Aplikasi"
+      "apps": "Aplikasi",
+      "skills": "Skill"
     },
     "sections": {
       "interface": "Antarmuka",
@@ -187,6 +191,9 @@
       "disabled": "Nonaktif",
       "restartPending": "Menunggu mulai ulang",
       "ready": "Siap",
+      "privateEngine": "Mesin privat",
+      "unixSocket": "Soket Unix",
+      "defaultWorkspace": "Workspace default",
       "comfortable": "Nyaman",
       "compact": "Ringkas",
       "auto": "Otomatis",
@@ -277,6 +284,31 @@
       "webSearch": "Pencarian web",
       "imageGeneration": "Pembuatan gambar",
       "workspace": "Ruang kerja"
+    },
+    "usage": {
+      "title": "Aktivitas token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Penggunaan yang dilaporkan penyedia selama 12 bulan terakhir.",
+      "empty": "Aktivitas token akan muncul setelah balasan model baru.",
+      "totalTokens": "Total token",
+      "peakTokens": "Puncak token",
+      "thirtyDayTokens": "Token 30 hari",
+      "currentStreak": "Rentetan saat ini",
+      "longestStreak": "Rentetan terpanjang",
+      "daysValue": "{{count}} h",
+      "last30": "30 hari",
+      "activeDays": "Hari aktif",
+      "requests": "Permintaan",
+      "estimated": "perkiraan",
+      "includesEstimates": "termasuk perkiraan",
+      "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Otomasi",
+        "dream": "Memori",
+        "system": "Sistem"
+      }
     },
     "providers": {
       "searchPlaceholder": "Cari penyedia",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk"
+    },
+    "skills": {
+      "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",
+      "caption": "{{available}} tersedia · {{total}} total",
+      "featured": "Skill agent",
+      "empty": "Tidak ada skill yang tersedia.",
+      "sourceWorkspace": "Kustom",
+      "sourceBuiltin": "Bawaan",
+      "statusAvailable": "Tersedia",
+      "statusUnavailable": "Tidak tersedia",
+      "unavailableReason": "Kurang: {{reason}}",
+      "openDetails": "Buka detail {{name}}",
+      "loadingDetail": "Memuat detail skill...",
+      "loadFailed": "Tidak dapat memuat detail skill.",
+      "descriptionTitle": "Deskripsi",
+      "source": "Sumber",
+      "status": "Status",
+      "requirements": "Kebutuhan",
+      "noRequirements": "Tidak ada kebutuhan eksplisit.",
+      "commands": "Perintah",
+      "environment": "Variabel lingkungan",
+      "missingCommands": "CLI hilang",
+      "missingEnvironment": "ENV hilang",
+      "unavailableReasonLabel": "Alasan tidak tersedia",
+      "rawInstructions": "SKILL.md mentah",
+      "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
+      "detailDescription": "Detail untuk {{name}}."
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "Tampilkan atau sembunyikan sidebar",
       "newChat": "Mulai chat baru",
       "toggleTheme": "Alihkan tema dari header",
-      "settings": "Buka pengaturan"
+      "settings": "Buka pengaturan",
+      "sessionInfo": "Detail sesi"
+    },
+    "sessionInfo": {
+      "title": "Sesi",
+      "untitled": "Chat tanpa judul",
+      "automations": "Otomasi",
+      "count": "{{count}}",
+      "loading": "Memuat otomasi...",
+      "loadFailed": "Tidak dapat memuat otomasi.",
+      "empty": "Belum ada otomasi dalam sesi ini.",
+      "disabled": "Mati",
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Jadwal khusus"
+      },
+      "next": {
+        "label": "Berikutnya {{time}}",
+        "disabled": "Dijeda",
+        "none": "Tidak ada jadwal berikutnya"
+      }
     },
     "composer": {
       "placeholderThread": "Ketik pesan Anda…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "modelNotConfigured": "Model belum dikonfigurasi",
+      "configureModel": "Konfigurasi model",
       "queued": {
         "label": "Panduan antrean",
         "guide": "Pandu",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "Gulir ke bawah",
-    "loadEarlier": "Muat pesan sebelumnya"
+    "loadEarlier": "Muat pesan sebelumnya",
+    "promptNavigator": {
+      "open": "Buka navigator prompt",
+      "title": "Prompt",
+      "search": "Cari prompt",
+      "noResults": "Tidak ada prompt yang cocok.",
+      "jumpTo": "Lompat ke prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "sedang mengalir",
@@ -724,7 +815,9 @@
     "cliActivityFailedMany": "{{count}} aplikasi CLI gagal",
     "cliRunRunning": "Menggunakan",
     "cliRunRan": "Digunakan",
-    "cliRunFailed": "Gagal"
+    "cliRunFailed": "Gagal",
+    "automationSourceFallback": "Otomatisasi",
+    "automationTriggered": "Dipicu otomatis"
   },
   "lightbox": {
     "title": "Pratinjau gambar",
@@ -732,6 +825,15 @@
     "prev": "Gambar sebelumnya",
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
+  },
+  "filePreview": {
+    "aria": "Pratinjau file",
+    "close": "Tutup pratinjau file",
+    "loading": "Memuat pratinjau...",
+    "failed": "Tidak dapat mempratinjau file ini.",
+    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang nanobot gateway lalu coba lagi.",
+    "resize": "Ubah ukuran pratinjau file",
+    "truncated": "Pratinjau dipotong karena file ini besar."
   },
   "code": {
     "fallbackLanguage": "kode",

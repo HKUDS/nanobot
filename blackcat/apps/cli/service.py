@@ -95,6 +95,8 @@ class CliAppsRuntimeConfig:
 
 _BRANDS: dict[str, tuple[str, str]] = {
     "1password-cli": ("1password", "#3B66BC"),
+    "arcgis": ("arcgis", "#2C7AC3"),
+    "arcgis-pro": ("arcgis", "#2C7AC3"),
     "audacity": ("audacity", "#0000CC"),
     "blender": ("blender", "#E87D0D"),
     "browser": ("googlechrome", "#4285F4"),
@@ -116,6 +118,7 @@ _BRANDS: dict[str, tuple[str, str]] = {
     "intelwatch": ("intel", "#0071C5"),
     "iterm2": ("iterm2", "#000000"),
     "jimeng": ("bytedance", "#3C8CFF"),
+    "joplin": ("joplin", "#1071D3"),
     "kdenlive": ("kdenlive", "#527EB2"),
     "krita": ("krita", "#3BABFF"),
     "libreoffice": ("libreoffice", "#18A303"),

@@ -20,6 +20,18 @@ import type {
     UIImage,
     UIMessage,
     WorkspaceScopePayload,
+  InboundEvent,
+  OutboundCliAppMention,
+  OutboundImageGeneration,
+  OutboundMcpPresetMention,
+  OutboundMedia,
+  GoalStateWsPayload,
+  ToolProgressEvent,
+  UIImage,
+  UIFileEdit,
+  UIMessage,
+  UITurnPhase,
+  WorkspaceScopePayload,
 } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -34,10 +46,32 @@ interface ActiveAssistantCursor {
 }
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string }
-  | { kind: "reasoning"; text: string };
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields }
+  | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
+
+type UIMessageTurnFields = Pick<UIMessage, "turnId" | "turnPhase" | "turnSeq">;
 
 const FILE_EDIT_TOOL_NAMES = new Set(["write_file", "edit_file", "apply_patch"]);
+
+function turnFieldsFromEvent(
+  ev: { turn_id?: string; turn_phase?: UITurnPhase; turn_seq?: number },
+  fallbackPhase?: UITurnPhase,
+): UIMessageTurnFields {
+  const fields: UIMessageTurnFields = {};
+  if (typeof ev.turn_id === "string" && ev.turn_id.length > 0) {
+    fields.turnId = ev.turn_id;
+  }
+  const phase = ev.turn_phase ?? fallbackPhase;
+  if (phase) fields.turnPhase = phase;
+  if (typeof ev.turn_seq === "number" && Number.isFinite(ev.turn_seq)) {
+    fields.turnSeq = ev.turn_seq;
+  }
+  return fields;
+}
+
+function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
+  return !turn.turnId || !message.turnId || message.turnId === turn.turnId;
+}
 
 /** Find a still-open streamed assistant turn. Closed stream segments stay visible
  * as streaming until ``turn_end`` for visual continuity, but they must not
@@ -45,11 +79,17 @@ const FILE_EDIT_TOOL_NAMES = new Set(["write_file", "edit_file", "apply_patch"])
 function findStreamingAssistantIndex(
   prev: UIMessage[],
   closedStreamIds: ReadonlySet<string>,
+  turn: UIMessageTurnFields = {},
 ): number | null {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const m = prev[i];
     if (m.kind === "trace") continue;
-    if (m.role === "assistant" && m.isStreaming && !closedStreamIds.has(m.id)) return i;
+    if (
+      m.role === "assistant"
+      && m.isStreaming
+      && !closedStreamIds.has(m.id)
+      && matchesTurn(m, turn)
+    ) return i;
     if (m.role === "user") break;
   }
   return null;
@@ -69,6 +109,7 @@ function attachReasoningChunk(
   segments?: {
     ensure: () => string;
   },
+  turn: UIMessageTurnFields = {},
 ): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
@@ -80,6 +121,7 @@ function attachReasoningChunk(
     // that produced those tool calls.
     if (candidate.kind === "trace") break;
     if (candidate.role !== "assistant") continue;
+    if (!matchesTurn(candidate, turn)) break;
     const activitySegmentId = candidate.activitySegmentId ?? segments?.ensure();
     const hasAnswer = candidate.content.length > 0;
     if (hasAnswer) break;
@@ -93,6 +135,7 @@ function attachReasoningChunk(
         reasoning: (candidate.reasoning ?? "") + chunk,
         reasoningStreaming: true,
         ...(activitySegmentId ? { activitySegmentId } : {}),
+        ...turn,
       };
       return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
     }
@@ -109,6 +152,7 @@ function attachReasoningChunk(
       reasoning: chunk,
       reasoningStreaming: true,
       ...(activitySegmentId ? { activitySegmentId } : {}),
+      ...turn,
       createdAt: Date.now(),
     },
   ];
@@ -122,12 +166,16 @@ function attachReasoningChunk(
  * the model already produced an answer in a previous turn, so the new
  * delta belongs in a fresh row.
  */
-function findActiveAssistantPlaceholderIndex(prev: UIMessage[]): number | null {
+function findActiveAssistantPlaceholderIndex(
+  prev: UIMessage[],
+  turn: UIMessageTurnFields = {},
+): number | null {
   const last = prev[prev.length - 1];
   if (!last) return null;
   if (last.role !== "assistant" || last.kind === "trace") return null;
   if (last.content.length > 0) return null;
   if (!last.isStreaming) return null;
+  if (!matchesTurn(last, turn)) return null;
   return prev.length - 1;
 }
 
@@ -187,10 +235,18 @@ function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
   });
 }
 
-function stampLastAssistantLatency(prev: UIMessage[], latencyMs: number): UIMessage[] {
+function stampLastAssistantLatency(
+  prev: UIMessage[],
+  latencyMs: number,
+  turnId?: string,
+): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const m = prev[i];
-    if (m.role === "assistant" && m.kind !== "trace") {
+    if (
+      m.role === "assistant"
+      && m.kind !== "trace"
+      && (!turnId || !m.turnId || m.turnId === turnId)
+    ) {
       const merged: UIMessage = { ...m, latencyMs, isStreaming: false };
       return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
     }
@@ -203,7 +259,7 @@ function absorbCompleteAssistantMessage(
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
 ): UIMessage[] {
   const last = prev[prev.length - 1];
-  if (!last || !isReasoningOnlyPlaceholder(last)) {
+  if (!last || !isReasoningOnlyPlaceholder(last) || !matchesTurn(last, message)) {
     return [
       ...prev,
       {
@@ -482,7 +538,10 @@ const clearPendingStreamWork = useCallback(() => {
     return !!closedStreamId;
   }, []);
 
-  const resolveActiveAssistantIndex = useCallback((prev: UIMessage[]): number | null => {
+  const resolveActiveAssistantIndex = useCallback((
+    prev: UIMessage[],
+    turn: UIMessageTurnFields = {},
+  ): number | null => {
     const cursor = activeAssistantRef.current;
     if (!cursor) return null;
     const indexed = prev[cursor.index];
@@ -491,6 +550,7 @@ const clearPendingStreamWork = useCallback(() => {
       && indexed.role === "assistant"
       && indexed.kind !== "trace"
       && indexed.isStreaming
+      && matchesTurn(indexed, turn)
     ) {
       return cursor.index;
     }
@@ -500,7 +560,12 @@ const clearPendingStreamWork = useCallback(() => {
       return null;
     }
     const found = prev[idx];
-    if (found.role !== "assistant" || found.kind === "trace" || !found.isStreaming) {
+    if (
+      found.role !== "assistant"
+      || found.kind === "trace"
+      || !found.isStreaming
+      || !matchesTurn(found, turn)
+    ) {
       activeAssistantRef.current = null;
       return null;
     }
@@ -509,15 +574,15 @@ const clearPendingStreamWork = useCallback(() => {
   }, []);
 
   const appendAnswerChunk = useCallback(
-    (prev: UIMessage[], chunk: string): UIMessage[] => {
+    (prev: UIMessage[], chunk: string, turn: UIMessageTurnFields = {}): UIMessage[] => {
       let next = prev;
-      let targetIndex = resolveActiveAssistantIndex(next);
+      let targetIndex = resolveActiveAssistantIndex(next, turn);
 
       if (targetIndex === null) {
-        targetIndex = findActiveAssistantPlaceholderIndex(next);
+        targetIndex = findActiveAssistantPlaceholderIndex(next, turn);
       }
       if (targetIndex === null) {
-        targetIndex = findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current);
+        targetIndex = findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current, turn);
       }
       if (targetIndex === null) {
         const id = crypto.randomUUID();
@@ -539,6 +604,7 @@ const clearPendingStreamWork = useCallback(() => {
         ...target,
         content: target.content + chunk,
         isStreaming: true,
+        ...turn,
       };
       closedAssistantStreamIdsRef.current.delete(merged.id);
       activeAssistantRef.current = { id: merged.id, index: targetIndex };
@@ -551,20 +617,17 @@ const clearPendingStreamWork = useCallback(() => {
   const applyPendingStreamEvents = useCallback(
     (prev: UIMessage[], events: PendingStreamEvent[]): UIMessage[] => {
       let next = prev;
-      for (let i = 0; i < events.length;) {
-        const kind = events[i].kind;
-        let text = "";
-        while (i < events.length && events[i].kind === kind) {
-          text += events[i].text;
-          i += 1;
-        }
-        if (kind === "delta") {
-          next = appendAnswerChunk(next, text);
+      for (const event of events) {
+        if (event.kind === "delta") {
+          next = appendAnswerChunk(next, event.text, event.turn);
         } else {
           if (closeActiveAssistantStream()) clearActivitySegment();
-          next = attachReasoningChunk(next, text, {
-            ensure: ensureActivitySegmentId,
-          });
+          next = attachReasoningChunk(
+            next,
+            event.text,
+            { ensure: ensureActivitySegmentId },
+            event.turn,
+          );
         }
       }
       return next;
@@ -575,6 +638,7 @@ const clearPendingStreamWork = useCallback(() => {
   const flushPendingStreamEvents = useCallback((options?: {
     closeAnswerSegment?: boolean;
     finalAnswerText?: string;
+    turn?: UIMessageTurnFields;
   }) => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
@@ -582,6 +646,7 @@ const clearPendingStreamWork = useCallback(() => {
     }
     const events = pendingStreamEventsRef.current;
     const finalAnswerText = options?.finalAnswerText;
+    const turn = options?.turn ?? {};
     if (events.length === 0 && finalAnswerText === undefined) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
@@ -591,14 +656,15 @@ const clearPendingStreamWork = useCallback(() => {
       let next = events.length > 0 ? applyPendingStreamEvents(prev, events) : prev;
       if (finalAnswerText !== undefined) {
         const targetIndex =
-          resolveActiveAssistantIndex(next)
-          ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current);
+          resolveActiveAssistantIndex(next, turn)
+          ?? findStreamingAssistantIndex(next, closedAssistantStreamIdsRef.current, turn);
           if (targetIndex !== null) {
             const target = next[targetIndex];
             next = replaceMessageAt(next, targetIndex, {
               ...target,
               content: finalAnswerText,
               isStreaming: true,
+              ...turn,
             });
           } else {
             const id = crypto.randomUUID();
@@ -610,6 +676,7 @@ const clearPendingStreamWork = useCallback(() => {
                 role: "assistant",
                 content: finalAnswerText,
                 isStreaming: true,
+                ...turn,
                 createdAt: Date.now(),
               },
             ];
@@ -679,7 +746,11 @@ const clearPendingStreamWork = useCallback(() => {
         if (!chunk) return;
         clearActivitySegment();
         setIsStreaming(true);
-        pendingStreamEventsRef.current.push({ kind: "delta", text: chunk });
+        pendingStreamEventsRef.current.push({
+          kind: "delta",
+          text: chunk,
+          turn: turnFieldsFromEvent(ev, "answer"),
+        });
         schedulePendingStreamFlush();
         return;
       }
@@ -690,7 +761,11 @@ const clearPendingStreamWork = useCallback(() => {
         if (!chunk) return;
         if (fileEditSegmentRef.current) clearActivitySegment();
         setIsStreaming(true);
-        pendingStreamEventsRef.current.push({ kind: "reasoning", text: chunk });
+        pendingStreamEventsRef.current.push({
+          kind: "reasoning",
+          text: chunk,
+          turn: turnFieldsFromEvent(ev, "reasoning"),
+        });
         schedulePendingStreamFlush();
         return;
       }
@@ -699,6 +774,7 @@ const clearPendingStreamWork = useCallback(() => {
         flushPendingStreamEvents({
           closeAnswerSegment: true,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
+          turn: turnFieldsFromEvent(ev, "answer"),
         });
         if (suppressStreamUntilTurnEndRef.current) return;
         // stream_end only means the text segment finished — the model may
@@ -751,7 +827,11 @@ const clearPendingStreamWork = useCallback(() => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
           finalized = pruneReasoningOnlyPlaceholders(finalized);
           if (typeof ev.latency_ms === "number" && ev.latency_ms >= 0) {
-            finalized = stampLastAssistantLatency(finalized, Math.round(ev.latency_ms));
+            finalized = stampLastAssistantLatency(
+              finalized,
+              Math.round(ev.latency_ms),
+              ev.turn_id,
+            );
           }
           buffer.current = null;
           activeAssistantRef.current = null;
@@ -778,9 +858,12 @@ const clearPendingStreamWork = useCallback(() => {
           const line = ev.text;
           if (!line) return;
           if (fileEditSegmentRef.current) clearActivitySegment();
-          setMessages((prev) => closeReasoningStream(attachReasoningChunk(prev, line, {
-            ensure: ensureActivitySegmentId,
-          })));
+          setMessages((prev) => closeReasoningStream(attachReasoningChunk(
+            prev,
+            line,
+            { ensure: ensureActivitySegmentId },
+            turnFieldsFromEvent(ev, "reasoning"),
+          )));
           return;
         }
         // Intermediate agent breadcrumbs (tool-call hints, raw progress).
@@ -788,6 +871,7 @@ const clearPendingStreamWork = useCallback(() => {
         // so a sequence of calls collapses into one compact trace group.
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
           const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
+          const turn = turnFieldsFromEvent(ev, "activity");
           setMessages((prev) => {
             const segmentId = ensureActivitySegmentId();
             const base = prev;
@@ -826,6 +910,7 @@ const clearPendingStreamWork = useCallback(() => {
                   ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
                   : last.toolEvents,
                 activitySegmentId: last.activitySegmentId ?? segmentId,
+                ...turn,
               };
               return [...base.slice(0, -1), merged];
             }
@@ -839,6 +924,7 @@ const clearPendingStreamWork = useCallback(() => {
                 traces: lines,
                 ...(visibleStructuredEvents.length ? { toolEvents: visibleStructuredEvents } : {}),
                 activitySegmentId: segmentId,
+                ...turn,
                 createdAt: Date.now(),
               },
             ];
@@ -870,6 +956,8 @@ const hasMedia = !!media && media.length > 0;
             content,
             ...(hasMedia ? { media } : {}),
             ...(lat !== undefined ? { latencyMs: lat } : {}),
+            ...(ev.source ? { source: ev.source } : {}),
+            ...turnFieldsFromEvent(ev, "answer"),
           });
         });
         if (hasMedia) {
@@ -882,6 +970,7 @@ const hasMedia = !!media && media.length > 0;
         if (edits.length === 0) return;
         const normalized = mergeFileEdits(undefined, edits);
         if (normalized.length === 0) return;
+        const turn = turnFieldsFromEvent(ev, "activity");
         const opensFileEditPhase = normalized.some(
           (edit) => edit.status === "editing" || edit.phase === "start",
         );
@@ -903,6 +992,7 @@ const hasMedia = !!media && media.length > 0;
               ...cleanedTarget,
               fileEdits: mergeFileEdits(cleanedTarget.fileEdits, normalized),
               activitySegmentId: segmentId,
+              ...turn,
             };
             return replaceMessageAt(base, targetIndex, merged);
           }
@@ -918,6 +1008,7 @@ const hasMedia = !!media && media.length > 0;
               traces: [],
               fileEdits: normalized,
               activitySegmentId: segmentId,
+              ...turn,
               createdAt: Date.now(),
             },
           ];
@@ -962,6 +1053,8 @@ const hasMedia = !!media && media.length > 0;
       if (!hasImages && !content.trim()) return;
 
 flushPendingStreamEvents();
+      flushPendingStreamEvents();
+      const turnId = crypto.randomUUID();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
         buffer.current = null;
@@ -974,6 +1067,9 @@ flushPendingStreamEvents();
             id: crypto.randomUUID(),
             role: "user",
             content,
+            turnId,
+            turnPhase: "user",
+            turnSeq: 0,
             createdAt: Date.now(),
             ...(previews ? { images: previews } : {}),
             ...(options?.cliApps?.length ? { cliApps: options.cliApps } : {}),
@@ -985,11 +1081,7 @@ flushPendingStreamEvents();
       // right away, before the first delta arrives from the server.
       setIsStreaming(true);
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
-      if (options) {
-        client.sendMessage(chatId, content, wireMedia, options);
-      } else {
-        client.sendMessage(chatId, content, wireMedia);
-      }
+      client.sendMessage(chatId, content, wireMedia, { ...options, turnId });
     },
     [chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );

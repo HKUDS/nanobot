@@ -25,12 +25,31 @@ def map_finish_reason(status: str | None) -> str:
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
+def _usage_from_response_obj(response: Any) -> dict[str, int]:
+    usage_raw = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    if not usage_raw:
+        return {}
+    if not isinstance(usage_raw, dict):
+        dump = getattr(usage_raw, "model_dump", None)
+        usage_raw = dump() if callable(dump) else vars(usage_raw)
+    prompt_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0)
+    completion_tokens = int(
+        usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0
+    )
+    total_tokens = int(usage_raw.get("total_tokens") or prompt_tokens + completion_tokens)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
     """Yield parsed JSON events from a Responses API SSE stream."""
     buffer: list[str] = []
 
     def _flush() -> dict[str, Any] | None:
-        data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+        data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
         buffer.clear()
         if not data_lines:
             return None
@@ -65,7 +84,7 @@ async def consume_sse(
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str]:
     """Consume a Responses API SSE stream into ``(content, tool_calls, finish_reason)``."""
-    content, tool_calls, finish_reason, _ = await consume_sse_with_reasoning(
+    content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
         response,
         on_content_delta=on_content_delta,
         on_tool_call_delta=on_tool_call_delta,
@@ -78,13 +97,14 @@ async def consume_sse_with_reasoning(
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
-) -> tuple[str, list[ToolCallRequest], str, str | None]:
+) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
     """Consume a Responses API SSE stream, including visible reasoning summaries."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason = "stop"
+    usage: dict[str, int] = {}
     reasoning_content: str | None = None
     streamed_reasoning = False
 
@@ -198,6 +218,7 @@ async def consume_sse_with_reasoning(
             response_obj = event.get("response") or {}
             status = response_obj.get("status")
             finish_reason = map_finish_reason(status)
+            usage = _usage_from_response_obj(response_obj) or usage
             if not reasoning_content:
                 summary = _extract_reasoning_summary_from_output(response_obj.get("output") or [])
                 if summary:
@@ -208,7 +229,7 @@ async def consume_sse_with_reasoning(
             detail = event.get("error") or event.get("message") or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
-    return content, tool_calls, finish_reason, reasoning_content
+    return content, tool_calls, finish_reason, usage, reasoning_content
 
 
 def _extract_reasoning_summary_from_output(output: Any) -> str | None:
@@ -280,17 +301,7 @@ def parse_response_output(response: Any) -> LLMResponse:
                 arguments=args if isinstance(args, dict) else {},
             ))
 
-    usage_raw = response.get("usage") or {}
-    if not isinstance(usage_raw, dict):
-        dump = getattr(usage_raw, "model_dump", None)
-        usage_raw = dump() if callable(dump) else vars(usage_raw)
-    usage = {}
-    if usage_raw:
-        usage = {
-            "prompt_tokens": int(usage_raw.get("input_tokens") or 0),
-            "completion_tokens": int(usage_raw.get("output_tokens") or 0),
-            "total_tokens": int(usage_raw.get("total_tokens") or 0),
-        }
+    usage = _usage_from_response_obj(response)
 
     status = response.get("status")
     finish_reason = map_finish_reason(status)

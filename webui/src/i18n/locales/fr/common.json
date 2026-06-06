@@ -54,7 +54,10 @@
       "label": "Langue",
       "ariaLabel": "Changer de langue"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Compétences"
+    }
   },
   "settings": {
     "backToChat": "Retour au chat",
@@ -75,7 +78,8 @@
       "advanced": "Sécurité",
       "cliApps": "Apps CLI",
       "mcp": "MCP",
-      "apps": "Applications"
+      "apps": "Applications",
+      "skills": "Compétences"
     },
     "sections": {
       "interface": "Interface utilisateur",
@@ -187,6 +191,9 @@
       "disabled": "Désactivé",
       "restartPending": "Redémarrage en attente",
       "ready": "Prêt",
+      "privateEngine": "Moteur privé",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Espace par défaut",
       "comfortable": "Confortable",
       "compact": "Compacte",
       "auto": "Automatique",
@@ -277,6 +284,31 @@
       "webSearch": "Recherche web",
       "imageGeneration": "Génération d’images",
       "workspace": "Espace de travail"
+    },
+    "usage": {
+      "title": "Activité des tokens",
+      "shortTitle": "Token Usage",
+      "subtitle": "Usage signalé par le fournisseur sur les 12 derniers mois.",
+      "empty": "L’activité des tokens apparaîtra après les nouvelles réponses du modèle.",
+      "totalTokens": "Tokens cumulés",
+      "peakTokens": "Pic de tokens",
+      "thirtyDayTokens": "Tokens sur 30 jours",
+      "currentStreak": "Série actuelle",
+      "longestStreak": "Plus longue série",
+      "daysValue": "{{count}} j",
+      "last30": "30 jours",
+      "activeDays": "Jours actifs",
+      "requests": "Requêtes",
+      "estimated": "estimé",
+      "includesEstimates": "inclut des estimations",
+      "cellTitle": "{{date}} : {{tokens}} tokens, {{requests}} requêtes",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automatisations",
+        "dream": "Mémoire",
+        "system": "Système"
+      }
     },
     "providers": {
       "searchPlaceholder": "Rechercher des fournisseurs",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Connecté",
       "notSignedIn": "Non connecté"
+    },
+    "skills": {
+      "description": "Consultez les compétences d’instruction que cet agent peut charger pendant une conversation.",
+      "caption": "{{available}} disponibles · {{total}} au total",
+      "featured": "Compétences agent",
+      "empty": "Aucune compétence disponible.",
+      "sourceWorkspace": "Personnalisée",
+      "sourceBuiltin": "Intégrée",
+      "statusAvailable": "Disponible",
+      "statusUnavailable": "Indisponible",
+      "unavailableReason": "Manquant : {{reason}}",
+      "openDetails": "Ouvrir les détails de {{name}}",
+      "loadingDetail": "Chargement des détails...",
+      "loadFailed": "Impossible de charger les détails.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Statut",
+      "requirements": "Prérequis",
+      "noRequirements": "Aucun prérequis explicite.",
+      "commands": "Commandes",
+      "environment": "Variables d’environnement",
+      "missingCommands": "CLI manquant",
+      "missingEnvironment": "ENV manquant",
+      "unavailableReasonLabel": "Raison d’indisponibilité",
+      "rawInstructions": "SKILL.md brut",
+      "rawInstructionsEmpty": "Aucune instruction brute.",
+      "detailDescription": "Détails de {{name}}."
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "Afficher ou masquer la barre latérale",
       "newChat": "Démarrer un nouveau chat",
       "toggleTheme": "Changer le thème depuis l’en-tête",
-      "settings": "Ouvrir les paramètres"
+      "settings": "Ouvrir les paramètres",
+      "sessionInfo": "Détails de la session"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Chat sans titre",
+      "automations": "Automatisations",
+      "count": "{{count}}",
+      "loading": "Chargement des automatisations...",
+      "loadFailed": "Impossible de charger les automatisations.",
+      "empty": "Aucune automatisation dans cette session pour le moment.",
+      "disabled": "Désactivé",
+      "schedule": {
+        "at": "À {{time}}",
+        "every": "Toutes les {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Planification personnalisée"
+      },
+      "next": {
+        "label": "Prochaine {{time}}",
+        "disabled": "En pause",
+        "none": "Aucune prochaine exécution"
+      }
     },
     "composer": {
       "placeholderThread": "Saisissez votre message…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "Fermer l’objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "modelNotConfigured": "Modèle non configuré",
+      "configureModel": "Configurer le modèle",
       "queued": {
         "label": "Guidage en attente",
         "guide": "Guider",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "Faire défiler vers le bas",
-    "loadEarlier": "Charger les messages précédents"
+    "loadEarlier": "Charger les messages précédents",
+    "promptNavigator": {
+      "open": "Ouvrir le navigateur de prompts",
+      "title": "Prompts",
+      "search": "Rechercher des prompts",
+      "noResults": "Aucun prompt correspondant.",
+      "jumpTo": "Aller au prompt : {{label}}"
+    }
   },
   "message": {
     "streaming": "en cours de génération",
@@ -724,7 +815,9 @@
     "cliActivityFailedMany": "Échec de {{count}} apps CLI",
     "cliRunRunning": "Utilisation",
     "cliRunRan": "Utilisé",
-    "cliRunFailed": "Échec"
+    "cliRunFailed": "Échec",
+    "automationSourceFallback": "Automatisation",
+    "automationTriggered": "Déclenché automatiquement"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
@@ -732,6 +825,15 @@
     "prev": "Image précédente",
     "next": "Image suivante",
     "close": "Fermer l’aperçu"
+  },
+  "filePreview": {
+    "aria": "Aperçu du fichier",
+    "close": "Fermer l’aperçu du fichier",
+    "loading": "Chargement de l’aperçu...",
+    "failed": "Impossible de prévisualiser ce fichier.",
+    "routeMissing": "L’aperçu du fichier nécessite le dernier gateway. Redémarrez nanobot gateway puis réessayez.",
+    "resize": "Redimensionner l’aperçu du fichier",
+    "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },
   "code": {
     "fallbackLanguage": "code",

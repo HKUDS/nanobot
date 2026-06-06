@@ -4,6 +4,8 @@ export type Role = "user" | "assistant" | "tool" | "system";
  * progress pings) that should not be rendered as conversational replies. */
 export type MessageKind = "message" | "trace";
 
+export type UITurnPhase = "user" | "reasoning" | "activity" | "answer" | "complete";
+
 /** One image attached to a UIMessage.
  *
  * ``url`` can arrive in three different shapes, which the bubble renders
@@ -29,6 +31,8 @@ export interface UIMediaAttachment {
   url?: string;
   name?: string;
 }
+
+export interface UIMessageSource { kind: "cron"; label?: string; }
 
 export interface UIMessage {
   id: string;
@@ -64,6 +68,12 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+  /** Lightweight provenance for proactive assistant messages. */
+  source?: UIMessageSource;
+  /** Stable protocol metadata for grouping all activity emitted by one user turn. */
+  turnId?: string;
+  turnPhase?: UITurnPhase;
+  turnSeq?: number;
 }
 
 export interface UICliAppAttachment {
@@ -85,6 +95,50 @@ export interface UIMcpPresetAttachment {
   logo_url?: string | null;
   brand_color?: string | null;
 }
+
+export interface SessionAutomationJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: {
+    kind: "at" | "every" | "cron" | string;
+    at_ms?: number | null;
+    every_ms?: number | null;
+    expr?: string | null;
+    tz?: string | null;
+  };
+  payload: {
+    message: string;
+  };
+  state: {
+    next_run_at_ms?: number | null;
+    last_status?: "ok" | "error" | "skipped" | string | null;
+  };
+}
+
+export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  source: "workspace" | "builtin" | string;
+  available: boolean;
+  unavailable_reason?: string;
+}
+
+export interface SkillRequirements {
+  bins: string[];
+  env: string[];
+  missing_bins: string[];
+  missing_env: string[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  requirements: SkillRequirements;
+  raw_markdown: string;
+}
+
+export interface SkillsPayload { skills: SkillSummary[]; }
 
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
@@ -352,6 +406,43 @@ export interface SettingsPayload {
     };
     unified_session: boolean;
   };
+  usage?: {
+    days: Array<{
+      date: string;
+      prompt_tokens: number;
+      completion_tokens: number;
+      cached_tokens: number;
+      total_tokens: number;
+      provider_tokens?: number;
+      estimated_tokens?: number;
+      requests: number;
+      provider_requests?: number;
+      estimated_requests?: number;
+      sources?: Record<
+        "user" | "api" | "cron" | "dream" | "system" | string,
+        {
+          prompt_tokens: number;
+          completion_tokens: number;
+          cached_tokens: number;
+          total_tokens: number;
+          provider_tokens?: number;
+          estimated_tokens?: number;
+          requests: number;
+          provider_requests?: number;
+          estimated_requests?: number;
+        }
+      >;
+    }>;
+    total_tokens: number;
+    total_tokens_30d: number;
+    total_tokens_365d: number;
+    peak_day_tokens: number;
+    current_streak_days: number;
+    longest_streak_days: number;
+    active_days_30d: number;
+    requests_30d: number;
+    updated_at?: string | null;
+  };
   advanced: {
     restrict_to_workspace: boolean;
     workspace_sandbox?: {
@@ -605,10 +696,16 @@ export type ConnectionStatus =
   | "closed"
   | "error";
 
+export interface InboundTurnMetadata {
+  turn_id?: string;
+  turn_phase?: UITurnPhase;
+  turn_seq?: number;
+}
+
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
-  | {
+  | ({
       event: "message";
       chat_id: string;
       text: string;
@@ -621,49 +718,51 @@ export type InboundEvent =
       kind?: "tool_hint" | "progress" | "reasoning";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
+      /** Lightweight provenance for proactive assistant messages. */
+      source?: UIMessageSource;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "file_edit";
       chat_id: string;
       edits: UIFileEdit[];
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "delta";
       chat_id: string;
       text: string;
       stream_id?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "reasoning_delta";
       chat_id: string;
       text: string;
       stream_id?: string;
-    }
-  | {
+    } & InboundTurnMetadata)
+  | ({
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
       model_name: string;
       model_preset?: string | null;
     }
-  | {
+  | ({
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
-    }
+    } & InboundTurnMetadata)
   | {
       event: "goal_status";
       chat_id: string;
@@ -732,6 +831,16 @@ export interface WebuiThreadPersistedPayload {
   workspace_scope?: WorkspaceScopePayload;
 }
 
+export interface FilePreviewPayload {
+  path: string;
+  display_path: string;
+  project_path: string;
+  language: string;
+  content: string;
+  size: number;
+  truncated: boolean;
+}
+
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "attach"; chat_id: string }
@@ -745,6 +854,7 @@ export type Outbound =
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       workspace_scope?: WorkspaceScopePayload;
+      turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

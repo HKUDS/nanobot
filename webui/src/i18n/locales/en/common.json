@@ -54,7 +54,10 @@
       "label": "Language",
       "ariaLabel": "Change language"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Skills"
+    }
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -75,7 +78,8 @@
       "mcp": "MCP",
       "runtime": "System",
       "advanced": "Security",
-      "apps": "Apps"
+      "apps": "Apps",
+      "skills": "Skills"
     },
     "sections": {
       "interface": "Interface",
@@ -295,6 +299,9 @@
       "disabled": "Disabled",
       "restartPending": "Restart pending",
       "ready": "Ready",
+      "privateEngine": "Private engine",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "Default workspace",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -386,6 +393,31 @@
       "imageGeneration": "Image generation",
       "workspace": "Workspace"
     },
+    "usage": {
+      "title": "Token activity",
+      "shortTitle": "Token Usage",
+      "subtitle": "Provider-reported usage over the last 12 months.",
+      "empty": "Token activity will appear after new model replies.",
+      "totalTokens": "Total tokens",
+      "peakTokens": "Peak tokens",
+      "thirtyDayTokens": "30-day tokens",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "daysValue": "{{count}}d",
+      "last30": "30 days",
+      "activeDays": "Active days",
+      "requests": "Requests",
+      "estimated": "estimated",
+      "includesEstimates": "includes estimates",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automations",
+        "dream": "Memory",
+        "system": "System"
+      }
+    },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in"
+    },
+    "skills": {
+      "description": "Review the instruction skills this agent can load during a conversation.",
+      "caption": "{{available}} available · {{total}} total",
+      "featured": "Agent skills",
+      "empty": "No skills are available.",
+      "sourceWorkspace": "Custom",
+      "sourceBuiltin": "Built-in",
+      "statusAvailable": "Available",
+      "statusUnavailable": "Unavailable",
+      "unavailableReason": "Missing: {{reason}}",
+      "openDetails": "Open details for {{name}}",
+      "loadingDetail": "Loading skill details...",
+      "loadFailed": "Could not load skill details.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Status",
+      "requirements": "Requirements",
+      "noRequirements": "No explicit requirements.",
+      "commands": "Commands",
+      "environment": "Environment variables",
+      "missingCommands": "Missing CLI",
+      "missingEnvironment": "Missing ENV",
+      "unavailableReasonLabel": "Unavailable reason",
+      "rawInstructions": "Raw SKILL.md",
+      "rawInstructionsEmpty": "No raw instructions.",
+      "detailDescription": "Details for {{name}}."
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "Toggle sidebar",
       "newChat": "Start a new chat",
       "toggleTheme": "Toggle theme from header",
-      "settings": "Open settings"
+      "settings": "Open settings",
+      "sessionInfo": "Session details"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Untitled chat",
+      "automations": "Automations",
+      "count": "{{count}}",
+      "loading": "Loading automations...",
+      "loadFailed": "Could not load automations.",
+      "empty": "No automations in this session yet.",
+      "disabled": "Off",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "Every {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Custom schedule"
+      },
+      "next": {
+        "label": "{{time}}",
+        "disabled": "Paused",
+        "none": "No next run"
+      }
     },
     "composer": {
       "placeholderThread": "Type your message…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
+      "modelNotConfigured": "Model not configured",
+      "configureModel": "Configure model",
       "queued": {
         "label": "Queued guidance",
         "guide": "Guide",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "Scroll to bottom",
-    "loadEarlier": "Load earlier messages"
+    "loadEarlier": "Load earlier messages",
+    "promptNavigator": {
+      "open": "Open prompt navigator",
+      "title": "Prompts",
+      "search": "Search prompts",
+      "noResults": "No matching prompts.",
+      "jumpTo": "Jump to prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "streaming",
@@ -722,6 +813,8 @@
     "cliRunRan": "Used",
     "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
+    "automationSourceFallback": "Automation",
+    "automationTriggered": "Triggered automatically",
     "copyReply": "Copy reply",
     "copiedReply": "Copied reply",
     "turnLatencyTitle": "Response time (end-to-end)"
@@ -732,6 +825,15 @@
     "prev": "Previous image",
     "next": "Next image",
     "close": "Close image preview"
+  },
+  "filePreview": {
+    "aria": "File preview",
+    "close": "Close file preview",
+    "loading": "Loading preview...",
+    "failed": "Could not preview this file.",
+    "routeMissing": "File preview needs the latest gateway. Restart nanobot gateway and try again.",
+    "resize": "Resize file preview",
+    "truncated": "Preview is truncated because this file is large."
   },
   "code": {
     "fallbackLanguage": "code",

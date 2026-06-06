@@ -94,6 +94,8 @@ interface ThreadComposerProps {
   modelLabel?: string | null;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
+  modelNeedsSetup?: boolean;
+  onModelBadgeClick?: () => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
@@ -647,6 +649,8 @@ export function ThreadComposer({
   modelLabel = null,
   modelProvider = null,
   modelProviderLabel = null,
+  modelNeedsSetup = false,
+  onModelBadgeClick,
   variant = "thread",
   slashCommands = [],
   cliApps = [],
@@ -759,17 +763,21 @@ export function ThreadComposer({
   );
   const hasErrors = images.some((img) => img.status === "error");
 
+  const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
     !disabled
+    && !modelNeedsSetup
     && !encoding
     && !hasErrors
-    && (value.trim().length > 0 || readyImages.length > 0);
+    && hasComposerContent;
+  const canOpenModelSettings = Boolean(modelNeedsSetup && onModelBadgeClick && !disabled);
   const canQueueGuidance =
     isStreaming
     && !disabled
+    && !modelNeedsSetup
     && !encoding
     && !hasErrors
-    && (value.trim().length > 0 || readyImages.length > 0)
+    && hasComposerContent
     && !value.trimStart().startsWith("/");
 
   const slashQuery = useMemo(() => {
@@ -1181,6 +1189,10 @@ export function ThreadComposer({
   }, [onStop, queuedPrompts.length]);
 
   const submit = useCallback(() => {
+    if (modelNeedsSetup) {
+      onModelBadgeClick?.();
+      return;
+    }
     if (!canSend) return;
     const trimmed = value.trim();
     const content = trimmed;
@@ -1219,6 +1231,8 @@ export function ThreadComposer({
     canSend,
     clear,
     clearComposerText,
+    modelNeedsSetup,
+    onModelBadgeClick,
     onSend,
     readyImages,
     value,
@@ -1533,24 +1547,32 @@ export function ThreadComposer({
                 label={modelLabel}
                 provider={modelProvider}
                 providerLabel={modelProviderLabel}
+                needsSetup={modelNeedsSetup}
                 isHero={isHero}
+                onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
             ) : null}
             <Button
-              type={showStopButton ? "button" : "submit"}
+              type={showStopButton || modelNeedsSetup ? "button" : "submit"}
               size="icon"
-              disabled={showStopButton ? disabled : !canSend}
-              aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
-              onClick={showStopButton ? handleStop : undefined}
+              disabled={showStopButton ? disabled : !canSend && !canOpenModelSettings}
+              aria-label={
+                showStopButton
+                  ? t("thread.composer.stop")
+                  : modelNeedsSetup
+                    ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
+                    : t("thread.composer.send")
+              }
+              onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
                 "rounded-full transition-transform",
                 showStopButton
                   ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero
-                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
-                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
+                    ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground disabled:bg-foreground disabled:text-background"
+                    : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground disabled:bg-foreground disabled:text-background",
                 isHero ? "h-8 w-8" : "h-9 w-9",
-                (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
+                (canSend || canOpenModelSettings || showStopButton) && "hover:scale-[1.03] active:scale-95",
               )}
             >
               {showStopButton ? (
@@ -1766,44 +1788,59 @@ function ComposerModelBadge({
   label,
   provider,
   providerLabel,
+  needsSetup,
   isHero,
+  onClick,
 }: {
   label: string;
   provider?: string | null;
   providerLabel?: string | null;
+  needsSetup?: boolean;
   isHero: boolean;
+  onClick?: () => void;
 }) {
-  const inferredProvider = provider || inferProviderFromModelName(label);
+  const inferredProvider = needsSetup ? null : provider || inferProviderFromModelName(label);
   const brand = providerBrand(inferredProvider);
   const [logoIndex, setLogoIndex] = useState(0);
   const logoUrl = brand?.logoUrls[logoIndex];
   const showLogo = !!logoUrl;
   const title = providerLabel ? `${label} · ${providerLabel}` : label;
+  const interactive = Boolean(onClick);
+  const Container = interactive ? "button" : "span";
 
   useEffect(() => setLogoIndex(0), [inferredProvider]);
 
   return (
-    <span
+    <Container
       title={title}
+      type={interactive ? "button" : undefined}
+      onClick={onClick}
       className={cn(
         "inline-flex min-w-0 items-center rounded-full border border-border/55 bg-card font-medium text-foreground/82",
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
+        interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
+        needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
         isHero ? "h-8 max-w-[12.5rem] gap-1.5 px-2 text-[11.5px]" : "h-9 max-w-[12rem] gap-2 px-2.5 text-[12px]",
       )}
     >
       <span
-        data-testid={inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
+        data-testid={needsSetup ? "composer-model-setup-icon" : inferredProvider ? `composer-model-logo-${inferredProvider}` : "composer-model-logo"}
         className={cn(
-          "grid shrink-0 place-items-center overflow-hidden rounded-full border bg-background",
+          "grid shrink-0 place-items-center overflow-hidden",
+          needsSetup
+            ? "text-amber-800 dark:text-amber-200"
+            : "rounded-full border bg-background",
           isHero ? "h-[18px] w-[18px]" : "h-5 w-5",
         )}
         style={{
-          borderColor: brand ? `${brand.color}28` : undefined,
-          boxShadow: brand ? `inset 0 0 0 1px ${brand.color}18` : undefined,
+          borderColor: !needsSetup && brand ? `${brand.color}28` : undefined,
+          boxShadow: !needsSetup && brand ? `inset 0 0 0 1px ${brand.color}18` : undefined,
         }}
         aria-hidden
       >
-        {showLogo ? (
+        {needsSetup ? (
+          <CircleHelp className={cn(isHero ? "h-3 w-3" : "h-3.5 w-3.5")} strokeWidth={1.8} />
+        ) : showLogo ? (
           <img
             src={logoUrl}
             alt=""
@@ -1825,7 +1862,7 @@ function ComposerModelBadge({
         )}
       </span>
       <span className="truncate">{label}</span>
-    </span>
+    </Container>
   );
 }
 

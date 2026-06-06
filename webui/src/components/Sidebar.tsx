@@ -5,6 +5,13 @@ import {
     Search,
     Settings,
     SquarePen,
+  Archive,
+  Brain,
+  Menu,
+  Search,
+  Settings,
+  SquarePen,
+  Blocks,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -34,8 +41,9 @@ interface SidebarProps {
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
   onOpenApps: () => void;
+  onOpenSkills: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | null;
+  activeUtility?: "apps" | "skills" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -156,6 +164,13 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenApps}
           active={props.activeUtility === "apps"}
           icon={<Blocks className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.skills.title")}
+          onClick={props.onOpenSkills}
+          active={props.activeUtility === "skills"}
+          icon={<Brain className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton

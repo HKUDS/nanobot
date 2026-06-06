@@ -32,6 +32,7 @@
 </div>
 
 🐈 **blackcat** is an open-source, ultra-lightweight agent runtime for people who want to own their AI agent stack. It gives you a small, readable core plus the practical pieces for real long-running agents: WebUI, chat channels, tools, memory, MCP, model routing, and deployment.
+🐈 **blackcat** is an open-source, ultra-lightweight personal AI agent you can truly own. It keeps the agent core small and readable while giving you the practical pieces for real long-running work: WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
 
 ## 📢 News
 
@@ -161,7 +162,7 @@
 
 Black Cat is a **local-first autonomous cognitive agent**. Not a chatbot — a continuously running artificial cognition with self-reflection, persistent memory, trust-based behavior, and multi-channel communication.
 
-Built on lightweight [nanobot](https://github.com/HKUDS/blackcat), extended with consciousness architecture and code intelligence.
+Built on lightweight [blackcat](https://github.com/HKUDS/blackcat), extended with consciousness architecture and code intelligence.
 
 ![Black Cat](images/blackcat.png)
 

@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
@@ -10,6 +10,67 @@ describe("MarkdownTextRenderer", () => {
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+  });
+
+  it("renders local file links as previewable file references", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
+      </MarkdownTextRenderer>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    expect(reference).toHaveTextContent("hook.py");
+    expect(reference).toHaveAttribute(
+      "aria-label",
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).toHaveBeenCalledWith(
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+  });
+
+  it("does not treat non-file hrefs as previews just because the label looks like a file", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Download [index.html](/api/media/sig/html)"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "index.html" })).toHaveAttribute(
+      "href",
+      "/api/media/sig/html",
+    );
+  });
+
+  it("renders glob file links as plain text instead of preview targets", () => {
+    const onOpenFilePreview = vi.fn();
+    const { container } = render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"原始对话通常还在 [*.json](*.json)。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "*.json" })).not.toBeInTheDocument();
+    expect(container).toHaveTextContent("*.json");
+  });
+
+  it("keeps glob inline code as code instead of a file preview chip", () => {
+    render(
+      <MarkdownTextRenderer>
+        {"检查 `src/**/*.json`。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
   it("does not wrap complete fenced code blocks in an extra pre", () => {
@@ -115,6 +176,42 @@ describe("MarkdownTextRenderer", () => {
         name: "Open link: Polymarket — When will GPT-5.6 be released?",
       }),
     ).toHaveAttribute("href", "https://polymarket.com/event/when-will-gpt-5pt6-be-released");
+  });
+
+  it("falls back through favicon sources before showing a globe for compact link rows", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "Useful links:\n\n- Savills Hong Kong Corporate Relocation — Corporate relocation services\n  https://www.savills.com.hk/services/corporate-relocation.aspx"
+        }
+      </MarkdownTextRenderer>,
+    );
+    const link = screen.getByRole("link", {
+      name: "Open link: Savills Hong Kong Corporate Relocation — Corporate relocation services",
+    });
+    const favicon = () => link.querySelector("img");
+
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://www.savills.com.hk/favicon.ico",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://icons.duckduckgo.com/ip3/www.savills.com.hk.ico",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://www.google.com/s2/favicons?domain=www.savills.com.hk&sz=64",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).not.toBeInTheDocument();
+    expect(link.querySelector("svg")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("SC");
   });
 
   it("renders media attachments without an extra preview/code wrapper", () => {

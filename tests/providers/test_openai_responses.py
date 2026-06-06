@@ -477,7 +477,7 @@ class TestConsumeSse:
         async def on_reasoning(delta: str) -> None:
             deltas.append(delta)
 
-        content, tool_calls, finish_reason, reasoning = await consume_sse_with_reasoning(
+        content, tool_calls, finish_reason, usage, reasoning = await consume_sse_with_reasoning(
             response,
             on_reasoning_delta=on_reasoning,
         )
@@ -485,6 +485,7 @@ class TestConsumeSse:
         assert content == "answer"
         assert tool_calls == []
         assert finish_reason == "stop"
+        assert usage == {}
         assert reasoning == "thinking briefly"
         assert deltas == ["thinking ", "briefly"]
 
@@ -505,7 +506,7 @@ class TestConsumeSse:
             },
         ])
 
-        _, _, _, reasoning = await consume_sse_with_reasoning(response)
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
         assert reasoning == "cached summary"
 
@@ -526,7 +527,7 @@ class TestConsumeSse:
         async def on_reasoning(delta: str) -> None:
             deltas.append(delta)
 
-        _, _, _, reasoning = await consume_sse_with_reasoning(
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
             response,
             on_reasoning_delta=on_reasoning,
         )
@@ -544,9 +545,25 @@ class TestConsumeSse:
             {"type": "response.completed", "response": {"status": "completed"}},
         ])
 
-        _, _, _, reasoning = await consume_sse_with_reasoning(response)
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
         assert reasoning == "part summary"
+
+    @pytest.mark.asyncio
+    async def test_raw_sse_usage_extracted(self):
+        response = _SseResponse([
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                },
+            },
+        ])
+
+        _, _, _, usage, _ = await consume_sse_with_reasoning(response)
+
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):

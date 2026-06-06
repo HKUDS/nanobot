@@ -592,16 +592,16 @@ async def test_internal_continuation_queues_turn_without_fake_user_history(
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                "max_iterations",
-                False,
-            )
+                    "max_iterations",
+                    False,
+                )
         return (
             "done",
             [],
             [*initial_messages, {"role": "assistant", "content": "done"}],
-            "completed",
-            False,
-        )
+                "completed",
+                False,
+            )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
     pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
@@ -665,9 +665,9 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                "max_iterations",
-                False,
-            )
+                    "max_iterations",
+                    False,
+                )
         assert on_stream is not None
         assert on_stream_end is not None
         await on_stream("done")
@@ -744,9 +744,9 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
                 "paused",
                 [],
                 [*initial_messages, {"role": "assistant", "content": "paused"}],
-                "max_iterations",
-                False,
-            )
+                    "max_iterations",
+                    False,
+                )
         return (
             "done",
             [],

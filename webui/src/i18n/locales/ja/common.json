@@ -54,7 +54,10 @@
       "label": "言語",
       "ariaLabel": "言語を変更"
     },
-    "apps": "アプリ"
+    "apps": "アプリ",
+    "skills": {
+      "title": "スキル"
+    }
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -75,7 +78,8 @@
       "advanced": "セキュリティ",
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
-      "apps": "アプリ"
+      "apps": "アプリ",
+      "skills": "スキル"
     },
     "sections": {
       "interface": "インターフェース",
@@ -187,6 +191,9 @@
       "disabled": "無効",
       "restartPending": "再起動待ち",
       "ready": "準備完了",
+      "privateEngine": "プライベートエンジン",
+      "unixSocket": "Unix ソケット",
+      "defaultWorkspace": "デフォルトワークスペース",
       "comfortable": "標準",
       "compact": "コンパクト",
       "auto": "自動",
@@ -277,6 +284,31 @@
       "webSearch": "Web 検索",
       "imageGeneration": "画像生成",
       "workspace": "ワークスペース"
+    },
+    "usage": {
+      "title": "Token アクティビティ",
+      "shortTitle": "Token Usage",
+      "subtitle": "直近 12 か月にプロバイダーが報告した使用量。",
+      "empty": "新しいモデル返信の後に token アクティビティが表示されます。",
+      "totalTokens": "累計 Token 数",
+      "peakTokens": "ピーク Token 数",
+      "thirtyDayTokens": "30 日 Token 数",
+      "currentStreak": "現在の連続日数",
+      "longestStreak": "最長連続日数",
+      "daysValue": "{{count}} 日",
+      "last30": "30 日",
+      "activeDays": "アクティブ日数",
+      "requests": "リクエスト",
+      "estimated": "推定",
+      "includesEstimates": "推定を含む",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} 件のリクエスト",
+      "sources": {
+        "user": "チャット",
+        "api": "API",
+        "cron": "自動タスク",
+        "dream": "メモリ整理",
+        "system": "システム"
+      }
     },
     "providers": {
       "searchPlaceholder": "プロバイダーを検索",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
       "signedIn": "サインイン済み",
       "notSignedIn": "未サインイン"
+    },
+    "skills": {
+      "description": "このエージェントが会話中に読み込める指示スキルを確認します。",
+      "caption": "{{available}} 利用可能 · 合計 {{total}}",
+      "featured": "エージェントスキル",
+      "empty": "利用可能なスキルはありません。",
+      "sourceWorkspace": "カスタム",
+      "sourceBuiltin": "組み込み",
+      "statusAvailable": "利用可能",
+      "statusUnavailable": "利用不可",
+      "unavailableReason": "不足: {{reason}}",
+      "openDetails": "{{name}} の詳細を開く",
+      "loadingDetail": "スキル詳細を読み込み中...",
+      "loadFailed": "スキル詳細を読み込めませんでした。",
+      "descriptionTitle": "説明",
+      "source": "ソース",
+      "status": "状態",
+      "requirements": "要件",
+      "noRequirements": "明示的な要件はありません。",
+      "commands": "コマンド",
+      "environment": "環境変数",
+      "missingCommands": "CLI 不足",
+      "missingEnvironment": "ENV 不足",
+      "unavailableReasonLabel": "利用不可の理由",
+      "rawInstructions": "元の SKILL.md",
+      "rawInstructionsEmpty": "元の説明はありません。",
+      "detailDescription": "{{name}} の詳細。"
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "サイドバーを切り替える",
       "newChat": "新しいチャットを開始",
       "toggleTheme": "ヘッダーからテーマを切り替える",
-      "settings": "設定を開く"
+      "settings": "設定を開く",
+      "sessionInfo": "セッション詳細"
+    },
+    "sessionInfo": {
+      "title": "セッション",
+      "untitled": "無題のチャット",
+      "automations": "自動タスク",
+      "count": "{{count}}",
+      "loading": "自動タスクを読み込み中...",
+      "loadFailed": "自動タスクを読み込めませんでした。",
+      "empty": "このセッションにはまだ自動タスクがありません。",
+      "disabled": "オフ",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}}ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "カスタムスケジュール"
+      },
+      "next": {
+        "label": "次回 {{time}}",
+        "disabled": "一時停止",
+        "none": "次回実行なし"
+      }
     },
     "composer": {
       "placeholderThread": "メッセージを入力…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
+      "modelNotConfigured": "モデルが未設定です",
+      "configureModel": "モデルを設定",
       "queued": {
         "label": "保留中のガイド",
         "guide": "ガイド",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "一番下へスクロール",
-    "loadEarlier": "以前のメッセージを読み込む"
+    "loadEarlier": "以前のメッセージを読み込む",
+    "promptNavigator": {
+      "open": "プロンプトナビゲーターを開く",
+      "title": "プロンプト",
+      "search": "プロンプトを検索",
+      "noResults": "一致するプロンプトがありません。",
+      "jumpTo": "プロンプトへ移動: {{label}}"
+    }
   },
   "message": {
     "streaming": "生成中",
@@ -724,7 +815,9 @@
     "cliActivityFailedMany": "{{count}} 個の CLI アプリが失敗しました",
     "cliRunRunning": "使用中",
     "cliRunRan": "使用済み",
-    "cliRunFailed": "失敗"
+    "cliRunFailed": "失敗",
+    "automationSourceFallback": "自動化",
+    "automationTriggered": "自動実行"
   },
   "lightbox": {
     "title": "画像プレビュー",
@@ -732,6 +825,15 @@
     "prev": "前の画像",
     "next": "次の画像",
     "close": "プレビューを閉じる"
+  },
+  "filePreview": {
+    "aria": "ファイルプレビュー",
+    "close": "ファイルプレビューを閉じる",
+    "loading": "プレビューを読み込み中...",
+    "failed": "このファイルをプレビューできませんでした。",
+    "routeMissing": "ファイルプレビューには最新の gateway が必要です。nanobot gateway を再起動してから再試行してください。",
+    "resize": "ファイルプレビューの幅を変更",
+    "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
   "code": {
     "fallbackLanguage": "コード",

@@ -356,7 +356,6 @@ class TestEphemeralHooks:
         await loop.process_direct("test", session_key="cli:normal")
         spy.before_iteration.assert_called()
 
-
 class TestDreamCommitMessage:
     async def test_commit_includes_response_summary(self, tmp_path):
         """Git auto-commit after Dream should include the LLM response in the body."""

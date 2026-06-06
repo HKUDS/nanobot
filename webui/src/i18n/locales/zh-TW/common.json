@@ -54,7 +54,10 @@
       "label": "語言",
       "ariaLabel": "切換語言"
     },
-    "apps": "應用"
+    "apps": "應用",
+    "skills": {
+      "title": "技能"
+    }
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -75,7 +78,8 @@
       "advanced": "安全",
       "cliApps": "CLI 應用",
       "mcp": "MCP",
-      "apps": "應用"
+      "apps": "應用",
+      "skills": "技能"
     },
     "sections": {
       "interface": "介面",
@@ -187,6 +191,9 @@
       "disabled": "已停用",
       "restartPending": "等待重啟",
       "ready": "就緒",
+      "privateEngine": "私有引擎",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "預設工作區",
       "comfortable": "舒適",
       "compact": "緊湊",
       "auto": "自動",
@@ -277,6 +284,31 @@
       "webSearch": "網頁搜尋",
       "imageGeneration": "圖片生成",
       "workspace": "工作區"
+    },
+    "usage": {
+      "title": "Token 活動",
+      "shortTitle": "Token Usage",
+      "subtitle": "最近 12 個月由供應商回報的 token 用量。",
+      "empty": "新的模型回覆產生後，這裡會顯示 token 活動。",
+      "totalTokens": "累計 Token 數",
+      "peakTokens": "峰值 Token 數",
+      "thirtyDayTokens": "30 天 Token 數",
+      "currentStreak": "目前連續天數",
+      "longestStreak": "最長連續天數",
+      "daysValue": "{{count}} 天",
+      "last30": "30 天",
+      "activeDays": "活躍天數",
+      "requests": "請求數",
+      "estimated": "估算",
+      "includesEstimates": "包含估算",
+      "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次請求",
+      "sources": {
+        "user": "對話",
+        "api": "API",
+        "cron": "自動任務",
+        "dream": "記憶整理",
+        "system": "系統"
+      }
     },
     "providers": {
       "searchPlaceholder": "搜尋供應商",
@@ -427,6 +459,33 @@
       "signInBeforeSaving": "將此 OAuth 供應商設為目前模型供應商前，請先登入。",
       "signedIn": "已登入",
       "notSignedIn": "未登入"
+    },
+    "skills": {
+      "description": "查看此 agent 在對話中可以載入的指令技能。",
+      "caption": "{{available}} 個可用 · 共 {{total}} 個",
+      "featured": "Agent 技能",
+      "empty": "暫無可用技能。",
+      "sourceWorkspace": "自訂",
+      "sourceBuiltin": "內建",
+      "statusAvailable": "可用",
+      "statusUnavailable": "不可用",
+      "unavailableReason": "缺少：{{reason}}",
+      "openDetails": "查看 {{name}} 詳情",
+      "loadingDetail": "正在載入技能詳情...",
+      "loadFailed": "無法載入技能詳情。",
+      "descriptionTitle": "完整描述",
+      "source": "來源",
+      "status": "狀態",
+      "requirements": "需求",
+      "noRequirements": "沒有明確需求。",
+      "commands": "命令",
+      "environment": "環境變數",
+      "missingCommands": "缺 CLI",
+      "missingEnvironment": "缺 ENV",
+      "unavailableReasonLabel": "不可用原因",
+      "rawInstructions": "原始 SKILL.md",
+      "rawInstructionsEmpty": "沒有原始說明。",
+      "detailDescription": "{{name}} 的詳細資訊。"
     }
   },
   "chat": {
@@ -548,7 +607,30 @@
       "toggleSidebar": "切換側邊欄",
       "newChat": "開始新對話",
       "toggleTheme": "從頂部切換主題",
-      "settings": "開啟設定"
+      "settings": "開啟設定",
+      "sessionInfo": "會話詳情"
+    },
+    "sessionInfo": {
+      "title": "會話",
+      "untitled": "未命名對話",
+      "automations": "自動任務",
+      "count": "{{count}}",
+      "loading": "正在載入自動任務...",
+      "loadFailed": "無法載入自動任務。",
+      "empty": "這個會話暫時沒有自動任務。",
+      "disabled": "已關閉",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "自訂計畫"
+      },
+      "next": {
+        "label": "下次 {{time}}",
+        "disabled": "已暫停",
+        "none": "沒有下次執行"
+      }
     },
     "composer": {
       "placeholderThread": "輸入訊息…",
@@ -565,6 +647,8 @@
       "goalStateCloseAria": "關閉目標",
       "send": "送出訊息",
       "stop": "停止回覆",
+      "modelNotConfigured": "模型未配置",
+      "configureModel": "配置模型",
       "queued": {
         "label": "待引導提示",
         "guide": "引導",
@@ -691,7 +775,14 @@
       }
     },
     "scrollToBottom": "捲動到底部",
-    "loadEarlier": "載入更早訊息"
+    "loadEarlier": "載入更早訊息",
+    "promptNavigator": {
+      "open": "開啟輸入導覽",
+      "title": "輸入列表",
+      "search": "搜尋輸入",
+      "noResults": "沒有符合的輸入。",
+      "jumpTo": "跳到輸入：{{label}}"
+    }
   },
   "message": {
     "streaming": "串流輸出中",
@@ -724,7 +815,9 @@
     "cliActivityFailedMany": "{{count}} 個 CLI 應用失敗",
     "cliRunRunning": "使用中",
     "cliRunRan": "已使用",
-    "cliRunFailed": "失敗"
+    "cliRunFailed": "失敗",
+    "automationSourceFallback": "自動化",
+    "automationTriggered": "自動觸發"
   },
   "lightbox": {
     "title": "圖片預覽",
@@ -732,6 +825,15 @@
     "prev": "上一張",
     "next": "下一張",
     "close": "關閉預覽"
+  },
+  "filePreview": {
+    "aria": "檔案預覽",
+    "close": "關閉檔案預覽",
+    "loading": "正在載入預覽...",
+    "failed": "無法預覽這個檔案。",
+    "routeMissing": "檔案預覽需要最新的 gateway。請重啟 nanobot gateway 後再試。",
+    "resize": "調整檔案預覽寬度",
+    "truncated": "檔案較大，目前只顯示前半部分預覽。"
   },
   "code": {
     "fallbackLanguage": "程式碼",

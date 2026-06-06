@@ -9,6 +9,13 @@
 blackcat-desktop/
 desktop/
 
+# Desktop app generated artifacts
+desktop/build/
+desktop/dist/
+desktop/node_modules/
+desktop/package-lock.json
+desktop/resources/blackcat-engine/
+
 # Claude / AI assistant artifacts
 docs/superpowers/
 docs/plans/

@@ -173,6 +173,7 @@ interface AgentActivityClusterProps {
   turnLatencyMs?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 /**
@@ -186,6 +187,7 @@ export function AgentActivityCluster({
   turnLatencyMs,
   cliApps = [],
   mcpPresets = [],
+  onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEdits = useMemo(
@@ -423,6 +425,7 @@ export function AgentActivityCluster({
         added={added}
         deleted={deleted}
         hasDiffStats={hasDiffStats}
+        onOpenFilePreview={onOpenFilePreview}
       />
     );
   }
@@ -449,6 +452,8 @@ export function AgentActivityCluster({
           <FileReferenceChip
             path={singleFilePath}
             tooltipPath={singleFileTooltipPath}
+            previewPath={singleFileTooltipPath || singleFilePath}
+            onOpen={onOpenFilePreview}
             active={hasLiveEditingFiles}
             className="-my-0.5 min-w-0"
             textClassName="text-xs"
@@ -494,6 +499,7 @@ export function AgentActivityCluster({
                       key={m.id}
                       text={m.reasoning ?? ""}
                       streaming={isTurnStreaming && !!m.reasoningStreaming}
+                      onOpenFilePreview={onOpenFilePreview}
                     />
                   );
                 }
@@ -510,7 +516,12 @@ export function AgentActivityCluster({
                 }
                 return null;
               })}
-              {fileEdits.length ? <FileEditGroup edits={fileEdits} /> : null}
+              {fileEdits.length ? (
+                <FileEditGroup
+                  edits={fileEdits}
+                  onOpenFilePreview={onOpenFilePreview}
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -537,6 +548,7 @@ function FileEditFlatActivity({
   added,
   deleted,
   hasDiffStats,
+  onOpenFilePreview,
 }: {
   edits: FileEditSummary[];
   active: boolean;
@@ -550,6 +562,7 @@ function FileEditFlatActivity({
   added: number;
   deleted: number;
   hasDiffStats: boolean;
+  onOpenFilePreview?: (path: string) => void;
 }) {
   const showRows = edits.length > 1 || edits.some((edit) => edit.status === "error" || edit.pending);
   return (
@@ -569,6 +582,8 @@ function FileEditFlatActivity({
           <FileReferenceChip
             path={singleFilePath}
             tooltipPath={singleFileTooltipPath}
+            previewPath={singleFileTooltipPath || singleFilePath}
+            onOpen={onOpenFilePreview}
             active={hasLiveEditingFiles}
             className="-my-0.5 min-w-0"
             textClassName="text-xs"
@@ -583,7 +598,7 @@ function FileEditFlatActivity({
       </div>
       {showRows ? (
         <div className="mt-0.5 pl-4">
-          <FileEditGroup edits={edits} />
+          <FileEditGroup edits={edits} onOpenFilePreview={onOpenFilePreview} />
         </div>
       ) : null}
     </div>

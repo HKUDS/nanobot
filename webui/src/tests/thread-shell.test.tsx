@@ -78,6 +78,20 @@ function wrap(client: ReturnType<typeof makeClient>, children: ReactNode, modelN
   );
 }
 
+function expectSendMessageWithTurn(
+  client: ReturnType<typeof makeClient>,
+  chatId: string,
+  content: string,
+  options: unknown = undefined,
+) {
+  expect(client.sendMessage).toHaveBeenCalledWith(
+    chatId,
+    content,
+    options,
+    expect.objectContaining({ turnId: expect.any(String) }),
+  );
+}
+
 function session(chatId: string) {
   return {
     key: `websocket:${chatId}`,
@@ -270,6 +284,45 @@ describe("ThreadShell", () => {
     expect(await screen.findByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
   });
 
+  it("opens model settings from the unconfigured model badge", async () => {
+    const client = makeClient();
+    const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
+    settings.agent.has_api_key = false;
+    settings.providers = settings.providers.map((provider) =>
+      provider.name === "openai_codex"
+        ? { ...provider, auth_type: "oauth", configured: false }
+        : provider,
+    );
+    const onOpenModelSettings = vi.fn();
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("unconfigured-model")}
+          title="Unconfigured model"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+          onOpenModelSettings={onOpenModelSettings}
+        />,
+        "openai-codex/gpt-5.1-codex",
+      ),
+    );
+
+    const badge = await screen.findByRole("button", { name: "Model not configured" });
+    expect(screen.getByTestId("composer-model-setup-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
+    fireEvent.click(badge);
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Configure model" }));
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(2);
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps image generation controls out of the composer", async () => {
     const client = makeClient();
     const disabledSettings = modelSettings("deepseek-v4-pro", "deepseek");
@@ -339,11 +392,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "persist me across tabs",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "persist me across tabs"),
     );
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
 
@@ -403,11 +452,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "delete me cleanly",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "delete me cleanly"),
     );
     expect(screen.getByText("delete me cleanly")).toBeInTheDocument();
 
@@ -506,11 +551,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-new",
-        "first message should stay",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-new", "first message should stay"),
     );
     await waitFor(() =>
       expect(screen.getByText("first message should stay")).toBeInTheDocument(),
@@ -575,7 +616,7 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith("chat-new", "/model", undefined),
+      expectSendMessageWithTurn(client, "chat-new", "/model"),
     );
 
     await act(async () => {
@@ -703,11 +744,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-a",
-        "only in chat a",
-        undefined,
-      ),
+      expectSendMessageWithTurn(client, "chat-a", "only in chat a"),
     );
     expect(screen.getByText("only in chat a")).toBeInTheDocument();
 

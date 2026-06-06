@@ -1,10 +1,13 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import {
   HISTORY_WINDOW_INCREMENT,
   INITIAL_HISTORY_WINDOW,
   ThreadViewport,
+  type ThreadViewportHandle,
   windowMessages,
 } from "@/components/thread/ThreadViewport";
 import type { UIMessage } from "@/lib/types";
@@ -33,6 +36,24 @@ function makeLongMessages(count: number): UIMessage[] {
     content: `message ${index}`,
     createdAt: index,
   }));
+}
+
+function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
+  const viewportRef = useRef<ThreadViewportHandle | null>(null);
+  return (
+    <div>
+      <PromptNavigator
+        messages={messages}
+        onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
+      />
+      <ThreadViewport
+        ref={viewportRef}
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+      />
+    </div>
+  );
 }
 
 describe("ThreadViewport", () => {
@@ -75,7 +96,9 @@ describe("ThreadViewport", () => {
       });
 
       const button = screen.getByRole("button", { name: "Scroll to bottom" });
-      expect(button).toHaveStyle({ bottom: "192px" });
+      const buttonPositioner = button.parentElement as HTMLElement;
+      expect(button).not.toHaveClass("-translate-x-1/2");
+      expect(buttonPositioner).toHaveStyle({ bottom: "192px" });
 
       const composerDock = screen.getByTestId("thread-composer-dock");
       composerDock.getBoundingClientRect = () =>
@@ -100,7 +123,7 @@ describe("ThreadViewport", () => {
         composerObserver!.callback([], composerObserver as unknown as ResizeObserver);
       });
 
-      expect(button).toHaveStyle({ bottom: "256px" });
+      expect(buttonPositioner).toHaveStyle({ bottom: "256px" });
     } finally {
       vi.stubGlobal("ResizeObserver", originalResizeObserver);
     }
@@ -207,12 +230,105 @@ describe("ThreadViewport", () => {
 
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to prompt: message 3" }));
+    const targetPrompt = screen.getByRole("button", { name: "Jump to prompt: message 3" });
+    expect(within(targetPrompt).getByText("message 3")).toBeInTheDocument();
+
+    fireEvent.click(targetPrompt);
 
     expect(scrollTo).toHaveBeenCalledWith({
       top: 1064,
       behavior: "smooth",
     });
+  });
+
+  it("opens a prompt navigator list and jumps to a selected prompt", async () => {
+    const promptMessages = makeLongMessages(5);
+    const { container } = render(<ViewportWithPromptNavigator messages={promptMessages} />);
+
+    const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 360,
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Prompts")).toBeInTheDocument();
+    expect(within(dialog).getByText("message 4")).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search prompts" }), {
+      target: { value: "message 4" },
+    });
+    expect(within(dialog).queryByText("message 1")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 4" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 1424,
+      behavior: "smooth",
+    });
+  });
+
+  it("expands the history window before jumping to an older prompt from the navigator", async () => {
+    const longMessages = makeLongMessages(300);
+    render(<ViewportWithPromptNavigator messages={longMessages} />);
+
+    expect(screen.queryByText("message 20")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open prompt navigator" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Jump to prompt: message 20" }));
+
+    await waitFor(() => expect(screen.getByText("message 20")).toBeInTheDocument());
+  });
+
+  it("renders the prompt rail for compact scroll ranges", async () => {
+    const promptMessages = makeLongMessages(3);
+    const { container } = render(
+      <ThreadViewport
+        messages={promptMessages}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 700 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0 },
+    });
+
+    const promptEls = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-user-prompt-id]"),
+    );
+    expect(promptEls).toHaveLength(3);
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", {
+        configurable: true,
+        value: index * 50,
+      });
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
   });
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
