@@ -781,8 +781,7 @@
       "title": "輸入列表",
       "search": "搜尋輸入",
       "noResults": "沒有符合的輸入。",
-      "jumpTo": "跳到輸入：{{label}}",
-      "promptNumber": "第 {{number}} 則"
+      "jumpTo": "跳到輸入：{{label}}"
     }
   },
   "message": {

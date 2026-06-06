@@ -781,8 +781,7 @@
       "title": "Prompt",
       "search": "Tìm prompt",
       "noResults": "Không có prompt phù hợp.",
-      "jumpTo": "Nhảy tới prompt: {{label}}",
-      "promptNumber": "Prompt {{number}}"
+      "jumpTo": "Nhảy tới prompt: {{label}}"
     }
   },
   "message": {

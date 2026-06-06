@@ -781,8 +781,7 @@
       "title": "プロンプト",
       "search": "プロンプトを検索",
       "noResults": "一致するプロンプトがありません。",
-      "jumpTo": "プロンプトへ移動: {{label}}",
-      "promptNumber": "プロンプト {{number}}"
+      "jumpTo": "プロンプトへ移動: {{label}}"
     }
   },
   "message": {

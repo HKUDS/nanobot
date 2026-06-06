@@ -781,8 +781,7 @@
       "title": "Prompts",
       "search": "Search prompts",
       "noResults": "No matching prompts.",
-      "jumpTo": "Jump to prompt: {{label}}",
-      "promptNumber": "Prompt {{number}}"
+      "jumpTo": "Jump to prompt: {{label}}"
     }
   },
   "message": {

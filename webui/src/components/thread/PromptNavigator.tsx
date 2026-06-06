@@ -136,18 +136,14 @@ function PromptNavigatorRow({
       aria-label={t("thread.promptNavigator.jumpTo", { label: prompt.label })}
       onClick={() => onJump(prompt.id)}
     >
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-        <span>{t("thread.promptNavigator.promptNumber", { number: prompt.index + 1 })}</span>
-        {timestamp ? (
-          <>
-            <span aria-hidden>·</span>
-            <span>{timestamp}</span>
-          </>
-        ) : null}
-      </div>
-      <div className="mt-1 max-h-20 overflow-hidden whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
+      <div className="max-h-20 overflow-hidden whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
         {prompt.preview}
       </div>
+      {timestamp ? (
+        <div className="mt-1 text-[10px] leading-4 text-muted-foreground/75">
+          {timestamp}
+        </div>
+      ) : null}
     </button>
   );
 }

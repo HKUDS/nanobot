@@ -781,8 +781,7 @@
       "title": "输入列表",
       "search": "搜索输入",
       "noResults": "没有匹配的输入。",
-      "jumpTo": "跳转到输入：{{label}}",
-      "promptNumber": "第 {{number}} 条"
+      "jumpTo": "跳转到输入：{{label}}"
     }
   },
   "message": {

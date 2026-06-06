@@ -781,8 +781,7 @@
       "title": "Prompt",
       "search": "Cari prompt",
       "noResults": "Tidak ada prompt yang cocok.",
-      "jumpTo": "Lompat ke prompt: {{label}}",
-      "promptNumber": "Prompt {{number}}"
+      "jumpTo": "Lompat ke prompt: {{label}}"
     }
   },
   "message": {

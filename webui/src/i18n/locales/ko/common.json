@@ -781,8 +781,7 @@
       "title": "프롬프트",
       "search": "프롬프트 검색",
       "noResults": "일치하는 프롬프트가 없습니다.",
-      "jumpTo": "프롬프트로 이동: {{label}}",
-      "promptNumber": "프롬프트 {{number}}"
+      "jumpTo": "프롬프트로 이동: {{label}}"
     }
   },
   "message": {

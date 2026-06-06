@@ -781,8 +781,7 @@
       "title": "Prompts",
       "search": "Rechercher des prompts",
       "noResults": "Aucun prompt correspondant.",
-      "jumpTo": "Aller au prompt : {{label}}",
-      "promptNumber": "Prompt {{number}}"
+      "jumpTo": "Aller au prompt : {{label}}"
     }
   },
   "message": {
