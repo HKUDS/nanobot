@@ -29,6 +29,8 @@ class CronPayload:
     to: str | None = None  # e.g. phone number
     channel_meta: dict = field(default_factory=dict)  # channel-specific routing (e.g. Slack thread_ts)
     session_key: str | None = None  # original session key for correct session recording
+    silent: bool = False  # If True, run the agent but don't auto-deliver the response
+    lock_recipient: str | None = None  # Fixed chat_id for the job (overrides 'to')
 
 
 @dataclass

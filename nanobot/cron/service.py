@@ -136,6 +136,8 @@ class CronService:
                                 or {}
                             ),
                             session_key=j["payload"].get("sessionKey") or j["payload"].get("session_key"),
+                            silent=j["payload"].get("silent", False),
+                            lock_recipient=j["payload"].get("lockRecipient") or j["payload"].get("lock_recipient"),
                         ),
                         state=CronJobState(
                             next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -266,6 +268,8 @@ class CronService:
                         "to": j.payload.to,
                         "channelMeta": j.payload.channel_meta,
                         "sessionKey": j.payload.session_key,
+                        "silent": j.payload.silent,
+                        "lockRecipient": j.payload.lock_recipient,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -479,6 +483,7 @@ class CronService:
         schedule: CronSchedule,
         message: str,
         deliver: bool = False,
+        silent: bool = False,
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
@@ -498,6 +503,7 @@ class CronService:
                 kind="agent_turn",
                 message=message,
                 deliver=deliver,
+                silent=silent,
                 channel=channel,
                 to=to,
                 channel_meta=channel_meta or {},
