@@ -61,10 +61,12 @@ from blackcat.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
 from blackcat.webui.media_gateway import WebUIMediaGateway
+from blackcat.webui.session_automations import session_automations_payload
 from blackcat.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
+from blackcat.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 from blackcat.webui.thread_disk import delete_webui_thread
 from blackcat.webui.transcript import build_webui_thread_response
 from blackcat.webui.workspaces import WebUIWorkspaceController
@@ -73,8 +75,6 @@ if TYPE_CHECKING:
     from blackcat.bus.queue import MessageBus
     from blackcat.cron.service import CronService
     from blackcat.session.manager import SessionManager
-from blackcat.webui.session_automations import session_automations_payload
-from blackcat.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 
 
 def _decode_api_key(raw_key: str) -> str | None:

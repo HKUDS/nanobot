@@ -170,6 +170,48 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 
     assert len(captured_usage) == 1
     assert captured_usage[0]["cached_tokens"] == 150
+    assert captured_usage[0]["provider_tokens"] == 220
+
+
+@pytest.mark.asyncio
+async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    captured_usage: list[dict] = []
+
+    class UsageHook(AgentHook):
+        async def after_iteration(self, context: AgentHookContext) -> None:
+            captured_usage.append(dict(context.usage))
+
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{"type": "function", "function": {"name": "lookup"}}]
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_prompt_tokens_chain",
+        lambda provider, model, messages, tools: (123, "test"),
+    )
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda message: 7)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=UsageHook(),
+    ))
+
+    assert result.usage["prompt_tokens"] == 123
+    assert result.usage["completion_tokens"] == 7
+    assert result.usage["total_tokens"] == 130
+    assert result.usage["estimated_tokens"] == 130
+    assert captured_usage[0]["estimated_tokens"] == 130
 
 
 @pytest.mark.asyncio
@@ -232,7 +274,12 @@ async def test_runner_calls_run_level_hooks_on_success():
             "done",
             "completed",
             None,
-            {"prompt_tokens": 3, "completion_tokens": 2},
+            {
+                "prompt_tokens": 3,
+                "completion_tokens": 2,
+                "total_tokens": 5,
+                "provider_tokens": 5,
+            },
             ["user", "assistant"],
         ),
         ("on_finally", "completed", None),

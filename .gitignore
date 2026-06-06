@@ -6,8 +6,6 @@
 .env
 .web
 .orion
-blackcat-desktop/
-desktop/
 
 # Desktop app generated artifacts
 desktop/build/
@@ -39,16 +37,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
-
-
-# Claude Docs
-CLAUDE.md
-.claude/*
-
-# Apple files
-.DS_Store
-
-test/
 .mypy_cache/
 .ruff_cache/
 .pytype/

@@ -214,8 +214,16 @@ class TestRestartCommand:
         assert "Tasks: 3 active" in response.content
 
     @pytest.mark.asyncio
-    async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
+    async def test_run_agent_loop_estimates_usage_when_provider_omits_it(self, monkeypatch):
         loop, _bus = _make_loop()
+        monkeypatch.setattr(
+            "nanobot.agent.runner.estimate_prompt_tokens_chain",
+            lambda *_args, **_kwargs: (123, "test"),
+        )
+        monkeypatch.setattr(
+            "nanobot.agent.runner.estimate_message_tokens",
+            lambda _message: 7,
+        )
         loop.provider.chat_with_retry = AsyncMock(side_effect=[
             LLMResponse(content="first", usage={"prompt_tokens": 9, "completion_tokens": 4}),
             LLMResponse(content="second", usage={}),
@@ -226,8 +234,9 @@ class TestRestartCommand:
         assert loop._last_usage["completion_tokens"] == 4
 
         await loop._run_agent_loop([])
-        assert loop._last_usage["prompt_tokens"] == 0
-        assert loop._last_usage["completion_tokens"] == 0
+        assert loop._last_usage["prompt_tokens"] == 123
+        assert loop._last_usage["completion_tokens"] == 7
+        assert loop._last_usage["estimated_tokens"] == 130
 
     @pytest.mark.asyncio
     async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):

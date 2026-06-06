@@ -73,7 +73,6 @@
       "models": "모델",
       "providers": "제공자",
       "image": "이미지",
-      "voice": "음성",
       "browser": "웹",
       "runtime": "시스템",
       "advanced": "보안",
@@ -100,8 +99,7 @@
       "mcp": "MCP 서비스",
       "apps": "앱",
       "nativeHost": "네이티브 호스트",
-      "hostSafety": "앱 보안",
-      "voiceInput": "음성 입력"
+      "hostSafety": "앱 보안"
     },
     "rows": {
       "theme": "테마",
@@ -144,13 +142,7 @@
       "engine": "엔진",
       "logs": "로그",
       "diagnostics": "진단",
-      "contextWindow": "컨텍스트 창",
-      "transcription": "전사",
-      "transcriptionProvider": "제공자",
-      "transcriptionProviderStatus": "제공자 상태",
-      "transcriptionModel": "모델",
-      "transcriptionLanguage": "언어",
-      "voiceLimits": "제한"
+      "contextWindow": "컨텍스트 창"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
@@ -189,12 +181,7 @@
       "diagnostics": "지원용 작은 런타임 보고서를 내보냅니다.",
       "localServiceAccessNative": "Full Access shell 명령이 이 Mac의 서비스에 접근할 수 있게 합니다.",
       "webuiDefaultAccessNative": "프로젝트별 권한이 없는 네이티브 채팅에 사용됩니다.",
-      "contextWindow": "이 모델 구성의 기본 컨텍스트 예산을 선택합니다.",
-      "transcription": "마이크 입력을 보내기 전에 텍스트로 변환합니다. 채널 음성 메시지도 같은 설정을 사용합니다.",
-      "transcriptionProvider": "Providers에 저장된 해당 제공자의 인증 정보를 사용합니다.",
-      "transcriptionProviderStatus": "API 키는 transcription 설정이 아니라 providers 아래에 유지됩니다.",
-      "transcriptionModel": "제공자가 사용자 지정 모델 ID를 요구하지 않으면 해석된 기본값을 사용하세요.",
-      "transcriptionLanguage": "en, zh, ja, ko 같은 선택적 ISO-639 힌트입니다."
+      "contextWindow": "이 모델 구성의 기본 컨텍스트 예산을 선택합니다."
     },
     "values": {
       "light": "라이트",
@@ -248,7 +235,7 @@
       "exporting": "내보내는 중..."
     },
     "byok": {
-      "description": "직접 provider 키를 가져옵니다. Blackcat은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
+      "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
       "configured": "설정됨",
       "notConfigured": "설정 안 됨",
       "configuredSection": "설정됨",
@@ -296,7 +283,6 @@
       "totalProviders": "{{count}}개 사용 가능",
       "webSearch": "웹 검색",
       "imageGeneration": "이미지 생성",
-      "voiceInput": "음성 입력",
       "workspace": "작업공간"
     },
     "usage": {
@@ -500,11 +486,6 @@
       "rawInstructions": "원본 SKILL.md",
       "rawInstructionsEmpty": "원본 지침이 없습니다.",
       "detailDescription": "{{name}} 세부 정보."
-    },
-    "voice": {
-      "selectProvider": "제공자 선택",
-      "configureProvider": "제공자 설정",
-      "languageAuto": "자동"
     }
   },
   "chat": {
@@ -697,21 +678,6 @@
         "deepResearch": "심층 조사",
         "voice": "음성 입력"
       },
-      "voice": {
-        "hint": "클릭해 받아쓰거나 길게 누르기",
-        "stop": "녹음 중지",
-        "transcribing": "변환 중...",
-        "recordingStatus": "녹음 중 {{time}}"
-      },
-      "voiceErrors": {
-        "unsupported": "이 브라우저는 음성 입력을 지원하지 않습니다.",
-        "permission": "마이크 권한이 필요합니다.",
-        "notConfigured": "먼저 음성 변환 제공업체를 설정하세요.",
-        "tooLong": "녹음 시간이 너무 깁니다.",
-        "tooShort": "음성을 녹음하려면 조금 더 길게 눌러 주세요.",
-        "noInput": "마이크 입력이 감지되지 않았습니다.",
-        "failed": "오디오를 변환하지 못했습니다."
-      },
       "slash": {
         "ariaLabel": "슬래시 명령",
         "label": "명령",
@@ -885,7 +851,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

@@ -212,7 +212,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
+        loop._schedule_background(loop.consolidator.archive(snapshot))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -686,7 +686,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈‍⬛ blackcat commands:"] # FIXME: import the logo and name from the main file
+    lines = ["🐈 blackcat commands:"]
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:

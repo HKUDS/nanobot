@@ -15,11 +15,6 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from blackcat.audio.transcription import resolve_transcription_config
-from blackcat.audio.transcription_registry import (
-    resolve_transcription_provider,
-    transcription_provider_names,
-)
 from blackcat.config.loader import get_config_path, load_config, save_config
 from blackcat.config.schema import ModelPresetConfig
 from blackcat.providers.image_generation import (
@@ -34,17 +29,8 @@ from blackcat.webui.workspaces import (
     write_webui_default_access_mode,
 )
 
-from blackcat import __version__
-
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
-
-
-def _version_payload() -> dict[str, Any]:
-    """Return version info for the settings payload."""
-    return {
-        "current": __version__,
-    }
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -436,13 +422,9 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
         "fetched_at": time.time(),
     }
     if (
-        spec.is_transcription_only
-        or (
-            spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
-            and spec.name != "minimax_anthropic"
-        )
-        or spec.is_oauth
-    ):
+        spec.backend in _MODEL_LIST_UNSUPPORTED_BACKENDS
+        and spec.name != "minimax_anthropic"
+    ) or spec.is_oauth:
         return {
             **base_payload,
             "status": "unsupported",
@@ -558,8 +540,6 @@ def _validate_configured_provider(config: Any, provider: str) -> None:
     spec = find_by_name(provider)
     if spec is None:
         raise WebUISettingsError("unknown provider")
-    if spec.is_transcription_only:
-        raise WebUISettingsError("provider does not support chat models")
     provider_config = getattr(config.providers, provider, None)
     if (
         provider_config is None
@@ -593,22 +573,6 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
                 ),
             }
         )
-    return rows
-
-
-def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for name in transcription_provider_names():
-        spec = find_by_name(name)
-        provider_config = getattr(config.providers, name, None)
-        rows.append({
-            "name": name,
-            "label": spec.label if spec is not None else name,
-            "configured": bool(getattr(provider_config, "api_key", None)),
-            "api_key_hint": _mask_secret_hint(getattr(provider_config, "api_key", None)),
-            "api_base": getattr(provider_config, "api_base", None),
-            "default_api_base": spec.default_api_base if spec and spec.default_api_base else None,
-        })
     return rows
 
 
@@ -658,7 +622,6 @@ def settings_payload(
             "api_key_hint": _mask_secret_hint(provider_config.api_key),
             "api_base": provider_config.api_base,
             "default_api_base": spec.default_api_base or None,
-            "model_selectable": not spec.is_transcription_only,
         }
         if oauth_status is not None:
             row["oauth_account"] = oauth_status["account"]
@@ -670,7 +633,6 @@ def settings_payload(
 
     search_config = config.tools.web.search
     image_config = config.tools.image_generation
-    transcription = resolve_transcription_config(config)
     search_provider = (
         search_config.provider
         if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
@@ -771,16 +733,6 @@ def settings_payload(
             "save_dir": image_config.save_dir,
             "providers": image_providers,
         },
-        "transcription": {
-            "enabled": transcription.enabled,
-            "provider": transcription.provider,
-            "provider_configured": transcription.configured,
-            "model": transcription.model,
-            "language": transcription.language,
-            "max_duration_sec": transcription.max_duration_sec,
-            "max_upload_mb": transcription.max_upload_mb,
-            "providers": _transcription_provider_rows(config),
-        },
         "runtime": {
             "config_path": str(get_config_path().expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -808,11 +760,9 @@ def settings_payload(
             "mcp_server_count": len(config.tools.mcp_servers),
             "exec_enabled": exec_config.enable,
             "exec_sandbox": exec_config.sandbox or None,
-            "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
         "requires_restart": requires_restart,
-        "version": _version_payload(),
     }
     return decorate_settings_payload(
         payload,
@@ -1361,73 +1311,3 @@ def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
     if changed:
         save_config(config)
     return settings_payload(requires_restart=changed)
-
-
-def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
-    config = load_config()
-    transcription = config.transcription
-    changed = False
-
-    enabled = _query_first(query, "enabled")
-    if enabled is not None:
-        parsed_enabled = _parse_bool(enabled, "enabled")
-        if transcription.enabled != parsed_enabled:
-            transcription.enabled = parsed_enabled
-            changed = True
-
-    provider = _query_first(query, "provider")
-    if provider is not None:
-        provider = provider.strip().lower()
-        provider_spec = resolve_transcription_provider(provider)
-        if provider_spec is None:
-            raise WebUISettingsError("unknown transcription provider")
-        provider = provider_spec.name
-        if transcription.provider != provider:
-            transcription.provider = provider
-            changed = True
-
-    model = _query_first(query, "model")
-    if model is not None:
-        model = model.strip() or None
-        if model is not None and len(model) > 200:
-            raise WebUISettingsError("transcription model is too long")
-        if transcription.model != model:
-            transcription.model = model
-            changed = True
-
-    language = _query_first(query, "language")
-    if language is not None:
-        language = language.strip().lower() or None
-        if language is not None and not re.fullmatch(r"[a-z]{2,3}", language):
-            raise WebUISettingsError("transcription language must be 2-3 lowercase letters")
-        if transcription.language != language:
-            transcription.language = language
-            changed = True
-
-    max_duration_sec = _query_first_alias(query, "max_duration_sec", "maxDurationSec")
-    if max_duration_sec is not None:
-        try:
-            parsed_duration = int(max_duration_sec)
-        except ValueError:
-            raise WebUISettingsError("max_duration_sec must be an integer") from None
-        if parsed_duration < 1 or parsed_duration > 600:
-            raise WebUISettingsError("max_duration_sec must be between 1 and 600")
-        if transcription.max_duration_sec != parsed_duration:
-            transcription.max_duration_sec = parsed_duration
-            changed = True
-
-    max_upload_mb = _query_first_alias(query, "max_upload_mb", "maxUploadMb")
-    if max_upload_mb is not None:
-        try:
-            parsed_upload = int(max_upload_mb)
-        except ValueError:
-            raise WebUISettingsError("max_upload_mb must be an integer") from None
-        if parsed_upload < 1 or parsed_upload > 100:
-            raise WebUISettingsError("max_upload_mb must be between 1 and 100")
-        if transcription.max_upload_mb != parsed_upload:
-            transcription.max_upload_mb = parsed_upload
-            changed = True
-
-    if changed:
-        save_config(config)
-    return settings_payload()

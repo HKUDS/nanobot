@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { StreamError } from "@/lib/blackcat-client";
+import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
 import {
   mergeToolProgressEvents,
@@ -8,21 +8,21 @@ import {
   normalizeToolProgressEvents,
   toolTraceLinesFromEvents,
 } from "@/lib/tool-traces";
+import type { StreamError } from "@/lib/blackcat-client";
 import type {
-  GoalStateWsPayload,
   InboundEvent,
   OutboundCliAppMention,
   OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
+  GoalStateWsPayload,
   ToolProgressEvent,
-  UIFileEdit,
   UIImage,
+  UIFileEdit,
   UIMessage,
   UITurnPhase,
-  WorkspaceScopePayload
+  WorkspaceScopePayload,
 } from "@/lib/types";
-import { useClient } from "@/providers/ClientProvider";
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared on ``stream_end``). */
@@ -404,7 +404,7 @@ function findFileEditTraceIndex(
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
  * a streaming flag, and a ``send`` function. Initial history must be seeded
-* separately (e.g. via ``fetchWebuiThread``) since the server only replays
+ * separately (e.g. via ``fetchWebuiThread``) since the server only replays
  * live events.
  */
 /** Payload passed to ``send`` when the user attaches one or more images.
@@ -425,7 +425,7 @@ export interface SendOptions {
   workspaceScope?: WorkspaceScopePayload | null;
 }
 
-export function useBlackcatStream(
+export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
@@ -438,7 +438,6 @@ export function useBlackcatStream(
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
-  transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
   /** Latest transport-level fault raised since the last ``dismissStreamError``.
@@ -485,7 +484,7 @@ export function useBlackcatStream(
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
-const clearPendingStreamWork = useCallback(() => {
+  const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
       streamFrameRef.current = null;
@@ -925,7 +924,7 @@ const clearPendingStreamWork = useCallback(() => {
         const media = ev.media_urls?.length
           ? ev.media_urls.map((m) => toMediaAttachment(m))
           : ev.media?.map((url) => toMediaAttachment({ url }));
-const hasMedia = !!media && media.length > 0;
+        const hasMedia = !!media && media.length > 0;
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
@@ -1042,7 +1041,6 @@ const hasMedia = !!media && media.length > 0;
       // the image blocks via ``media`` paths.
       if (!hasImages && !content.trim()) return;
 
-flushPendingStreamEvents();
       flushPendingStreamEvents();
       const turnId = crypto.randomUUID();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
@@ -1091,19 +1089,12 @@ flushPendingStreamEvents();
     client.sendMessage(chatId, "/stop");
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
 
-  const transcribeAudio = useCallback(
-    (dataUrl: string, options?: { durationMs?: number }) =>
-      client.transcribeAudio(dataUrl, options),
-    [client],
-  );
-
   return {
     messages,
     isStreaming,
     runStartedAt,
     goalState,
     send,
-    transcribeAudio,
     stop,
     setMessages,
     streamError,

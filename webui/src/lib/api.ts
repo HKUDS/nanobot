@@ -1,4 +1,3 @@
-import { fetchWithTimeout } from "./http";
 import type {
   ChatSummary,
   CliAppsPayload,
@@ -17,12 +16,12 @@ import type {
   SkillDetail,
   SkillsPayload,
   SlashCommand,
-  TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
+  WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
-  WorkspacesPayload,
 } from "./types";
+import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
 
@@ -83,7 +82,7 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
     payload[key] = value;
   });
   if (!Object.keys(payload).length) return undefined;
-  return { "X-Blackcat-MCP-Values": JSON.stringify(payload) };
+  return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -226,26 +225,6 @@ export async function fetchSettingsUsage(
     token,
     undefined,
     API_READ_TIMEOUT_MS,
-  );
-}
-
-export interface VersionCheckResult {
-  updateAvailable: {
-    currentVersion: string;
-    latestVersion: string;
-    pypiUrl?: string;
-  } | null;
-}
-
-export async function checkVersion(
-  token: string,
-  base: string = "",
-): Promise<VersionCheckResult> {
-  return request<VersionCheckResult>(
-    `${base}/api/settings/version-check`,
-    token,
-    undefined,
-    10_000,
   );
 }
 
@@ -565,24 +544,6 @@ export async function updateImageGenerationSettings(
   query.set("max_images_per_turn", String(update.maxImagesPerTurn));
   return request<SettingsPayload>(
     `${base}/api/settings/image-generation/update?${query}`,
-    token,
-  );
-}
-
-export async function updateTranscriptionSettings(
-  token: string,
-  update: TranscriptionSettingsUpdate,
-  base: string = "",
-): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  query.set("enabled", String(update.enabled));
-  query.set("provider", update.provider);
-  query.set("model", update.model);
-  query.set("language", update.language);
-  query.set("max_duration_sec", String(update.maxDurationSec));
-  query.set("max_upload_mb", String(update.maxUploadMb));
-  return request<SettingsPayload>(
-    `${base}/api/settings/transcription/update?${query}`,
     token,
   );
 }

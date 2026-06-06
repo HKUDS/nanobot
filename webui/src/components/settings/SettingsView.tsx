@@ -1,16 +1,25 @@
 import {
+  useCallback,
+  useEffect,
+  forwardRef,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import {
   Activity,
-  ArrowUpCircle,
   Bot,
   Brain,
   Check,
+  CircleAlert,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cloud,
   Cpu,
   Database,
-  ExternalLink,
   Eye,
   EyeOff,
   Gem,
@@ -23,11 +32,11 @@ import {
   Loader2,
   LogOut,
   Moon,
+  PlayCircle,
+  Plus,
   Orbit,
   Palette,
   Pencil,
-  PlayCircle,
-  Plus,
   RotateCcw,
   Search,
   Server,
@@ -41,20 +50,19 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-} from "react";
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -63,22 +71,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  checkVersion,
   createModelConfiguration,
+  fetchSettings,
+  fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
   fetchProviderModels,
-  fetchSettings,
   importMcpConfig,
   loginProviderOAuth,
   logoutProviderOAuth,
@@ -94,13 +95,16 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
+import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import {
   logoFallbackUrls,
   providerBrand,
   providerDisplayLabel,
 } from "@/lib/provider-brand";
-import { getHostApi } from "@/lib/runtime";
+import { cn } from "@/lib/utils";
+import { shortWorkspacePath } from "@/lib/workspace";
+import { useClient } from "@/providers/ClientProvider";
 import type {
   CliAppInfo,
   CliAppsPayload,
@@ -110,11 +114,10 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   SettingsPayload,
+  SkillSummary,
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { useClient } from "@/providers/ClientProvider";
 
 export type SettingsSectionKey =
   | "overview"
@@ -123,10 +126,9 @@ export type SettingsSectionKey =
   | "image"
   | "browser"
   | "apps"
+  | "skills"
   | "runtime"
-  | "advanced"
-  | "voice"
-  | "skills";
+  | "advanced";
 
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
@@ -172,8 +174,6 @@ type ProviderApiType = "auto" | "chat_completions" | "responses";
 type ProviderForm = { apiKey: string; apiBase: string; apiType: ProviderApiType };
 type CustomMcpTransport = "stdio" | "streamableHttp" | "sse";
 
-const BLACKCAT_ICON_SRC = "/brand/blackcat_light_logo.png";
-const BLACKCAT_ICON_SRC_DARK = "/brand/blackcat_dark_logo.png";
 const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 262_144] as const;
 const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "aihubmix",
@@ -271,15 +271,18 @@ const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 interface SettingsViewProps {
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
+  initialSettings?: SettingsPayload | null;
   showSidebar?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
+  skills?: SkillSummary[];
   onWorkspaceSettingsChange?: () => void | Promise<void>;
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
+  onNativeEngineRestart?: () => Promise<string>;
   isRestarting?: boolean;
   hostChromeInset?: boolean;
 }
@@ -317,27 +320,150 @@ function editableDefaultProvider(payload: SettingsPayload): string {
   return base?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "";
 }
 
+function settingsProviderRow(
+  payload: SettingsPayload,
+  provider: string | null | undefined,
+): SettingsPayload["providers"][number] | null {
+  if (!provider) return null;
+  return payload.providers.find((row) => row.name === provider) ?? null;
+}
+
+function settingsProviderConfigured(
+  payload: SettingsPayload,
+  provider: string | null | undefined,
+): boolean {
+  const row = settingsProviderRow(payload, provider);
+  if (row) return row.configured;
+  return payload.agent.has_api_key;
+}
+
+const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
+  model: "",
+  provider: "",
+  modelPreset: "default",
+  presetLabel: "Default",
+  contextWindowTokens: 65_536,
+  timezone: "UTC",
+  botName: "blackcat",
+  botIcon: "",
+  toolHintMaxLength: 40,
+};
+
+const DEFAULT_WEB_SEARCH_FORM: WebSearchSettingsUpdate = {
+  provider: "duckduckgo",
+  apiKey: "",
+  baseUrl: "",
+  maxResults: 5,
+  timeout: 30,
+  useJinaReader: true,
+};
+
+const DEFAULT_IMAGE_GENERATION_FORM: ImageGenerationSettingsUpdate = {
+  enabled: false,
+  provider: "openrouter",
+  model: "openai/gpt-5.4-image-2",
+  defaultAspectRatio: "1:1",
+  defaultImageSize: "1K",
+  maxImagesPerTurn: 4,
+};
+
+const DEFAULT_NETWORK_SAFETY_FORM: NetworkSafetySettingsUpdate = {
+  webuiAllowLocalServiceAccess: true,
+  webuiDefaultAccessMode: "default",
+};
+
+function agentDraftFromPayload(payload: SettingsPayload): AgentSettingsDraft {
+  const fallbackDefault = defaultPreset(payload);
+  const activePresetName = modelPresetValue(payload);
+  const activePreset =
+    payload.model_presets.find((preset) => preset.name === activePresetName) ?? fallbackDefault;
+  return {
+    model: activePreset?.model ?? payload.agent.model,
+    provider: activePreset?.is_default
+      ? editableDefaultProvider(payload)
+      : activePreset?.provider ?? editableDefaultProvider(payload),
+    modelPreset: activePresetName,
+    presetLabel: activePreset?.label ?? activePresetName,
+    contextWindowTokens: normalizeContextWindowTokens(
+      activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
+    ),
+    timezone: payload.agent.timezone,
+    botName: payload.agent.bot_name,
+    botIcon: payload.agent.bot_icon,
+    toolHintMaxLength: payload.agent.tool_hint_max_length,
+  };
+}
+
+function webSearchFormFromPayload(
+  payload: SettingsPayload,
+  previous?: WebSearchSettingsUpdate,
+): WebSearchSettingsUpdate {
+  return {
+    provider: payload.web_search.provider,
+    apiKey: previous?.provider === payload.web_search.provider ? previous.apiKey ?? "" : "",
+    baseUrl: payload.web_search.base_url ?? "",
+    maxResults: payload.web_search.max_results,
+    timeout: payload.web_search.timeout,
+    useJinaReader: payload.web.fetch.use_jina_reader,
+  };
+}
+
+function imageGenerationFormFromPayload(payload: SettingsPayload): ImageGenerationSettingsUpdate {
+  return {
+    enabled: payload.image_generation.enabled,
+    provider: payload.image_generation.provider,
+    model: payload.image_generation.model,
+    defaultAspectRatio: payload.image_generation.default_aspect_ratio,
+    defaultImageSize: payload.image_generation.default_image_size,
+    maxImagesPerTurn: payload.image_generation.max_images_per_turn,
+  };
+}
+
+function networkSafetyFormFromPayload(payload: SettingsPayload): NetworkSafetySettingsUpdate {
+  return {
+    webuiAllowLocalServiceAccess:
+      payload.advanced.webui_allow_local_service_access ??
+      payload.advanced.allow_local_preview_access ??
+      true,
+    webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(
+      payload.advanced.webui_default_access_mode,
+    ),
+  };
+}
+
+function pendingRestartSectionsFromPayload(payload: SettingsPayload): PendingRestartSections {
+  const sections = payload.restart_required_sections ?? [];
+  return {
+    runtime: sections.includes("runtime"),
+    browser: sections.includes("browser"),
+    image: sections.includes("image"),
+  };
+}
+
 export function SettingsView({
   theme,
   initialSection = "overview",
+  initialSettings = null,
   showSidebar = true,
   onToggleTheme,
   onBackToChat,
   onModelNameChange,
   onSettingsChange,
+  skills = [],
   onWorkspaceSettingsChange,
   onSectionChange,
   onLogout,
   onRestart,
+  onNativeEngineRestart,
   isRestarting = false,
   hostChromeInset = false,
 }: SettingsViewProps) {
   const { t } = useTranslation();
   const { token } = useClient();
-  const [settings, setSettings] = useState<SettingsPayload | null>(null);
+  const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => initialSettings === null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -376,26 +502,18 @@ export function SettingsView({
     EMPTY_PENDING_RESTART_SECTIONS,
   );
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
-  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>({
-    provider: "duckduckgo",
-    apiKey: "",
-    baseUrl: "",
-    maxResults: 5,
-    timeout: 30,
-    useJinaReader: true,
-  });
-  const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>({
-    enabled: false,
-    provider: "openrouter",
-    model: "openai/gpt-5.4-image-2",
-    defaultAspectRatio: "1:1",
-    defaultImageSize: "1K",
-    maxImagesPerTurn: 4,
-  });
-  const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>({
-    webuiAllowLocalServiceAccess: true,
-    webuiDefaultAccessMode: "default",
-  });
+  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>(() =>
+    initialSettings ? webSearchFormFromPayload(initialSettings) : DEFAULT_WEB_SEARCH_FORM,
+  );
+  const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>(
+    () =>
+      initialSettings
+        ? imageGenerationFormFromPayload(initialSettings)
+        : DEFAULT_IMAGE_GENERATION_FORM,
+  );
+  const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>(() =>
+    initialSettings ? networkSafetyFormFromPayload(initialSettings) : DEFAULT_NETWORK_SAFETY_FORM,
+  );
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -410,17 +528,9 @@ export function SettingsView({
   );
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
-  const [form, setForm] = useState<AgentSettingsDraft>({
-    model: "",
-    provider: "",
-    modelPreset: "default",
-    presetLabel: "Default",
-    contextWindowTokens: 65_536,
-    timezone: "UTC",
-    botName: "blackcat",
-    botIcon: "",
-    toolHintMaxLength: 40,
-  });
+  const [form, setForm] = useState<AgentSettingsDraft>(() =>
+    initialSettings ? agentDraftFromPayload(initialSettings) : DEFAULT_AGENT_SETTINGS_DRAFT,
+  );
 
   const text = useCallback(
     (key: string, fallback: string, options?: Record<string, unknown>) =>
@@ -429,59 +539,27 @@ export function SettingsView({
   );
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
-    const fallbackDefault = defaultPreset(payload);
-    const activePresetName = modelPresetValue(payload);
-    const activePreset =
-      payload.model_presets.find((preset) => preset.name === activePresetName) ?? fallbackDefault;
     setSettings(payload);
-    setForm({
-      model: activePreset?.model ?? payload.agent.model,
-      provider: activePreset?.is_default
-        ? editableDefaultProvider(payload)
-        : activePreset?.provider ?? editableDefaultProvider(payload),
-      modelPreset: activePresetName,
-      presetLabel: activePreset?.label ?? activePresetName,
-      contextWindowTokens: normalizeContextWindowTokens(
-        activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
-      ),
-      timezone: payload.agent.timezone,
-      botName: payload.agent.bot_name,
-      botIcon: payload.agent.bot_icon,
-      toolHintMaxLength: payload.agent.tool_hint_max_length,
-    });
-    setWebSearchForm((prev) => ({
-      provider: payload.web_search.provider,
-      apiKey: prev.provider === payload.web_search.provider ? prev.apiKey ?? "" : "",
-      baseUrl: payload.web_search.base_url ?? "",
-      maxResults: payload.web_search.max_results,
-      timeout: payload.web_search.timeout,
-      useJinaReader: payload.web.fetch.use_jina_reader,
-    }));
-    setImageGenerationForm({
-      enabled: payload.image_generation.enabled,
-      provider: payload.image_generation.provider,
-      model: payload.image_generation.model,
-      defaultAspectRatio: payload.image_generation.default_aspect_ratio,
-      defaultImageSize: payload.image_generation.default_image_size,
-      maxImagesPerTurn: payload.image_generation.max_images_per_turn,
-    });
-    setNetworkSafetyForm({
-      webuiAllowLocalServiceAccess: payload.advanced.webui_allow_local_service_access ?? payload.advanced.allow_local_preview_access ?? true,
-      webuiDefaultAccessMode: visibleWebuiDefaultAccessMode(payload.advanced.webui_default_access_mode),
-    });
+    setForm(agentDraftFromPayload(payload));
+    setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
+    setImageGenerationForm(imageGenerationFormFromPayload(payload));
+    setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
     if (payload.restart_required_sections) {
-      setPendingRestartSections({
-        runtime: payload.restart_required_sections.includes("runtime"),
-        browser: payload.restart_required_sections.includes("browser"),
-        image: payload.restart_required_sections.includes("image"),
-      });
+      setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
     }
     onSettingsChange?.(payload);
   }, [onSettingsChange]);
 
   useEffect(() => {
+    if (!initialSettings || settings !== null) return;
+    applyPayload(initialSettings);
+    setLoading(false);
+  }, [applyPayload, initialSettings, settings]);
+
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const showLoading = settings === null;
+    if (showLoading) setLoading(true);
     fetchSettings(token)
       .then((payload) => {
         if (!cancelled) {
@@ -490,7 +568,7 @@ export function SettingsView({
         }
       })
       .catch((err) => {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled && showLoading) setError((err as Error).message);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -499,6 +577,34 @@ export function SettingsView({
       cancelled = true;
     };
   }, [applyPayload, token]);
+
+  const hasSettings = settings !== null;
+  useEffect(() => {
+    if (activeSection !== "overview" || !hasSettings) return;
+    let cancelled = false;
+    const refresh = () => {
+      fetchSettingsUsage(token)
+        .then((usage) => {
+          if (cancelled) return;
+          setSettings((current) => (current ? { ...current, usage } : current));
+        })
+        .catch(() => {});
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 5000);
+    const onFocus = () => refresh();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [activeSection, hasSettings, token]);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -635,12 +741,15 @@ export function SettingsView({
 
   const restartViaSettingsSurface = useCallback(async () => {
     const isNativeHost = (settings?.surface ?? settings?.runtime_surface) === "native";
-    const hostApi = getHostApi();
-    if (isNativeHost && settings?.runtime_capabilities?.can_restart_engine && hostApi) {
+    if (
+      isNativeHost &&
+      settings?.runtime_capabilities?.can_restart_engine &&
+      onNativeEngineRestart
+    ) {
       setHostEngineApplying(true);
       try {
-        await hostApi.restartEngine();
-        const payload = await fetchSettings(token);
+        const nextToken = await onNativeEngineRestart();
+        const payload = await fetchSettings(nextToken);
         applyPayload(payload);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
@@ -652,21 +761,25 @@ export function SettingsView({
       return;
     }
     onRestart?.();
-  }, [applyPayload, onRestart, settings, token]);
+  }, [applyPayload, onNativeEngineRestart, onRestart, settings]);
 
   const maybeRestartHostEngine = useCallback(
     async (payload: RestartAwarePayload) => {
       const surface = payload.surface ?? payload.runtime_surface ?? settings?.surface ?? settings?.runtime_surface;
       const capabilities = payload.runtime_capabilities ?? settings?.runtime_capabilities;
       const isNativeHost = surface === "native";
-      const hostApi = getHostApi();
-      if (!payload.requires_restart || !isNativeHost || !capabilities?.can_restart_engine || !hostApi) {
+      if (
+        !payload.requires_restart ||
+        !isNativeHost ||
+        !capabilities?.can_restart_engine ||
+        !onNativeEngineRestart
+      ) {
         return;
       }
       setHostEngineApplying(true);
       try {
-        await hostApi.restartEngine();
-        const refreshed = await fetchSettings(token);
+        const nextToken = await onNativeEngineRestart();
+        const refreshed = await fetchSettings(nextToken);
         applyPayload(refreshed);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
@@ -676,7 +789,7 @@ export function SettingsView({
         setHostEngineApplying(false);
       }
     },
-    [applyPayload, settings, token],
+    [applyPayload, onNativeEngineRestart, settings],
   );
 
   const saveModelSettings = async () => {
@@ -1141,8 +1254,6 @@ export function SettingsView({
           <OverviewSettings
             settings={settings}
             requiresRestart={hasPendingRestart}
-            onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
           />
@@ -1296,6 +1407,8 @@ export function SettingsView({
             isRestarting={isRestarting || hostEngineApplying}
           />
         );
+      case "skills":
+        return <SkillsCatalogSettings skills={skills} />;
       case "runtime":
         return (
           <RuntimeSettings
@@ -1360,10 +1473,20 @@ export function SettingsView({
           )}
         >
           <div className="mb-7">
-            <p className="mb-2 text-[13px] font-medium text-muted-foreground">
+            {!showSidebar ? (
+              <button
+                type="button"
+                onClick={onBackToChat}
+                className="mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                {t("settings.backToChat")}
+              </button>
+            ) : null}
+            <p className="mb-2 text-[12px] font-normal text-muted-foreground">
               {t("settings.sidebar.title")}
             </p>
-            <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[34px]">
+            <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
               {text(`settings.nav.${activeSection}`, titleForSection(activeSection))}
             </h1>
           </div>
@@ -1443,7 +1566,7 @@ function SettingsSidebar({
         {t("settings.backToChat")}
       </button>
       <div className="mb-3 px-1 md:mb-4 md:px-2">
-        <h2 className="text-[21px] font-semibold tracking-[-0.02em] text-foreground">
+        <h2 className="text-[18px] font-normal tracking-normal text-foreground">
           {t("settings.sidebar.title")}
         </h2>
       </div>
@@ -1494,15 +1617,11 @@ function SettingsSidebar({
 function OverviewSettings({
   settings,
   requiresRestart,
-  onRestart,
-  isRestarting,
   onSelectSection,
   showBrandLogos,
 }: {
   settings: SettingsPayload;
   requiresRestart: boolean;
-  onRestart?: () => void;
-  isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
 }) {
@@ -1510,6 +1629,16 @@ function OverviewSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const activePreset = settings.agent.model_preset || "default";
   const activeProvider = settings.agent.resolved_provider ?? settings.agent.provider;
+  const activeProviderConfigured = settingsProviderConfigured(settings, activeProvider);
+  const activeProviderLabel = providerDisplayLabel(settings.providers, activeProvider);
+  const activeModelValue = activeProviderConfigured
+    ? settings.agent.model
+    : tx("settings.values.notConfigured", "Not configured");
+  const activeModelCaption = activeProviderConfigured
+    ? `${activeProvider} · ${activePreset}`
+    : activeProviderLabel || settings.agent.model
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
@@ -1521,48 +1650,23 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
+  const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
+  const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
+  const runtimeTitle = isNativeHost
+    ? tx("settings.rows.engine", "Engine")
+    : tx("settings.rows.gateway", "Gateway");
+  const runtimeValue = isNativeHost
+    ? tx("settings.values.privateEngine", "Private engine")
+    : `${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`;
+  const runtimeCaption = isNativeHost
+    ? tx("settings.values.unixSocket", "Unix socket")
+    : requiresRestart
+      ? tx("settings.values.restartPending", "Restart pending")
+      : tx("settings.values.ready", "Ready");
   return (
     <div className="space-y-7">
       <section>
-        <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
-          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <BlackcatBrandLogo size="lg" testId="overview-blackcat-logo" />
-              <div className="min-w-0">
-                <div className="text-[12px] font-medium text-muted-foreground">blackcat</div>
-                <div className="mt-0.5 truncate text-[18px] font-semibold leading-6 text-foreground">
-                  {settings.agent.model}
-                </div>
-                <div className="mt-0.5 truncate text-[13px] leading-5 text-muted-foreground">
-                  {activeProvider} · {activePreset}
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              <StatusPill tone={requiresRestart ? "neutral" : "success"}>
-                {requiresRestart
-                  ? tx("settings.values.restartPending", "Restart pending")
-                  : tx("settings.values.ready", "Ready")}
-              </StatusPill>
-              {requiresRestart && onRestart ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={onRestart}
-                  disabled={isRestarting}
-                  className="rounded-full"
-                >
-                  {isRestarting ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                  ) : (
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  )}
-                  {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <TokenUsageHeatmap usage={settings.usage} />
       </section>
 
       <section>
@@ -1572,8 +1676,8 @@ function OverviewSettings({
             icon={Bot}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
-            value={settings.agent.model}
-            caption={`${activeProvider} · ${activePreset}`}
+            value={activeModelValue}
+            caption={activeModelCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("models")}
           />
@@ -1609,122 +1713,20 @@ function OverviewSettings({
         <SettingsGroup>
           <OverviewListRow
             icon={Server}
-            title={tx("settings.rows.gateway", "Gateway")}
-            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
-            caption={
-              requiresRestart
-                ? tx("settings.values.restartPending", "Restart pending")
-                : tx("settings.values.ready", "Ready")
-            }
+            title={runtimeTitle}
+            value={runtimeValue}
+            caption={runtimeCaption}
             onClick={() => onSelectSection("runtime")}
           />
           <OverviewListRow
             icon={HardDrive}
             title={tx("settings.overview.workspace", "Workspace")}
-            value={settings.runtime.workspace_path}
-            caption={settings.runtime.config_path}
+            value={tx("settings.values.defaultWorkspace", "Default workspace")}
+            caption={workspaceCaption}
             onClick={() => onSelectSection("runtime")}
           />
         </SettingsGroup>
       </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <VersionCheckRow currentVersion={settings.version?.current} />
-        </SettingsGroup>
-      </section>
-    </div>
-  );
-}
-
-function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const { token } = useClient();
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<
-    | { type: "up-to-date" }
-    | { type: "update"; latestVersion: string; pypiUrl?: string }
-    | { type: "error"; message: string }
-    | null
-  >(null);
-
-  const handleCheck = async () => {
-    setChecking(true);
-    setResult(null);
-    try {
-      const res = await checkVersion(token);
-      if (res.updateAvailable) {
-        setResult({
-          type: "update",
-          latestVersion: res.updateAvailable.latestVersion,
-          pypiUrl: res.updateAvailable.pypiUrl,
-        });
-      } else {
-        setResult({ type: "up-to-date" });
-      }
-    } catch (err) {
-      setResult({ type: "error", message: (err as Error).message });
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-      <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">
-          {tx("settings.about.version", "Version")}
-        </div>
-        <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-          {currentVersion ? `v${currentVersion}` : "blackcat"}
-        </div>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleCheck()}
-          disabled={checking}
-          className="rounded-full"
-        >
-          {checking ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <ArrowUpCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          )}
-          {checking
-            ? tx("settings.about.checking", "Checking...")
-            : tx("settings.about.checkForUpdates", "Check for updates")}
-        </Button>
-        {result?.type === "up-to-date" ? (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-emerald-600 dark:text-emerald-300">
-            <Check className="h-3 w-3" aria-hidden />
-            {tx("settings.about.upToDate", "You're up to date")}
-          </span>
-        ) : null}
-        {result?.type === "update" ? (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-blue-600 dark:text-blue-300">
-            <ArrowUpCircle className="h-3 w-3" aria-hidden />
-            {tx("settings.about.updateAvailable", "Update available")}{result.latestVersion && ` v${result.latestVersion}`}
-            {result.pypiUrl ? (
-              <a
-                href={result.pypiUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 underline-offset-2 hover:underline"
-              >
-                PyPI
-                <ExternalLink className="h-2.5 w-2.5" aria-hidden />
-              </a>
-            ) : null}
-          </span>
-        ) : null}
-        {result?.type === "error" ? (
-          <span className="text-[12px] text-destructive">{result.message}</span>
-        ) : null}
-      </div>
     </div>
   );
 }
@@ -1989,9 +1991,8 @@ function ModelsSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const oauthProviders = settings.providers.filter((provider) => provider.auth_type === "oauth");
   const showAutoProvider = defaultPreset(settings)?.provider === "auto" || form.provider === "auto";
-  const selectableProviders = uniqueProviders([...configuredProviders, ...oauthProviders]);
+  const selectableProviders = uniqueProviders(configuredProviders);
   const providerOptions = showAutoProvider
     ? [{ name: "auto", label: tx("settings.values.auto", "Auto") }, ...selectableProviders]
     : selectableProviders;
@@ -2004,6 +2005,7 @@ function ModelsSettings({
   const selectedProviderNeedsSignIn =
     selectedProvider?.auth_type === "oauth" && !selectedProvider.configured;
   const selectedProviderSigningIn = providerSaving === selectedProvider?.name;
+  const selectedProviderConfigured = settingsProviderConfigured(settings, form.provider);
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
@@ -2022,6 +2024,7 @@ function ModelsSettings({
               settings={settings}
               draftModel={form.model}
               draftProvider={form.provider}
+              providerConfigured={selectedProviderConfigured}
               showProviderLogos={showBrandLogos}
               onChange={(modelPreset) => {
                 const nextPreset = settings.model_presets.find((preset) => preset.name === modelPreset);
@@ -2975,9 +2978,11 @@ function AppsCatalogSettings({
   const loading = (cliAppsLoading || mcpPresetsLoading) && !cliApps && !mcpPresets;
   const statusMessage = cliError || mcpError || (!focusedApp ? cliMessage || mcpMessage : null);
   const statusIsError = Boolean(cliError || mcpError);
-  const caption = tx("settings.apps.caption", "{{cli}} CLI · {{mcp}} MCP")
-    .replace("{{cli}}", String(cliApps?.installed_count ?? 0))
-    .replace("{{mcp}}", String(mcpPresets?.installed_count ?? 0));
+  const caption = t("settings.apps.caption", {
+    cli: cliApps?.installed_count ?? 0,
+    mcp: mcpPresets?.installed_count ?? 0,
+    defaultValue: "{{cli}} CLI · {{mcp}} MCP",
+  });
 
   return (
     <div className="space-y-7">
@@ -3359,7 +3364,10 @@ function McpAppsCatalogRow({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-[12.5px] font-semibold text-foreground">
-                {tx("settings.mcp.connectTitle", "Connect {{name}}").replace("{{name}}", preset.display_name)}
+                {t("settings.mcp.connectTitle", {
+                  name: preset.display_name,
+                  defaultValue: "Connect {{name}}",
+                })}
               </div>
               <p className="mt-0.5 text-[11.5px] text-muted-foreground">
                 {tx("settings.mcp.connectHint", "Add the key from your account settings.")}
@@ -3463,7 +3471,7 @@ function McpAppsCatalogRow({
                   className={cn(
                     "max-w-full rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors",
                     selected
-                      ? "border-brand/25 bg-brand/10 text-brand dark:text-brand"
+                      ? "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
                       : "border-border/55 bg-muted/30 text-muted-foreground hover:bg-muted/60",
                   )}
                 >
@@ -4164,10 +4172,12 @@ function RuntimeSettings({
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
         <SettingsGroup>
-          <ReadOnlyRow
-            title={tx("settings.rows.gateway", "Gateway")}
-            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
-          />
+          {!isNativeHost ? (
+            <ReadOnlyRow
+              title={tx("settings.rows.gateway", "Gateway")}
+              value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
+            />
+          ) : null}
           <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
           <ReadOnlyRow title={tx("settings.rows.workspacePath", "Default workspace")} value={settings.runtime.workspace_path} />
           {onRestart && !requiresRestartPending ? (
@@ -4473,7 +4483,14 @@ function ModelIdPicker({
   const [error, setError] = useState<string | null>(null);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
-  const canFetchModels = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
+  const providerRow = settingsProviderRow(settings, effectiveProvider);
+  const providerConfigured = settingsProviderConfigured(settings, effectiveProvider);
+  const providerRequiresConfiguration = hasConcreteProvider && !providerConfigured;
+  const providerUsesManualModelIds =
+    hasConcreteProvider && providerConfigured && providerRow?.auth_type === "oauth";
+  const canFetchModels =
+    hasConcreteProvider && providerConfigured && !providerUsesManualModelIds;
   const normalizedQuery = query.trim().toLowerCase();
   const providerModels = payload?.models ?? [];
   const visibleModels = providerModels
@@ -4494,13 +4511,15 @@ function ModelIdPicker({
   const hasModelList = payload?.status === "available";
   const showModels = Boolean(hasModelList && payload && (!isCatalog || normalizedQuery));
   const customCandidate = query.trim();
+  const allowCustomModel = !providerRequiresConfiguration;
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
   const providerModelCount = payload?.model_count ?? providerModels.length;
+  const modelUnconfigured = !value.trim() || !providerConfigured;
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-  }, [open, effectiveProvider]);
+    setQuery(providerUsesManualModelIds || !hasConcreteProvider ? value : "");
+  }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
   useEffect(() => {
     if (!open || !shouldFetchModels) {
@@ -4547,7 +4566,11 @@ function ModelIdPicker({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+        <ProviderPickerIcon
+          provider={effectiveProvider}
+          showBrandLogos={showProviderLogos}
+          unconfigured={!providerConfigured}
+        />
         <span className="min-w-0 truncate font-medium text-foreground">
           {model.label ?? model.id}
         </span>
@@ -4571,7 +4594,11 @@ function ModelIdPicker({
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <ProviderPickerIcon provider={effectiveProvider} showBrandLogos={showProviderLogos} />
+            <ProviderPickerIcon
+              provider={effectiveProvider}
+              showBrandLogos={showProviderLogos}
+              unconfigured={modelUnconfigured}
+            />
             <span
               className={cn(
                 "min-w-0 truncate font-medium",
@@ -4604,7 +4631,15 @@ function ModelIdPicker({
           </div>
         </div>
 
-        {!canFetchModels ? (
+        {providerRequiresConfiguration ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
+          </div>
+        ) : providerUsesManualModelIds ? (
+          <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx("settings.models.unsupportedModelList", "Type a model ID manually.")}
+          </div>
+        ) : !canFetchModels ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.autoProviderCustomOnly", "Auto provider mode uses custom model IDs.")}
           </div>
@@ -4648,7 +4683,7 @@ function ModelIdPicker({
           </div>
         ) : null}
 
-        {customCandidate && !exactQueryMatch && customCandidate !== value ? (
+        {allowCustomModel && customCandidate && !exactQueryMatch && customCandidate !== value ? (
           <>
             {showModels ? <DropdownMenuSeparator /> : null}
             <DropdownMenuItem
@@ -4685,16 +4720,30 @@ function formatContextWindow(tokens: number): string {
 function ProviderPickerIcon({
   provider,
   showBrandLogos,
+  unconfigured = false,
 }: {
   provider: string;
   showBrandLogos: boolean;
+  unconfigured?: boolean;
 }) {
   const [logoIndex, setLogoIndex] = useState(0);
   const brand = providerBrand(provider);
-  const Icon = PROVIDER_ICONS[provider] ?? Sparkles;
+  const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
   const logoUrl = brand?.logoUrls[logoIndex];
 
   useEffect(() => setLogoIndex(0), [provider]);
+
+  if (unconfigured) {
+    return (
+      <span
+        data-testid="provider-picker-unconfigured-icon"
+        className="grid h-5 w-5 shrink-0 place-items-center text-amber-700 dark:text-amber-200"
+        aria-hidden
+      >
+        <CircleAlert className="h-4 w-4" strokeWidth={1.8} />
+      </span>
+    );
+  }
 
   if (showBrandLogos && logoUrl) {
     return (
@@ -5005,43 +5054,6 @@ function ProviderIcon({
   );
 }
 
-export function BlackcatBrandLogo({
-  size = "sm",
-  testId,
-}: {
-  size?: "sm" | "lg";
-  testId?: string;
-}) {
-  return (
-    <span
-      data-testid={testId}
-      className={cn(
-        "grid shrink-0 place-items-center overflow-hidden border border-border/45 bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]",
-        size === "lg" ? "h-12 w-12 rounded-[16px]" : "h-9 w-9 rounded-[12px]",
-      )}
-      aria-hidden
-    >
-      <picture>
-        <source
-          media="(prefers-color-scheme: dark)"
-          srcSet={BLACKCAT_ICON_SRC_DARK}
-          type="image/png"
-        />
-        <source
-          media="(prefers-color-scheme: light)"
-          srcSet={BLACKCAT_ICON_SRC}
-          type="image/png"
-        />
-        <img
-          alt="Blackcat logo"
-          className={cn("select-none object-contain", size === "lg" ? "h-10 w-10" : "h-7 w-7")}
-          draggable={false}
-        />
-      </picture>
-    </span>
-  );
-}
-
 function OverviewRowIcon({
   icon: Icon,
 }: {
@@ -5205,6 +5217,7 @@ function ModelPresetPicker({
   settings,
   draftModel,
   draftProvider,
+  providerConfigured,
   showProviderLogos,
   onChange,
   onCreateConfiguration,
@@ -5214,6 +5227,7 @@ function ModelPresetPicker({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  providerConfigured: boolean;
   showProviderLogos: boolean;
   onChange: (preset: string) => void;
   onCreateConfiguration: () => void;
@@ -5241,6 +5255,7 @@ function ModelPresetPicker({
               settings={settings}
               draftModel={draftModel}
               draftProvider={draftProvider}
+              forceUnconfigured={selectedPreset?.is_default ? !providerConfigured : undefined}
               showProviderLogos={showProviderLogos}
               compact
             />
@@ -5305,6 +5320,7 @@ function ModelPresetOptionContent({
   settings,
   draftModel,
   draftProvider,
+  forceUnconfigured,
   showProviderLogos,
   compact = false,
 }: {
@@ -5312,27 +5328,50 @@ function ModelPresetOptionContent({
   settings: SettingsPayload;
   draftModel: string;
   draftProvider: string;
+  forceUnconfigured?: boolean;
   showProviderLogos: boolean;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const provider = modelPresetProviderKey(preset, settings, {
     draftProvider: preset.is_default ? draftProvider : undefined,
   });
   const model = preset.is_default ? draftModel : preset.model;
   const providerName = providerDisplayLabel(settings.providers, provider);
+  const providerConfigured =
+    forceUnconfigured === undefined
+      ? settingsProviderConfigured(settings, provider)
+      : !forceUnconfigured;
+  const title = providerConfigured ? model || preset.label : tx("settings.values.notConfigured", "Not configured");
+  const caption = providerConfigured
+    ? `${providerName}${preset.label ? ` · ${preset.label}` : ""}`
+    : providerName || model || preset.label
+      ? [providerName, model || preset.label].filter(Boolean).join(" · ")
+      : tx("settings.byok.noConfiguredProviders", "No configured providers");
   return (
     <span className="flex min-w-0 items-center gap-2.5">
-      <ProviderPickerIcon provider={provider} showBrandLogos={showProviderLogos} />
+      <ProviderPickerIcon
+        provider={provider}
+        showBrandLogos={showProviderLogos}
+        unconfigured={!providerConfigured}
+      />
       <span className="min-w-0 text-left leading-tight">
-        <span className="block truncate font-medium text-foreground">{model || preset.label}</span>
+        <span
+          className={cn(
+            "block truncate font-medium",
+            providerConfigured ? "text-foreground" : "text-amber-800 dark:text-amber-200",
+          )}
+        >
+          {title}
+        </span>
         <span
           className={cn(
             "mt-0.5 block truncate text-muted-foreground",
             compact ? "text-[11.5px]" : "text-[12px]",
           )}
         >
-          {providerName}
-          {preset.label ? ` · ${preset.label}` : ""}
+          {caption}
         </span>
       </span>
     </span>
@@ -5479,7 +5518,7 @@ function SettingsStatusMessage({
     <span
       className={cn(
         "inline-flex items-center gap-2",
-        tone === "accent" && "font-medium text-brand",
+        tone === "accent" && "font-medium text-blue-600 dark:text-blue-300",
         tone === "danger" && "font-medium text-destructive",
       )}
     >
@@ -5488,7 +5527,7 @@ function SettingsStatusMessage({
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full",
             tone === "accent" &&
-              "bg-brand shadow-[0_0_0_3px_hsl(var(--brand)/0.14)] dark:shadow-[0_0_0_3px_hsl(var(--brand)/0.18)]",
+              "bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.14)] dark:bg-blue-400 dark:shadow-[0_0_0_3px_rgba(96,165,250,0.18)]",
             tone === "danger" && "bg-destructive/70",
           )}
           aria-hidden

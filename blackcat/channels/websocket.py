@@ -36,9 +36,6 @@ from blackcat.utils.media_decode import (
 from blackcat.webui.cli_apps_api import normalize_cli_app_mentions
 from blackcat.webui.gateway_services import GatewayServices
 from blackcat.webui.http_utils import (
-    is_localhost as _is_localhost,
-)
-from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
 from blackcat.webui.http_utils import (
@@ -48,7 +45,6 @@ from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
-from blackcat.webui.transcript import append_transcript_object, build_user_transcript_event
 from blackcat.webui.websocket_logging import websockets_server_logger
 
 
@@ -293,11 +289,15 @@ class WebSocketChannel(BaseChannel):
         self._http_router = gateway.http
         self._tokens = gateway.tokens
         self._media = gateway.media
+        self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
 
     # -- Subscription bookkeeping -------------------------------------------
+
+    def _workspace_controls_available(self, connection: Any) -> bool:
+        return self._http_router.workspace_controls_available(connection)
 
     def _attach(self, connection: Any, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
@@ -651,7 +651,7 @@ class WebSocketChannel(BaseChannel):
                 connection,
                 lambda: self._workspaces.scope_for_new_chat(
                     envelope,
-                    controls_available=_is_localhost(connection),
+                    controls_available=self._workspace_controls_available(connection),
                 ),
             )
             if scope is None:
@@ -688,7 +688,7 @@ class WebSocketChannel(BaseChannel):
                     envelope,
                     chat_id=cid,
                     chat_running=websocket_turn_wall_started_at(cid) is not None,
-                    controls_available=_is_localhost(connection),
+                    controls_available=self._workspace_controls_available(connection),
                 ),
                 chat_id=cid,
             )
@@ -740,7 +740,7 @@ class WebSocketChannel(BaseChannel):
                     envelope,
                     chat_id=cid,
                     chat_running=websocket_turn_wall_started_at(cid) is not None,
-                    controls_available=_is_localhost(connection),
+                    controls_available=self._workspace_controls_available(connection),
                 ),
                 chat_id=cid,
             )
@@ -753,6 +753,7 @@ class WebSocketChannel(BaseChannel):
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
+                metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -768,13 +769,14 @@ class WebSocketChannel(BaseChannel):
                     "enabled": True,
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
-            if envelope.get("webui") is True and self.is_allowed(client_id):
-                self._try_append_webui_user_transcript(
+            if metadata.get("webui") is True and self.is_allowed(client_id):
+                self._transcripts.append_user_message(
                     cid,
                     content,
-                    media_paths=media_paths,
-                    cli_apps=cli_apps,
-                    mcp_presets=mcp_presets,
+                    metadata=metadata,
+                    media_paths=media_paths or None,
+                    cli_apps=cli_apps or None,
+                    mcp_presets=mcp_presets or None,
                 )
             await self._handle_message(
                 sender_id=client_id,
@@ -836,36 +838,6 @@ class WebSocketChannel(BaseChannel):
             self.logger.exception("send failed{}", label)
             raise
 
-    def _try_append_webui_transcript(self, chat_id: str, wire: dict[str, Any]) -> None:
-        sk = f"websocket:{chat_id}"
-        try:
-            dup = json.loads(json.dumps(wire, ensure_ascii=False))
-            append_transcript_object(sk, dup)
-        except (OSError, ValueError, TypeError) as e:
-            self.logger.warning("webui transcript append failed: {}", e)
-
-    def _try_append_webui_user_transcript(
-        self,
-        chat_id: str,
-        content: str,
-        *,
-        media_paths: list[str],
-        cli_apps: list[dict[str, Any]],
-        mcp_presets: list[dict[str, Any]],
-    ) -> None:
-        if content.strip() == "/stop" and not media_paths:
-            return
-        payload = build_user_transcript_event(
-            chat_id,
-            content,
-            media_paths=media_paths,
-            cli_apps=cli_apps,
-            mcp_presets=mcp_presets,
-        )
-        if payload is None:
-            return
-        self._try_append_webui_transcript(chat_id, payload)
-
     async def send(self, msg: OutboundMessage) -> None:
         if msg.metadata.get("_runtime_model_updated"):
             await self.send_runtime_model_updated(
@@ -888,20 +860,21 @@ class WebSocketChannel(BaseChannel):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
-            return
         if msg.metadata.get("_goal_state_sync"):
-            blob = msg.metadata.get("goal_state")
-            await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+            if conns:
+                blob = msg.metadata.get("goal_state")
+                await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
             return
         if msg.metadata.get("_goal_status"):
-            status = msg.metadata.get("goal_status")
-            if status in ("running", "idle"):
-                started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
-                await self.send_goal_status(
-                    msg.chat_id,
-                    status,
-                    started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
-                )
+            if conns:
+                status = msg.metadata.get("goal_status")
+                if status in ("running", "idle"):
+                    started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
+                    await self.send_goal_status(
+                        msg.chat_id,
+                        status,
+                        started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
+                    )
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):
@@ -909,14 +882,20 @@ class WebSocketChannel(BaseChannel):
             lat_i = int(lat) if isinstance(lat, (int, float)) else None
             gs = msg.metadata.get("goal_state")
             gs_blob = gs if isinstance(gs, dict) else None
-            await self.send_turn_end(msg.chat_id, latency_ms=lat_i, goal_state=gs_blob)
+            await self.send_turn_end(
+                msg.chat_id,
+                latency_ms=lat_i,
+                goal_state=gs_blob,
+                metadata=msg.metadata,
+            )
             return
         if msg.metadata.get("_session_updated"):
-            scope = msg.metadata.get("_session_update_scope")
-            await self.send_session_updated(
-                msg.chat_id,
-                scope=scope if isinstance(scope, str) else None,
-            )
+            if conns:
+                scope = msg.metadata.get("_session_update_scope")
+                await self.send_session_updated(
+                    msg.chat_id,
+                    scope=scope if isinstance(scope, str) else None,
+                )
             return
         if msg.metadata.get("_file_edit_events"):
             edits = msg.metadata.get("_file_edit_events")
@@ -959,10 +938,18 @@ class WebSocketChannel(BaseChannel):
             payload["kind"] = "tool_hint"
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
-        transcript_payload = dict(payload)
-        transcript_payload["text"] = text
-        self._try_append_webui_transcript(msg.chat_id, transcript_payload)
+        phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
+        self._transcripts.prepare_and_append(
+            msg.chat_id,
+            payload,
+            metadata=msg.metadata,
+            phase=phase,
+            include_source=True,
+            transcript_overrides={"text": text},
+        )
         raw = json.dumps(payload, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
 
@@ -978,7 +965,7 @@ class WebSocketChannel(BaseChannel):
         until the matching ``reasoning_end`` arrives.
         """
         conns = list(self._subs.get(chat_id, ()))
-        if not conns or not delta:
+        if not delta:
             return
         meta = metadata or {}
         body: dict[str, Any] = {
@@ -989,8 +976,15 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="reasoning",
+        )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning ")
 
@@ -1001,8 +995,6 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Close the current reasoning stream segment for in-place renderers."""
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         meta = metadata or {}
         body: dict[str, Any] = {
             "event": "reasoning_end",
@@ -1011,8 +1003,15 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="reasoning",
+        )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning_end ")
 
@@ -1023,15 +1022,20 @@ class WebSocketChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         payload: dict[str, Any] = {
             "event": "file_edit",
             "chat_id": chat_id,
             "edits": edits,
         }
-        self._try_append_webui_transcript(chat_id, payload)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            payload,
+            metadata=metadata,
+            phase="activity",
+        )
         raw = json.dumps(payload, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" file_edit ")
 
@@ -1042,8 +1046,6 @@ class WebSocketChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         meta = metadata or {}
         stream_key = (chat_id, str(meta.get("_stream_id") or ""))
         if meta.get("_stream_end"):
@@ -1064,8 +1066,15 @@ class WebSocketChannel(BaseChannel):
             self._stream_text_buffers.setdefault(stream_key, []).append(delta)
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=meta,
+            phase="answer",
+        )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
@@ -1075,18 +1084,24 @@ class WebSocketChannel(BaseChannel):
         latency_ms: int | None = None,
         *,
         goal_state: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
         if latency_ms is not None:
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
-        self._try_append_webui_transcript(chat_id, body)
+        self._transcripts.prepare_and_append(
+            chat_id,
+            body,
+            metadata=metadata,
+            phase="complete",
+        )
         raw = json.dumps(body, ensure_ascii=False)
+        if not conns:
+            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
 

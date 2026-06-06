@@ -363,14 +363,15 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
+            context = AgentHookContext(
+                iteration=iteration,
+                messages=messages,
+                session_key=spec.session_key,
+            )
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
-            raw_usage = self._usage_dict(response.usage)
             context.response = response
-            context.usage = dict(raw_usage)
             context.tool_calls = list(response.tool_calls)
-            self._accumulate_usage(usage, raw_usage)
 
             reasoning_text, cleaned_content = extract_reasoning(
                 response.reasoning_content,
@@ -378,6 +379,9 @@ class AgentRunner:
                 response.content,
             )
             response.content = cleaned_content
+            raw_usage = self._usage_or_estimate(spec, messages_for_model, response)
+            context.usage = dict(raw_usage)
+            self._accumulate_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
                 await hook.emit_reasoning(reasoning_text)
                 await hook.emit_reasoning_end()
@@ -504,8 +508,9 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                retry_messages = self._finalization_retry_messages(messages_for_model)
                 response = await self._request_finalization_retry(spec, messages_for_model)
-                retry_usage = self._usage_dict(response.usage)
+                retry_usage = self._usage_or_estimate(spec, retry_messages, response)
                 self._accumulate_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
@@ -821,10 +826,59 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ):
-        retry_messages = list(messages)
-        retry_messages.append(build_finalization_retry_message())
+        retry_messages = self._finalization_retry_messages(messages)
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
         return await self.provider.chat_with_retry(**kwargs)
+
+    @staticmethod
+    def _finalization_retry_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        retry_messages = list(messages)
+        retry_messages.append(build_finalization_retry_message())
+        return retry_messages
+
+    def _usage_or_estimate(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
+    ) -> dict[str, int]:
+        usage = self._usage_dict(response.usage)
+        total = self._usage_total(usage)
+        if total > 0:
+            usage["total_tokens"] = total
+            usage.setdefault("provider_tokens", total)
+            return usage
+        if response.finish_reason == "error":
+            return {}
+        return self._estimate_response_usage(spec, messages, response)
+
+    def _estimate_response_usage(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
+    ) -> dict[str, int]:
+        try:
+            tools = spec.tools.get_definitions()
+        except Exception:
+            tools = None
+        prompt_tokens, _ = estimate_prompt_tokens_chain(self.provider, spec.model, messages, tools)
+        assistant_message = build_assistant_message(
+            response.content or "",
+            tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+            reasoning_content=response.reasoning_content,
+            thinking_blocks=response.thinking_blocks,
+        )
+        completion_tokens = estimate_message_tokens(assistant_message)
+        total_tokens = max(0, prompt_tokens) + max(0, completion_tokens)
+        if total_tokens <= 0:
+            return {}
+        return {
+            "prompt_tokens": max(0, prompt_tokens),
+            "completion_tokens": max(0, completion_tokens),
+            "total_tokens": total_tokens,
+            "estimated_tokens": total_tokens,
+        }
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
@@ -837,6 +891,12 @@ class AgentRunner:
             except (TypeError, ValueError):
                 continue
         return result
+
+    @staticmethod
+    def _usage_total(usage: dict[str, int]) -> int:
+        return max(0, usage.get("total_tokens", 0) or (
+            usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+        ))
 
     @staticmethod
     def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:

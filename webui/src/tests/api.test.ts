@@ -171,6 +171,17 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("fetches token usage through the lightweight settings endpoint", async () => {
+    await fetchSettingsUsage("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/usage",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("serializes model configuration creation", async () => {
     await createModelConfiguration("tok", {
       label: "Fast writing",

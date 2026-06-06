@@ -73,7 +73,6 @@
       "models": "モデル",
       "providers": "プロバイダー",
       "image": "画像",
-      "voice": "音声",
       "browser": "ウェブ",
       "runtime": "システム",
       "advanced": "セキュリティ",
@@ -100,8 +99,7 @@
       "mcp": "MCP サービス",
       "apps": "アプリ",
       "nativeHost": "ネイティブホスト",
-      "hostSafety": "アプリの安全性",
-      "voiceInput": "音声入力"
+      "hostSafety": "アプリの安全性"
     },
     "rows": {
       "theme": "テーマ",
@@ -144,13 +142,7 @@
       "engine": "エンジン",
       "logs": "ログ",
       "diagnostics": "診断",
-      "contextWindow": "コンテキストウィンドウ",
-      "transcription": "文字起こし",
-      "transcriptionProvider": "プロバイダー",
-      "transcriptionProviderStatus": "プロバイダー状態",
-      "transcriptionModel": "モデル",
-      "transcriptionLanguage": "言語",
-      "voiceLimits": "制限"
+      "contextWindow": "コンテキストウィンドウ"
     },
     "help": {
       "theme": "ライト表示とダーク表示を切り替えます。",
@@ -189,12 +181,7 @@
       "diagnostics": "サポート用の小さなランタイムレポートを書き出します。",
       "localServiceAccessNative": "Full Access の shell コマンドがこの Mac 上のサービスにアクセスできるようにします。",
       "webuiDefaultAccessNative": "プロジェクト固有の権限がないネイティブチャットで使用します。",
-      "contextWindow": "このモデル設定で使う既定のコンテキスト予算を選択します。",
-      "transcription": "マイク入力を送信前に文字起こしします。チャネルの音声メッセージも同じ設定を使います。",
-      "transcriptionProvider": "プロバイダー設定にある対応する認証情報を使います。",
-      "transcriptionProviderStatus": "APIキーは文字起こし設定ではなくプロバイダー側に保存されます。",
-      "transcriptionModel": "プロバイダーがカスタムモデルIDを必要としない限り、解決済みのデフォルトのままにします。",
-      "transcriptionLanguage": "en、zh、ja、ko などの任意の ISO-639 ヒント。"
+      "contextWindow": "このモデル設定で使う既定のコンテキスト予算を選択します。"
     },
     "values": {
       "light": "ライト",
@@ -248,7 +235,7 @@
       "exporting": "書き出しています..."
     },
     "byok": {
-      "description": "自分の provider キーを使います。Blackcat は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
+      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
       "configured": "設定済み",
       "notConfigured": "未設定",
       "configuredSection": "設定済み",
@@ -296,7 +283,6 @@
       "totalProviders": "{{count}} 個利用可能",
       "webSearch": "Web 検索",
       "imageGeneration": "画像生成",
-      "voiceInput": "音声入力",
       "workspace": "ワークスペース"
     },
     "usage": {
@@ -500,11 +486,6 @@
       "rawInstructions": "元の SKILL.md",
       "rawInstructionsEmpty": "元の説明はありません。",
       "detailDescription": "{{name}} の詳細。"
-    },
-    "voice": {
-      "selectProvider": "プロバイダーを選択",
-      "configureProvider": "プロバイダーを設定",
-      "languageAuto": "自動"
     }
   },
   "chat": {
@@ -697,21 +678,6 @@
         "deepResearch": "詳細調査",
         "voice": "音声入力"
       },
-      "voice": {
-        "hint": "クリックして音声入力、または長押し",
-        "stop": "録音を停止",
-        "transcribing": "文字起こし中...",
-        "recordingStatus": "録音中 {{time}}"
-      },
-      "voiceErrors": {
-        "unsupported": "このブラウザーは音声入力に対応していません。",
-        "permission": "マイクの許可が必要です。",
-        "notConfigured": "先に文字起こしプロバイダーを設定してください。",
-        "tooLong": "録音が長すぎます。",
-        "tooShort": "もう少し長く録音してください。",
-        "noInput": "マイク入力が検出されませんでした。",
-        "failed": "音声を文字起こしできませんでした。"
-      },
       "slash": {
         "ariaLabel": "スラッシュコマンド",
         "label": "コマンド",
@@ -885,7 +851,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

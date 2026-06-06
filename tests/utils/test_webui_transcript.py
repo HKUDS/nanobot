@@ -43,6 +43,177 @@ def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
     assert msgs[1]["latencyMs"] == 42
 
 
+def test_replay_preserves_turn_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-turn"
+    for ev in (
+        {
+            "event": "user",
+            "chat_id": "t-turn",
+            "text": "q",
+            "turn_id": "turn-1",
+            "turn_phase": "user",
+            "turn_seq": 1,
+        },
+        {
+            "event": "reasoning_delta",
+            "chat_id": "t-turn",
+            "text": "think",
+            "turn_id": "turn-1",
+            "turn_phase": "reasoning",
+            "turn_seq": 2,
+        },
+        {
+            "event": "delta",
+            "chat_id": "t-turn",
+            "text": "a",
+            "turn_id": "turn-1",
+            "turn_phase": "answer",
+            "turn_seq": 3,
+        },
+        {
+            "event": "turn_end",
+            "chat_id": "t-turn",
+            "latency_ms": 12,
+            "turn_id": "turn-1",
+            "turn_phase": "complete",
+            "turn_seq": 4,
+        },
+    ):
+        append_transcript_object(key, ev)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert msgs[0]["turnId"] == "turn-1"
+    assert msgs[0]["turnPhase"] == "user"
+    assert msgs[0]["turnSeq"] == 1
+    assert msgs[1]["turnId"] == "turn-1"
+    assert msgs[1]["turnPhase"] == "answer"
+    assert msgs[1]["turnSeq"] == 3
+
+
+def test_replay_reused_turn_id_after_turn_end_starts_new_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-reused-turn"
+
+    def event(
+        event: str,
+        phase: str,
+        seq: int,
+        text: str | None = None,
+        source: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        out = {
+            "event": event,
+            "chat_id": "t-reused-turn",
+            "turn_id": "turn-1",
+            "turn_phase": phase,
+            "turn_seq": seq,
+        }
+        if text is not None:
+            out["text"] = text
+        if source is not None:
+            out["source"] = source
+        return out
+
+    for record in (
+        event("user", "user", 1, "remind me later"),
+        event("message", "answer", 2, "Reminder set."),
+        event("turn_end", "complete", 3),
+        event(
+            "message", "answer", 1, "Time to drink water.",
+            {"kind": "cron", "label": "drink water"},
+        ),
+        event("turn_end", "complete", 2),
+    ):
+        append_transcript_object(key, record)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert [m["content"] for m in msgs] == [
+        "remind me later",
+        "Reminder set.",
+        "Time to drink water.",
+    ]
+    assert msgs[1]["turnId"] == "turn-1"
+    assert msgs[2]["turnId"].startswith("turn-1:replay:")
+    assert msgs[2]["turnId"] != msgs[1]["turnId"]
+    assert msgs[2]["source"] == {"kind": "cron", "label": "drink water"}
+
+
+def test_build_response_restores_session_users_for_legacy_transcript(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:legacy-users"
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "legacy-users", "text": "assistant one"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "legacy-users"})
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "legacy-users", "text": "assistant two"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "legacy-users"})
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": "prompt one", "timestamp": "2026-06-02T10:00:00"},
+            {"role": "assistant", "content": "assistant one"},
+            {"role": "user", "content": "prompt two", "timestamp": "2026-06-02T10:01:00"},
+            {"role": "assistant", "content": "assistant two"},
+        ],
+    )
+
+    assert out is not None
+    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+        ("user", "prompt one"),
+        ("assistant", "assistant one"),
+        ("user", "prompt two"),
+        ("assistant", "assistant two"),
+    ]
+
+
+def test_build_response_restores_session_users_without_duplicating_new_transcript_users(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:mixed-users"
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "mixed-users", "text": "old assistant"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "mixed-users"})
+    append_transcript_object(key, {"event": "user", "chat_id": "mixed-users", "text": "new prompt"})
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "mixed-users", "text": "new assistant"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "mixed-users"})
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": "old prompt"},
+            {"role": "assistant", "content": "old assistant"},
+            {"role": "user", "content": "new prompt"},
+            {"role": "assistant", "content": "new assistant"},
+        ],
+    )
+
+    assert out is not None
+    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+        ("user", "old prompt"),
+        ("assistant", "old assistant"),
+        ("user", "new prompt"),
+        ("assistant", "new assistant"),
+    ]
+
+
 def test_replay_augments_assistant_text() -> None:
     msgs = replay_transcript_to_ui_messages(
         [
@@ -675,8 +846,6 @@ def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypat
 
 
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
-    from blackcat.webui.transcript import build_webui_thread_response
-
     monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t3"
     append_transcript_object(key, {"event": "user", "chat_id": "t3", "text": "x"})

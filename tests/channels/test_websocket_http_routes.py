@@ -253,7 +253,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "      bins:",
             "        - definitely-missing-blackcat-skill-cli",
             "      env:",
-            "        - DEFINITELY_MISSING_BLACKCAT_SKILL_ENV",
+            "        - DEFINITELY_MISSING_NANOBOT_SKILL_ENV",
             "---",
             "Use the missing CLI and env var.",
         ]),
@@ -298,7 +298,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         assert unavailable["available"] is False
         assert unavailable["unavailable_reason"] == (
             "CLI: definitely-missing-blackcat-skill-cli, "
-            "ENV: DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"
+            "ENV: DEFINITELY_MISSING_NANOBOT_SKILL_ENV"
         )
 
         detail = await _http_get(
@@ -310,9 +310,9 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         assert "path" not in detail_body
         assert detail_body["requirements"] == {
             "bins": ["definitely-missing-blackcat-skill-cli"],
-            "env": ["DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"],
+            "env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
             "missing_bins": ["definitely-missing-blackcat-skill-cli"],
-            "missing_env": ["DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"],
+            "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:
@@ -484,7 +484,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
             headers={
                 **auth,
-                "X-Blackcat-MCP-Values": json.dumps(
+                "X-Nanobot-MCP-Values": json.dumps(
                     {"browserbase_api_key": "bb_live_secret"}
                 ),
             },
@@ -499,7 +499,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         bad_header = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
-            headers={**auth, "X-Blackcat-MCP-Values": "[]"},
+            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
         )
         assert bad_header.status_code == 400
 
@@ -507,7 +507,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
             headers={
                 **auth,
-                "X-Blackcat-MCP-Values": json.dumps(
+                "X-Nanobot-MCP-Values": json.dumps(
                     {"name": "docs", "command": "npx"}
                 ),
             },
@@ -518,7 +518,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         imported = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/import",
-            headers={**auth, "X-Blackcat-MCP-Values": json.dumps({"config": "{}"})},
+            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
         )
         assert imported.status_code == 200
         assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
@@ -527,7 +527,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
             headers={
                 **auth,
-                "X-Blackcat-MCP-Values": json.dumps(
+                "X-Nanobot-MCP-Values": json.dumps(
                     {"name": "docs", "enabled_tools": []}
                 ),
             },
@@ -958,7 +958,7 @@ def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
 def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 
@@ -1052,7 +1052,7 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
 def test_bootstrap_accepts_x_blackcat_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 

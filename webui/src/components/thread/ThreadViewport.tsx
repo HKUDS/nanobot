@@ -1,21 +1,31 @@
-import { ArrowDown } from "lucide-react";
 import {
+  forwardRef,
   type ReactNode,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { Button } from "@/components/ui/button";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import {
+  findPromptElement,
+  jumpToPrompt,
+} from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
+import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+
+export interface ThreadViewportHandle {
+  jumpToUserPrompt: (promptId: string) => void;
+}
 
 interface ThreadViewportProps {
   messages: UIMessage[];
@@ -27,6 +37,7 @@ interface ThreadViewportProps {
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  onOpenFilePreview?: (path: string) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -48,7 +59,7 @@ export function windowMessages(messages: UIMessage[], visibleCount: number): UIM
   return messages.slice(start);
 }
 
-export function ThreadViewport({
+export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages,
   isStreaming,
   composer,
@@ -58,7 +69,8 @@ export function ThreadViewport({
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
-}: ThreadViewportProps) {
+  onOpenFilePreview,
+}, ref) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -66,6 +78,7 @@ export function ThreadViewport({
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
   const pendingConversationScrollRef = useRef(true);
+  const pendingPromptJumpRef = useRef<string | null>(null);
   const scrollFrameIdsRef = useRef<number[]>([]);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
@@ -139,6 +152,22 @@ export function ThreadViewport({
     );
   }, [messages.length]);
 
+  const jumpToUserPrompt = useCallback((promptId: string) => {
+    const scrollEl = scrollRef.current;
+    if (scrollEl && findPromptElement(scrollEl, promptId)) {
+      jumpToPrompt(scrollEl, promptId);
+      return;
+    }
+    const index = messages.findIndex((message) => message.id === promptId);
+    if (index < 0) return;
+    pendingPromptJumpRef.current = promptId;
+    userReadingHistoryRef.current = true;
+    setAtBottom(false);
+    setVisibleMessageCount((count) => Math.max(count, messages.length - index));
+  }, [messages]);
+
+  useImperativeHandle(ref, () => ({ jumpToUserPrompt }), [jumpToUserPrompt]);
+
   const measureComposerDock = useCallback(() => {
     const el = composerDockRef.current;
     if (!el) return;
@@ -178,6 +207,15 @@ export function ThreadViewport({
     if (!el) return;
     const delta = el.scrollHeight - pending.height;
     el.scrollTop = pending.top + delta;
+  }, [visibleMessages.length]);
+
+  useLayoutEffect(() => {
+    const promptId = pendingPromptJumpRef.current;
+    const scrollEl = scrollRef.current;
+    if (!promptId || !scrollEl || !findPromptElement(scrollEl, promptId)) return;
+    pendingPromptJumpRef.current = null;
+    const frame = window.requestAnimationFrame(() => jumpToPrompt(scrollEl, promptId));
+    return () => window.cancelAnimationFrame(frame);
   }, [visibleMessages.length]);
 
   useLayoutEffect(() => {
@@ -256,6 +294,7 @@ export function ThreadViewport({
                   onLoadEarlier={loadEarlierMessages}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
                 />
               </div>
             </div>
@@ -299,22 +338,25 @@ export function ThreadViewport({
       ) : null}
 
       {showScrollToBottomButton && !atBottom && (
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => scrollToBottom(true, 1, { force: true })}
-          className={cn(
-            /* Keep clear of sticky composer (textarea + toolbar + optional goal strip). */
-            "absolute left-1/2 z-20 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
-            "bg-background/90 backdrop-blur",
-            "animate-in fade-in-0 zoom-in-95",
-          )}
+        <div
+          className="absolute left-1/2 z-20 -translate-x-1/2"
           style={{ bottom: scrollButtonBottom }}
-          aria-label={t("thread.scrollToBottom")}
         >
-          <ArrowDown className="h-4 w-4" />
-        </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => scrollToBottom(true, 1, { force: true })}
+            className={cn(
+              "h-8 w-8 rounded-full shadow-md",
+              "bg-background/90 backdrop-blur",
+              "animate-in fade-in-0 zoom-in-95",
+            )}
+            aria-label={t("thread.scrollToBottom")}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        </div>
       )}
     </div>
   );
-}
+});

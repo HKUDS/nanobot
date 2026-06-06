@@ -73,7 +73,6 @@
       "models": "Modelos",
       "providers": "Proveedores",
       "image": "Imagen",
-      "voice": "Voz",
       "browser": "Internet",
       "runtime": "Sistema",
       "advanced": "Seguridad",
@@ -100,8 +99,7 @@
       "mcp": "Servicios MCP",
       "apps": "Aplicaciones",
       "nativeHost": "Host nativo",
-      "hostSafety": "Seguridad de la app",
-      "voiceInput": "Entrada de voz"
+      "hostSafety": "Seguridad de la app"
     },
     "rows": {
       "theme": "Tema",
@@ -144,13 +142,7 @@
       "engine": "Motor",
       "logs": "Registros",
       "diagnostics": "Diagnóstico",
-      "contextWindow": "Ventana de contexto",
-      "transcription": "Transcripcion",
-      "transcriptionProvider": "Proveedor",
-      "transcriptionProviderStatus": "Estado del proveedor",
-      "transcriptionModel": "Modelo",
-      "transcriptionLanguage": "Idioma",
-      "voiceLimits": "Limites"
+      "contextWindow": "Ventana de contexto"
     },
     "help": {
       "theme": "Cambia entre apariencia clara y oscura.",
@@ -189,12 +181,7 @@
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
       "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
-      "contextWindow": "Elige el presupuesto de contexto predeterminado para esta configuración de modelo.",
-      "transcription": "Transcribe la entrada del microfono antes de enviarla. Los mensajes de voz de los canales usan la misma configuracion.",
-      "transcriptionProvider": "Usa las credenciales del proveedor correspondiente en Proveedores.",
-      "transcriptionProviderStatus": "Las claves API permanecen en proveedores, no en la configuracion de transcripcion.",
-      "transcriptionModel": "Dejalo como el valor predeterminado resuelto salvo que el proveedor necesite un id de modelo personalizado.",
-      "transcriptionLanguage": "Pista ISO-639 opcional, como en, zh, ja o ko."
+      "contextWindow": "Elige el presupuesto de contexto predeterminado para esta configuración de modelo."
     },
     "values": {
       "light": "Claro",
@@ -248,7 +235,7 @@
       "exporting": "Exportando..."
     },
     "byok": {
-      "description": "Usa tus propias claves de proveedor. Blackcat lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
+      "description": "Usa tus propias claves de proveedor. Nanobot lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
       "configured": "Configurado",
       "notConfigured": "Sin configurar",
       "configuredSection": "Configurados",
@@ -296,7 +283,6 @@
       "totalProviders": "{{count}} disponibles",
       "webSearch": "Búsqueda web",
       "imageGeneration": "Generación de imágenes",
-      "voiceInput": "Entrada de voz",
       "workspace": "Espacio de trabajo"
     },
     "usage": {
@@ -500,11 +486,6 @@
       "rawInstructions": "SKILL.md original",
       "rawInstructionsEmpty": "No hay instrucciones originales.",
       "detailDescription": "Detalles de {{name}}."
-    },
-    "voice": {
-      "selectProvider": "Seleccionar proveedor",
-      "configureProvider": "Configurar proveedor",
-      "languageAuto": "Auto"
     }
   },
   "chat": {
@@ -697,21 +678,6 @@
         "deepResearch": "Investigación profunda",
         "voice": "Entrada de voz"
       },
-      "voice": {
-        "hint": "Haz clic para dictar o mantén",
-        "stop": "Detener grabación",
-        "transcribing": "Transcribiendo...",
-        "recordingStatus": "Grabando {{time}}"
-      },
-      "voiceErrors": {
-        "unsupported": "Este navegador no admite entrada de voz.",
-        "permission": "Se requiere permiso de micrófono.",
-        "notConfigured": "Configura primero un proveedor de transcripción.",
-        "tooLong": "La grabación es demasiado larga.",
-        "tooShort": "Mantén pulsado un poco más para grabar voz.",
-        "noInput": "No se detectó entrada del micrófono.",
-        "failed": "No se pudo transcribir el audio."
-      },
       "slash": {
         "ariaLabel": "Comandos slash",
         "label": "comandos",
@@ -885,7 +851,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

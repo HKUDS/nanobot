@@ -1,6 +1,6 @@
-import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";

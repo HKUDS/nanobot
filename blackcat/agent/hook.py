@@ -44,23 +44,11 @@ class AgentRunHookContext:
     exception: BaseException | None = None
 
 
-@dataclass(slots=True)
-class AgentRunHookContext:
-    """Run-level state snapshot exposed to runner hooks."""
-
-    messages: list[dict[str, Any]]
-    final_content: str | None = None
-    tools_used: list[str] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
-    stop_reason: str | None = None
-    error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
-    had_injections: bool = False
-    exception: BaseException | None = None
-
-
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
+
+    def __init__(self, reraise: bool = False) -> None:
+        self._reraise = reraise
 
     def wants_streaming(self) -> bool:
         return False
@@ -118,6 +106,7 @@ class CompositeHook(AgentHook):
     __slots__ = ("_hooks",)
 
     def __init__(self, hooks: list[AgentHook]) -> None:
+        super().__init__()
         self._hooks = list(hooks)
 
     def wants_streaming(self) -> bool:
@@ -150,46 +139,22 @@ class CompositeHook(AgentHook):
         await self._for_each_hook_safe("on_finally", context)
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        for h in self._hooks:
-            try:
-                await h.on_stream(context, delta)
-            except Exception:
-                logger.exception("AgentHook.on_stream error in {}", type(h).__name__)
+        await self._for_each_hook_safe("on_stream", context, delta)
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        for h in self._hooks:
-            try:
-                await h.on_stream_end(context, resuming=resuming)
-            except Exception:
-                logger.exception("AgentHook.on_stream_end error in {}", type(h).__name__)
+        await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
-        for h in self._hooks:
-            try:
-                await h.before_execute_tools(context)
-            except Exception:
-                logger.exception("AgentHook.before_execute_tools error in {}", type(h).__name__)
+        await self._for_each_hook_safe("before_execute_tools", context)
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
-        for h in self._hooks:
-            try:
-                await h.emit_reasoning(reasoning_content)
-            except Exception:
-                logger.exception("AgentHook.emit_reasoning error in {}", type(h).__name__)
+        await self._for_each_hook_safe("emit_reasoning", reasoning_content)
 
     async def emit_reasoning_end(self) -> None:
-        for h in self._hooks:
-            try:
-                await h.emit_reasoning_end()
-            except Exception:
-                logger.exception("AgentHook.emit_reasoning_end error in {}", type(h).__name__)
+        await self._for_each_hook_safe("emit_reasoning_end")
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        for h in self._hooks:
-            try:
-                await h.after_iteration(context)
-            except Exception:
-                logger.exception("AgentHook.after_iteration error in {}", type(h).__name__)
+        await self._for_each_hook_safe("after_iteration", context)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         for h in self._hooks:

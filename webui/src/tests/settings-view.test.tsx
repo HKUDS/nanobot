@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
-import type { SettingsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsPayload } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -93,7 +93,6 @@ function settingsPayload(): SettingsPayload {
       mcp_server_count: 0,
       exec_enabled: true,
       exec_sandbox: null,
-      exec_path_prepend_set: false,
       exec_path_append_set: false,
     },
     requires_restart: false,
@@ -120,7 +119,6 @@ const installedAnyGen = {
 function renderSettingsView(
   options: {
     initialSection?: "overview" | "apps" | "advanced" | "models";
-    initialSettings?: SettingsPayload;
     onSettingsChange?: (payload: SettingsPayload) => void;
     onNativeEngineRestart?: () => Promise<string>;
   } = {},
@@ -130,7 +128,6 @@ function renderSettingsView(
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}
-        initialSettings={options.initialSettings}
         onToggleTheme={() => {}}
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
@@ -143,7 +140,6 @@ function renderSettingsView(
 
 describe("SettingsView Apps catalog", () => {
   afterEach(() => {
-    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -272,45 +268,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
     expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
-  });
-
-  it("aligns token activity days with the configured timezone", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-02T18:00:00Z"));
-    const basePayload = settingsPayload();
-    const payload: SettingsPayload = {
-      ...basePayload,
-      agent: {
-        ...basePayload.agent,
-        timezone: "Asia/Shanghai",
-      },
-      usage: {
-        days: [
-          {
-            date: "2026-06-03",
-            prompt_tokens: 1200,
-            completion_tokens: 300,
-            cached_tokens: 500,
-            total_tokens: 1500,
-            requests: 2,
-          },
-        ],
-        total_tokens: 1500,
-        total_tokens_30d: 1500,
-        total_tokens_365d: 1500,
-        peak_day_tokens: 1500,
-        current_streak_days: 1,
-        longest_streak_days: 1,
-        active_days_30d: 1,
-        requests_30d: 2,
-        updated_at: "2026-06-03T00:00:00Z",
-      },
-    };
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-
-    renderSettingsView({ initialSection: "overview", initialSettings: payload });
-
-    expect(screen.getByLabelText("2026-06-03: 1.5K tokens, 2 requests")).toBeInTheDocument();
   });
 
   it("shows context window options in model settings", async () => {
