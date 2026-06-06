@@ -255,6 +255,23 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     return start
 
 
+def resolve_stream_idle_timeout_s(
+    value: Any,
+    *,
+    default: int = 90,
+    minimum: int = 1,
+    maximum: int = 3600,
+) -> int:
+    """Parse and clamp stream idle timeout seconds."""
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        return default
+    if timeout < minimum:
+        return default
+    return min(timeout, maximum)
+
+
 def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
     parts: list[str] = []
     for block in content:

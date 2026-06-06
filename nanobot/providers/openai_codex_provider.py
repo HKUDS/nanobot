@@ -19,6 +19,7 @@ from nanobot.providers.openai_responses import (
     convert_messages,
     convert_tools,
 )
+from nanobot.utils.helpers import resolve_stream_idle_timeout_s
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
@@ -198,7 +199,9 @@ async def _request_codex(
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, str | None]:
-    idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+    idle_timeout_s = resolve_stream_idle_timeout_s(
+        os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S"), default=90,
+    )
     async with httpx.AsyncClient(timeout=idle_timeout_s, verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:

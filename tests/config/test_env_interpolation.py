@@ -10,6 +10,14 @@ from nanobot.config.loader import (
 )
 
 
+def test_load_config_invalid_json_fails_closed(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{invalid", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        load_config(config_path)
+
+
 class TestResolveEnvVars:
     def test_replaces_string_value(self, monkeypatch):
         monkeypatch.setenv("MY_SECRET", "hunter2")
