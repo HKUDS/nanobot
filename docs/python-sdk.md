@@ -7,12 +7,10 @@ Use blackcat as a library — no CLI, no gateway, just Python.
 ```python
 import asyncio
 
-from blackcat import Blackcat
+from blackcat import Nanobot
 
 
 async def main() -> None:
-    bot = Blackcat.from_config()
-    result = await bot.run("What time is it in Tokyo?")
     async with Nanobot.from_config() as bot:
         result = await bot.run("What time is it in Tokyo?")
     print(result.content)
@@ -21,7 +19,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`Blackcat.from_config()` reuses your normal `~/.blackcat/config.json`, so the SDK follows the same provider, model, tools, and workspace defaults as the CLI unless you override them.
+`Nanobot.from_config()` reuses your normal `~/.blackcat/config.json`, so the SDK follows the same provider, model, tools, and workspace defaults as the CLI unless you override them.
 
 Use `async with` when possible so MCP connections and background cleanup work are closed before the event loop exits. If you manage the instance manually, call `await bot.aclose()` in a `finally` block.
 
@@ -30,9 +28,9 @@ Use `async with` when possible so MCP connections and background cleanup work ar
 ### Use a specific config or workspace
 
 ```python
-from blackcat import Blackcat
+from blackcat import Nanobot
 
-bot = Blackcat.from_config(
+bot = Nanobot.from_config(
     config_path="~/.blackcat/config.json",
     workspace="/my/project",
 )
@@ -66,9 +64,9 @@ result = await bot.run("Review this change", hooks=[AuditHook()])
 
 ## API Reference
 
-### `Blackcat.from_config(config_path=None, *, workspace=None)`
+### `Nanobot.from_config(config_path=None, *, workspace=None)`
 
-Create a `Blackcat` instance from a config file.
+Create a `Nanobot` instance from a config file.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -201,7 +199,7 @@ class Censor(AgentHook):
 import asyncio
 import time
 
-from blackcat import Blackcat
+from blackcat import Nanobot
 from blackcat.agent import AgentHook, AgentHookContext
 
 
@@ -219,7 +217,7 @@ class TimingHook(AgentHook):
 
 
 async def main() -> None:
-    bot = Blackcat.from_config(workspace="/my/project")
+    bot = Nanobot.from_config(workspace="/my/project")
     result = await bot.run(
         "Explain the main function",
         session_key="sdk:demo",
