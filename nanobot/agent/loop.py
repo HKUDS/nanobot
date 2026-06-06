@@ -727,8 +727,23 @@ class AgentLoop:
                 if media:
                     content, media = self._prepare_message_media(content, media)
                     media = media or None
-                user_content = self.context._build_user_content(content, media)
-                return {"role": "user", "content": user_content}
+                scope = self.workspace_scopes.for_message(
+                    pending_msg,
+                    session.metadata if session is not None else None,
+                )
+                built = self.context.build_messages(
+                    history=[],
+                    current_message=image_generation_prompt(content, pending_msg.metadata),
+                    media=media,
+                    channel=pending_msg.channel,
+                    chat_id=self._runtime_chat_id(pending_msg),
+                    sender_id=pending_msg.sender_id,
+                    session_metadata=session.metadata if session is not None else None,
+                    workspace=scope.project_path,
+                    runtime_state=self,
+                    inbound_message=pending_msg,
+                )
+                return built[-1]
 
             items: list[dict[str, Any]] = []
             while len(items) < limit:
