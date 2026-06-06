@@ -659,6 +659,6 @@ class CronService:
         store = self._load_store()
         return {
             "enabled": self._running,
-            "jobs": len(store.jobs),
+            "jobs": len(store.jobs) if store is not None else 0,
             "next_wake_at_ms": self._get_next_wake_ms(),
         }
