@@ -124,6 +124,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 > - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` to use OpenAI Whisper. API keys still live in the matching `providers.<provider>` config.
 > - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper or `"openrouter"` for OpenRouter speech-to-text models. API keys still live in the matching `providers.<provider>` config.
 > - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, or `"xiaomi_mimo"` for Xiaomi MiMo ASR. API keys still live in the matching `providers.<provider>` config.
+> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so blackcat keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
@@ -146,6 +147,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
 | `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
+| `assemblyai` | Voice transcription only | [assemblyai.com](https://www.assemblyai.com/) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
@@ -1002,6 +1004,8 @@ That's it! Environment variables, model routing, config matching, and `blackcat 
 | `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`; required for providers that reject both being set simultaneously (e.g. VolcEngine) | `True` |
 
 </details>
+Contributor notes for adding new providers live in
+[`development.md`](./development.md#adding-an-llm-provider).
 
 ## Model Presets
 
@@ -1125,8 +1129,8 @@ Configure transcription under the top-level `transcription` section:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI/desktop microphone input. |
-| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, or `"xiaomi_mimo"`. |
-| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, and `mimo-v2.5-asr` for Xiaomi MiMo ASR. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. |
+| `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, `"xiaomi_mimo"`, or `"assemblyai"`. |
+| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, `mimo-v2.5-asr` for Xiaomi MiMo ASR, and `universal-3-pro,universal-2` for AssemblyAI. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. AssemblyAI accepts a comma-separated model fallback list. |
 | `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
 | `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
 | `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |
@@ -1157,6 +1161,9 @@ Transcription credentials are intentionally not stored in `transcription`. Put t
 ```
 
 Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
+
+If you are adding a new transcription provider, see
+[`development.md`](./development.md#adding-a-transcription-provider).
 
 ## Channel Settings
 
