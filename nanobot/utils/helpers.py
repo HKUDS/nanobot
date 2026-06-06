@@ -252,7 +252,7 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
             if tid and str(tid) not in declared:
                 start = i + 1
                 declared.clear()
-    return start
+    return min(start, len(messages) - 1) if messages else 0
 
 
 def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
