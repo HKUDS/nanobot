@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
@@ -28,7 +29,21 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
         "Not used for action='list' or action='remove'."
     ),
-    every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
+    every_seconds=IntegerSchema(
+        0,
+        description=(
+            "Recurring interval in seconds. Use only when the user explicitly asks to repeat "
+            "(e.g. 'every 20 minutes'). Do NOT use for one-time 'in/after N minutes' reminders; "
+            "use delay_seconds or at instead."
+        ),
+    ),
+    delay_seconds=IntegerSchema(
+        0,
+        description=(
+            "One-time delay in seconds for relative reminders/tasks like 'in 10 minutes' or "
+            "'after 1 hour'. The job runs once and is then removed."
+        ),
+    ),
     cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
     tz=StringSchema(
         "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
@@ -46,7 +61,8 @@ _CRON_PARAMETERS = tool_parameters_schema(
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
-        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action. "
+        "(every_seconds, delay_seconds, cron_expr, or at); remove requires job_id; list only "
+        "needs action. "
         "Per-action requirements are enforced at runtime (see field descriptions) so the "
         "top-level schema stays compatible with providers (e.g. OpenAI Codex/Responses) that "
         "reject oneOf/anyOf/allOf/enum/not at the root of function parameters."
@@ -119,6 +135,8 @@ class CronTool(Tool, ContextAware):
     def description(self) -> str:
         return (
             "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            "Use delay_seconds for one-time relative requests like 'in 10 minutes'; "
+            "use every_seconds only for explicit repeats. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
@@ -137,6 +155,7 @@ class CronTool(Tool, ContextAware):
         name: str | None = None,
         message: str = "",
         every_seconds: int | None = None,
+        delay_seconds: int | None = None,
         cron_expr: str | None = None,
         tz: str | None = None,
         at: str | None = None,
@@ -147,7 +166,16 @@ class CronTool(Tool, ContextAware):
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, deliver)
+            return self._add_job(
+                name,
+                message,
+                every_seconds,
+                cron_expr,
+                tz,
+                at,
+                delay_seconds=delay_seconds,
+                deliver=deliver,
+            )
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -162,6 +190,7 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        delay_seconds: int | None = None,
         deliver: bool = True,
     ) -> str:
         if not message:
@@ -180,10 +209,22 @@ class CronTool(Tool, ContextAware):
             if err := self._validate_timezone(tz):
                 return err
 
+        schedule_params = [
+            every_seconds is not None and every_seconds > 0,
+            delay_seconds is not None and delay_seconds > 0,
+            bool(cron_expr),
+            bool(at),
+        ]
+        if sum(schedule_params) > 1:
+            return "Error: use exactly one of every_seconds, delay_seconds, cron_expr, or at"
+
         # Build schedule
         delete_after = False
         if every_seconds:
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+        elif delay_seconds:
+            schedule = CronSchedule(kind="at", at_ms=int(time.time() * 1000) + delay_seconds * 1000)
+            delete_after = True
         elif cron_expr:
             effective_tz = tz or self._default_timezone
             if err := self._validate_timezone(effective_tz):
