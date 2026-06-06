@@ -1,7 +1,12 @@
 # WebUI Sync Workflow
 
-`desktop` consumes the shared WebUI build output. It must not copy,
-fork, or vendor `webui/src`.
+This workflow is for contributors keeping the desktop app and browser WebUI in
+sync. Users should experience them as one product surface: desktop adds a native
+host and local engine lifecycle, while chat, settings, apps, skills, and
+workspace UI still come from the shared WebUI.
+
+`desktop` consumes the shared WebUI build output. It must not copy, fork, or
+vendor `webui/src`.
 
 ## Development
 

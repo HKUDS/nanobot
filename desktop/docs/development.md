@@ -1,5 +1,10 @@
 # Desktop Development Guide
 
+This guide is for GitHub contributors who want to change the desktop app. If
+you are using nanobot rather than developing it, the important bit is simpler:
+desktop runs the local engine for you and shows the same chat, settings, apps,
+skills, and workspace UI as the browser WebUI.
+
 `desktop` is the native host for the shared nanobot WebUI. It is not a fork of
 the WebUI, and it should not grow a second copy of product UI.
 
@@ -12,6 +17,8 @@ desktop       -> native host, engine lifecycle, secure host capabilities
 ```
 
 ## Development Workflow
+
+Use this when developing from a source checkout.
 
 Run the shared WebUI dev server:
 

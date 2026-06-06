@@ -1,7 +1,12 @@
 # Native Host Contract
 
-`desktop` is a native host shell around the shared WebUI build. The
-renderer must not import Electron directly. It receives a minimal bridge at
+This is a contributor reference for the boundary between the shared WebUI and
+the native desktop host. Users should not need this contract to run the app, but
+it explains why the desktop app can use native capabilities without turning the
+WebUI into Electron-specific code.
+
+`desktop` is a native host shell around the shared WebUI build. The renderer
+must not import Electron directly. It receives a minimal bridge at
 `window.nanobotHost`.
 
 ## Runtime API

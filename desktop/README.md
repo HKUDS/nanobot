@@ -1,14 +1,29 @@
 # nanobot Desktop
 
-Electron package for the Mac-first nanobot native app.
+Mac-first desktop app for running nanobot locally with the same product UI as
+the browser WebUI.
 
-This folder is a host shell. It reuses the root WebUI build at
-`nanobot/web/dist`; it does not copy or fork `webui/src`. Electron owns the
-local engine lifecycle, exposes `window.nanobotHost` to the renderer, serves the
-`nanobot-app://` app protocol, and proxies `/api/*` plus `/webui/bootstrap` to a
-private Unix socket `nanobot desktop-gateway` process.
+For users, the desktop app is a local wrapper around nanobot: it starts the
+engine for you, keeps config and chat state in the platform app data directory,
+and uses the shared WebUI for chat, settings, apps, skills, and workspace
+selection.
+
+For contributors, this folder is a native host shell. It reuses the root WebUI
+build at `nanobot/web/dist`; it does not copy or fork `webui/src`. Electron owns
+the local engine lifecycle, exposes `window.nanobotHost` to the renderer, serves
+the `nanobot-app://` app protocol, and proxies `/api/*` plus `/webui/bootstrap`
+to a private Unix socket `nanobot desktop-gateway` process.
+
+## What To Read
+
+- Using or trying the app from source: start with the development commands below.
+- Changing desktop behavior: read [`docs/development.md`](docs/development.md).
+- Adding native host capabilities: read [`docs/host-contract.md`](docs/host-contract.md).
+- Keeping browser WebUI and desktop aligned: read [`docs/webui-sync.md`](docs/webui-sync.md).
 
 ## Development
+
+This section is for contributors working from a source checkout.
 
 ```sh
 cd desktop
