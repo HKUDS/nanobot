@@ -26,10 +26,12 @@ export interface InboundMessage {
   id: string;
   sender: string;
   pn: string;
+  participant?: string;
   content: string;
   timestamp: number;
   isGroup: boolean;
   wasMentioned?: boolean;
+  isReplyToBot?: boolean;
   media?: string[];
 }
 
@@ -50,28 +52,49 @@ export class WhatsAppClient {
   }
 
   private normalizeJid(jid: string | undefined | null): string {
-    return (jid || '').split(':')[0];
+    return (jid || '').trim().toLowerCase().replace(/:\d+(?=@)/g, '');
   }
 
-  private wasMentioned(msg: any): boolean {
-    if (!msg?.key?.remoteJid?.endsWith('@g.us')) return false;
-
-    const candidates = [
-      msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid,
-      msg?.message?.imageMessage?.contextInfo?.mentionedJid,
-      msg?.message?.videoMessage?.contextInfo?.mentionedJid,
-      msg?.message?.documentMessage?.contextInfo?.mentionedJid,
-      msg?.message?.audioMessage?.contextInfo?.mentionedJid,
-    ];
-    const mentioned = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
-    if (mentioned.length === 0) return false;
-
-    const selfIds = new Set(
+  private selfJids(): Set<string> {
+    return new Set(
       [this.sock?.user?.id, this.sock?.user?.lid, this.sock?.user?.jid]
         .map((jid) => this.normalizeJid(jid))
         .filter(Boolean),
     );
-    return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
+  }
+
+  private messageContextInfos(msg: any): any[] {
+    const unwrapped = baileysExtractMessageContent(msg?.message);
+    const containers = [msg?.message, unwrapped];
+    const infos = containers.flatMap((message) => [
+      message?.extendedTextMessage?.contextInfo,
+      message?.imageMessage?.contextInfo,
+      message?.videoMessage?.contextInfo,
+      message?.documentMessage?.contextInfo,
+      message?.audioMessage?.contextInfo,
+    ]);
+    return infos.filter(Boolean);
+  }
+
+  private botAddressing(msg: any): { wasMentioned: boolean; isReplyToBot: boolean } {
+    if (!msg?.key?.remoteJid?.endsWith('@g.us')) {
+      return { wasMentioned: false, isReplyToBot: false };
+    }
+
+    const selfIds = this.selfJids();
+    const contextInfos = this.messageContextInfos(msg);
+
+    const mentioned = contextInfos.flatMap((info) => (
+      Array.isArray(info?.mentionedJid) ? info.mentionedJid : []
+    ));
+    const wasMentioned = mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
+
+    const isReplyToBot = contextInfos.some((info) => {
+      const quotedParticipant = this.normalizeJid(info?.participant);
+      return Boolean(info?.stanzaId && quotedParticipant && selfIds.has(quotedParticipant));
+    });
+
+    return { wasMentioned, isReplyToBot };
   }
 
   async connect(): Promise<void> {
@@ -175,16 +198,17 @@ export class WhatsAppClient {
         if (!finalContent && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
-        const wasMentioned = this.wasMentioned(msg);
+        const { wasMentioned, isReplyToBot } = this.botAddressing(msg);
 
         this.options.onMessage({
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
+          ...(isGroup && msg.key.participant ? { participant: msg.key.participant } : {}),
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
-          ...(isGroup ? { wasMentioned } : {}),
+          ...(isGroup ? { wasMentioned: wasMentioned || isReplyToBot, isReplyToBot } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
       }
