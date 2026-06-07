@@ -1,13 +1,16 @@
 """Foolish Analytics — queries Umami for The Foolish Butcher storefront metrics.
 
 Exposes one agent-callable tool:
-  foolish_analytics  — pageviews, visitors, e-commerce funnel events, top pages
+  foolish_analytics  — pageviews, visitors, e-commerce funnel events, top pages,
+                       abandoned carts, orders completed (from storefront DB API)
 
 Required env vars:
   FOOLISH_UMAMI_URL         e.g. https://umami-production-8b53.up.railway.app
   FOOLISH_UMAMI_PASSWORD    password set at first Umami login
   FOOLISH_UMAMI_WEBSITE_ID  e.g. 764cb6b5-a16f-4dc6-b144-449b43e102fa
   FOOLISH_UMAMI_USERNAME    default: admin
+  FOOLISH_PAYLOAD_SECRET    shared secret for storefront API (x-storefront-secret header)
+  FOOLISH_STOREFRONT_URL    e.g. https://thefoolishbutcher.com (default)
 """
 
 from __future__ import annotations
@@ -36,6 +39,12 @@ def _credentials() -> tuple[str, str]:
 
 def _website_id() -> str:
     return os.environ.get("FOOLISH_UMAMI_WEBSITE_ID", "")
+
+def _storefront_url() -> str:
+    return os.environ.get("FOOLISH_STOREFRONT_URL", "https://thefoolishbutcher.com").rstrip("/")
+
+def _payload_secret() -> str:
+    return os.environ.get("FOOLISH_PAYLOAD_SECRET", "")
 
 
 # ---------------------------------------------------------------------------
@@ -117,10 +126,41 @@ async def _fetch_all(
 
 
 # ---------------------------------------------------------------------------
+# DB cart / order stats from storefront API
+# ---------------------------------------------------------------------------
+
+async def _fetch_cart_stats(client: httpx.AsyncClient) -> dict | None:
+    secret = _payload_secret()
+    if not secret:
+        return None
+    try:
+        resp = await client.get(
+            f"{_storefront_url()}/api/marketing/stats",
+            headers={"x-storefront-secret": secret},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Cart stats API error: {}", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 
-def _format_report(period: str, stats: dict, events: list, pages: list) -> str:
+def _pct(num: int, den: int) -> str:
+    return f"{round(num / den * 100, 1)}%" if den else "n/d"
+
+
+def _format_report(
+    period: str,
+    stats: dict,
+    events: list,
+    pages: list,
+    cart_stats: dict | None = None,
+) -> str:
     label = {
         "today":     "oggi",
         "yesterday": "ieri",
@@ -148,9 +188,8 @@ def _format_report(period: str, stats: dict, events: list, pages: list) -> str:
     add_to_cart      = ev.get("add_to_cart",      0)
     pack_added       = ev.get("pack_added",        0)
     checkout_started = ev.get("checkout_started",  0)
+    order_completed  = ev.get("order_completed",   0)
     variant_selected = ev.get("variant_selected",  0)
-
-    conv = f"{round(checkout_started / uv * 100, 1)}%" if uv else "n/d"
 
     lines = [
         f"## Analytics Foolish — {label}",
@@ -158,13 +197,29 @@ def _format_report(period: str, stats: dict, events: list, pages: list) -> str:
         f"**Traffico:** {pv} pageview · {uv} visitatori · {sessions} sessioni",
         f"**Bounce rate:** {bounce_pct} · **Durata media sessione:** {avg_dur}",
         "",
-        "### Funnel e-commerce",
+        "### Funnel e-commerce (Umami)",
         f"- `variant_selected` — {variant_selected}",
-        f"- `add_to_cart` — {add_to_cart}",
+        f"- `add_to_cart` — {add_to_cart}  ({_pct(add_to_cart, uv)} visitatori)",
         f"- `pack_added` — {pack_added}",
-        f"- `checkout_started` — {checkout_started}",
-        f"- **Conversion rate** (visitatori → checkout): {conv}",
+        f"- `checkout_started` — {checkout_started}  ({_pct(checkout_started, add_to_cart)} di chi ha aggiunto al carrello)",
+        f"- `order_completed` — {order_completed}  ({_pct(order_completed, checkout_started)} di chi ha avviato il checkout)",
+        f"- **Conversion rate totale** (visitatori → ordine): {_pct(order_completed, uv)}",
     ]
+
+    if cart_stats:
+        carts_today    = cart_stats.get("carts_active_today", 0)
+        carts_aband    = cart_stats.get("carts_abandoned_7d", 0)
+        orders_today   = cart_stats.get("orders_today", 0)
+        orders_7d      = cart_stats.get("orders_7d", 0)
+        revenue_7d     = cart_stats.get("revenue_7d", 0.0)
+        lines += [
+            "",
+            "### Carrelli & Ordini (DB live)",
+            f"- Carrelli avviati oggi: **{carts_today}**",
+            f"- Carrelli abbandonati (ultimi 7gg, >1h fa): **{carts_aband}**",
+            f"- Ordini completati oggi: **{orders_today}**",
+            f"- Ordini completati (ultimi 7gg): **{orders_7d}** · Revenue: **{revenue_7d:.2f}€**",
+        ]
 
     if pages:
         lines += ["", "### Pagine più visitate"]
@@ -233,6 +288,7 @@ class FoolishAnalyticsTool(Tool):
                 stats, events, pages = await _fetch_all(
                     client, base, wid, token, start_ms, end_ms
                 )
+                cart_stats = await _fetch_cart_stats(client)
         except httpx.HTTPStatusError as exc:
             logger.error("Umami API HTTP error: {}", exc)
             return f"Errore API Umami: HTTP {exc.response.status_code} — {exc.response.text[:300]}"
@@ -240,4 +296,4 @@ class FoolishAnalyticsTool(Tool):
             logger.error("Umami connection error: {}", exc)
             return f"Errore connessione Umami: {exc}"
 
-        return _format_report(period, stats, events, pages)
+        return _format_report(period, stats, events, pages, cart_stats)
