@@ -5,6 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
 
 import blackcat.agent.tools.mcp as mcp_mod
@@ -484,6 +485,80 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
     assert "stdio protocol pollution" in messages[-1]
     assert "stdout" in messages[-1]
     assert "stderr" in messages[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        MCPServerConfig(url="http://127.0.0.1:9/sse"),
+        MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:9/mcp"),
+    ],
+)
+async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
+    config: MCPServerConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted_connections: list[tuple[object, ...]] = []
+    warnings: list[str] = []
+
+    async def _open_connection(*args: object, **_kwargs: object):
+        attempted_connections.append(args)
+        raise AssertionError("unsafe MCP URL should be rejected before TCP probe")
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _open_connection)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"local": config}, registry)
+
+    assert stacks == {}
+    assert registry.tool_names == []
+    assert attempted_connections == []
+    assert any("blocked unsafe URL" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_mcp_http_request_hook_rejects_unsafe_redirect_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_urls: list[str] = []
+    sent_urls: list[str] = []
+
+    def _validate(url: str) -> tuple[bool, str]:
+        checked_urls.append(url)
+        if url == "http://127.0.0.1/private":
+            return False, "loopback blocked"
+        return True, ""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        sent_urls.append(str(request.url))
+        if str(request.url) == "https://example.com/start":
+            return httpx.Response(
+                302,
+                headers={"Location": "http://127.0.0.1/private"},
+                request=request,
+            )
+        raise AssertionError("unsafe redirect target should be blocked before transport")
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+
+    async with httpx.AsyncClient(
+        event_hooks={"request": [mcp_mod._validate_mcp_request_url]},
+        follow_redirects=True,
+        transport=httpx.MockTransport(_handler),
+    ) as client:
+        with pytest.raises(httpx.RequestError, match="loopback blocked"):
+            await client.get("https://example.com/start")
+
+    assert checked_urls == [
+        "https://example.com/start",
+        "http://127.0.0.1/private",
+    ]
+    assert sent_urls == ["https://example.com/start"]
 
 
 @pytest.mark.asyncio
