@@ -101,26 +101,20 @@ async def _fetch_all(
 
     stats_req  = client.get(f"{base}/api/websites/{wid}/stats",
                             headers=headers, params=base_params)
-    events_req = client.get(f"{base}/api/websites/{wid}/events",
+    # /metrics?type=event returns aggregated counts {x: eventName, y: count}
+    events_req = client.get(f"{base}/api/websites/{wid}/metrics",
                             headers=headers,
-                            params={**base_params, "unit": "day", "timezone": "Europe/Rome"})
-    pages_req  = client.get(f"{base}/api/websites/{wid}/metrics",
-                            headers=headers,
-                            params={**base_params, "type": "url", "limit": 5})
+                            params={**base_params, "type": "event", "limit": 50})
 
-    stats_r, events_r, pages_r = await asyncio.gather(
-        stats_req, events_req, pages_req
-    )
+    stats_r, events_r = await asyncio.gather(stats_req, events_req)
     stats_r.raise_for_status()
     events_r.raise_for_status()
-    pages_r.raise_for_status()
 
-    # Events response may be list or {data: [...]}
     ev_raw = events_r.json()
     events = ev_raw if isinstance(ev_raw, list) else ev_raw.get("data", [])
 
-    pg_raw = pages_r.json()
-    pages  = pg_raw if isinstance(pg_raw, list) else pg_raw.get("data", [])
+    # Top pages — /metrics?type=url broken on this Umami version; skip gracefully
+    pages: list = []
 
     return stats_r.json(), events, pages
 
@@ -168,11 +162,17 @@ def _format_report(
         "30d":       "ultimi 30 giorni",
     }.get(period, period)
 
-    pv       = stats.get("pageviews", {}).get("value", 0)
-    uv       = stats.get("visitors",  {}).get("value", 0)
-    sessions = stats.get("visits",    {}).get("value", 0)
-    bounces  = stats.get("bounces",   {}).get("value", 0)
-    tot_time = stats.get("totaltime", {}).get("value", 0)
+    def _sv(v) -> int:
+        """Stats value — handles both flat int and {"value": N} formats."""
+        if isinstance(v, dict):
+            return int(v.get("value", 0))
+        return int(v or 0)
+
+    pv       = _sv(stats.get("pageviews"))
+    uv       = _sv(stats.get("visitors"))
+    sessions = _sv(stats.get("visits"))
+    bounces  = _sv(stats.get("bounces"))
+    tot_time = _sv(stats.get("totaltime"))
 
     bounce_pct = f"{round(bounces  / sessions * 100)}%" if sessions else "n/d"
     avg_dur    = f"{round(tot_time / sessions)}s"        if sessions else "n/d"
