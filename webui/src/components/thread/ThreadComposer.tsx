@@ -157,7 +157,7 @@ function VoiceRecordingMeter({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-2 text-red-600 dark:text-red-300",
+        "flex min-w-0 items-center gap-2 text-neutral-700 dark:text-white",
         isHero ? "h-8" : "h-9",
         className,
       )}
