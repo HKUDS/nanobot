@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from blackcat.providers.openai_compat_provider import OpenAICompatProvider
+from blackcat.utils.helpers import build_assistant_message
 
 # ── _parse: non-streaming ─────────────────────────────────────────────────
 
@@ -75,6 +76,56 @@ def test_parse_dict_reasoning_content_empty_string_preserved() -> None:
     result = provider._parse(response)
 
     assert result.reasoning_content == ""
+
+
+def test_parse_sdk_reasoning_content_empty_string_preserved() -> None:
+    """SDK response objects preserve reasoning_content=\"\"."""
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    message = SimpleNamespace(content="answer", reasoning_content="", tool_calls=None)
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    response = SimpleNamespace(choices=[choice], usage=None)
+
+    result = provider._parse(response)
+
+    assert result.content == "answer"
+    assert result.reasoning_content == ""
+
+
+def test_tool_call_history_preserves_empty_reasoning_content_after_sanitize() -> None:
+    """Empty reasoning_content survives the tool-call history round trip."""
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {
+                "content": "",
+                "reasoning_content": "",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{}"},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+    }
+
+    result = provider._parse(response)
+    assistant_message = build_assistant_message(
+        result.content or "",
+        tool_calls=[tc.to_openai_tool_call() for tc in result.tool_calls],
+        reasoning_content=result.reasoning_content,
+    )
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "look something up"},
+        assistant_message,
+        {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+    ])
+
+    assert sanitized[1]["reasoning_content"] == ""
 
 
 # ── _parse_chunks: streaming dict branch ─────────────────────────────────
