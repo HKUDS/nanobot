@@ -28,6 +28,7 @@ import {
   HardDrive,
   Hexagon,
   ImageIcon,
+  Info,
   Layers,
   Loader2,
   LogOut,
@@ -1727,6 +1728,33 @@ function OverviewSettings({
           />
         </SettingsGroup>
       </section>
+
+      {settings.version && (() => {
+        const currentVersion = settings.version.current;
+        const latestVersion = settings.version.latest;
+        const hasUpdate = latestVersion && latestVersion !== currentVersion;
+        const versionCaption = hasUpdate
+          ? tx("settings.overview.version.updateAvailable", `Update available: v${latestVersion}`)
+          : tx("settings.overview.version.upToDate", "Up to date");
+        return (
+          <section>
+            <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
+            <SettingsGroup>
+              <OverviewListRow
+                icon={Info}
+                title={tx("settings.overview.version", "Version")}
+                value={`v${currentVersion}`}
+                caption={versionCaption}
+                onClick={() => {
+                  if (hasUpdate) {
+                    window.open("https://pypi.org/project/nanobot-ai/", "_blank", "noopener,noreferrer");
+                  }
+                }}
+              />
+            </SettingsGroup>
+          </section>
+        );
+      })()}
     </div>
   );
 }

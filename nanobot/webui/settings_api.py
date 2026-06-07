@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from nanobot import __version__
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.image_generation import (
@@ -31,6 +32,36 @@ from nanobot.webui.workspaces import (
 
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
+
+_PYPI_PACKAGE_URL = "https://pypi.org/pypi/nanobot-ai/json"
+_VERSION_CACHE_TTL_S = 3600  # 1 hour
+
+_latest_version_cache: tuple[float, str | None] = (0.0, None)
+
+
+def _fetch_latest_version() -> str | None:
+    """Return the latest nanobot-ai version from PyPI, cached for 1 hour."""
+    global _latest_version_cache  # noqa: PLW0603
+    now = time.monotonic()
+    cached_at, cached_value = _latest_version_cache
+    if now - cached_at < _VERSION_CACHE_TTL_S:
+        return cached_value
+    try:
+        resp = httpx.get(_PYPI_PACKAGE_URL, timeout=5.0, follow_redirects=True)
+        resp.raise_for_status()
+        latest = resp.json().get("info", {}).get("version")
+    except Exception:
+        latest = None
+    _latest_version_cache = (now, latest)
+    return latest
+
+
+def _version_payload() -> dict[str, Any]:
+    return {
+        "current": __version__,
+        "latest": _fetch_latest_version(),
+    }
+
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -762,6 +793,7 @@ def settings_payload(
             "exec_sandbox": exec_config.sandbox or None,
             "exec_path_append_set": bool(exec_config.path_append),
         },
+        "version": _version_payload(),
         "requires_restart": requires_restart,
     }
     return decorate_settings_payload(

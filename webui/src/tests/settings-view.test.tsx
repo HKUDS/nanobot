@@ -95,6 +95,10 @@ function settingsPayload(): SettingsPayload {
       exec_sandbox: null,
       exec_path_append_set: false,
     },
+    version: {
+      current: "0.2.1",
+      latest: "0.2.1",
+    },
     requires_restart: false,
   };
 }

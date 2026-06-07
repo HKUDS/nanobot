@@ -464,6 +464,10 @@ export interface SettingsPayload {
     exec_sandbox?: string | null;
     exec_path_append_set: boolean;
   };
+  version?: {
+    current: string;
+    latest?: string | null;
+  };
   requires_restart: boolean;
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
 }
