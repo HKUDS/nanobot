@@ -350,36 +350,8 @@ async def test_multimodal_remote_image_url_returns_400(aiohttp_client, mock_agen
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_empty_response_retry_then_success(aiohttp_client) -> None:
-    call_count = 0
-
-    async def sometimes_empty(content, session_key="", channel="", chat_id="", **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return ""
-        return "recovered response"
-
-    agent = MagicMock()
-    agent.process_direct = sometimes_empty
-    agent._connect_mcp = AsyncMock()
-    agent.close_mcp = AsyncMock()
-
-    app = create_app(agent, model_name="m")
-    client = await aiohttp_client(app)
-    resp = await client.post(
-        "/v1/chat/completions",
-        json={"messages": [{"role": "user", "content": "hello"}]},
-    )
-    assert resp.status == 200
-    body = await resp.json()
-    assert body["choices"][0]["message"]["content"] == "recovered response"
-    assert call_count == 2
-
-
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
-@pytest.mark.asyncio
-async def test_empty_response_falls_back(aiohttp_client) -> None:
+async def test_empty_response_returns_fallback(aiohttp_client) -> None:
+    """Empty process_direct response returns fallback without retrying."""
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     call_count = 0
@@ -403,7 +375,45 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     assert resp.status == 200
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == EMPTY_FINAL_RESPONSE_MESSAGE
-    assert call_count == 2
+    assert call_count == 1
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_empty_response_does_not_duplicate_user_turn(aiohttp_client) -> None:
+    """A single API request must call process_direct exactly once.
+
+    The old retry-on-empty path called process_direct twice, which persisted
+    the user message twice in the session history.  See nanobot#4079.
+    """
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
+    call_count = 0
+
+    async def always_empty(content, session_key="", channel="", chat_id="", **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return ""
+
+    agent = MagicMock()
+    agent.process_direct = always_empty
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+
+    # Send one request with empty response
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["choices"][0]["message"]["content"] == EMPTY_FINAL_RESPONSE_MESSAGE
+
+    # process_direct must be called exactly once — no retry
+    assert call_count == 1
 
 
 @pytest.mark.asyncio
