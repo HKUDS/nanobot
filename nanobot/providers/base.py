@@ -21,19 +21,24 @@ class ToolCallRequest:
     """A tool call request from the LLM."""
     id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: Any
     extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
+        arguments = (
+            self.arguments
+            if isinstance(self.arguments, str)
+            else json.dumps(self.arguments, ensure_ascii=False)
+        )
         tool_call = {
             "id": self.id,
             "type": "function",
             "function": {
                 "name": self.name,
-                "arguments": json.dumps(self.arguments, ensure_ascii=False),
+                "arguments": arguments,
             },
         }
         if self.extra_content:
@@ -43,6 +48,34 @@ class ToolCallRequest:
         if self.function_provider_specific_fields:
             tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
         return tool_call
+
+
+def parse_tool_arguments(arguments: Any) -> Any:
+    """Parse provider tool arguments without guessing executable parameters.
+
+    Valid JSON object strings become dicts. Empty strings become no-arg calls.
+    Malformed JSON and JSON array/scalar values are preserved so ToolRegistry
+    can reject them before execution.
+    """
+    if arguments is None:
+        return {}
+    if not isinstance(arguments, str):
+        return arguments
+
+    stripped = arguments.strip()
+    if not stripped:
+        return {}
+
+    try:
+        return json.loads(stripped)
+    except Exception:
+        return arguments
+
+
+def tool_arguments_object(arguments: Any) -> dict[str, Any]:
+    """Return object-shaped arguments for provider history replay only."""
+    parsed = parse_tool_arguments(arguments)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 @dataclass

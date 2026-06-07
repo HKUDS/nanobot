@@ -75,8 +75,10 @@ def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
     return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
 
 
-def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:
+def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
     """Stable signature for repeated external lookups we want to throttle."""
+    if not isinstance(arguments, dict):
+        return None
     if tool_name == "web_fetch":
         url = str(arguments.get("url") or "").strip()
         if url:
@@ -90,7 +92,7 @@ def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str 
 
 def repeated_external_lookup_error(
     tool_name: str,
-    arguments: dict[str, Any],
+    arguments: Any,
     seen_counts: dict[str, int],
 ) -> str | None:
     """Block repeated external lookups after a small retry budget."""
@@ -119,9 +121,11 @@ _OUTSIDE_PATH_PATTERN = re.compile(r"(?:^|[\s|>'\"])((?:/[^\s\"'>;|<]+)|(?:~[^\s
 
 def workspace_violation_signature(
     tool_name: str,
-    arguments: dict[str, Any],
+    arguments: Any,
 ) -> str | None:
     """Return a stable cross-tool signature for the outside-workspace target."""
+    if not isinstance(arguments, dict):
+        return None
     for key in ("path", "file_path", "target", "source", "destination"):
         val = arguments.get(key)
         if isinstance(val, str) and val.strip():
@@ -151,7 +155,7 @@ def _normalize_violation_target(raw: str) -> str:
 
 def repeated_workspace_violation_error(
     tool_name: str,
-    arguments: dict[str, Any],
+    arguments: Any,
     seen_counts: dict[str, int],
 ) -> str | None:
     """Return an escalated error after repeated bypass attempts."""

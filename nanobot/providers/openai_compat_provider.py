@@ -17,10 +17,14 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-import json_repair
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    parse_tool_arguments,
+)
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -477,21 +481,26 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _normalize_tool_call_arguments(arguments: Any) -> str:
-        """Force function.arguments into a valid JSON object string."""
+        """Normalize function.arguments without guessing executable parameters."""
         if isinstance(arguments, str):
             stripped = arguments.strip()
             if not stripped:
                 return "{}"
             try:
-                parsed = json_repair.loads(stripped)
+                parsed = json.loads(stripped)
             except Exception:
-                return "{}"
+                return stripped
             if isinstance(parsed, dict):
                 return json.dumps(parsed, ensure_ascii=False)
-            return "{}"
+            return stripped
         if isinstance(arguments, dict):
             return json.dumps(arguments, ensure_ascii=False)
-        return "{}"
+        if arguments is None:
+            return "{}"
+        try:
+            return json.dumps(arguments, ensure_ascii=False)
+        except Exception:
+            return str(arguments)
 
     @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
@@ -1018,14 +1027,12 @@ class OpenAICompatProvider(LLMProvider):
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
-                args = fn.get("arguments", {})
-                if isinstance(args, str):
-                    args = json_repair.loads(args)
+                args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=str(tc_map.get("id") or _short_tool_id()),
                     name=str(fn.get("name") or ""),
-                    arguments=args if isinstance(args, dict) else {},
+                    arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
@@ -1061,9 +1068,7 @@ class OpenAICompatProvider(LLMProvider):
 
         tool_calls = []
         for tc in raw_tool_calls:
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = json_repair.loads(args)
+            args = parse_tool_arguments(tc.function.arguments)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=str(getattr(tc, "id", None) or _short_tool_id()),
@@ -1204,7 +1209,7 @@ class OpenAICompatProvider(LLMProvider):
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                    arguments=parse_tool_arguments(b["arguments"]),
                     extra_content=b.get("extra_content"),
                     provider_specific_fields=b.get("prov"),
                     function_provider_specific_fields=b.get("fn_prov"),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -12,6 +12,8 @@ from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.openai_responses.parsing import parse_response_output
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -200,6 +202,165 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
         if msg.get("role") == "assistant" and msg.get("tool_calls")
     ][0]
     assert replayed_assistant["tool_calls"][0]["function"]["name"] == "readFile"
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_openai_compat_malformed_arguments_without_executing():
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        parsed = OpenAICompatProvider()._parse({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "optional_tool",
+                            "arguments": '{path:"notes.txt"}',
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {},
+        })
+
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return parsed
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "optional_tool",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "try optional"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert parsed.tool_calls[0].arguments == '{path:"notes.txt"}'
+    assert shared_events == []
+    tool_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1"
+    ][0]
+    assert "parameters must be a JSON object" in tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_openai_responses_malformed_arguments_without_executing():
+    parsed = parse_response_output({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "id": "fc_1",
+            "name": "optional_tool",
+            "arguments": "{bad",
+        }],
+        "status": "completed",
+        "usage": {},
+    })
+
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return parsed
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "optional_tool",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "try optional"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert parsed.tool_calls[0].arguments == "{bad"
+    assert shared_events == []
+    tool_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1|fc_1"
+    ][0]
+    assert "parameters must be a JSON object" in tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_openai_responses_array_arguments_without_executing():
+    parsed = parse_response_output({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "id": "fc_1",
+            "name": "optional_tool",
+            "arguments": [],
+        }],
+        "status": "completed",
+        "usage": {},
+    })
+
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return parsed
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "optional_tool",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "try optional"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done"
+    assert parsed.tool_calls[0].arguments == []
+    assert shared_events == []
+    tool_message = [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1|fc_1"
+    ][0]
+    assert "parameters must be a JSON object" in tool_message["content"]
 
 
 @pytest.mark.asyncio
