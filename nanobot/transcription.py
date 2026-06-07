@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+from loguru import logger
+
+from nanobot.config.paths import get_media_dir
+from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
 TranscriptionProviderName = Literal["groq", "openai"]
 
@@ -13,6 +19,19 @@ _DEFAULT_MODELS: dict[TranscriptionProviderName, str] = {
     "groq": "whisper-large-v3",
     "openai": "whisper-1",
 }
+_MAX_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
+_AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+})
 
 
 @dataclass(frozen=True)
@@ -31,6 +50,15 @@ class EffectiveTranscriptionConfig:
         return bool(self.api_key)
 
 
+class TranscriptionIngressError(Exception):
+    """Stable transcription upload error surfaced to WebUI clients."""
+
+    def __init__(self, detail: str, **extra: Any):
+        super().__init__(detail)
+        self.detail = detail
+        self.extra = extra
+
+
 def _as_provider(value: Any) -> TranscriptionProviderName | None:
     if isinstance(value, str):
         name = value.strip().lower()
@@ -41,6 +69,13 @@ def _as_provider(value: Any) -> TranscriptionProviderName | None:
 
 def _provider_config(config: Any, provider: str) -> Any:
     return getattr(getattr(config, "providers", None), provider, None)
+
+
+def _extract_data_url_mime(url: str) -> str | None:
+    header, _, _ = url.partition(",")
+    if not header.startswith("data:") or ";base64" not in header:
+        return None
+    return header[5:].split(";", 1)[0].strip().lower() or None
 
 
 def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
@@ -63,6 +98,55 @@ def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
         max_upload_mb=int(getattr(top, "max_upload_mb", 25)),
     )
+
+
+async def transcribe_audio_data_url(
+    data_url: Any,
+    config: EffectiveTranscriptionConfig,
+    *,
+    duration_ms: Any = None,
+) -> str:
+    """Validate, persist, transcribe, and remove a WebUI audio data URL."""
+    if not isinstance(data_url, str) or not data_url:
+        raise TranscriptionIngressError("missing_audio")
+    if not config.enabled:
+        raise TranscriptionIngressError("disabled")
+    if not config.configured:
+        raise TranscriptionIngressError("not_configured", provider=config.provider)
+    if (
+        isinstance(duration_ms, (int, float))
+        and duration_ms > (config.max_duration_sec * 1000 + 1000)
+    ):
+        raise TranscriptionIngressError("duration")
+    if _extract_data_url_mime(data_url) not in _AUDIO_MIME_ALLOWED:
+        raise TranscriptionIngressError("mime")
+
+    audio_path: str | None = None
+    max_bytes = max(
+        1,
+        config.max_upload_mb * 1024 * 1024 if config.max_upload_mb else _MAX_AUDIO_BYTES_FALLBACK,
+    )
+    try:
+        audio_path = save_base64_data_url(
+            data_url,
+            get_media_dir("websocket-transcription"),
+            max_bytes=max_bytes,
+        )
+    except FileSizeExceeded as exc:
+        raise TranscriptionIngressError("size") from exc
+    except Exception as exc:
+        logger.warning("transcription audio decode failed: {}", exc)
+    if not audio_path:
+        raise TranscriptionIngressError("decode")
+
+    try:
+        text = await transcribe_audio_file(audio_path, config)
+    finally:
+        with suppress(OSError):
+            Path(audio_path).unlink(missing_ok=True)
+    if not text:
+        raise TranscriptionIngressError("empty")
+    return text
 
 
 async def transcribe_audio_file(

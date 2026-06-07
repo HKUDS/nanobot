@@ -495,7 +495,7 @@ async def test_webui_transcribe_audio_rejects_oversized_audio(
     config.providers.groq.api_key = "gsk-test"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", lambda _channel=None: tmp_path)
+    monkeypatch.setattr("nanobot.transcription.get_media_dir", lambda _channel=None: tmp_path)
 
     channel = _ch(bus)
     conn = AsyncMock()
@@ -532,7 +532,7 @@ async def test_webui_transcribe_audio_returns_text_and_removes_temp_file(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
-        "nanobot.channels.websocket.get_media_dir",
+        "nanobot.transcription.get_media_dir",
         lambda _channel=None: media_dir,
     )
     captured_paths: list[Path] = []
@@ -544,7 +544,7 @@ async def test_webui_transcribe_audio_returns_text_and_removes_temp_file(
         return "hello voice"
 
     monkeypatch.setattr(
-        "nanobot.channels.websocket.transcribe_audio_file",
+        "nanobot.transcription.transcribe_audio_file",
         fake_transcribe_audio_file,
     )
 

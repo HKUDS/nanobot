@@ -30,7 +30,11 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
-from nanobot.transcription import resolve_transcription_config, transcribe_audio_file
+from nanobot.transcription import (
+    TranscriptionIngressError,
+    resolve_transcription_config,
+    transcribe_audio_data_url,
+)
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
@@ -219,7 +223,6 @@ _MAX_IMAGES_PER_MESSAGE = 4
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _MAX_VIDEOS_PER_MESSAGE = 1
 _MAX_VIDEO_BYTES = 20 * 1024 * 1024
-_MAX_TRANSCRIPTION_AUDIO_BYTES_FALLBACK = 25 * 1024 * 1024
 
 # Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
 # explicitly excluded to avoid the XSS surface inside embedded scripts.
@@ -234,19 +237,6 @@ _VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
     "video/mp4",
     "video/webm",
     "video/quicktime",
-})
-
-_AUDIO_MIME_ALLOWED: frozenset[str] = frozenset({
-    "audio/aac",
-    "audio/flac",
-    "audio/m4a",
-    "audio/mp4",
-    "audio/mpeg",
-    "audio/ogg",
-    "audio/wav",
-    "audio/webm",
-    "audio/x-m4a",
-    "audio/x-wav",
 })
 
 _UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
@@ -666,58 +656,15 @@ class WebSocketChannel(BaseChannel):
         if not valid_request_id:
             await fail("invalid_request")
             return
-        if not isinstance(data_url, str) or not data_url:
-            await fail("missing_audio")
-            return
-
         resolved = resolve_transcription_config(load_config())
-        if not resolved.enabled:
-            await fail("disabled")
-            return
-        if not resolved.configured:
-            await fail("not_configured", provider=resolved.provider)
-            return
-        duration_ms = envelope.get("duration_ms")
-        if (
-            isinstance(duration_ms, (int, float))
-            and duration_ms > (resolved.max_duration_sec * 1000 + 1000)
-        ):
-            await fail("duration")
-            return
-        mime = _extract_data_url_mime(data_url)
-        if mime not in _AUDIO_MIME_ALLOWED:
-            await fail("mime")
-            return
-
-        max_bytes = max(
-            1,
-            resolved.max_upload_mb * 1024 * 1024
-            if resolved.max_upload_mb
-            else _MAX_TRANSCRIPTION_AUDIO_BYTES_FALLBACK,
-        )
-        audio_path: str | None = None
         try:
-            audio_path = save_base64_data_url(
+            text = await transcribe_audio_data_url(
                 data_url,
-                get_media_dir("websocket-transcription"),
-                max_bytes=max_bytes,
+                resolved,
+                duration_ms=envelope.get("duration_ms"),
             )
-        except FileSizeExceeded:
-            await fail("size")
-            return
-        except Exception as exc:
-            self.logger.warning("transcription audio decode failed: {}", exc)
-        if not audio_path:
-            await fail("decode")
-            return
-
-        try:
-            text = await transcribe_audio_file(audio_path, resolved)
-        finally:
-            with suppress(OSError):
-                Path(audio_path).unlink(missing_ok=True)
-        if not text:
-            await fail("empty")
+        except TranscriptionIngressError as exc:
+            await fail(exc.detail, **exc.extra)
             return
         await self._send_event(
             connection,
