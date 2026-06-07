@@ -655,56 +655,38 @@ class WebSocketChannel(BaseChannel):
     async def _handle_transcribe_audio(self, connection: Any, envelope: dict[str, Any]) -> None:
         request_id = envelope.get("request_id")
         data_url = envelope.get("data_url")
-        if not isinstance(request_id, str) or not request_id or len(request_id) > 80:
-            await self._send_event(connection, "transcription_error", detail="invalid_request")
+        valid_request_id = isinstance(request_id, str) and 0 < len(request_id) <= 80
+
+        async def fail(detail: str, **extra: Any) -> None:
+            payload: dict[str, Any] = {"detail": detail, **extra}
+            if valid_request_id:
+                payload["request_id"] = request_id
+            await self._send_event(connection, "transcription_error", **payload)
+
+        if not valid_request_id:
+            await fail("invalid_request")
             return
         if not isinstance(data_url, str) or not data_url:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="missing_audio",
-            )
+            await fail("missing_audio")
             return
 
         resolved = resolve_transcription_config(load_config())
         if not resolved.enabled:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="disabled",
-            )
+            await fail("disabled")
             return
         if not resolved.configured:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="not_configured",
-                provider=resolved.provider,
-            )
+            await fail("not_configured", provider=resolved.provider)
             return
         duration_ms = envelope.get("duration_ms")
         if (
             isinstance(duration_ms, (int, float))
             and duration_ms > (resolved.max_duration_sec * 1000 + 1000)
         ):
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="duration",
-            )
+            await fail("duration")
             return
         mime = _extract_data_url_mime(data_url)
         if mime not in _AUDIO_MIME_ALLOWED:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="mime",
-            )
+            await fail("mime")
             return
 
         max_bytes = max(
@@ -721,22 +703,12 @@ class WebSocketChannel(BaseChannel):
                 max_bytes=max_bytes,
             )
         except FileSizeExceeded:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="size",
-            )
+            await fail("size")
             return
         except Exception as exc:
             self.logger.warning("transcription audio decode failed: {}", exc)
         if not audio_path:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="decode",
-            )
+            await fail("decode")
             return
 
         try:
@@ -745,12 +717,7 @@ class WebSocketChannel(BaseChannel):
             with suppress(OSError):
                 Path(audio_path).unlink(missing_ok=True)
         if not text:
-            await self._send_event(
-                connection,
-                "transcription_error",
-                request_id=request_id,
-                detail="empty",
-            )
+            await fail("empty")
             return
         await self._send_event(
             connection,

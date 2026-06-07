@@ -7,7 +7,6 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
@@ -61,6 +60,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
 import type {
   CliAppInfo,
   GoalStateWsPayload,
@@ -140,73 +140,6 @@ const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
-const VOICE_RECORDING_MAX_MS = 120_000;
-const VOICE_RECORDING_MIN_MS = 650;
-const VOICE_NO_INPUT_HINT_MS = 1_100;
-const VOICE_HOLD_START_MS = 140;
-const VOICE_WAVEFORM_BAR_COUNT = 64;
-const VOICE_WAVEFORM_MIN_HEIGHT = 7;
-const VOICE_WAVEFORM_MAX_HEIGHT = 34;
-const VOICE_MIN_LEVEL = 0.018;
-const VOICE_WAVEFORM_IDLE_LEVELS = Array.from(
-  { length: VOICE_WAVEFORM_BAR_COUNT },
-  () => VOICE_WAVEFORM_MIN_HEIGHT,
-);
-const VOICE_MIME_CANDIDATES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/mp4",
-  "audio/ogg;codecs=opus",
-] as const;
-
-function mediaRecorderOptions(): MediaRecorderOptions | undefined {
-  if (typeof MediaRecorder === "undefined") return undefined;
-  const mimeType = VOICE_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type));
-  return mimeType ? { mimeType } : undefined;
-}
-
-function formatVoiceElapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function audioContextConstructor(): typeof AudioContext | undefined {
-  if (typeof window === "undefined") return undefined;
-  return window.AudioContext
-    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-}
-
-function voiceLevelFromSamples(samples: ArrayLike<number>): number {
-  if (samples.length === 0) return 0;
-  let sum = 0;
-  for (let index = 0; index < samples.length; index += 1) {
-    const sample = samples[index];
-    const centered = (sample - 128) / 128;
-    sum += centered * centered;
-  }
-  const rms = Math.sqrt(sum / samples.length);
-  return Math.min(1, Math.pow(rms * 4.2, 0.72));
-}
-
-function waveformHeightFromLevel(level: number): number {
-  return Math.round(
-    VOICE_WAVEFORM_MIN_HEIGHT
-      + level * (VOICE_WAVEFORM_MAX_HEIGHT - VOICE_WAVEFORM_MIN_HEIGHT),
-  );
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("invalid_data_url"));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("read_failed"));
-    reader.readAsDataURL(blob);
-  });
-}
 
 function VoiceRecordingMeter({
   ariaLabel,
@@ -795,32 +728,6 @@ export function ThreadComposer({
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const voiceChunksRef = useRef<BlobPart[]>([]);
-  const voiceStreamRef = useRef<MediaStream | null>(null);
-  const voiceAudioRef = useRef<{
-    analyser: AnalyserNode;
-    context: AudioContext;
-    data: Uint8Array<ArrayBuffer>;
-    frame: number | null;
-    source: MediaStreamAudioSourceNode;
-  } | null>(null);
-  const voiceStartedAtRef = useRef(0);
-  const voiceMaxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceInputHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceHoldActiveRef = useRef(false);
-  const voiceStartPendingRef = useRef(false);
-  const voiceStopAfterStartRef = useRef(false);
-  const voiceSuppressClickRef = useRef(false);
-  const voiceSuppressClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceLevelObservedRef = useRef(false);
-  const voicePeakLevelRef = useRef(0);
-  const voiceLevelReliableRef = useRef(false);
-  const voiceNoInputHintVisibleRef = useRef(false);
-  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
-  const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
-  const [voiceLevels, setVoiceLevels] = useState<number[]>(VOICE_WAVEFORM_IDLE_LEVELS);
   const isHero = variant === "hero";
   const queuedPromptStorageKey = useMemo(
     () => queuedPromptsStorageKey(pendingQueueKey),
@@ -1162,111 +1069,6 @@ export function ThreadComposer({
     });
   }, []);
 
-  const clearVoiceHoldTimer = useCallback(() => {
-    if (voiceHoldTimerRef.current !== null) {
-      clearTimeout(voiceHoldTimerRef.current);
-      voiceHoldTimerRef.current = null;
-    }
-  }, []);
-
-  const clearVoiceSuppressClickTimer = useCallback(() => {
-    if (voiceSuppressClickTimerRef.current !== null) {
-      clearTimeout(voiceSuppressClickTimerRef.current);
-      voiceSuppressClickTimerRef.current = null;
-    }
-  }, []);
-
-  const suppressNextVoiceClick = useCallback(() => {
-    clearVoiceSuppressClickTimer();
-    voiceSuppressClickRef.current = true;
-    voiceSuppressClickTimerRef.current = setTimeout(() => {
-      voiceSuppressClickRef.current = false;
-      voiceSuppressClickTimerRef.current = null;
-    }, 500);
-  }, [clearVoiceSuppressClickTimer]);
-
-  const stopVoiceWaveform = useCallback(() => {
-    const audio = voiceAudioRef.current;
-    voiceAudioRef.current = null;
-    if (!audio) return;
-    if (audio.frame !== null) cancelAnimationFrame(audio.frame);
-    audio.source.disconnect();
-    audio.analyser.disconnect();
-    void audio.context.close().catch(() => undefined);
-  }, []);
-
-  const clearVoiceInputHintTimer = useCallback(() => {
-    if (voiceInputHintTimerRef.current !== null) {
-      clearTimeout(voiceInputHintTimerRef.current);
-      voiceInputHintTimerRef.current = null;
-    }
-  }, []);
-
-  const startVoiceWaveform = useCallback((stream: MediaStream) => {
-    const AudioContextCtor = audioContextConstructor();
-    if (!AudioContextCtor) return;
-    stopVoiceWaveform();
-    setVoiceLevels(VOICE_WAVEFORM_IDLE_LEVELS);
-    try {
-      const context = new AudioContextCtor();
-      const source = context.createMediaStreamSource(stream);
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.68;
-      source.connect(analyser);
-      const audio = {
-        analyser,
-        context,
-        data: new Uint8Array(new ArrayBuffer(analyser.fftSize)),
-        frame: null as number | null,
-        source,
-      };
-      const tick = () => {
-        const current = voiceAudioRef.current;
-        if (!current) return;
-        if (current.context.state !== "running") {
-          void current.context.resume().catch(() => undefined);
-          current.frame = requestAnimationFrame(tick);
-          return;
-        }
-        current.analyser.getByteTimeDomainData(current.data);
-        const level = voiceLevelFromSamples(current.data);
-        voiceLevelReliableRef.current = true;
-        voiceLevelObservedRef.current = true;
-        voicePeakLevelRef.current = Math.max(voicePeakLevelRef.current, level);
-        if (level >= VOICE_MIN_LEVEL) {
-          clearVoiceInputHintTimer();
-          if (voiceNoInputHintVisibleRef.current) {
-            voiceNoInputHintVisibleRef.current = false;
-            setInlineError(null);
-          }
-        }
-        setVoiceLevels((levels) => [...levels.slice(1), waveformHeightFromLevel(level)]);
-        current.frame = requestAnimationFrame(tick);
-      };
-      voiceAudioRef.current = audio;
-      void context.resume().catch(() => undefined);
-      audio.frame = requestAnimationFrame(tick);
-    } catch {
-      stopVoiceWaveform();
-    }
-  }, [clearVoiceInputHintTimer, stopVoiceWaveform]);
-
-  const cleanupVoiceRecording = useCallback(() => {
-    clearVoiceHoldTimer();
-    clearVoiceInputHintTimer();
-    stopVoiceWaveform();
-    if (voiceMaxTimerRef.current !== null) {
-      clearTimeout(voiceMaxTimerRef.current);
-      voiceMaxTimerRef.current = null;
-    }
-    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
-    voiceStreamRef.current = null;
-    mediaRecorderRef.current = null;
-    voiceStartPendingRef.current = false;
-    voiceNoInputHintVisibleRef.current = false;
-  }, [clearVoiceHoldTimer, clearVoiceInputHintTimer, stopVoiceWaveform]);
-
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
@@ -1281,177 +1083,17 @@ export function ThreadComposer({
     resizeTextarea();
   }, [resizeTextarea]);
 
-  const stopVoiceRecording = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
-    recorder.stop();
-  }, []);
-
-  useEffect(() => {
-    if (voiceState !== "recording") {
-      setVoiceElapsedMs(0);
-      return;
-    }
-    const updateElapsed = () => {
-      setVoiceElapsedMs(Math.max(0, Date.now() - voiceStartedAtRef.current));
-    };
-    updateElapsed();
-    const interval = window.setInterval(updateElapsed, 250);
-    return () => window.clearInterval(interval);
-  }, [voiceState]);
-
-  const startVoiceRecording = useCallback(async () => {
-    if (!onTranscribeAudio || voiceState !== "idle" || voiceStartPendingRef.current) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setInlineError(t("thread.composer.voiceErrors.unsupported"));
-      return;
-    }
-    voiceStartPendingRef.current = true;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, mediaRecorderOptions());
-      voiceChunksRef.current = [];
-      voiceStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      voiceStartedAtRef.current = Date.now();
-      voiceLevelObservedRef.current = false;
-      voicePeakLevelRef.current = 0;
-      voiceLevelReliableRef.current = false;
-      voiceNoInputHintVisibleRef.current = false;
-      setVoiceElapsedMs(0);
-      startVoiceWaveform(stream);
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) voiceChunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        const chunks = voiceChunksRef.current.splice(0);
-        const durationMs = Math.max(0, Date.now() - voiceStartedAtRef.current);
-        const mimeType = recorder.mimeType || "audio/webm";
-        const hasMeasuredSilence =
-          voiceLevelReliableRef.current
-          && voiceLevelObservedRef.current
-          && voicePeakLevelRef.current < VOICE_MIN_LEVEL;
-        cleanupVoiceRecording();
-        if (chunks.length === 0) {
-          setVoiceState("idle");
-          return;
-        }
-        if (durationMs < VOICE_RECORDING_MIN_MS) {
-          setVoiceState("idle");
-          setInlineError(t("thread.composer.voiceErrors.tooShort"));
-          return;
-        }
-        if (hasMeasuredSilence) {
-          setVoiceState("idle");
-          setInlineError(t("thread.composer.voiceErrors.noInput"));
-          return;
-        }
-        setVoiceState("transcribing");
-        void blobToDataUrl(new Blob(chunks, { type: mimeType }))
-          .then((dataUrl) => onTranscribeAudio(dataUrl, { durationMs }))
-          .then(appendTranscription)
-          .catch((error) => {
-            const detail = error instanceof Error ? error.message : "";
-            const key = detail === "not_configured"
-              ? "notConfigured"
-              : detail === "duration"
-                ? "tooLong"
-                : "failed";
-            setInlineError(t(`thread.composer.voiceErrors.${key}`));
-          })
-          .finally(() => setVoiceState("idle"));
-      };
-      recorder.start();
-      setVoiceState("recording");
-      setInlineError(null);
-      voiceMaxTimerRef.current = setTimeout(stopVoiceRecording, VOICE_RECORDING_MAX_MS);
-      voiceInputHintTimerRef.current = setTimeout(() => {
-        const recording = mediaRecorderRef.current?.state === "recording";
-        if (
-          !recording
-          || !voiceLevelReliableRef.current
-          || !voiceLevelObservedRef.current
-          || voicePeakLevelRef.current >= VOICE_MIN_LEVEL
-        ) {
-          return;
-        }
-        voiceNoInputHintVisibleRef.current = true;
-        setInlineError(t("thread.composer.voiceErrors.noInput"));
-      }, VOICE_NO_INPUT_HINT_MS);
-    } catch {
-      cleanupVoiceRecording();
-      setVoiceState("idle");
-      setInlineError(t("thread.composer.voiceErrors.permission"));
-    }
-  }, [
-    appendTranscription,
-    cleanupVoiceRecording,
-    onTranscribeAudio,
-    startVoiceWaveform,
-    stopVoiceRecording,
-    t,
-    voiceState,
-  ]);
-
-  const beginVoicePress = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (!onTranscribeAudio || disabled || voiceState !== "idle") return;
-    clearVoiceHoldTimer();
-    voiceStopAfterStartRef.current = false;
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Some embedded runtimes do not expose pointer capture for toolbar buttons.
-    }
-    voiceHoldTimerRef.current = setTimeout(() => {
-      voiceHoldTimerRef.current = null;
-      voiceHoldActiveRef.current = true;
-      suppressNextVoiceClick();
-      void startVoiceRecording().then(() => {
-        if (voiceStopAfterStartRef.current) {
-          voiceStopAfterStartRef.current = false;
-          stopVoiceRecording();
-        }
-      });
-    }, VOICE_HOLD_START_MS);
-  }, [
-    clearVoiceHoldTimer,
+  const clearInlineError = useCallback(() => setInlineError(null), []);
+  const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
+    setInlineError(t(`thread.composer.voiceErrors.${key}`));
+  }, [t]);
+  const voiceRecorder = useVoiceRecorder({
     disabled,
+    onClearError: clearInlineError,
+    onError: setVoiceError,
+    onTranscript: appendTranscription,
     onTranscribeAudio,
-    startVoiceRecording,
-    stopVoiceRecording,
-    suppressNextVoiceClick,
-    voiceState,
-  ]);
-
-  const endVoicePress = useCallback(() => {
-    const wasHoldRecording = voiceHoldActiveRef.current;
-    clearVoiceHoldTimer();
-    if (!wasHoldRecording) return;
-    voiceHoldActiveRef.current = false;
-    suppressNextVoiceClick();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      stopVoiceRecording();
-    } else {
-      voiceStopAfterStartRef.current = true;
-    }
-  }, [clearVoiceHoldTimer, stopVoiceRecording, suppressNextVoiceClick]);
-
-  const handleVoiceButtonClick = useCallback(() => {
-    if (voiceSuppressClickRef.current) {
-      clearVoiceSuppressClickTimer();
-      voiceSuppressClickRef.current = false;
-      return;
-    }
-    if (voiceState === "recording") {
-      stopVoiceRecording();
-    } else {
-      void startVoiceRecording();
-    }
-  }, [clearVoiceSuppressClickTimer, startVoiceRecording, stopVoiceRecording, voiceState]);
-
-  useEffect(() => cleanupVoiceRecording, [cleanupVoiceRecording]);
-  useEffect(() => () => clearVoiceSuppressClickTimer(), [clearVoiceSuppressClickTimer]);
+  });
 
   const chooseSlashCommand = useCallback(
     (command: SlashCommand) => {
@@ -1769,12 +1411,9 @@ export function ThreadComposer({
 
   const attachButtonDisabled = disabled || full;
   const showVoiceButton = Boolean(onTranscribeAudio);
-  const voiceButtonDisabled = disabled || voiceState === "transcribing";
-  const isVoiceRecording = voiceState === "recording";
-  const voiceElapsedLabel = formatVoiceElapsed(voiceElapsedMs);
   const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
-    time: voiceElapsedLabel,
-    defaultValue: `Recording ${voiceElapsedLabel}`,
+    time: voiceRecorder.elapsedLabel,
+    defaultValue: `Recording ${voiceRecorder.elapsedLabel}`,
   });
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
@@ -1966,13 +1605,13 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            {isVoiceRecording ? (
+            {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
                 className="mx-1 flex-1"
-                elapsedLabel={voiceElapsedLabel}
+                elapsedLabel={voiceRecorder.elapsedLabel}
                 isHero={isHero}
-                levels={voiceLevels}
+                levels={voiceRecorder.levels}
               />
             ) : workspaceScope ? (
               <WorkspaceAccessMenu
@@ -1986,48 +1625,46 @@ export function ThreadComposer({
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {showVoiceButton ? (
-              <>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  disabled={voiceButtonDisabled}
-                  aria-label={
-                    voiceState === "recording"
-                      ? t("thread.composer.voice.stop")
-                      : voiceState === "transcribing"
-                        ? t("thread.composer.voice.transcribing")
-                        : t("thread.composer.tools.voice")
-                  }
-                  title={
-                    voiceState === "recording"
-                      ? t("thread.composer.voice.stop")
-                      : voiceState === "transcribing"
-                        ? t("thread.composer.voice.transcribing")
-                        : t("thread.composer.tools.voice")
-                  }
-                  onPointerDown={beginVoicePress}
-                  onPointerUp={endVoicePress}
-                  onPointerCancel={endVoicePress}
-                  onClick={handleVoiceButtonClick}
-                  className={cn(
-                    "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
-                    isHero ? "h-8 w-8" : "h-9 w-9",
-                    isVoiceRecording &&
-                      "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
-                  )}
-                >
-                  {voiceState === "transcribing" ? (
-                    <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-                  ) : isVoiceRecording ? (
-                    <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
-                  ) : (
-                    <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
-                  )}
-                </Button>
-              </>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                disabled={voiceRecorder.buttonDisabled}
+                aria-label={
+                  voiceRecorder.state === "recording"
+                    ? t("thread.composer.voice.stop")
+                    : voiceRecorder.state === "transcribing"
+                      ? t("thread.composer.voice.transcribing")
+                      : t("thread.composer.tools.voice")
+                }
+                title={
+                  voiceRecorder.state === "recording"
+                    ? t("thread.composer.voice.stop")
+                    : voiceRecorder.state === "transcribing"
+                      ? t("thread.composer.voice.transcribing")
+                      : t("thread.composer.tools.voice")
+                }
+                onPointerDown={voiceRecorder.beginPress}
+                onPointerUp={voiceRecorder.endPress}
+                onPointerCancel={voiceRecorder.endPress}
+                onClick={voiceRecorder.handleClick}
+                className={cn(
+                  "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                  isHero ? "h-8 w-8" : "h-9 w-9",
+                  voiceRecorder.isRecording &&
+                    "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
+                )}
+              >
+                {voiceRecorder.state === "transcribing" ? (
+                  <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
+                ) : voiceRecorder.isRecording ? (
+                  <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
+                ) : (
+                  <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+                )}
+              </Button>
             ) : null}
-            {modelLabel && !isVoiceRecording ? (
+            {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
                 label={modelLabel}
                 provider={modelProvider}
