@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { CodeBlock } from "@/components/CodeBlock";
@@ -85,6 +86,64 @@ describe("CodeBlock", () => {
     expect(screen.getByTestId("highlighted-code")).toBeInTheDocument();
     expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "text");
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
+  });
+
+  it("renders ANSI output without mounting the syntax highlighter", () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock
+          language="ansi"
+          code={"\x1b[32mPASS\x1b[0m <script>alert(1)</script>"}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ansi-code")).toBeInTheDocument();
+    expect(screen.getByTestId("ansi-code").closest(".not-prose")).toBeTruthy();
+    expect(screen.getByText("ansi")).toBeInTheDocument();
+    expect(screen.getByText("PASS")).toHaveStyle({ color: "#0dbc79" });
+    expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
+    expect(document.querySelector("script")).toBeNull();
+  });
+
+  it("detects ANSI sequences in regular code blocks", () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock
+          language="text"
+          code={"\x1b[38;2;35;209;139mtruecolor\x1b[0m"}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByText("truecolor")).toHaveStyle({
+      color: "rgb(35, 209, 139)",
+    });
+  });
+
+  it("copies ANSI output as clean text", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(
+        <ThemeProvider theme="dark">
+          <CodeBlock language="ansi" code={"\x1b[32mPASS\x1b[0m"} />
+        </ThemeProvider>,
+      );
+
+      await user.click(screen.getByRole("button", { name: /copy/i }));
+
+      expect(writeText).toHaveBeenCalledWith("PASS");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("reads theme from context without creating per-block observers", async () => {

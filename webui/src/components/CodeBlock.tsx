@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useState } from "react";
+import { Suspense, lazy, useCallback, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useThemeValue } from "@/hooks/useTheme";
+import { hasAnsi, parseAnsiSegments, stripAnsi } from "@/lib/ansi";
 import { cn } from "@/lib/utils";
 
 interface CodeBlockProps {
@@ -35,6 +36,10 @@ const CODE_FONT_STACK = [
   "Consolas",
   "monospace",
 ].join(", ");
+
+const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
+const CODE_SURFACE_LIGHT = "#f4f4f5";
+const CODE_SURFACE_DARK = "#27272a";
 
 const LazyHighlightedCode = lazy(async () => {
   const [
@@ -74,7 +79,11 @@ const LazyHighlightedCode = lazy(async () => {
           language={language || "text"}
           style={transparentTheme}
           customStyle={{
-            background: chrome === "none" ? "transparent" : undefined,
+            background: chrome === "none"
+              ? "transparent"
+              : isDark
+                ? CODE_SURFACE_DARK
+                : CODE_SURFACE_LIGHT,
             margin: 0,
             padding: chrome === "none" ? "0.75rem 1rem" : "1rem",
             fontFamily: CODE_FONT_STACK,
@@ -83,10 +92,10 @@ const LazyHighlightedCode = lazy(async () => {
             tabSize: 2,
           }}
           codeTagProps={{
-            style: chrome === "none" ? {
+            style: {
               background: "transparent",
               fontFamily: CODE_FONT_STACK,
-            } : undefined,
+            },
           }}
           lineNumberStyle={{
             minWidth: "2.6em",
@@ -106,14 +115,32 @@ const LazyHighlightedCode = lazy(async () => {
   };
 });
 
-function PlainCodeFallback({
+function renderPlainText(value: string): ReactNode {
+  return value;
+}
+
+function renderAnsiText(value: string): ReactNode {
+  return parseAnsiSegments(value).map((segment, index) => (
+    <span key={index} style={segment.style}>
+      {segment.text}
+    </span>
+  ));
+}
+
+function CodeTextBlock({
   code,
   chrome,
   showLineNumbers,
+  testId,
+  className,
+  renderText = renderPlainText,
 }: {
   code: string;
   chrome: "default" | "none";
   showLineNumbers: boolean;
+  testId: string;
+  className?: string;
+  renderText?: (value: string) => ReactNode;
 }) {
   const lines = code.split("\n");
   return (
@@ -121,10 +148,11 @@ function PlainCodeFallback({
       className={cn(
         "m-0 overflow-x-auto p-4 font-mono text-sm leading-[1.6] text-foreground/90",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
-        chrome === "default" ? "bg-background" : "bg-transparent",
+        chrome === "default" ? "bg-zinc-100 dark:bg-zinc-800" : "bg-transparent",
         chrome === "none" && "p-3 text-[13px] leading-[1.55]",
+        className,
       )}
-      data-testid="plain-code-fallback"
+      data-testid={testId}
     >
       <code className="text-inherit">
         {showLineNumbers ? (
@@ -133,14 +161,19 @@ function PlainCodeFallback({
               <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground/60">
                 {index + 1}
               </span>
-              <span className="whitespace-pre">{line || " "}</span>
+              <span className="whitespace-pre">{renderText(line || " ")}</span>
               {index < lines.length - 1 ? "\n" : null}
             </span>
           ))
-        ) : code}
+        ) : renderText(code)}
       </code>
     </pre>
   );
+}
+
+function shouldRenderAnsi(language: string | undefined, code: string): boolean {
+  const normalized = language?.trim().toLowerCase();
+  return Boolean((normalized && ANSI_LANGUAGES.has(normalized)) || hasAnsi(code));
 }
 
 export function CodeBlock({
@@ -156,19 +189,20 @@ export function CodeBlock({
   const [copied, setCopied] = useState(false);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";
+  const renderAnsi = shouldRenderAnsi(language, code);
 
   const onCopy = useCallback(() => {
     if (!navigator.clipboard) return;
-    navigator.clipboard.writeText(code).then(() => {
+    navigator.clipboard.writeText(renderAnsi ? stripAnsi(code) : code).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1_500);
     });
-  }, [code]);
+  }, [code, renderAnsi]);
 
   return (
     <div
       className={cn(
-        "overflow-hidden",
+        "not-prose overflow-hidden",
         hasChrome && "rounded-lg border",
         hasChrome && (isDark ? "border-white/10" : "border-black/10"),
         className,
@@ -177,7 +211,7 @@ export function CodeBlock({
       {hasChrome ? (
         <div
           className={cn(
-            "flex items-center justify-between px-4 py-1.5 text-xs font-medium",
+            "flex items-center justify-between px-4 pb-1.5 pt-2 text-xs font-medium",
             isDark
               ? "bg-zinc-800 text-zinc-300"
               : "bg-zinc-100 text-zinc-600",
@@ -206,13 +240,22 @@ export function CodeBlock({
           </button>
         </div>
       ) : null}
-      {highlight ? (
+      {renderAnsi ? (
+        <CodeTextBlock
+          code={code}
+          chrome={chrome}
+          showLineNumbers={showLineNumbers}
+          testId="ansi-code"
+          renderText={renderAnsiText}
+        />
+      ) : highlight ? (
         <Suspense
           fallback={
-            <PlainCodeFallback
+            <CodeTextBlock
               code={code}
               chrome={chrome}
               showLineNumbers={showLineNumbers}
+              testId="plain-code-fallback"
             />
           }
         >
@@ -226,10 +269,11 @@ export function CodeBlock({
           />
         </Suspense>
       ) : (
-        <PlainCodeFallback
+        <CodeTextBlock
           code={code}
           chrome={chrome}
           showLineNumbers={showLineNumbers}
+          testId="plain-code-fallback"
         />
       )}
     </div>
