@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import threading
 from contextlib import suppress
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -37,23 +38,41 @@ _PYPI_PACKAGE_URL = "https://pypi.org/pypi/nanobot-ai/json"
 _VERSION_CACHE_TTL_S = 3600  # 1 hour
 
 _latest_version_cache: tuple[float, str | None] = (0.0, None)
+_fetch_lock = threading.Lock()
+_fetch_in_progress = False
 
 
-def _fetch_latest_version() -> str | None:
-    """Return the latest nanobot-ai version from PyPI, cached for 1 hour."""
-    global _latest_version_cache  # noqa: PLW0603
-    now = time.monotonic()
-    cached_at, cached_value = _latest_version_cache
-    if now - cached_at < _VERSION_CACHE_TTL_S:
-        return cached_value
+def _fetch_latest_version_async() -> None:
+    """Background fetch: update the cache without blocking the caller."""
+    global _latest_version_cache, _fetch_in_progress  # noqa: PLW0603
     try:
         resp = httpx.get(_PYPI_PACKAGE_URL, timeout=5.0, follow_redirects=True)
         resp.raise_for_status()
         latest = resp.json().get("info", {}).get("version")
     except Exception:
         latest = None
-    _latest_version_cache = (now, latest)
-    return latest
+    with _fetch_lock:
+        _latest_version_cache = (time.monotonic(), latest)
+        _fetch_in_progress = False
+
+
+def _fetch_latest_version() -> str | None:
+    """Return the latest nanobot-ai version from PyPI, cached for 1 hour.
+
+    Non-blocking: returns the cached value immediately and kicks off a
+    background refresh when the cache is stale.
+    """
+    global _fetch_in_progress  # noqa: PLW0603
+    now = time.monotonic()
+    cached_at, cached_value = _latest_version_cache
+    if now - cached_at < _VERSION_CACHE_TTL_S:
+        return cached_value
+    # Cache is stale — start a background refresh (no duplicate threads).
+    with _fetch_lock:
+        if not _fetch_in_progress:
+            _fetch_in_progress = True
+            threading.Thread(target=_fetch_latest_version_async, daemon=True).start()
+    return cached_value
 
 
 def _version_payload() -> dict[str, Any]:

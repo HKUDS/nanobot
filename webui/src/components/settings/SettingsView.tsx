@@ -1729,7 +1729,7 @@ function OverviewSettings({
         </SettingsGroup>
       </section>
 
-      {settings.version && (() => {
+      {settings.version ? (() => {
         const currentVersion = settings.version.current;
         const latestVersion = settings.version.latest;
         const hasUpdate = latestVersion && latestVersion !== currentVersion;
@@ -1746,15 +1746,13 @@ function OverviewSettings({
                 value={`v${currentVersion}`}
                 caption={versionCaption}
                 onClick={() => {
-                  if (hasUpdate) {
-                    window.open("https://pypi.org/project/nanobot-ai/", "_blank", "noopener,noreferrer");
-                  }
+                  window.open("https://pypi.org/project/nanobot-ai/", "_blank", "noopener,noreferrer");
                 }}
               />
             </SettingsGroup>
           </section>
         );
-      })()}
+      })() : null}
     </div>
   );
 }
