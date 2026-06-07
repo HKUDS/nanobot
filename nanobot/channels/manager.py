@@ -15,7 +15,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
-from nanobot.transcription import resolve_transcription_config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
 if TYPE_CHECKING:
@@ -81,9 +80,6 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_channel_names, discover_enabled
 
-        transcription = resolve_transcription_config(self.config)
-        transcription_key = transcription.api_key if transcription.enabled else ""
-
         # Collect enabled module names first, then only import those.
         # Channel configs live in ChannelsConfig's extra fields (via
         # extra="allow"), so we enumerate candidates from pkgutil scan
@@ -134,11 +130,6 @@ class ChannelManager:
                     )
                     kwargs["gateway"] = gateway
                 channel = cls(section, self.bus, **kwargs)
-                channel.transcription_provider = transcription.provider
-                channel.transcription_api_key = transcription_key
-                channel.transcription_api_base = transcription.api_base
-                channel.transcription_model = transcription.model
-                channel.transcription_language = transcription.language
                 channel.send_progress = self._resolve_bool_override(
                     section, "send_progress", self.config.channels.send_progress,
                 )

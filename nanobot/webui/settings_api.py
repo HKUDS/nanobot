@@ -1407,4 +1407,4 @@ def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
 
     if changed:
         save_config(config)
-    return settings_payload(requires_restart=changed)
+    return settings_payload()

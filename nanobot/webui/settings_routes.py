@@ -285,7 +285,7 @@ class WebUISettingsRouter:
             payload = update_transcription_settings(self._query(request))
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
-        return self._json_response(self._with_restart_state(payload, section="browser"))
+        return self._json_response(self._with_restart_state(payload))
 
     def _handle_settings_network_safety_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
