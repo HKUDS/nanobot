@@ -101,7 +101,7 @@
       "apps": "应用",
       "nativeHost": "原生宿主",
       "hostSafety": "应用安全",
-      "voiceInput": "语音输入"
+      "voiceInput": "语音识别"
     },
     "models": {
       "selectModel": "选择模型",
@@ -404,7 +404,7 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
-      "voiceInput": "语音输入",
+      "voiceInput": "语音识别",
       "workspace": "工作区"
     },
     "usage": {
