@@ -95,10 +95,6 @@ function settingsPayload(): SettingsPayload {
       exec_sandbox: null,
       exec_path_append_set: false,
     },
-    version: {
-      current: "0.2.1",
-      latest: "0.2.1",
-    },
     requires_restart: false,
   };
 }
@@ -831,5 +827,93 @@ describe("SettingsView Apps catalog", () => {
         }),
       ),
     );
+  });
+});
+
+describe("SettingsView version display", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function payloadWithVersion(version: { current: string; latest?: string | null }): SettingsPayload {
+    return { ...settingsPayload(), version };
+  }
+
+  it("shows up-to-date when latest matches current", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payloadWithVersion({ current: "1.0.0", latest: "1.0.0" }));
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByText("About")).toBeInTheDocument();
+    expect(screen.getByText("Version")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("Up to date")).toBeInTheDocument();
+    expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
+  });
+
+  it("shows update available when latest version differs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payloadWithVersion({ current: "1.0.0", latest: "2.0.0" }));
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByText("About")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("Update available: v2.0.0")).toBeInTheDocument();
+  });
+
+  it("handles null latest gracefully when PyPI is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(payloadWithVersion({ current: "1.0.0", latest: null }));
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByText("About")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("Up to date")).toBeInTheDocument();
+  });
+
+  it("hides About section when version is absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView({ initialSection: "overview" });
+
+    expect(await screen.findByText("System")).toBeInTheDocument();
+    expect(screen.queryByText("About")).not.toBeInTheDocument();
+    expect(screen.queryByText("Version")).not.toBeInTheDocument();
   });
 });
