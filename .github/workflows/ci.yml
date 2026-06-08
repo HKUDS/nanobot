@@ -2,9 +2,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [ blackcat ]
+    branches: [main]
   pull_request:
-    branches: [ blackcat ]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,4 +46,4 @@ jobs:
         run: uv run ruff check blackcat --select F
 
       - name: Run tests
-        run: uv run pytest tests/ --ignore=tests/agent/test_llm_agent_loop.py
+        run: uv run pytest tests/
