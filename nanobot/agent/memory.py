@@ -717,6 +717,12 @@ class Consolidator:
             session_summary=summary,
             session_metadata=session.metadata,
         )
+        # Apply the same microcompaction the runner uses before sending to the
+        # model, so /status and the consolidation trigger don't over-count from
+        # the full untrimmed history (#4222).
+        from nanobot.agent.runner import AgentRunner
+
+        probe_messages = AgentRunner._microcompact(probe_messages)
         return estimate_prompt_tokens_chain(
             self.provider,
             self.model,

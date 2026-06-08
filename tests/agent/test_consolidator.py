@@ -710,3 +710,98 @@ class TestArchiveTruncation:
         sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         token_count = len(enc.encode(sent_content))
         assert token_count <= 9_900 + 10  # small margin for truncation suffix
+
+
+def test_estimate_session_prompt_tokens_mirrors_microcompact(tmp_path):
+    """#4222: estimation should account for the microcompaction the runner
+    applies before sending messages to the model.
+
+    Builds a real ContextBuilder probe from a session with many compactable
+    tool results and a deterministic provider counter (no network). Without the
+    fix the estimate reflects the full untrimmed history; with it, the stale
+    tool results are summarized, so the estimate is strictly lower and matches
+    what the model actually receives. The persisted session must stay intact.
+    """
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.runner import (
+        _MICROCOMPACT_KEEP_RECENT,
+        _MICROCOMPACT_MIN_CHARS,
+        AgentRunner,
+    )
+    from nanobot.session.manager import Session
+
+    def char_count(messages):
+        total = 0
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, str):
+                total += len(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        total += len(part.get("text", ""))
+        return total
+
+    class _CountingProvider:
+        def estimate_prompt_tokens(self, messages, tools, model):
+            return char_count(messages), "counting"
+
+    ctx = ContextBuilder(workspace=tmp_path)
+    store = MemoryStore(tmp_path)
+
+    total = _MICROCOMPACT_KEEP_RECENT + 4
+    big = "z" * (_MICROCOMPACT_MIN_CHARS + 50)
+    session = Session(key="websocket:demo")
+    session.messages = [{"role": "user", "content": "do the work"}]
+    for i in range(total):
+        session.messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        session.messages.append(
+            {"role": "tool", "name": "read_file", "tool_call_id": f"c{i}", "content": big}
+        )
+
+    consolidator = Consolidator(
+        store=store,
+        provider=_CountingProvider(),
+        model="m",
+        sessions=MagicMock(),
+        context_window_tokens=100_000,
+        build_messages=ctx.build_messages,
+        get_tool_definitions=lambda: [],
+        max_completion_tokens=4096,
+    )
+
+    # Reference estimate WITHOUT microcompaction, from the same real probe.
+    history = consolidator._full_unconsolidated_history(session, include_timestamps=True)
+    probe = ctx.build_messages(
+        history=history,
+        current_message="[token-probe]",
+        channel="websocket",
+        chat_id="demo",
+        sender_id=None,
+        session_summary=None,
+        session_metadata=session.metadata,
+    )
+    # The real probe must actually contain compactable tool results.
+    assert sum(1 for m in probe if m.get("role") == "tool" and m.get("name") == "read_file") == total
+    full_estimate = char_count(probe)
+    compacted_estimate = char_count(AgentRunner._microcompact(probe))
+    assert compacted_estimate < full_estimate  # stale results are summarized
+
+    # The wired method must return the compacted (lower) estimate end-to-end.
+    estimated, _ = consolidator.estimate_session_prompt_tokens(session)
+    assert estimated == compacted_estimate
+
+    # Estimation must never mutate the persisted session history.
+    assert all(m["content"] == big for m in session.messages if m.get("role") == "tool")
