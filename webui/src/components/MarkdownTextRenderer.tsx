@@ -24,6 +24,7 @@ import {
 } from "@/components/FileReferenceChip";
 import { inferMediaKind } from "@/lib/media";
 import { faviconUrls } from "@/lib/provider-brand";
+import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
@@ -190,6 +191,7 @@ const remarkPlugins: NonNullable<ReactMarkdownOptions["remarkPlugins"]> = [
   remarkBreaks,
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
+  remarkTexMath,
   remarkSafeHtmlSubset,
 ];
 const rehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [rehypeKatex];
