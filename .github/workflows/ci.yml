@@ -2,9 +2,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [main, nightly]
+    branches: [main]
   pull_request:
-    branches: [main, nightly]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -316,14 +316,10 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
 
-### Branching Strategy
+### Contribution Flow
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable releases — bug fixes and minor improvements |
-| `nightly` | Experimental features — new features and breaking changes |
-
-**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution
+guidelines.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
