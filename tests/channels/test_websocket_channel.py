@@ -1,7 +1,6 @@
 """Unit and lightweight integration tests for the WebSocket channel."""
 
 import asyncio
-import base64
 import functools
 import json
 import time
@@ -94,10 +93,6 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
         runtime_surface=kw.get("runtime_surface", "browser"),
         runtime_capabilities_overrides=kw.get("runtime_capabilities_overrides"),
     )
-
-
-def _audio_data_url(payload: bytes = b"voice", mime: str = "audio/webm") -> str:
-    return f"data:{mime};base64,{base64.b64encode(payload).decode('ascii')}"
 
 
 @pytest.fixture()
@@ -412,165 +407,6 @@ async def test_plain_websocket_message_does_not_mark_webui(bus: MagicMock) -> No
 
     msg = bus.publish_inbound.await_args.args[0]
     assert "webui" not in msg.metadata
-
-
-@pytest.mark.asyncio
-async def test_webui_transcribe_audio_rejects_unconfigured_provider(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.transcription.provider = "groq"
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    channel = _ch(bus)
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "transcribe_audio",
-            "request_id": "voice-1",
-            "data_url": _audio_data_url(),
-        },
-    )
-
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload == {
-        "event": "transcription_error",
-        "request_id": "voice-1",
-        "detail": "not_configured",
-        "provider": "groq",
-    }
-    bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_webui_transcribe_audio_rejects_unsupported_mime(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    channel = _ch(bus)
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "transcribe_audio",
-            "request_id": "voice-1",
-            "data_url": _audio_data_url(mime="text/plain"),
-        },
-    )
-
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "transcription_error"
-    assert payload["request_id"] == "voice-1"
-    assert payload["detail"] == "mime"
-    bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_webui_transcribe_audio_rejects_oversized_audio(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.transcription.provider = "groq"
-    config.transcription.max_upload_mb = 1
-    config.providers.groq.api_key = "gsk-test"
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.transcription.get_media_dir", lambda _channel=None: tmp_path)
-
-    channel = _ch(bus)
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "transcribe_audio",
-            "request_id": "voice-1",
-            "data_url": _audio_data_url(payload=b"x" * (1024 * 1024 + 1)),
-        },
-    )
-
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "transcription_error"
-    assert payload["request_id"] == "voice-1"
-    assert payload["detail"] == "size"
-    bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_webui_transcribe_audio_returns_text_and_removes_temp_file(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    media_dir = tmp_path / "media"
-    media_dir.mkdir()
-    config = Config()
-    config.transcription.provider = "groq"
-    config.providers.groq.api_key = "gsk-test"
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr(
-        "nanobot.transcription.get_media_dir",
-        lambda _channel=None: media_dir,
-    )
-    captured_paths: list[Path] = []
-
-    async def fake_transcribe_audio_file(path: str | Path, _resolved: Any) -> str:
-        p = Path(path)
-        assert p.exists()
-        captured_paths.append(p)
-        return "hello voice"
-
-    monkeypatch.setattr(
-        "nanobot.transcription.transcribe_audio_file",
-        fake_transcribe_audio_file,
-    )
-
-    channel = _ch(bus)
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "transcribe_audio",
-            "request_id": "voice-1",
-            "data_url": _audio_data_url(payload=b"webm voice", mime="audio/webm;codecs=opus"),
-            "duration_ms": 1200,
-        },
-    )
-
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload == {
-        "event": "transcription_result",
-        "request_id": "voice-1",
-        "text": "hello voice",
-    }
-    assert captured_paths
-    assert not captured_paths[0].exists()
-    bus.publish_inbound.assert_not_awaited()
 
 
 @pytest.mark.asyncio

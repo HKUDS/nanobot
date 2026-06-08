@@ -129,7 +129,7 @@ async def transcribe_audio_data_url(
     try:
         audio_path = save_base64_data_url(
             data_url,
-            get_media_dir("websocket-transcription"),
+            get_media_dir("webui-transcription"),
             max_bytes=max_bytes,
         )
     except FileSizeExceeded as exc:

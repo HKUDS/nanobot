@@ -21,7 +21,6 @@ from websockets.http11 import Request as WsRequest
 from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.loader import load_config
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.workspace_access import (
@@ -30,11 +29,6 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
-from nanobot.transcription import (
-    TranscriptionIngressError,
-    resolve_transcription_config,
-    transcribe_audio_data_url,
-)
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
@@ -51,6 +45,7 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
 
 
@@ -642,37 +637,6 @@ class WebSocketChannel(BaseChannel):
             paths.append(saved)
         return paths, None
 
-    async def _handle_transcribe_audio(self, connection: Any, envelope: dict[str, Any]) -> None:
-        request_id = envelope.get("request_id")
-        data_url = envelope.get("data_url")
-        valid_request_id = isinstance(request_id, str) and 0 < len(request_id) <= 80
-
-        async def fail(detail: str, **extra: Any) -> None:
-            payload: dict[str, Any] = {"detail": detail, **extra}
-            if valid_request_id:
-                payload["request_id"] = request_id
-            await self._send_event(connection, "transcription_error", **payload)
-
-        if not valid_request_id:
-            await fail("invalid_request")
-            return
-        resolved = resolve_transcription_config(load_config())
-        try:
-            text = await transcribe_audio_data_url(
-                data_url,
-                resolved,
-                duration_ms=envelope.get("duration_ms"),
-            )
-        except TranscriptionIngressError as exc:
-            await fail(exc.detail, **exc.extra)
-            return
-        await self._send_event(
-            connection,
-            "transcription_result",
-            request_id=request_id,
-            text=text,
-        )
-
     async def _dispatch_envelope(
         self,
         connection: Any,
@@ -740,7 +704,8 @@ class WebSocketChannel(BaseChannel):
             )
             return
         if t == "transcribe_audio":
-            await self._handle_transcribe_audio(connection, envelope)
+            event, payload = await webui_transcription_event(envelope)
+            await self._send_event(connection, event, **payload)
             return
         if t == "message":
             cid = envelope.get("chat_id")
