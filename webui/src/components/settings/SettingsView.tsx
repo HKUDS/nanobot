@@ -1797,6 +1797,7 @@ function OverviewSettings({
           </div>
         </div>
         <TokenUsageHeatmap usage={settings.usage} />
+        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>
