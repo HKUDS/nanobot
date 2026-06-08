@@ -1488,6 +1488,51 @@ def _run_gateway(
                         ))
                         logger.info("foolish-storefront-order hook: notified telegram {} cmsError={}", chat_id, bool(cms_error))
 
+                    # Schedula verifica pipeline a +5 min (one-shot, delete_after_run)
+                    try:
+                        from nanobot.cron.types import CronSchedule as _CronSchedule
+                        import time as _time
+                        _check_at_ms = int(_time.time() * 1000) + 5 * 60 * 1000
+                        _cms_url = os.environ.get("FOOLISH_PAYLOAD_URL", "https://cms-production-1dda.up.railway.app")
+                        _check_msg = (
+                            f"Verifica pipeline ordine {_order_ref} (appena notificato ad Alessandro).\n\n"
+                            f"Cliente: {_customer} | Totale: {_amount}\n"
+                            f"CMS registrato: {_cms_ok}\n\n"
+                            f"Esegui questi controlli:\n"
+                            f"1. CMS — GET {_cms_url}/api/orders?where[orderNumber][equals]={_order_ref} "
+                            f"con header x-storefront-secret. Verifica che l'ordine esista e abbia "
+                            f"customerEmail, total, lineItems corretti.\n"
+                            f"2. Railway logs — controlla i log del servizio storefront negli ultimi 10 min "
+                            f"per errori relativi a questo ordine o al webhook Stripe.\n"
+                            f"3. Se tutto ok: scrivi una riga in "
+                            f"/home/ab/.nanobot/memory/scribble/ordini-{_today}.md con '  ✅ pipeline verificata' "
+                            f"e non mandare nessun messaggio.\n"
+                            f"4. Se qualcosa non va: notifica subito su Telegram 8273632991 con i dettagli."
+                        )
+                        cron.add_job(
+                            name=f"order-check-{_order_ref}",
+                            schedule=_CronSchedule(kind="at", at_ms=_check_at_ms),
+                            message=_check_msg,
+                            deliver=True,
+                            channel="telegram",
+                            to=chat_id,
+                            channel_meta={
+                                "user_id": int(chat_id) if chat_id.isdigit() else 0,
+                                "username": "ale_boss_live",
+                                "first_name": "Alessandro",
+                                "is_group": False,
+                                "message_thread_id": None,
+                                "is_forum": False,
+                                "reply_to_message_id": None,
+                                "_wants_stream": False,
+                            },
+                            session_key=f"telegram:{chat_id}",
+                            delete_after_run=True,
+                        )
+                        logger.info("foolish-storefront-order: scheduled pipeline check for {}", _order_ref)
+                    except Exception as _ce:
+                        logger.warning("foolish-storefront-order: could not schedule check: {}", _ce)
+
                     body = _json.dumps({"ok": True})
                     resp = (
                         f"HTTP/1.0 200 OK\r\n"
