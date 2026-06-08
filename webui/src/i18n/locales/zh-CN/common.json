@@ -73,6 +73,7 @@
       "models": "模型",
       "providers": "提供商",
       "image": "图片",
+      "voice": "语音",
       "browser": "网页",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
@@ -99,7 +100,8 @@
       "capabilities": "能力",
       "apps": "应用",
       "nativeHost": "原生宿主",
-      "hostSafety": "应用安全"
+      "hostSafety": "应用安全",
+      "voiceInput": "语音识别"
     },
     "models": {
       "selectModel": "选择模型",
@@ -161,7 +163,13 @@
       "engine": "引擎",
       "logs": "日志",
       "diagnostics": "诊断",
-      "contextWindow": "上下文窗口"
+      "contextWindow": "上下文窗口",
+      "transcription": "语音转写",
+      "transcriptionProvider": "提供商",
+      "transcriptionProviderStatus": "提供商状态",
+      "transcriptionModel": "模型",
+      "transcriptionLanguage": "语言",
+      "voiceLimits": "限制"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
@@ -200,7 +208,12 @@
       "diagnostics": "导出一份用于支持排查的小型运行报告。",
       "localServiceAccessNative": "允许完全访问权限下的 shell 命令访问这台 Mac 上的服务。",
       "webuiDefaultAccessNative": "用于没有单独项目权限的原生聊天。",
-      "contextWindow": "选择此模型配置的默认上下文预算。"
+      "contextWindow": "选择此模型配置的默认上下文预算。",
+      "transcription": "发送前先把麦克风输入转写到输入框。聊天渠道里的语音消息也使用同一套设置。",
+      "transcriptionProvider": "使用「提供商」中对应提供商的凭据。",
+      "transcriptionProviderStatus": "API Key 仍保存在 providers 里，不写进 transcription 设置。",
+      "transcriptionModel": "除非提供商需要自定义模型 ID，否则保持解析后的默认值即可。",
+      "transcriptionLanguage": "可选 ISO-639 语言提示，例如 en、zh、ja 或 ko。"
     },
     "timezone": {
       "select": "选择时区",
@@ -391,6 +404,7 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
+      "voiceInput": "语音识别",
       "workspace": "工作区"
     },
     "usage": {
@@ -486,6 +500,11 @@
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "没有原始说明。",
       "detailDescription": "{{name}} 的详情。"
+    },
+    "voice": {
+      "selectProvider": "选择提供商",
+      "configureProvider": "配置提供商",
+      "languageAuto": "自动"
     }
   },
   "chat": {
@@ -676,6 +695,21 @@
         "reason": "推理",
         "deepResearch": "深度研究",
         "voice": "语音输入"
+      },
+      "voice": {
+        "hint": "点击进行听写或长按",
+        "stop": "停止录音",
+        "transcribing": "正在转写...",
+        "recordingStatus": "正在录音 {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "当前浏览器不支持语音输入。",
+        "permission": "需要麦克风权限。",
+        "notConfigured": "请先配置转写提供商。",
+        "tooLong": "录音时间太长。",
+        "tooShort": "请稍微多录一会儿。",
+        "noInput": "没有检测到麦克风输入。",
+        "failed": "语音转写失败。"
       },
       "slash": {
         "ariaLabel": "斜杠命令",

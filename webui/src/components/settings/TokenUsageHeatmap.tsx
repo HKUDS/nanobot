@@ -24,11 +24,6 @@ type TokenUsageMonthLabel = {
   label: string;
   column: number;
 };
-type CalendarDayParts = {
-  year: string;
-  month: string;
-  day: string;
-};
 
 const TOKEN_HEATMAP_CELLS = 371;
 const TOKEN_HEATMAP_COLUMNS = Math.ceil(TOKEN_HEATMAP_CELLS / 7);
@@ -49,16 +44,8 @@ function utcDateFromIsoDay(day: string): Date {
   return new Date(Date.UTC(year, month - 1, date));
 }
 
-function utcDayParts(date: Date): CalendarDayParts {
-  return {
-    year: String(date.getUTCFullYear()).padStart(4, "0"),
-    month: String(date.getUTCMonth() + 1).padStart(2, "0"),
-    day: String(date.getUTCDate()).padStart(2, "0"),
-  };
-}
-
-function dayPartsForTimeZone(date: Date, timeZone: string | undefined): CalendarDayParts {
-  if (!timeZone) return utcDayParts(date);
+function isoDayInTimeZone(date: Date, timeZone: string | undefined): string {
+  if (!timeZone) return isoDay(date);
   try {
     const parts = new Intl.DateTimeFormat("en", {
       calendar: "gregory",
@@ -70,21 +57,16 @@ function dayPartsForTimeZone(date: Date, timeZone: string | undefined): Calendar
     }).formatToParts(date);
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     if (values.year && values.month && values.day) {
-      return {
-        year: values.year.padStart(4, "0"),
-        month: values.month.padStart(2, "0"),
-        day: values.day.padStart(2, "0"),
-      };
+      return [
+        values.year.padStart(4, "0"),
+        values.month.padStart(2, "0"),
+        values.day.padStart(2, "0"),
+      ].join("-");
     }
   } catch {
     // Fall through to UTC when the browser cannot resolve the configured timezone.
   }
-  return utcDayParts(date);
-}
-
-function todayIsoDay(timeZone: string | undefined): string {
-  const parts = dayPartsForTimeZone(new Date(), timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return isoDay(date);
 }
 
 function buildTokenUsageCalendar(
@@ -93,19 +75,16 @@ function buildTokenUsageCalendar(
   timeZone: string | undefined,
 ): { cells: TokenUsageCell[]; monthLabels: TokenUsageMonthLabel[] } {
   const byDate = new Map((days ?? []).map((day) => [day.date, day]));
-  const today = utcDateFromIsoDay(todayIsoDay(timeZone));
+  const today = utcDateFromIsoDay(isoDayInTimeZone(new Date(), timeZone));
   const end = addUtcDays(today, 6 - today.getUTCDay());
   const start = addUtcDays(end, -(TOKEN_HEATMAP_CELLS - 1));
-  const seenMonths = new Set<string>();
   const monthLabels: TokenUsageMonthLabel[] = [];
 
   const cells = Array.from({ length: TOKEN_HEATMAP_CELLS }, (_, index) => {
     const date = addUtcDays(start, index);
     const key = isoDay(date);
     const row = byDate.get(key);
-    const monthKey = key.slice(0, 7);
-    if (!seenMonths.has(monthKey)) {
-      seenMonths.add(monthKey);
+    if (date.getUTCDate() === 1) {
       monthLabels.push({
         label: monthFormatter.format(date),
         column: Math.floor(index / 7) + 1,
@@ -204,16 +183,12 @@ export function TokenUsageHeatmap({
             {tx("settings.usage.shortTitle", "Token Usage")}
           </span>
         </div>
-        <div
-          className="mb-2 grid min-h-4 gap-1.5 text-[10px] font-normal leading-4 text-muted-foreground/62"
-          style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
-          aria-hidden
-        >
+        <div className="relative mb-2 h-4 text-[10px] font-normal leading-4 text-muted-foreground/62" aria-hidden>
           {monthLabels.map((month) => (
             <span
               key={`${month.label}-${month.column}`}
-              className="overflow-visible whitespace-nowrap"
-              style={{ gridColumnStart: month.column, gridColumnEnd: "span 4" }}
+              className="absolute top-0 whitespace-nowrap"
+              style={{ left: `${((month.column - 1) / TOKEN_HEATMAP_COLUMNS) * 100}%` }}
             >
               {month.label}
             </span>

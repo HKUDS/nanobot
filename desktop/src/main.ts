@@ -15,6 +15,7 @@ import {
   protocol,
   session,
   shell,
+  systemPreferences,
 } from "electron";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
 
@@ -98,6 +99,58 @@ function isTrustedAppUrl(rawUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isTrustedPermissionRequest(
+  webContents: WebContents | null,
+  details: unknown,
+): boolean {
+  return [
+    permissionDetail(details, "requestingUrl"),
+    permissionDetail(details, "securityOrigin"),
+    webContents?.getURL(),
+  ].some((url) => typeof url === "string" && isTrustedAppUrl(url));
+}
+
+function permissionDetail(details: unknown, key: string): unknown {
+  return typeof details === "object" && details !== null
+    ? (details as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function isAudioOnlyMediaRequest(details: unknown): boolean {
+  const mediaTypes = permissionDetail(details, "mediaTypes");
+  if (Array.isArray(mediaTypes)) {
+    return mediaTypes.includes("audio") && !mediaTypes.includes("video");
+  }
+  return permissionDetail(details, "mediaType") === "audio";
+}
+
+async function requestNativeMicrophoneAccess(): Promise<boolean> {
+  if (process.platform !== "darwin") return true;
+  const status = systemPreferences.getMediaAccessStatus("microphone");
+  if (status === "granted") return true;
+  if (status === "denied" || status === "restricted") return false;
+  return await systemPreferences.askForMediaAccess("microphone");
+}
+
+function registerPermissionHandlers(): void {
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => (
+    permission === "media"
+    && isTrustedPermissionRequest(webContents, details)
+    && isAudioOnlyMediaRequest(details)
+  ));
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (
+      permission !== "media"
+      || !isTrustedPermissionRequest(webContents, details)
+      || !isAudioOnlyMediaRequest(details)
+    ) {
+      callback(false);
+      return;
+    }
+    void requestNativeMicrophoneAccess().then(callback, () => callback(false));
+  });
 }
 
 function assertTrustedIpc(event: IpcMainInvokeEvent): void {
@@ -749,6 +802,7 @@ app.whenReady().then(async () => {
   }
 
   registerIpcHandlers();
+  registerPermissionHandlers();
   registerAppProtocol(webDist, devUrl);
 
   mainWindow = createWindow();

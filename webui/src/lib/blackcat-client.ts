@@ -1,15 +1,15 @@
-import { createHostWebSocket } from "./runtime";
 import type {
   ConnectionStatus,
-  GoalStateWsPayload,
   InboundEvent,
   Outbound,
   OutboundCliAppMention,
   OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
+  GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
+import { createHostWebSocket } from "./runtime";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -95,7 +95,13 @@ interface PendingNewChat {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export interface BlackcatClientOptions {
+interface PendingTranscription {
+  resolve: (text: string) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export interface NanobotClientOptions {
   url: string;
   reconnect?: boolean;
   /** Called when a connection drops so the app can refresh its token. */
@@ -113,7 +119,7 @@ export interface BlackcatClientOptions {
  * ``chat_id``, and this class fans those events out to handlers registered
  * per chat. Reconnects are transparent and re-attach every known chat_id.
  */
-export class BlackcatClient {
+export class NanobotClient {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
@@ -132,6 +138,7 @@ export class BlackcatClient {
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingNewChat | null = null;
+  private pendingTranscriptions = new Map<string, PendingTranscription>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -146,7 +153,7 @@ export class BlackcatClient {
   // and must not schedule a reconnect or flip status back to "reconnecting".
   private intentionallyClosed = false;
 
-  constructor(private options: BlackcatClientOptions) {
+  constructor(private options: NanobotClientOptions) {
     this.shouldReconnect = options.reconnect ?? true;
     this.maxBackoffMs = options.maxBackoffMs ?? 15_000;
     this.socketFactory = options.socketFactory ?? createDefaultSocket;
@@ -320,6 +327,27 @@ export class BlackcatClient {
     });
   }
 
+  transcribeAudio(
+    dataUrl: string,
+    options?: { durationMs?: number; timeoutMs?: number },
+  ): Promise<string> {
+    const requestId = crypto.randomUUID();
+    const timeoutMs = options?.timeoutMs ?? 120_000;
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingTranscriptions.delete(requestId);
+        reject(new Error("transcription timed out"));
+      }, timeoutMs);
+      this.pendingTranscriptions.set(requestId, { resolve, reject, timer });
+      this.queueSend({
+        type: "transcribe_audio",
+        request_id: requestId,
+        data_url: dataUrl,
+        ...(options?.durationMs !== undefined ? { duration_ms: options.durationMs } : {}),
+      });
+    });
+  }
+
   attach(chatId: string): void {
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
@@ -363,8 +391,6 @@ export class BlackcatClient {
       workspace_scope: workspaceScope,
     });
   }
-
-  // TODO: add the method transcribeAudio(dataUrl, options)
 
   // -- internals ---------------------------------------------------------
 
@@ -424,6 +450,16 @@ export class BlackcatClient {
 
     if (parsed.event === "runtime_model_updated") {
       this.emitRuntimeModelUpdate(parsed.model_name || null, parsed.model_preset ?? null);
+      return;
+    }
+
+    if (parsed.event === "transcription_result") {
+      this.resolveTranscription(parsed.request_id, parsed.text);
+      return;
+    }
+
+    if (parsed.event === "transcription_error") {
+      this.rejectTranscription(parsed.request_id, parsed.detail || "error");
       return;
     }
 
@@ -489,7 +525,7 @@ export class BlackcatClient {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
-    const over = q.length - BlackcatClient.PENDING_INBOUND_MAX;
+    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
     if (over > 0) {
       q.splice(0, over);
     }
@@ -502,6 +538,7 @@ export class BlackcatClient {
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
+    this.rejectAllTranscriptions("socket closed");
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -527,6 +564,34 @@ export class BlackcatClient {
       } catch {
         // best-effort: subscriber fault must not stall transport bookkeeping
       }
+    }
+  }
+
+  private resolveTranscription(requestId: string, text: string): void {
+    const pending = this.pendingTranscriptions.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingTranscriptions.delete(requestId);
+    pending.resolve(text);
+  }
+
+  private rejectTranscription(requestId: string | undefined, detail: string): void {
+    if (!requestId) {
+      this.rejectAllTranscriptions(detail);
+      return;
+    }
+    const pending = this.pendingTranscriptions.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingTranscriptions.delete(requestId);
+    pending.reject(new Error(detail));
+  }
+
+  private rejectAllTranscriptions(detail: string): void {
+    for (const [requestId, pending] of this.pendingTranscriptions) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(detail));
+      this.pendingTranscriptions.delete(requestId);
     }
   }
 

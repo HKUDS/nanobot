@@ -119,7 +119,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" blackcat agent
 ## Providers
 
 > [!TIP]
-> - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead, and optionally set `"transcriptionLanguage": "en"` (or another ISO-639-1 code) for more accurate transcription. The API key is picked from the matching provider config.
+> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. By default Groq Whisper is used; set `transcription.provider` to `"openai"` to use OpenAI Whisper. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the blackcat community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` when you want `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so blackcat keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
@@ -1100,6 +1100,61 @@ Set `agents.defaults.modelPreset` to start with a named preset:
 
 When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
 
+## Transcription Settings
+
+Audio transcription is a shared capability used by chat-channel voice messages and by WebUI/desktop microphone input. Chat-channel voice messages are transcribed automatically before they enter the agent. WebUI and desktop microphone input is transcribed into the composer first, so you can edit the text before sending.
+
+Configure transcription under the top-level `transcription` section:
+
+```json
+{
+  "transcription": {
+    "enabled": true,
+    "provider": "groq",
+    "model": null,
+    "language": null,
+    "maxDurationSec": 120,
+    "maxUploadMb": 25
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI/desktop microphone input. |
+| `provider` | `"groq"` | Transcription backend: `"groq"` or `"openai"`. |
+| `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq and `whisper-1` for OpenAI. |
+| `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
+| `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
+| `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |
+
+Provider and language resolution is intentionally ordered for backwards compatibility:
+
+1. `transcription.provider` / `transcription.language`
+2. Legacy `channels.transcriptionProvider` / `channels.transcriptionLanguage`
+3. Built-in defaults (`provider: "groq"`, no language hint)
+
+The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI/desktop microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
+
+Transcription credentials are intentionally not stored in `transcription`. Put the API key and optional endpoint in the matching provider config:
+
+```json
+{
+  "providers": {
+    "groq": {
+      "apiKey": "gsk-...",
+      "apiBase": "https://api.groq.com/openai/v1"
+    }
+  },
+  "transcription": {
+    "provider": "groq",
+    "language": "zh"
+  }
+}
+```
+
+Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
+
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.blackcat/config.json`:
@@ -1111,8 +1166,6 @@ Global settings that apply to all channels. Configure under the `channels` secti
     "sendToolHints": false,
     "extractDocumentText": true,
     "sendMaxRetries": 3,
-    "transcriptionProvider": "groq",
-    "transcriptionLanguage": null,
     "telegram": { ... }
   }
 }
@@ -1125,8 +1178,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
 | `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
-| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key and optional `apiBase` are auto-resolved from the matching provider config. Chat-style bases such as `https://api.groq.com/openai/v1` are normalized to the audio transcription endpoint. |
-| `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
+
+`channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 
 `sendProgress` and `sendToolHints` can also be overridden per channel. The
 global values stay as defaults for channels that do not set their own value:
@@ -1184,7 +1237,7 @@ If you want to disable them, which removes both `web_search` and `web_fetch` fro
 }
 ```
 
-nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP connections. By default it blocks loopback, RFC1918/private ranges, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints. If you need to allow trusted private ranges, explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+blackcat uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP connections. By default it blocks loopback, RFC1918/private ranges, CGNAT/Tailscale ranges, link-local addresses, and cloud metadata endpoints. If you need to allow trusted private ranges, explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
 
 ```json
 {

@@ -73,6 +73,7 @@
       "models": "模型",
       "providers": "提供商",
       "image": "圖片",
+      "voice": "語音",
       "browser": "網頁",
       "runtime": "系統",
       "advanced": "安全",
@@ -99,7 +100,8 @@
       "mcp": "MCP 服務",
       "apps": "應用",
       "nativeHost": "原生宿主",
-      "hostSafety": "App 安全"
+      "hostSafety": "App 安全",
+      "voiceInput": "語音辨識"
     },
     "rows": {
       "theme": "主題",
@@ -142,7 +144,13 @@
       "engine": "引擎",
       "logs": "日誌",
       "diagnostics": "診斷",
-      "contextWindow": "上下文視窗"
+      "contextWindow": "上下文視窗",
+      "transcription": "語音轉寫",
+      "transcriptionProvider": "提供商",
+      "transcriptionProviderStatus": "提供商狀態",
+      "transcriptionModel": "模型",
+      "transcriptionLanguage": "語言",
+      "voiceLimits": "限制"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
@@ -181,7 +189,12 @@
       "diagnostics": "匯出一份用於支援排查的小型執行報告。",
       "localServiceAccessNative": "允許完全訪問權限下的 shell 命令訪問這台 Mac 上的服務。",
       "webuiDefaultAccessNative": "用於沒有單獨專案權限的原生聊天。",
-      "contextWindow": "選擇此模型配置的預設上下文預算。"
+      "contextWindow": "選擇此模型配置的預設上下文預算。",
+      "transcription": "送出前先把麥克風輸入轉寫到輸入框。聊天渠道的語音訊息也使用同一組設定。",
+      "transcriptionProvider": "使用「提供商」中對應提供商的憑證。",
+      "transcriptionProviderStatus": "API Key 仍保存在 providers 裡，不寫進 transcription 設定。",
+      "transcriptionModel": "除非提供商需要自訂模型 ID，否則保持解析後的預設值即可。",
+      "transcriptionLanguage": "可選 ISO-639 語言提示，例如 en、zh、ja 或 ko。"
     },
     "values": {
       "light": "淺色",
@@ -283,6 +296,7 @@
       "totalProviders": "共 {{count}} 個可用",
       "webSearch": "網頁搜尋",
       "imageGeneration": "圖片生成",
+      "voiceInput": "語音辨識",
       "workspace": "工作區"
     },
     "usage": {
@@ -486,6 +500,11 @@
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "沒有原始說明。",
       "detailDescription": "{{name}} 的詳細資訊。"
+    },
+    "voice": {
+      "selectProvider": "選擇提供商",
+      "configureProvider": "設定提供商",
+      "languageAuto": "自動"
     }
   },
   "chat": {
@@ -677,6 +696,21 @@
         "reason": "推理",
         "deepResearch": "深度研究",
         "voice": "語音輸入"
+      },
+      "voice": {
+        "hint": "點擊進行聽寫或長按",
+        "stop": "停止錄音",
+        "transcribing": "正在轉寫...",
+        "recordingStatus": "正在錄音 {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "目前瀏覽器不支援語音輸入。",
+        "permission": "需要麥克風權限。",
+        "notConfigured": "請先設定轉寫提供商。",
+        "tooLong": "錄音時間太長。",
+        "tooShort": "請稍微多錄一會兒。",
+        "noInput": "沒有偵測到麥克風輸入。",
+        "failed": "語音轉寫失敗。"
       },
       "slash": {
         "ariaLabel": "斜線命令",

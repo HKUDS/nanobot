@@ -45,6 +45,7 @@ from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from blackcat.webui.transcription_ws import webui_transcription_event
 from blackcat.webui.websocket_logging import websockets_server_logger
 
 
@@ -235,7 +236,7 @@ _VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
 
 _UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
 
-_DATA_URL_MIME_RE = re.compile(r"^data:([^;]+);base64,", re.DOTALL)
+_DATA_URL_MIME_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,", re.DOTALL)
 
 
 def _extract_data_url_mime(url: str) -> str | None:
@@ -418,7 +419,6 @@ class WebSocketChannel(BaseChannel):
             self._tokens.take_issued_token_if_valid(supplied)
         return None
 
-    # -- Server lifecycle and connection ingress ---------------------------
     # -- Server lifecycle and connection ingress ---------------------------
 
     async def start(self) -> None:
@@ -702,6 +702,10 @@ class WebSocketChannel(BaseChannel):
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
+            return
+        if t == "transcribe_audio":
+            event, payload = await webui_transcription_event(envelope)
+            await self._send_event(connection, event, **payload)
             return
         if t == "message":
             cid = envelope.get("chat_id")

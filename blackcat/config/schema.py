@@ -8,7 +8,6 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
-from blackcat.config.paths import get_workspace_path
 from blackcat.cron.types import CronSchedule
 
 if TYPE_CHECKING:
@@ -48,7 +47,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: str | None = None  # Validated by blackcat.audio.transcription_registry.
+    provider: Literal["groq", "openai"] | None = None
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
@@ -92,9 +91,6 @@ class InlineFallbackConfig(Base):
     provider: str
     max_tokens: int | None = None
     context_window_tokens: int | None = None
-    daily_summary_hour: int = 3  # Hour to run daily summary (0-23)
-    llm_timeout: int = 60  # Timeout for LLM API calls in seconds
-    summarizer_model: str | None = None  # Model for summarization
     temperature: float | None = None
     reasoning_effort: str | None = None
 
@@ -150,7 +146,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     bot_name: str = "blackcat"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
-    bot_icon: str = "🐈‍⬛"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
+    bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
@@ -187,7 +183,6 @@ class ProviderConfig(Base):
     api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
-    extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -206,7 +201,6 @@ class ProvidersConfig(Base):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)  # AssemblyAI voice transcription
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)  # Skywork / APIFree API gateway
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -287,76 +281,12 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
-class WorkspaceConfig(Base):
-    """Per-workspace Lens configuration."""
-
-    path: str  # absolute path to workspace
-    diagnostics_source: Literal["cli", "vscode"] | None = None
-    """Override global diagnostics_source for this workspace. None = use global default."""
-
-
-class LensConfig(Base):
-    """Lens LSP bridge configuration."""
-
-    enabled: bool = False
-    workspaces: dict[str, str | WorkspaceConfig] = Field(default_factory=dict)
-    """Workspace name -> path (str) or full config (WorkspaceConfig).
-
-    Examples:
-        # Simple: just a path
-        "black-cat-py": "/path/to/black-cat-py"
-
-        # Full config with overrides
-        "Nomad's Map": {"path": "/path/to/NomadsMap", "diagnostics_source": "vscode"}
-    """
-    diagnostics_source: Literal["cli", "vscode"] = "cli"
-    """Default source for diagnostics.
-
-    - "cli": Run pyright/tsc directly (fresh results, works for healthy codebases)
-    - "vscode": Use VSCode extension (faster but may be stale, fallback for broken codebases)
-
-    Default is "cli" since most projects are healthy. Use "vscode" for large/complex
-    TypeScript projects where tsc --noEmit would be slow or fail.
-
-    Can be overridden per-workspace via WorkspaceConfig.diagnostics_source.
-    """
-
-    def get_workspace_paths(self) -> dict[str, str]:
-        """Get workspace name -> path mapping (normalizes str | WorkspaceConfig)."""
-        return {
-            name: str(get_workspace_path(
-                cfg.path if isinstance(cfg, WorkspaceConfig) else cfg
-            ))
-            for name, cfg in self.workspaces.items()
-        }
-
-    def get_workspace_source(self, workspace: str) -> Literal["cli", "vscode"]:
-        """Get diagnostics_source for a workspace (with per-workspace override)."""
-        ws_config = self.workspaces.get(workspace)
-        if isinstance(ws_config, WorkspaceConfig) and ws_config.diagnostics_source:
-            return ws_config.diagnostics_source
-        return self.diagnostics_source
-
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
-
-    enable: bool = True
-    allow_set: bool = Field(default=False, alias="allowSet")
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
     import importlib
     module = importlib.import_module(module_path)
     return getattr(module, class_name)()
-
-
-class AuthorIdentity(Base): # FIXME: add all the other platforms
-    """Platform identities for an author (like API keys, keep private)."""
-
-    whatsapp: str | None = None
-    telegram: str | None = None
-    discord: str | None = None
-    cli: str | None = None
 
 
 class ToolsConfig(Base):
@@ -385,7 +315,6 @@ class ToolsConfig(Base):
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    lens: LensConfig = Field(default_factory=LensConfig)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
@@ -399,8 +328,6 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    my_tool: MyToolConfig = Field(default_factory=MyToolConfig, alias="myTool")
-    author_identity: AuthorIdentity | None = None
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
@@ -446,16 +373,6 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    @staticmethod
-    def _is_cloud_model(model: str) -> bool:
-        """Check if model name ends with :cloud suffix (e.g., 'glm-5.1:cloud')."""
-        return model.lower().endswith(":cloud")
-
-    @staticmethod
-    def _strip_cloud_suffix(model: str) -> str:
-        """Remove :cloud suffix from model name for provider matching."""
-        return model[:-6] if model.lower().endswith(":cloud") else model
-
     def _match_provider(
         self, model: str | None = None,
         *,
@@ -484,8 +401,6 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
-                continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
@@ -493,8 +408,6 @@ class Config(BaseSettings):
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
-                continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
@@ -521,7 +434,7 @@ class Config(BaseSettings):
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth or spec.is_transcription_only:
+            if spec.is_oauth:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
@@ -567,12 +480,7 @@ class Config(BaseSettings):
         """Get API base URL for the given model, falling back to the provider default when present."""
         from blackcat.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
-
-        # Ollama cloud routing: models ending with :cloud use ollama.com
-        if name == "ollama" and model and self._is_cloud_model(model):
-            return "https://ollama.com/v1/" # TODO: a better integration of this so it can be reflected in the webui too
-
+        p, name = self._match_provider(model, preset=preset)
         if p and p.api_base:
             return p.api_base
         if name:
@@ -581,7 +489,7 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="BLACKCAT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
 
 
 def _resolve_tool_config_refs() -> None:

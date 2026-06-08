@@ -16,6 +16,7 @@ import type {
   SkillDetail,
   SkillsPayload,
   SlashCommand,
+  TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
@@ -544,6 +545,24 @@ export async function updateImageGenerationSettings(
   query.set("max_images_per_turn", String(update.maxImagesPerTurn));
   return request<SettingsPayload>(
     `${base}/api/settings/image-generation/update?${query}`,
+    token,
+  );
+}
+
+export async function updateTranscriptionSettings(
+  token: string,
+  update: TranscriptionSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("enabled", String(update.enabled));
+  query.set("provider", update.provider);
+  query.set("model", update.model);
+  query.set("language", update.language);
+  query.set("max_duration_sec", String(update.maxDurationSec));
+  query.set("max_upload_mb", String(update.maxUploadMb));
+  return request<SettingsPayload>(
+    `${base}/api/settings/transcription/update?${query}`,
     token,
   );
 }

@@ -1172,13 +1172,13 @@ describe("App layout", () => {
 
   it("restores the settings section from the URL hash after a page reload", async () => {
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
-    window.history.replaceState(null, "", "/#/settings?section=models");
+    window.history.replaceState(null, "", "/#/settings?section=voice");
 
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=models");
+    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
   it("updates the URL hash when switching settings sections", async () => {
@@ -1197,6 +1197,11 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "Models" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
+
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Voice" }));
+
+    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
   it("opens Apps from the main sidebar without replacing the sidebar", async () => {

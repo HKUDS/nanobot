@@ -88,21 +88,18 @@ class BaseChannel(ABC):
         """Stop the channel and clean up resources."""
         pass
 
+    @abstractmethod
     async def send(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
 
-        Subclasses can either override this method directly or implement
-        ``_send_impl`` which this method delegates to by default.
+        Args:
+            msg: The message to send.
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
         """
-        await self._send_impl(msg)
-
-    async def _send_impl(self, msg: OutboundMessage) -> None:
-        """Internal send hook – override in subclasses instead of ``send``."""
-        raise NotImplementedError
+        pass
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Deliver a streaming text chunk.
