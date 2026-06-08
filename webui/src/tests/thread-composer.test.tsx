@@ -374,6 +374,30 @@ describe("ThreadComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("supports keyboard hold voice recording", async () => {
+    mockVoiceRecorder();
+    const onSend = vi.fn();
+    const onTranscribeAudio = vi.fn(async () => "shortcut voice");
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onTranscribeAudio={onTranscribeAudio}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const voiceButton = screen.getByRole("button", { name: "Voice input" });
+    expect(voiceButton).toHaveAttribute("title", "Click to dictate or hold");
+    fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
+    await waitForVoiceCapture();
+    fireEvent.keyUp(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
+
+    await waitFor(() => expect(onTranscribeAudio).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("shortcut voice"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("ignores the delayed click emitted after a long-press voice recording", async () => {
     const { getUserMedia } = mockVoiceRecorder();
     const onTranscribeAudio = vi.fn(async () => "held once");

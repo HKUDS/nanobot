@@ -697,7 +697,7 @@
         "voice": "Nhập bằng giọng nói"
       },
       "voice": {
-        "hint": "Bấm để đọc chính tả hoặc nhấn giữ để ghi âm",
+        "hint": "Bấm để đọc chính tả hoặc nhấn giữ",
         "stop": "Dừng ghi âm",
         "transcribing": "Đang chép lời...",
         "recordingStatus": "Đang ghi {{time}}"

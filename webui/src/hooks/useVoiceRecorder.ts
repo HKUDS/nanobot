@@ -63,6 +63,7 @@ export function useVoiceRecorder({
   const stopAfterStartRef = useRef(false);
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shortcutActiveRef = useRef(false);
   const levelObservedRef = useRef(false);
   const peakLevelRef = useRef(0);
   const levelReliableRef = useRef(false);
@@ -155,6 +156,7 @@ export function useVoiceRecorder({
     streamRef.current = null;
     mediaRecorderRef.current = null;
     startPendingRef.current = false;
+    shortcutActiveRef.current = false;
     noInputHintVisibleRef.current = false;
   }, [clearInputHintTimer, stopWaveform]);
 
@@ -296,6 +298,28 @@ export function useVoiceRecorder({
     else void startRecording();
   }, [clearSuppressClickTimer, startRecording, state, stopRecording]);
 
+  const beginShortcutHold = useCallback(() => {
+    if (!onTranscribeAudio || disabled || state !== "idle" || shortcutActiveRef.current) return;
+    shortcutActiveRef.current = true;
+    stopAfterStartRef.current = false;
+    void startRecording().then(() => {
+      if (stopAfterStartRef.current) {
+        stopAfterStartRef.current = false;
+        stopRecording();
+      }
+    });
+  }, [disabled, onTranscribeAudio, startRecording, state, stopRecording]);
+
+  const endShortcutHold = useCallback(() => {
+    if (!shortcutActiveRef.current) return;
+    shortcutActiveRef.current = false;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      stopRecording();
+    } else if (startPendingRef.current) {
+      stopAfterStartRef.current = true;
+    }
+  }, [stopRecording]);
+
   useEffect(() => {
     if (state !== "recording") {
       setElapsedMs(0);
@@ -313,9 +337,11 @@ export function useVoiceRecorder({
   useEffect(() => () => clearSuppressClickTimer(), [clearSuppressClickTimer]);
 
   return {
+    beginShortcutHold,
     beginPress,
     buttonDisabled: disabled || state === "transcribing",
     elapsedLabel: formatVoiceElapsed(elapsedMs),
+    endShortcutHold,
     endPress,
     handleClick,
     isRecording: state === "recording",

@@ -697,7 +697,7 @@
         "voice": "Entrada de voz"
       },
       "voice": {
-        "hint": "Haz clic para dictar o mantén pulsado",
+        "hint": "Haz clic para dictar o mantén",
         "stop": "Detener grabación",
         "transcribing": "Transcribiendo...",
         "recordingStatus": "Grabando {{time}}"

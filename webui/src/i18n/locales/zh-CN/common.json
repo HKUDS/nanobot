@@ -696,7 +696,7 @@
         "voice": "语音输入"
       },
       "voice": {
-        "hint": "点击进行听写，或长按录音",
+        "hint": "点击进行听写或长按",
         "stop": "停止录音",
         "transcribing": "正在转写...",
         "recordingStatus": "正在录音 {{time}}"

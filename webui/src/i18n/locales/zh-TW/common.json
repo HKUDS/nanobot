@@ -697,7 +697,7 @@
         "voice": "語音輸入"
       },
       "voice": {
-        "hint": "點擊進行聽寫，或長按錄音",
+        "hint": "點擊進行聽寫或長按",
         "stop": "停止錄音",
         "transcribing": "正在轉寫...",
         "recordingStatus": "正在錄音 {{time}}"

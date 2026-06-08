@@ -697,7 +697,7 @@
         "voice": "음성 입력"
       },
       "voice": {
-        "hint": "클릭해 받아쓰거나 길게 눌러 녹음",
+        "hint": "클릭해 받아쓰거나 길게 누르기",
         "stop": "녹음 중지",
         "transcribing": "변환 중...",
         "recordingStatus": "녹음 중 {{time}}"

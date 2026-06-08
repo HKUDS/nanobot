@@ -87,11 +87,35 @@ import { cn } from "@/lib/utils";
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
  * deliberately excluded to avoid an embedded-script XSS surface. */
 const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
+const VOICE_SHORTCUT_CODE = "KeyD";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isVoiceShortcutDown(event: KeyboardEvent): boolean {
+  return (
+    event.code === VOICE_SHORTCUT_CODE
+    && event.ctrlKey
+    && event.shiftKey
+    && !event.altKey
+    && !event.metaKey
+  );
+}
+
+function isVoiceShortcutRelease(event: KeyboardEvent): boolean {
+  return (
+    event.code === VOICE_SHORTCUT_CODE
+    || event.key === "Control"
+    || event.key === "Shift"
+  );
+}
+
+function getVoiceShortcutLabel(): string {
+  if (typeof navigator === "undefined") return "Ctrl ⇧ D";
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌃⇧D" : "Ctrl ⇧ D";
 }
 
 interface ThreadComposerProps {
@@ -734,7 +758,9 @@ export function ThreadComposer({
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
+  const voiceShortcutDownRef = useRef(false);
   const isHero = variant === "hero";
+  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const queuedPromptStorageKey = useMemo(
     () => queuedPromptsStorageKey(pendingQueueKey),
     [pendingQueueKey],
@@ -1100,6 +1126,39 @@ export function ThreadComposer({
     onTranscript: appendTranscription,
     onTranscribeAudio,
   });
+
+  useEffect(() => {
+    if (!onTranscribeAudio) return;
+
+    function onKeyDown(event: KeyboardEvent): void {
+      if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
+      event.preventDefault();
+      voiceShortcutDownRef.current = true;
+      voiceRecorder.beginShortcutHold();
+    }
+
+    function onKeyUp(event: KeyboardEvent): void {
+      if (!voiceShortcutDownRef.current || !isVoiceShortcutRelease(event)) return;
+      event.preventDefault();
+      voiceShortcutDownRef.current = false;
+      voiceRecorder.endShortcutHold();
+    }
+
+    function onWindowBlur(): void {
+      if (!voiceShortcutDownRef.current) return;
+      voiceShortcutDownRef.current = false;
+      voiceRecorder.endShortcutHold();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashCommand) => {
@@ -1676,9 +1735,14 @@ export function ThreadComposer({
                   <TooltipContent
                     side="top"
                     align="center"
-                    className="rounded-full border-0 bg-neutral-900 px-3 py-1.5 text-[12px] text-white shadow-lg dark:bg-neutral-100 dark:text-neutral-900"
+                    className="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
                   >
-                    {voiceButtonTooltip}
+                    <span>{voiceButtonTooltip}</span>
+                    {voiceRecorder.state === "idle" ? (
+                      <kbd className="rounded-full bg-muted px-2 py-0.5 font-sans text-[12px] font-semibold leading-none text-muted-foreground dark:bg-white/10 dark:text-white/80">
+                        {voiceShortcutLabel}
+                      </kbd>
+                    ) : null}
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
