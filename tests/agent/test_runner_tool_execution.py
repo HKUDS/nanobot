@@ -220,7 +220,7 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
     ))
 
     assert result.final_content == "done"
-    assert result.tools_used == ["readFile"]
+    assert result.tools_used == []
     assert shared_events == []
     assistant_message = [
         msg for msg in result.messages
@@ -265,6 +265,7 @@ async def test_runner_rejects_openai_compat_malformed_arguments_without_executin
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == '{path:"notes.txt"}'
+    assert result.tools_used == []
     assert shared_events == []
     tool_message = _tool_message(result, "call_1")
     assert "parameters must be a JSON object" in tool_message["content"]
@@ -288,6 +289,7 @@ async def test_runner_rejects_openai_responses_malformed_arguments_without_execu
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == "{bad"
+    assert result.tools_used == []
     assert shared_events == []
     tool_message = _tool_message(result, "call_1|fc_1")
     assert "parameters must be a JSON object" in tool_message["content"]
@@ -311,6 +313,7 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == []
+    assert result.tools_used == []
     assert shared_events == []
     tool_message = _tool_message(result, "call_1|fc_1")
     assert "parameters must be a JSON object" in tool_message["content"]

@@ -399,7 +399,6 @@ class AgentRunner:
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
-                tools_used.extend(tc.name for tc in response.tool_calls)
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -421,6 +420,11 @@ class AgentRunner:
                     workspace_violation_counts,
                 )
                 tool_events.extend(new_events)
+                tools_used.extend(
+                    tool_call.name
+                    for tool_call, event in zip(response.tool_calls, new_events)
+                    if event.get("status") == "ok"
+                )
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
