@@ -107,7 +107,8 @@ class ToolRegistry:
         if not isinstance(params, dict):
             return tool, params, (
                 f"Error: Tool '{name}' parameters must be a JSON object, got "
-                f"{type(params).__name__}. Use named parameters matching the tool schema."
+                f"{type(params).__name__}. Use named parameters like "
+                'tool_name(param1="value1", param2="value2") matching the tool schema.'
             )
 
         cast_params = tool.cast_params(params)

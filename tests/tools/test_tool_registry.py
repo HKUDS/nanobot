@@ -116,6 +116,7 @@ def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint()
     assert params == ["foo.txt"]
     assert error is not None
     assert "must be a JSON object" in error
+    assert 'tool_name(param1="value1", param2="value2")' in error
     assert "matching the tool schema" in error
 
 
@@ -222,7 +223,8 @@ def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
     assert params == ["TODO"]
     assert error == (
         "Error: Tool 'grep' parameters must be a JSON object, got list. "
-        "Use named parameters matching the tool schema."
+        'Use named parameters like tool_name(param1="value1", param2="value2") '
+        "matching the tool schema."
     )
 
 
