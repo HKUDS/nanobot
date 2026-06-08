@@ -14,9 +14,11 @@ from nanobot.webui.settings_api import (
     create_model_configuration,
     provider_models_payload,
     settings_payload,
+    settings_usage_payload,
     update_agent_settings,
     update_model_configuration,
     update_network_safety_settings,
+    update_transcription_settings,
 )
 
 
@@ -240,6 +242,121 @@ def test_settings_payload_includes_network_safety_fields(
     assert payload["advanced"]["webui_default_access_mode"] == "default"
     assert payload["advanced"]["private_service_protection_enabled"] is True
     assert payload["advanced"]["ssrf_whitelist_count"] == 1
+
+
+def test_settings_payload_includes_effective_transcription_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.channels.transcription_provider = "openai"
+    config.channels.transcription_language = "en"
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    assert payload["transcription"]["enabled"] is True
+    assert payload["transcription"]["provider"] == "openai"
+    assert payload["transcription"]["provider_configured"] is True
+    assert payload["transcription"]["model"] == "whisper-1"
+    assert payload["transcription"]["language"] == "en"
+
+
+def test_update_transcription_settings_writes_top_level_only(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.channels.transcription_provider = "openai"
+    config.channels.transcription_language = "en"
+    config.providers.groq.api_key = "gsk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_transcription_settings(
+        {
+            "enabled": ["true"],
+            "provider": ["groq"],
+            "model": ["whisper-large-v3-turbo"],
+            "language": ["ko"],
+            "maxDurationSec": ["90"],
+            "maxUploadMb": ["20"],
+        }
+    )
+
+    saved = load_config(config_path)
+    assert saved.channels.transcription_provider == "openai"
+    assert saved.channels.transcription_language == "en"
+    assert saved.transcription.enabled is True
+    assert saved.transcription.provider == "groq"
+    assert saved.transcription.model == "whisper-large-v3-turbo"
+    assert saved.transcription.language == "ko"
+    assert saved.transcription.max_duration_sec == 90
+    assert saved.transcription.max_upload_mb == 20
+    assert payload["transcription"]["provider"] == "groq"
+    assert payload["transcription"]["provider_configured"] is True
+
+
+def test_update_transcription_settings_validates_language(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="transcription language"):
+        update_transcription_settings({"language": ["en-US"]})
+
+
+def test_settings_payload_includes_token_usage_summary(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    from nanobot.webui.token_usage import record_token_usage
+
+    record_token_usage({"prompt_tokens": 10, "completion_tokens": 5})
+
+    payload = settings_payload()
+
+    assert payload["usage"]["total_tokens_30d"] == 15
+    assert payload["usage"]["total_tokens"] == 15
+    assert payload["usage"]["peak_day_tokens"] == 15
+    assert payload["usage"]["current_streak_days"] == 1
+    assert payload["usage"]["longest_streak_days"] == 1
+    assert payload["usage"]["active_days_30d"] == 1
+    assert payload["usage"]["requests_30d"] == 1
+
+
+def test_settings_usage_payload_returns_lightweight_token_usage(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+
+    from nanobot.webui.token_usage import record_token_usage
+
+    record_token_usage({"prompt_tokens": 20, "completion_tokens": 2})
+
+    payload = settings_usage_payload()
+
+    assert payload["total_tokens"] == 22
+    assert payload["requests_30d"] == 1
+    assert "agent" not in payload
 
 
 def test_update_network_safety_settings_writes_local_service_flag(

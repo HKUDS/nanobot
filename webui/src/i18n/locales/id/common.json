@@ -54,7 +54,10 @@
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
     },
-    "apps": "Aplikasi"
+    "apps": "Aplikasi",
+    "skills": {
+      "title": "Skill"
+    }
   },
   "settings": {
     "backToChat": "Kembali ke chat",
@@ -70,12 +73,14 @@
       "models": "Model",
       "providers": "Penyedia",
       "image": "Gambar",
+      "voice": "Suara",
       "browser": "Internet",
       "runtime": "Sistem",
       "advanced": "Keamanan",
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
-      "apps": "Aplikasi"
+      "apps": "Aplikasi",
+      "skills": "Skill"
     },
     "sections": {
       "interface": "Antarmuka",
@@ -95,7 +100,8 @@
       "mcp": "Layanan MCP",
       "apps": "Aplikasi",
       "nativeHost": "Host native",
-      "hostSafety": "Keamanan aplikasi"
+      "hostSafety": "Keamanan aplikasi",
+      "voiceInput": "Input suara"
     },
     "rows": {
       "theme": "Tema",
@@ -138,7 +144,13 @@
       "engine": "Mesin",
       "logs": "Log",
       "diagnostics": "Diagnostik",
-      "contextWindow": "Jendela konteks"
+      "contextWindow": "Jendela konteks",
+      "transcription": "Transkripsi",
+      "transcriptionProvider": "Penyedia",
+      "transcriptionProviderStatus": "Status penyedia",
+      "transcriptionModel": "Model",
+      "transcriptionLanguage": "Bahasa",
+      "voiceLimits": "Batas"
     },
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
@@ -177,7 +189,12 @@
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
       "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
-      "contextWindow": "Pilih anggaran konteks default untuk konfigurasi model ini."
+      "contextWindow": "Pilih anggaran konteks default untuk konfigurasi model ini.",
+      "transcription": "Transkripsikan input mikrofon sebelum dikirim. Pesan suara channel memakai pengaturan yang sama.",
+      "transcriptionProvider": "Menggunakan kredensial penyedia yang sesuai dari Providers.",
+      "transcriptionProviderStatus": "API key tetap berada di providers, bukan di pengaturan transkripsi.",
+      "transcriptionModel": "Biarkan memakai default yang teresolusi kecuali penyedia membutuhkan id model khusus.",
+      "transcriptionLanguage": "Petunjuk ISO-639 opsional, seperti en, zh, ja, atau ko."
     },
     "values": {
       "light": "Terang",
@@ -187,6 +204,9 @@
       "disabled": "Nonaktif",
       "restartPending": "Menunggu mulai ulang",
       "ready": "Siap",
+      "privateEngine": "Mesin privat",
+      "unixSocket": "Soket Unix",
+      "defaultWorkspace": "Workspace default",
       "comfortable": "Nyaman",
       "compact": "Ringkas",
       "auto": "Otomatis",
@@ -276,7 +296,33 @@
       "totalProviders": "{{count}} tersedia",
       "webSearch": "Pencarian web",
       "imageGeneration": "Pembuatan gambar",
+      "voiceInput": "Input suara",
       "workspace": "Ruang kerja"
+    },
+    "usage": {
+      "title": "Aktivitas token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Penggunaan yang dilaporkan penyedia selama 12 bulan terakhir.",
+      "empty": "Aktivitas token akan muncul setelah balasan model baru.",
+      "totalTokens": "Total token",
+      "peakTokens": "Puncak token",
+      "thirtyDayTokens": "Token 30 hari",
+      "currentStreak": "Rentetan saat ini",
+      "longestStreak": "Rentetan terpanjang",
+      "daysValue": "{{count}} h",
+      "last30": "30 hari",
+      "activeDays": "Hari aktif",
+      "requests": "Permintaan",
+      "estimated": "perkiraan",
+      "includesEstimates": "termasuk perkiraan",
+      "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Otomasi",
+        "dream": "Memori",
+        "system": "Sistem"
+      }
     },
     "providers": {
       "searchPlaceholder": "Cari penyedia",
@@ -427,6 +473,38 @@
       "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk"
+    },
+    "skills": {
+      "description": "Tinjau skill instruksi yang dapat dimuat agent ini selama percakapan.",
+      "caption": "{{available}} tersedia · {{total}} total",
+      "featured": "Skill agent",
+      "empty": "Tidak ada skill yang tersedia.",
+      "sourceWorkspace": "Kustom",
+      "sourceBuiltin": "Bawaan",
+      "statusAvailable": "Tersedia",
+      "statusUnavailable": "Tidak tersedia",
+      "unavailableReason": "Kurang: {{reason}}",
+      "openDetails": "Buka detail {{name}}",
+      "loadingDetail": "Memuat detail skill...",
+      "loadFailed": "Tidak dapat memuat detail skill.",
+      "descriptionTitle": "Deskripsi",
+      "source": "Sumber",
+      "status": "Status",
+      "requirements": "Kebutuhan",
+      "noRequirements": "Tidak ada kebutuhan eksplisit.",
+      "commands": "Perintah",
+      "environment": "Variabel lingkungan",
+      "missingCommands": "CLI hilang",
+      "missingEnvironment": "ENV hilang",
+      "unavailableReasonLabel": "Alasan tidak tersedia",
+      "rawInstructions": "SKILL.md mentah",
+      "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
+      "detailDescription": "Detail untuk {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Pilih penyedia",
+      "configureProvider": "Konfigurasi penyedia",
+      "languageAuto": "Auto"
     }
   },
   "chat": {
@@ -548,7 +626,30 @@
       "toggleSidebar": "Tampilkan atau sembunyikan sidebar",
       "newChat": "Mulai chat baru",
       "toggleTheme": "Alihkan tema dari header",
-      "settings": "Buka pengaturan"
+      "settings": "Buka pengaturan",
+      "sessionInfo": "Detail sesi"
+    },
+    "sessionInfo": {
+      "title": "Sesi",
+      "untitled": "Chat tanpa judul",
+      "automations": "Otomasi",
+      "count": "{{count}}",
+      "loading": "Memuat otomasi...",
+      "loadFailed": "Tidak dapat memuat otomasi.",
+      "empty": "Belum ada otomasi dalam sesi ini.",
+      "disabled": "Mati",
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Jadwal khusus"
+      },
+      "next": {
+        "label": "Berikutnya {{time}}",
+        "disabled": "Dijeda",
+        "none": "Tidak ada jadwal berikutnya"
+      }
     },
     "composer": {
       "placeholderThread": "Ketik pesan Anda…",
@@ -565,6 +666,8 @@
       "goalStateCloseAria": "Tutup tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "modelNotConfigured": "Model belum dikonfigurasi",
+      "configureModel": "Konfigurasi model",
       "queued": {
         "label": "Panduan antrean",
         "guide": "Pandu",
@@ -593,6 +696,21 @@
         "reason": "Bernalar",
         "deepResearch": "Riset mendalam",
         "voice": "Input suara"
+      },
+      "voice": {
+        "hint": "Klik untuk mendikte atau tahan",
+        "stop": "Hentikan rekaman",
+        "transcribing": "Mentranskripsi...",
+        "recordingStatus": "Merekam {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Input suara tidak didukung di browser ini.",
+        "permission": "Izin mikrofon diperlukan.",
+        "notConfigured": "Konfigurasikan penyedia transkripsi terlebih dahulu.",
+        "tooLong": "Rekaman terlalu panjang.",
+        "tooShort": "Tahan sedikit lebih lama untuk merekam suara.",
+        "noInput": "Tidak ada input mikrofon yang terdeteksi.",
+        "failed": "Tidak dapat mentranskripsi audio."
       },
       "slash": {
         "ariaLabel": "Perintah slash",
@@ -691,7 +809,14 @@
       }
     },
     "scrollToBottom": "Gulir ke bawah",
-    "loadEarlier": "Muat pesan sebelumnya"
+    "loadEarlier": "Muat pesan sebelumnya",
+    "promptNavigator": {
+      "open": "Buka navigator prompt",
+      "title": "Prompt",
+      "search": "Cari prompt",
+      "noResults": "Tidak ada prompt yang cocok.",
+      "jumpTo": "Lompat ke prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "sedang mengalir",
@@ -724,7 +849,9 @@
     "cliActivityFailedMany": "{{count}} aplikasi CLI gagal",
     "cliRunRunning": "Menggunakan",
     "cliRunRan": "Digunakan",
-    "cliRunFailed": "Gagal"
+    "cliRunFailed": "Gagal",
+    "automationSourceFallback": "Otomatisasi",
+    "automationTriggered": "Dipicu otomatis"
   },
   "lightbox": {
     "title": "Pratinjau gambar",
@@ -732,6 +859,15 @@
     "prev": "Gambar sebelumnya",
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
+  },
+  "filePreview": {
+    "aria": "Pratinjau file",
+    "close": "Tutup pratinjau file",
+    "loading": "Memuat pratinjau...",
+    "failed": "Tidak dapat mempratinjau file ini.",
+    "routeMissing": "Pratinjau file memerlukan gateway terbaru. Mulai ulang nanobot gateway lalu coba lagi.",
+    "resize": "Ubah ukuran pratinjau file",
+    "truncated": "Pratinjau dipotong karena file ini besar."
   },
   "code": {
     "fallbackLanguage": "kode",

@@ -9,15 +9,35 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import app
-from nanobot.providers.factory import make_provider
+from nanobot.cli.commands import _proactive_delivery_metadata, app
 from nanobot.config.schema import Config
 from nanobot.cron.types import CronJob, CronPayload
-from nanobot.providers.factory import ProviderSnapshot
+from nanobot.providers.factory import ProviderSnapshot, make_provider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
 runner = CliRunner()
+
+
+def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
+    metadata = {
+        "webui": True,
+        "webui_turn_id": "turn-that-created-the-reminder",
+        "workspace_scope": {"mode": "default"},
+    }
+
+    out = _proactive_delivery_metadata(
+        "websocket",
+        metadata,
+        turn_seed="cron:drink-water",
+        source_label="drink water",
+    )
+
+    assert out["webui"] is True
+    assert out["workspace_scope"] == {"mode": "default"}
+    assert out["webui_turn_id"].startswith("cron:drink-water:")
+    assert out["webui_turn_id"] != metadata["webui_turn_id"]
+    assert out["_webui_message_source"] == {"kind": "cron", "label": "drink water"}
 
 
 def _fake_provider():
@@ -542,8 +562,8 @@ def test_openai_compat_provider_passes_model_through():
 
 
 def test_make_provider_uses_github_copilot_backend():
-    from nanobot.providers.factory import make_provider
     from nanobot.config.schema import Config
+    from nanobot.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -1317,6 +1337,41 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         }
     ]
 
+    bus.publish_outbound.reset_mock()
+    old_turn_id = "turn-that-created-the-reminder"
+    websocket_job = CronJob(
+        id="drink-water",
+        name="drink water",
+        payload=CronPayload(
+            message="Remind me to drink water.",
+            deliver=True,
+            channel="websocket",
+            to="chat-1",
+            channel_meta={
+                "webui": True,
+                "webui_turn_id": old_turn_id,
+                "workspace_scope": {"mode": "default"},
+            },
+            session_key="websocket:chat-1",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(websocket_job))
+
+    assert response == "Time to stretch."
+    bus.publish_outbound.assert_awaited_once()
+    delivered = bus.publish_outbound.await_args.args[0]
+    assert delivered.channel == "websocket"
+    assert delivered.chat_id == "chat-1"
+    assert delivered.metadata["webui"] is True
+    assert delivered.metadata["workspace_scope"] == {"mode": "default"}
+    assert delivered.metadata["webui_turn_id"].startswith("cron:drink-water:")
+    assert delivered.metadata["webui_turn_id"] != old_turn_id
+    assert delivered.metadata["_webui_message_source"] == {
+        "kind": "cron",
+        "label": "drink water",
+    }
+
 
 def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch, tmp_path: Path
@@ -1597,6 +1652,65 @@ def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
     assert extras["websocket"]["unix_socket_path"] == "/tmp/nanobot-test.sock"
     assert extras["websocket"]["token_issue_secret"] == "secret"
     assert extras["websocket"]["websocket_requires_token"] is True
+
+
+def test_load_or_create_desktop_config_bootstraps_without_api_key(tmp_path: Path) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+
+    config_path = tmp_path / "config.json"
+    loaded = _load_or_create_desktop_config(
+        str(config_path),
+        str(tmp_path / "workspace"),
+    )
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert loaded.agents.defaults.model_preset is None
+    assert config_path.exists()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_repairs_existing_unconfigured_default(
+    tmp_path: Path,
+) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+    from nanobot.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_unwinds_persisted_bootstrap(
+    tmp_path: Path,
+) -> None:
+    from nanobot.cli.commands import _load_or_create_desktop_config
+    from nanobot.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.provider = "openai_codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    save_config(config, config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
 
 
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(

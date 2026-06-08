@@ -157,6 +157,28 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("preserves proactive automation source metadata on complete assistant messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-cron", {
+        event: "message",
+        chat_id: "chat-cron",
+        text: "Time to drink water.",
+        source: { kind: "cron", label: "drink water" },
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Time to drink water.",
+      source: { kind: "cron", label: "drink water" },
+    });
+  });
+
   it("drops pending stream work when switching chats", async () => {
     const fake = fakeClient();
     const { result, rerender } = renderHook(
@@ -1342,6 +1364,8 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe("user");
     expect(result.current.messages[0].content).toBe("fine");
+    expect(result.current.messages[0].turnId).toEqual(expect.any(String));
+    expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
   it("attaches assistant media_urls to complete messages", () => {
@@ -1482,7 +1506,10 @@ describe("useNanobotStream", () => {
       "chat-img",
       "draw a square icon",
       undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "1:1" } },
+      expect.objectContaining({
+        imageGeneration: { enabled: true, aspect_ratio: "1:1" },
+        turnId: expect.any(String),
+      }),
     );
   });
 

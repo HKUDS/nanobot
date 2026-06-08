@@ -39,8 +39,19 @@ class ChannelsConfig(Base):
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     extract_document_text: bool = True  # extract text from document attachments before sending to the model
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
-    transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
-    transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
+    transcription_provider: str = "groq"  # Deprecated: use top-level transcription.provider
+    transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Deprecated: use top-level transcription.language
+
+
+class TranscriptionConfig(Base):
+    """Cross-channel audio transcription configuration."""
+
+    enabled: bool = True
+    provider: Literal["groq", "openai"] | None = None
+    model: str | None = None
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
+    max_duration_sec: int = Field(default=120, ge=1, le=600)
+    max_upload_mb: int = Field(default=25, ge=1, le=100)
 
 
 class DreamConfig(Base):
@@ -167,11 +178,12 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
-    api_key: str | None = None
+    api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
     api_type: Literal["auto", "chat_completions", "responses"] = "auto"  # Request API surface
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
+    extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
 
 
 class BedrockProviderConfig(ProviderConfig):
@@ -338,6 +350,7 @@ class Config(BaseSettings):
     bus: BusConfig = Field(default_factory=BusConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

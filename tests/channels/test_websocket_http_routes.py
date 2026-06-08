@@ -12,6 +12,8 @@ import httpx
 import pytest
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
+from nanobot.cron.service import CronService
+from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
@@ -24,10 +26,12 @@ def _make_handler(
     *,
     session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
+    workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
+    cron_service: CronService | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
-    workspace = Path.cwd()
+    workspace = workspace_path or Path.cwd()
     return build_gateway_services(
         config=config,
         bus=bus,
@@ -38,6 +42,7 @@ def _make_handler(
         runtime_model_name=runtime_model_name,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
+        cron_service=cron_service,
     )
 
 
@@ -46,8 +51,10 @@ def _ch(
     *,
     session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
+    workspace_path: Path | None = None,
     port: int = _PORT,
     runtime_model_name: Any | None = None,
+    cron_service: CronService | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -63,7 +70,9 @@ def _ch(
         cfg, bus,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
+        workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
+        cron_service=cron_service,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -156,6 +165,156 @@ async def test_sessions_routes_require_bearer_token(
         body = msgs.json()
         assert body["key"] == "websocket:abc"
         assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_automations_route_filters_by_webui_session(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    hourly = CronSchedule(kind="every", every_ms=3_600_000)
+    for name, message, to in (
+        ("Morning check", "Check the project status", "abc"),
+        ("Other session", "Do not show", "other"),
+    ):
+        cron.add_job(
+            name=name,
+            schedule=hourly,
+            message=message,
+            channel="websocket",
+            to=to,
+            session_key=f"websocket:{to}",
+        )
+    cron.register_system_job(
+        CronJob(
+            id="heartbeat",
+            name="heartbeat",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        cron_service=cron,
+        port=29914,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket:abc/automations"
+        )
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29914/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        resp = await _http_get(
+            "http://127.0.0.1:29914/api/sessions/websocket%3Aabc/automations",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [job["name"] for job in body["jobs"]] == ["Morning check"]
+        job = body["jobs"][0]
+        assert job["schedule"]["kind"] == "every"
+        assert job["schedule"]["every_ms"] == 3_600_000
+        assert job["payload"]["message"] == "Check the project status"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_skills_route_requires_token_and_hides_paths(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    workspace_skill = tmp_path / "skills" / "workspace-skill"
+    workspace_skill.mkdir(parents=True)
+    (workspace_skill / "SKILL.md").write_text(
+        "---\nname: workspace-skill\ndescription: Workspace skill.\n---\n",
+        encoding="utf-8",
+    )
+    unavailable_skill = tmp_path / "skills" / "zz-unavailable-skill"
+    unavailable_skill.mkdir(parents=True)
+    (unavailable_skill / "SKILL.md").write_text(
+        "\n".join([
+            "---",
+            "name: zz-unavailable-skill",
+            "description: Missing CLI skill.",
+            "metadata:",
+            "  nanobot:",
+            "    requires:",
+            "      bins:",
+            "        - definitely-missing-nanobot-skill-cli",
+            "      env:",
+            "        - DEFINITELY_MISSING_NANOBOT_SKILL_ENV",
+            "---",
+            "Use the missing CLI and env var.",
+        ]),
+        encoding="utf-8",
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        workspace_path=tmp_path,
+        port=29920,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29920/api/webui/skills")
+        assert deny.status_code == 401
+        deny_detail = await _http_get("http://127.0.0.1:29920/api/webui/skills/workspace-skill")
+        assert deny_detail.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29920/webui/bootstrap")
+        token = boot.json()["token"]
+        resp = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        names = [skill["name"] for skill in body["skills"]]
+        assert names[0] == "workspace-skill"
+        assert "cron" in names
+        assert all("path" not in skill for skill in body["skills"])
+        workspace = body["skills"][0]
+        assert workspace == {
+            "name": "workspace-skill",
+            "description": "Workspace skill.",
+            "source": "workspace",
+            "available": True,
+            "unavailable_reason": "",
+        }
+        unavailable = next(skill for skill in body["skills"] if skill["name"] == "zz-unavailable-skill")
+        assert unavailable["available"] is False
+        assert unavailable["unavailable_reason"] == (
+            "CLI: definitely-missing-nanobot-skill-cli, "
+            "ENV: DEFINITELY_MISSING_NANOBOT_SKILL_ENV"
+        )
+
+        detail = await _http_get(
+            "http://127.0.0.1:29920/api/webui/skills/zz-unavailable-skill",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.status_code == 200
+        detail_body = detail.json()
+        assert "path" not in detail_body
+        assert detail_body["requirements"] == {
+            "bins": ["definitely-missing-nanobot-skill-cli"],
+            "env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+            "missing_bins": ["definitely-missing-nanobot-skill-cli"],
+            "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+        }
+        assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:
         await channel.stop()
         await server_task

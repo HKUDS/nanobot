@@ -1,6 +1,12 @@
-"""Voice transcription providers (Groq and OpenAI Whisper)."""
+"""Provider-specific voice transcription adapters.
+
+This module only knows how to call external transcription APIs such as Groq
+and OpenAI Whisper. Product-level config fallback, WebUI upload validation,
+and channel integration live in ``nanobot.audio.transcription``.
+"""
 
 import asyncio
+import mimetypes
 import os
 from pathlib import Path
 
@@ -8,6 +14,15 @@ import httpx
 from loguru import logger
 
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
+_AUDIO_MIME_OVERRIDES = {
+    ".m4a": "audio/mp4",
+    ".mpga": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".weba": "audio/webm",
+    ".webm": "audio/webm",
+}
 
 
 def _resolve_transcription_url(api_base: str | None, default_url: str) -> str:
@@ -24,6 +39,14 @@ def _resolve_transcription_url(api_base: str | None, default_url: str) -> str:
     if base.endswith(_TRANSCRIPTIONS_PATH):
         return base
     return f"{base}/{_TRANSCRIPTIONS_PATH}"
+
+
+def _audio_mime_type(path: Path) -> str:
+    return (
+        _AUDIO_MIME_OVERRIDES.get(path.suffix.lower())
+        or mimetypes.guess_type(path.name)[0]
+        or "application/octet-stream"
+    )
 
 
 # Up to 3 retries (4 attempts total) with exponential backoff on transient
@@ -71,7 +94,7 @@ async def _post_transcription_with_retry(
     async with httpx.AsyncClient() as client:
         for attempt in range(_MAX_RETRIES + 1):
             files = {
-                "file": (path.name, data),
+                "file": (path.name, data, _audio_mime_type(path)),
                 "model": (None, model),
             }
             if language:
@@ -113,6 +136,16 @@ async def _post_transcription_with_retry(
 
             try:
                 response.raise_for_status()
+            except httpx.HTTPStatusError:
+                body = response.text.strip().replace("\n", " ")[:500]
+                logger.error(
+                    "{} transcription HTTP {}{}{}",
+                    provider_label,
+                    response.status_code,
+                    f" {response.reason_phrase}" if response.reason_phrase else "",
+                    f": {body}" if body else "",
+                )
+                return ""
             except Exception as e:
                 logger.exception("{} transcription error: {}", provider_label, e)
                 return ""
@@ -144,6 +177,7 @@ class OpenAITranscriptionProvider:
         api_key: str | None = None,
         api_base: str | None = None,
         language: str | None = None,
+        model: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.api_url = _resolve_transcription_url(
@@ -151,6 +185,7 @@ class OpenAITranscriptionProvider:
             "https://api.openai.com/v1/audio/transcriptions",
         )
         self.language = language or None
+        self.model = model or "whisper-1"
         logger.debug("OpenAI transcription endpoint: {}", self.api_url)
 
     async def transcribe(self, file_path: str | Path) -> str:
@@ -165,7 +200,7 @@ class OpenAITranscriptionProvider:
             self.api_url,
             api_key=self.api_key,
             path=path,
-            model="whisper-1",
+            model=self.model,
             provider_label="OpenAI",
             language=self.language,
         )
@@ -183,6 +218,7 @@ class GroqTranscriptionProvider:
         api_key: str | None = None,
         api_base: str | None = None,
         language: str | None = None,
+        model: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.api_url = _resolve_transcription_url(
@@ -190,6 +226,7 @@ class GroqTranscriptionProvider:
             "https://api.groq.com/openai/v1/audio/transcriptions",
         )
         self.language = language or None
+        self.model = model or "whisper-large-v3"
         logger.debug("Groq transcription endpoint: {}", self.api_url)
 
     async def transcribe(self, file_path: str | Path) -> str:
@@ -215,7 +252,7 @@ class GroqTranscriptionProvider:
             self.api_url,
             api_key=self.api_key,
             path=path,
-            model="whisper-large-v3",
+            model=self.model,
             provider_label="Groq",
             language=self.language,
         )

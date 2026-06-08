@@ -101,6 +101,22 @@ describe("MessageBubble", () => {
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
   });
 
+  it("renders a lightweight automation source label for cron replies", () => {
+    const message: UIMessage = {
+      id: "a-cron",
+      role: "assistant",
+      content: "Time to drink water.",
+      source: { kind: "cron", label: "drink water" },
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("drink water")).toBeInTheDocument();
+    expect(screen.getByText("Triggered automatically")).toBeInTheDocument();
+    expect(screen.getByText("Time to drink water.")).toBeInTheDocument();
+  });
+
   it("renders structured CLI app attachments even without the installed catalog", () => {
     const message: UIMessage = {
       id: "u-cli-attached",

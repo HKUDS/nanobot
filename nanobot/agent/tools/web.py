@@ -826,12 +826,12 @@ class WebFetchTool(Tool):
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                from readability import Document
-
-                doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extract_mode == "markdown" else _strip_tags(doc.summary())
-                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                extractor = "readability"
+                try:
+                    text = self._extract_readable_html(r.text, extract_mode)
+                    extractor = "readability"
+                except Exception as e:
+                    logger.warning("Readability failed for {}, using raw HTML fallback: {}", url, e)
+                    text, extractor = _normalize(_strip_tags(r.text)), "html"
             else:
                 text, extractor = r.text, "raw"
 
@@ -851,6 +851,14 @@ class WebFetchTool(Tool):
         except Exception as e:
             logger.exception("WebFetch error for {}", url)
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
+
+    def _extract_readable_html(self, html_content: str, extract_mode: str) -> str:
+        from readability import Document
+
+        doc = Document(html_content)
+        summary = doc.summary()
+        content = self._to_markdown(summary) if extract_mode == "markdown" else _strip_tags(summary)
+        return f"# {doc.title()}\n\n{content}" if doc.title() else content
 
     def _to_markdown(self, html_content: str) -> str:
         """Convert HTML to markdown."""

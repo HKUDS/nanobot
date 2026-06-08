@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig

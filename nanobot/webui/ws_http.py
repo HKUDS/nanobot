@@ -22,6 +22,7 @@ from websockets.http11 import Response
 
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -60,16 +61,19 @@ from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.session_automations import session_automations_payload
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
 )
+from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
+    from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
 
 
@@ -95,7 +99,7 @@ def _default_model_name_from_config() -> str | None:
 
 def _resolve_bootstrap_model_name(
     runtime_name: Callable[[], str | None] | None,
-) -> str | None:
+) -> str:
     if runtime_name is not None:
         try:
             raw = runtime_name()
@@ -106,7 +110,7 @@ def _resolve_bootstrap_model_name(
                 stripped = raw.strip()
                 if stripped:
                     return stripped
-    return _default_model_name_from_config()
+    return _default_model_name_from_config() or ""
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +138,9 @@ class GatewayHTTPHandler:
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
         workspaces: WebUIWorkspaceController,
+        skills_workspace_path: Path,
+        disabled_skills: set[str] | None = None,
+        cron_service: CronService | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -144,6 +151,9 @@ class GatewayHTTPHandler:
         self.tokens = tokens
         self.media = media
         self.workspaces = workspaces
+        self.skills_workspace_path = skills_workspace_path
+        self.disabled_skills = disabled_skills or set()
+        self.cron_service = cron_service
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -161,6 +171,9 @@ class GatewayHTTPHandler:
             runtime_surface=runtime_surface,
             runtime_capabilities=self._capabilities,
         )
+
+    def workspace_controls_available(self, connection: Any) -> bool:
+        return self._runtime_surface == "native" or _is_localhost(connection)
 
     # -- Token management ---------------------------------------------------
 
@@ -291,6 +304,14 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
+        if m:
+            return self._handle_file_preview(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/automations$", got)
+        if m:
+            return self._handle_session_automations(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
             return self._handle_session_delete(request, m.group(1))
@@ -369,6 +390,36 @@ class GatewayHTTPHandler:
         data["workspace_scope"] = scope.payload()
         return _http_json_response(data)
 
+    def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        path = _query_first(_parse_query(request.path), "path")
+        try:
+            payload = file_preview_payload(
+                path,
+                scope=self.workspaces.scope_for_session_key(decoded_key),
+            )
+        except WebUIFilePreviewError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(payload)
+
+    def _handle_session_automations(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        return _http_json_response(
+            session_automations_payload(self.cron_service, decoded_key)
+        )
+
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -411,6 +462,11 @@ class GatewayHTTPHandler:
             return self._handle_commands(request)
         if got == "/api/workspaces":
             return self._handle_workspaces(connection, request)
+        if got == "/api/webui/skills":
+            return self._handle_webui_skills(request)
+        m = re.match(r"^/api/webui/skills/([^/]+)$", got)
+        if m:
+            return self._handle_webui_skill_detail(request, m.group(1))
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
@@ -426,8 +482,37 @@ class GatewayHTTPHandler:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response(
-            self.workspaces.payload(controls_available=_is_localhost(connection))
+            self.workspaces.payload(
+                controls_available=self.workspace_controls_available(connection)
+            )
         )
+
+    def _handle_webui_skills(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(
+            webui_skills_payload(
+                self.skills_workspace_path,
+                disabled_skills=self.disabled_skills,
+            )
+        )
+
+    def _handle_webui_skill_detail(self, request: WsRequest, raw_name: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from urllib.parse import unquote
+
+        name = unquote(raw_name)
+        if not name or "/" in name or "\\" in name:
+            return _http_error(400, "invalid skill name")
+        payload = webui_skill_detail_payload(
+            self.skills_workspace_path,
+            name,
+            disabled_skills=self.disabled_skills,
+        )
+        if payload is None:
+            return _http_error(404, "skill not found")
+        return _http_json_response(payload)
 
     def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

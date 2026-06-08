@@ -1,16 +1,29 @@
-import { Children, isValidElement, useMemo, type ReactNode } from "react";
+import {
+  Children,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
-import { Check } from "lucide-react";
+import { Check, Globe2 } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
-import { FileReferenceChip, isLikelyFilePath } from "@/components/FileReferenceChip";
+import {
+  FileReferenceChip,
+  isFilePatternReference,
+  isLikelyFilePath,
+} from "@/components/FileReferenceChip";
 import { inferMediaKind } from "@/lib/media";
+import { faviconUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
@@ -19,6 +32,7 @@ interface MarkdownTextRendererProps {
   children: string;
   className?: string;
   highlightCode?: boolean;
+  onOpenFilePreview?: (path: string) => void;
 }
 
 type MarkdownAstNode = {
@@ -32,10 +46,9 @@ type MarkdownAstNode = {
 
 type InlineLinkPreview = {
   href: string;
-  origin: string;
+  host: string;
   prefix?: string;
   title: string;
-  initials: string;
 };
 
 const SAFE_INLINE_HTML_TAGS = new Set(["mark", "sub", "sup"]);
@@ -187,6 +200,45 @@ function nodeText(value: ReactNode): string {
     .join("");
 }
 
+function cleanFileReferenceTarget(value: string): string {
+  let target = value.trim();
+  if (!target) return "";
+  try {
+    if (/^file:\/\//i.test(target)) {
+      target = decodeURIComponent(new URL(target).pathname);
+    } else {
+      target = decodeURIComponent(target);
+    }
+  } catch {
+    // Keep the raw value when URL/path decoding is not possible.
+  }
+  target = target.split("?", 1)[0]?.split("#", 1)[0]?.trim() ?? "";
+  if (!/^[A-Za-z]:[\\/]/.test(target)) {
+    target = target.replace(/:\d+(?::\d+)?$/, "");
+  }
+  return target;
+}
+
+function isPreviewableFileTarget(value: string): boolean {
+  if (isFilePatternReference(value)) return false;
+  if (isLikelyFilePath(value)) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return false;
+  if (/[\\/]/.test(value)) return false;
+  return /^[^?#]+\.[a-z0-9][a-z0-9_-]{0,12}$/i.test(value);
+}
+
+function isNonNavigableFilePatternLink(href: string | undefined): boolean {
+  if (!href || /^https?:\/\//i.test(href) || href.startsWith("#")) return false;
+  const target = cleanFileReferenceTarget(href);
+  return Boolean(target && isFilePatternReference(target));
+}
+
+function fileReferenceFromLink(href: string | undefined): string | null {
+  if (!href || /^https?:\/\//i.test(href) || href.startsWith("#")) return null;
+  const target = cleanFileReferenceTarget(href);
+  return isPreviewableFileTarget(target) ? target : null;
+}
+
 function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
   let text = "";
   let href: string | undefined;
@@ -216,16 +268,6 @@ function cleanLinkPreviewText(value: string): string {
     .trim();
 }
 
-function linkPreviewInitials(value: string): string {
-  const clean = value
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\.[a-z]{2,}$/i, "");
-  const parts = clean.split(/[\s.-]+/).filter(Boolean);
-  return (parts.length > 1 ? parts.slice(0, 2).map((part) => part[0]).join("") : clean.slice(0, 2))
-    .toUpperCase();
-}
-
 function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview | null {
   const { text: rawText, href } = linkPreviewParts(children);
   if (!href) return null;
@@ -253,17 +295,18 @@ function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview |
 
   return {
     href,
-    origin: url.origin,
+    host: url.hostname,
     prefix,
     title,
-    initials: linkPreviewInitials(prefix || url.hostname),
   };
 }
 
 function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
+  const { favicon, onFaviconError } = useFaviconFallback(link.host);
   const label = link.prefix
     ? `${link.prefix} — ${link.title}`
     : link.title;
+
   return (
     <a
       href={link.href}
@@ -278,26 +321,45 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       <span
         className={cn(
           "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
-          "border border-border/65 bg-background text-[0.5rem] font-semibold text-muted-foreground",
+          "border border-border/65 bg-background text-muted-foreground",
         )}
         aria-hidden
       >
-        {link.initials}
-        <img
-          src={`${link.origin}/favicon.ico`}
-          alt=""
-          className="absolute h-3 w-3 rounded-[2px] object-contain"
-          loading="lazy"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
-        />
+        {favicon ? (
+          <img
+            src={favicon}
+            alt=""
+            className="h-3 w-3 rounded-[2px] object-contain"
+            loading="lazy"
+            onError={onFaviconError}
+          />
+        ) : (
+          <Globe2 className="h-3 w-3" />
+        )}
       </span>
       <span className="min-w-0 truncate leading-normal">
         {label}
       </span>
     </a>
   );
+}
+
+function useFaviconFallback(host: string) {
+  const faviconCandidates = useMemo(() => faviconUrls(host), [host]);
+  const [faviconIndex, setFaviconIndex] = useState(0);
+
+  useEffect(() => {
+    setFaviconIndex(0);
+  }, [host]);
+
+  const onFaviconError = useCallback(() => {
+    setFaviconIndex((index) => Math.min(index + 1, faviconCandidates.length));
+  }, [faviconCandidates.length]);
+
+  return {
+    favicon: faviconCandidates[faviconIndex] ?? null,
+    onFaviconError,
+  };
 }
 
 function isRenderedCodeBlock(value: ReactNode): boolean {
@@ -326,6 +388,7 @@ export default function MarkdownTextRenderer({
   children,
   className,
   highlightCode = true,
+  onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const components = useMemo<Components>(
     () => ({
@@ -344,7 +407,7 @@ export default function MarkdownTextRenderer({
         }
         const raw = String(kids).replace(/\n$/, "");
         if (isLikelyFilePath(raw)) {
-          return <FileReferenceChip path={raw} />;
+          return <FileReferenceChip path={raw} onOpen={onOpenFilePreview} />;
         }
         /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
@@ -405,6 +468,21 @@ export default function MarkdownTextRenderer({
         );
       },
       a({ href, children: markdownChildren, ...props }) {
+        const filePath = fileReferenceFromLink(href);
+        if (filePath) {
+          const label = nodeText(markdownChildren).trim();
+          return (
+            <FileReferenceChip
+              path={label || filePath}
+              tooltipPath={filePath}
+              previewPath={filePath}
+              onOpen={onOpenFilePreview}
+            />
+          );
+        }
+        if (isNonNavigableFilePatternLink(href)) {
+          return <>{markdownChildren}</>;
+        }
         return (
           <a
             href={href}
@@ -495,7 +573,7 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode],
+    [highlightCode, onOpenFilePreview],
   );
 
   return (

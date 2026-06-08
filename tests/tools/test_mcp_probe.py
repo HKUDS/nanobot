@@ -16,9 +16,11 @@ from nanobot.agent.tools.registry import ToolRegistry
 @pytest.mark.asyncio
 async def test_probe_returns_true_for_open_port(tmp_path):
     """Start a trivial TCP server, probe should return True."""
-    server = await asyncio.start_server(
-        lambda r, w: None, "127.0.0.1", 0,
-    )
+    async def _close_connection(_reader, writer):
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(_close_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     try:
         assert await _probe_http_url(f"http://127.0.0.1:{port}/mcp") is True
@@ -59,9 +61,13 @@ def _make_http_cfg(url: str, transport: str = "streamableHttp"):
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_streamable_http():
     """Unreachable streamableHttp server should be skipped with a warning, no crash."""
+    async def _unreachable(_url: str) -> bool:
+        return False
+
     registry = ToolRegistry()
-    servers = {"dead": _make_http_cfg("http://127.0.0.1:19999/mcp")}
-    stacks = await connect_mcp_servers(servers, registry)
+    servers = {"dead": _make_http_cfg("http://93.184.216.34:19999/mcp")}
+    with patch("nanobot.agent.tools.mcp._probe_http_url", _unreachable):
+        stacks = await connect_mcp_servers(servers, registry)
     assert stacks == {}
     assert len(registry._tools) == 0
 
@@ -69,9 +75,13 @@ async def test_connect_skips_unreachable_streamable_http():
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_sse():
     """Unreachable SSE server should be skipped with a warning, no crash."""
+    async def _unreachable(_url: str) -> bool:
+        return False
+
     registry = ToolRegistry()
-    servers = {"dead": _make_http_cfg("http://127.0.0.1:19999/sse", transport="sse")}
-    stacks = await connect_mcp_servers(servers, registry)
+    servers = {"dead": _make_http_cfg("http://93.184.216.34:19999/sse", transport="sse")}
+    with patch("nanobot.agent.tools.mcp._probe_http_url", _unreachable):
+        stacks = await connect_mcp_servers(servers, registry)
     assert stacks == {}
     assert len(registry._tools) == 0
 

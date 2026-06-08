@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from nanobot.audio.transcription import resolve_transcription_config
+from nanobot.config.schema import Config
 from nanobot.providers.transcription import (
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
@@ -31,6 +33,65 @@ def _raw_response(status: int, content: bytes) -> httpx.Response:
     """Build a Response with a raw, possibly-malformed body (bypasses json= encoding)."""
     request = httpx.Request("POST", "https://example.test/audio/transcriptions")
     return httpx.Response(status_code=status, content=content, request=request)
+
+
+def test_resolver_uses_legacy_channel_provider_when_top_level_is_unset() -> None:
+    config = Config()
+    config.channels.transcription_provider = "openai"
+    config.channels.transcription_language = "en"
+    config.providers.openai.api_key = "sk-test"
+    config.providers.openai.api_base = "https://proxy.example/v1"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "openai"
+    assert resolved.model == "whisper-1"
+    assert resolved.language == "en"
+    assert resolved.api_key == "sk-test"
+    assert resolved.api_base == "https://proxy.example/v1"
+    assert resolved.configured is True
+
+
+def test_resolver_prefers_top_level_transcription_over_legacy_channels() -> None:
+    config = Config()
+    config.channels.transcription_provider = "openai"
+    config.channels.transcription_language = "en"
+    config.transcription.provider = "groq"
+    config.transcription.model = "whisper-large-v3-turbo"
+    config.transcription.language = "ko"
+    config.providers.groq.api_key = "gsk-test"
+    config.providers.groq.api_base = "https://groq.example/openai/v1"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "groq"
+    assert resolved.model == "whisper-large-v3-turbo"
+    assert resolved.language == "ko"
+    assert resolved.api_key == "gsk-test"
+    assert resolved.api_base == "https://groq.example/openai/v1"
+
+
+def test_resolved_transcription_repr_hides_api_key() -> None:
+    config = Config()
+    config.providers.groq.api_key = "gsk-secret"
+
+    resolved = resolve_transcription_config(config)
+
+    assert "gsk-secret" not in repr(resolved)
+    assert "api_key" not in repr(resolved)
+
+
+def test_resolver_keeps_enabled_and_limits_on_effective_config() -> None:
+    config = Config()
+    config.transcription.enabled = False
+    config.transcription.max_duration_sec = 45
+    config.transcription.max_upload_mb = 12
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.enabled is False
+    assert resolved.max_duration_sec == 45
+    assert resolved.max_upload_mb == 12
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +274,32 @@ async def test_provider_omits_language_when_unset(
     assert post.await_count == 1
     files = post.await_args_list[0].kwargs["files"]
     assert "language" not in files
+
+
+@pytest.mark.asyncio
+async def test_provider_forwards_custom_model_in_multipart(audio_file: Path) -> None:
+    provider = GroqTranscriptionProvider(api_key="k", model="whisper-large-v3-turbo")
+    post = AsyncMock(return_value=_response(200, {"text": "ok"}))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        result = await provider.transcribe(audio_file)
+
+    assert result == "ok"
+    files = post.await_args_list[0].kwargs["files"]
+    assert files["model"] == (None, "whisper-large-v3-turbo")
+
+
+@pytest.mark.asyncio
+async def test_provider_forwards_file_mime_type(tmp_path: Path) -> None:
+    audio = tmp_path / "voice.webm"
+    audio.write_bytes(b"audio")
+    provider = GroqTranscriptionProvider(api_key="k")
+    post = AsyncMock(return_value=_response(200, {"text": "ok"}))
+    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
+        result = await provider.transcribe(audio)
+
+    assert result == "ok"
+    files = post.await_args_list[0].kwargs["files"]
+    assert files["file"] == ("voice.webm", b"audio", "audio/webm")
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,7 @@ def _make_channel() -> WebSocketChannel:
     [
         ("data:image/png;base64,AAAA", "image/png"),
         ("data:image/jpeg;base64,AAAA", "image/jpeg"),
+        ("data:audio/webm;codecs=opus;base64,AAAA", "audio/webm"),
         ("data:IMAGE/PNG;base64,AAAA", "image/png"),
         ("data:image/svg+xml;base64,AAAA", "image/svg+xml"),
         ("data:text/plain;base64,AAAA", "text/plain"),

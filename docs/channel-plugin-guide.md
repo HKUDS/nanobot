@@ -234,7 +234,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | **Call this when you receive a message.** Checks `is_allowed()`, then publishes to the bus. Automatically sets `_wants_stream` if `supports_streaming` is true. |
 | `is_allowed(sender_id)` | Checks against `config.allow_from`; `"*"` allows all, `[]` denies all. |
 | `default_config()` (classmethod) | Returns default config dict for `nanobot onboard`. Override to declare your fields. |
-| `transcribe_audio(file_path)` | Transcribes audio via Groq Whisper (if configured). |
+| `transcribe_audio(file_path)` | Transcribes audio via the shared top-level `transcription` config (if configured). |
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
 | `is_running` | Returns `self._running`. |
 | `login(force=False)` | Perform interactive login (e.g. QR code scan). Returns `True` if already authenticated or login succeeds. Override in subclasses that support interactive login. |

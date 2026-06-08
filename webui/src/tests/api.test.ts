@@ -3,10 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createModelConfiguration,
   deleteSession,
+  fetchFilePreview,
   fetchCliApps,
   fetchMcpPresets,
   fetchProviderModels,
+  fetchSessionAutomations,
+  fetchSettingsUsage,
   fetchSidebarState,
+  fetchSkillDetail,
+  fetchSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
@@ -55,6 +60,51 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("percent-encodes websocket keys and paths when fetching file previews", async () => {
+    await fetchFilePreview("tok", "websocket:chat-1", "/tmp/project/hook.py:12");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/file-preview?path=%2Ftmp%2Fproject%2Fhook.py%3A12",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys when fetching session automations", async () => {
+    await fetchSessionAutomations("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches the WebUI skill summary", async () => {
+    await fetchSkills("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("percent-encodes skill names when fetching skill details", async () => {
+    await fetchSkillDetail("tok", "current web");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/current%20web",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("percent-encodes websocket keys when deleting a session", async () => {
     await deleteSession("tok", "websocket:chat-1");
 
@@ -80,6 +130,17 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches token usage through the lightweight settings endpoint", async () => {
+    await fetchSettingsUsage("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/usage",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

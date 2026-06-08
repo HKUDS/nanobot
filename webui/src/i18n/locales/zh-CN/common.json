@@ -54,7 +54,10 @@
       "label": "语言",
       "ariaLabel": "切换语言"
     },
-    "apps": "应用"
+    "apps": "应用",
+    "skills": {
+      "title": "技能"
+    }
   },
   "settings": {
     "backToChat": "返回聊天",
@@ -70,12 +73,14 @@
       "models": "模型",
       "providers": "提供商",
       "image": "图片",
+      "voice": "语音",
       "browser": "网页",
       "cliApps": "CLI 应用",
       "mcp": "MCP",
       "runtime": "系统",
       "advanced": "安全",
-      "apps": "应用"
+      "apps": "应用",
+      "skills": "技能"
     },
     "sections": {
       "interface": "界面",
@@ -95,7 +100,8 @@
       "capabilities": "能力",
       "apps": "应用",
       "nativeHost": "原生宿主",
-      "hostSafety": "应用安全"
+      "hostSafety": "应用安全",
+      "voiceInput": "语音识别"
     },
     "models": {
       "selectModel": "选择模型",
@@ -157,7 +163,13 @@
       "engine": "引擎",
       "logs": "日志",
       "diagnostics": "诊断",
-      "contextWindow": "上下文窗口"
+      "contextWindow": "上下文窗口",
+      "transcription": "语音转写",
+      "transcriptionProvider": "提供商",
+      "transcriptionProviderStatus": "提供商状态",
+      "transcriptionModel": "模型",
+      "transcriptionLanguage": "语言",
+      "voiceLimits": "限制"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
@@ -196,7 +208,12 @@
       "diagnostics": "导出一份用于支持排查的小型运行报告。",
       "localServiceAccessNative": "允许完全访问权限下的 shell 命令访问这台 Mac 上的服务。",
       "webuiDefaultAccessNative": "用于没有单独项目权限的原生聊天。",
-      "contextWindow": "选择此模型配置的默认上下文预算。"
+      "contextWindow": "选择此模型配置的默认上下文预算。",
+      "transcription": "发送前先把麦克风输入转写到输入框。聊天渠道里的语音消息也使用同一套设置。",
+      "transcriptionProvider": "使用「提供商」中对应提供商的凭据。",
+      "transcriptionProviderStatus": "API Key 仍保存在 providers 里，不写进 transcription 设置。",
+      "transcriptionModel": "除非提供商需要自定义模型 ID，否则保持解析后的默认值即可。",
+      "transcriptionLanguage": "可选 ISO-639 语言提示，例如 en、zh、ja 或 ko。"
     },
     "timezone": {
       "select": "选择时区",
@@ -295,6 +312,9 @@
       "disabled": "已禁用",
       "restartPending": "等待重启",
       "ready": "就绪",
+      "privateEngine": "私有引擎",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "默认工作区",
       "comfortable": "舒适",
       "compact": "紧凑",
       "auto": "自动",
@@ -384,7 +404,33 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
+      "voiceInput": "语音识别",
       "workspace": "工作区"
+    },
+    "usage": {
+      "title": "Token 活动",
+      "shortTitle": "Token Usage",
+      "subtitle": "最近 12 个月由提供商上报的 token 用量。",
+      "empty": "新的模型回复产生后，这里会显示 token 活动。",
+      "totalTokens": "累计 Token 数",
+      "peakTokens": "峰值 Token 数",
+      "thirtyDayTokens": "30 天 Token 数",
+      "currentStreak": "当前连续天数",
+      "longestStreak": "最长连续天数",
+      "daysValue": "{{count}} 天",
+      "last30": "30 天",
+      "activeDays": "活跃天数",
+      "requests": "请求数",
+      "estimated": "估算",
+      "includesEstimates": "包含估算",
+      "cellTitle": "{{date}}：{{tokens}} tokens，{{requests}} 次请求",
+      "sources": {
+        "user": "对话",
+        "api": "API",
+        "cron": "自动任务",
+        "dream": "记忆整理",
+        "system": "系统"
+      }
     },
     "providers": {
       "searchPlaceholder": "搜索提供商",
@@ -427,6 +473,38 @@
       "signInBeforeSaving": "将此 OAuth 提供商设为当前模型提供商前，请先登录。",
       "signedIn": "已登录",
       "notSignedIn": "未登录"
+    },
+    "skills": {
+      "description": "查看此 agent 在对话中可以加载的指令技能。",
+      "caption": "{{available}} 个可用 · 共 {{total}} 个",
+      "featured": "Agent 技能",
+      "empty": "暂无可用技能。",
+      "sourceWorkspace": "自定义",
+      "sourceBuiltin": "内置",
+      "statusAvailable": "可用",
+      "statusUnavailable": "不可用",
+      "unavailableReason": "缺少：{{reason}}",
+      "openDetails": "查看 {{name}} 详情",
+      "loadingDetail": "正在加载技能详情...",
+      "loadFailed": "无法加载技能详情。",
+      "descriptionTitle": "完整描述",
+      "source": "来源",
+      "status": "状态",
+      "requirements": "需求",
+      "noRequirements": "没有显式需求。",
+      "commands": "命令",
+      "environment": "环境变量",
+      "missingCommands": "缺 CLI",
+      "missingEnvironment": "缺 ENV",
+      "unavailableReasonLabel": "不可用原因",
+      "rawInstructions": "原始 SKILL.md",
+      "rawInstructionsEmpty": "没有原始说明。",
+      "detailDescription": "{{name}} 的详情。"
+    },
+    "voice": {
+      "selectProvider": "选择提供商",
+      "configureProvider": "配置提供商",
+      "languageAuto": "自动"
     }
   },
   "chat": {
@@ -548,7 +626,30 @@
       "toggleSidebar": "切换侧边栏",
       "newChat": "从顶部新建对话",
       "toggleTheme": "从顶部切换主题",
-      "settings": "打开设置"
+      "settings": "打开设置",
+      "sessionInfo": "会话详情"
+    },
+    "sessionInfo": {
+      "title": "会话",
+      "untitled": "未命名对话",
+      "automations": "自动任务",
+      "count": "{{count}}",
+      "loading": "正在加载自动任务...",
+      "loadFailed": "无法加载自动任务。",
+      "empty": "这个会话暂时没有自动任务。",
+      "disabled": "已关闭",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "自定义计划"
+      },
+      "next": {
+        "label": "下次 {{time}}",
+        "disabled": "已暂停",
+        "none": "没有下次运行"
+      }
     },
     "composer": {
       "placeholderThread": "输入消息…",
@@ -564,6 +665,8 @@
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
+      "modelNotConfigured": "模型未配置",
+      "configureModel": "配置模型",
       "queued": {
         "label": "待引导提示",
         "guide": "引导",
@@ -592,6 +695,21 @@
         "reason": "推理",
         "deepResearch": "深度研究",
         "voice": "语音输入"
+      },
+      "voice": {
+        "hint": "点击进行听写或长按",
+        "stop": "停止录音",
+        "transcribing": "正在转写...",
+        "recordingStatus": "正在录音 {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "当前浏览器不支持语音输入。",
+        "permission": "需要麦克风权限。",
+        "notConfigured": "请先配置转写提供商。",
+        "tooLong": "录音时间太长。",
+        "tooShort": "请稍微多录一会儿。",
+        "noInput": "没有检测到麦克风输入。",
+        "failed": "语音转写失败。"
       },
       "slash": {
         "ariaLabel": "斜杠命令",
@@ -691,7 +809,14 @@
       }
     },
     "scrollToBottom": "滚动到底部",
-    "loadEarlier": "加载更早消息"
+    "loadEarlier": "加载更早消息",
+    "promptNavigator": {
+      "open": "打开输入导航",
+      "title": "输入列表",
+      "search": "搜索输入",
+      "noResults": "没有匹配的输入。",
+      "jumpTo": "跳转到输入：{{label}}"
+    }
   },
   "message": {
     "streaming": "流式输出中",
@@ -722,6 +847,8 @@
     "cliRunRan": "已使用",
     "cliRunFailed": "失败",
     "imageAttachment": "图片附件",
+    "automationSourceFallback": "自动化",
+    "automationTriggered": "自动触发",
     "copyReply": "复制回复",
     "copiedReply": "已复制回复",
     "turnLatencyTitle": "本轮耗时（端到端）"
@@ -732,6 +859,15 @@
     "prev": "上一张",
     "next": "下一张",
     "close": "关闭预览"
+  },
+  "filePreview": {
+    "aria": "文件预览",
+    "close": "关闭文件预览",
+    "loading": "正在加载预览...",
+    "failed": "无法预览这个文件。",
+    "routeMissing": "文件预览需要最新的 gateway。请重启 nanobot gateway 后再试。",
+    "resize": "调整文件预览宽度",
+    "truncated": "文件较大，当前只显示前半部分预览。"
   },
   "code": {
     "fallbackLanguage": "代码",
