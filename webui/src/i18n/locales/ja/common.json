@@ -697,6 +697,7 @@
         "voice": "音声入力"
       },
       "voice": {
+        "hint": "クリックして音声入力、または長押しで録音",
         "stop": "録音を停止",
         "transcribing": "文字起こし中...",
         "recordingStatus": "録音中 {{time}}"

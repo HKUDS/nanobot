@@ -697,6 +697,7 @@
         "voice": "Input suara"
       },
       "voice": {
+        "hint": "Klik untuk mendikte atau tekan lama untuk merekam",
         "stop": "Hentikan rekaman",
         "transcribing": "Mentranskripsi...",
         "recordingStatus": "Merekam {{time}}"

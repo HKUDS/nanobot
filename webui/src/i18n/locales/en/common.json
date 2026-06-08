@@ -697,6 +697,7 @@
         "voice": "Voice input"
       },
       "voice": {
+        "hint": "Click to dictate or press and hold",
         "stop": "Stop recording",
         "transcribing": "Transcribing...",
         "recordingStatus": "Recording {{time}}"

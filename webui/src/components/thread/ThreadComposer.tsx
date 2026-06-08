@@ -48,6 +48,12 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   WorkspaceAccessMenu,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
@@ -1415,6 +1421,18 @@ export function ThreadComposer({
     time: voiceRecorder.elapsedLabel,
     defaultValue: `Recording ${voiceRecorder.elapsedLabel}`,
   });
+  const voiceButtonLabel =
+    voiceRecorder.state === "recording"
+      ? t("thread.composer.voice.stop")
+      : voiceRecorder.state === "transcribing"
+        ? t("thread.composer.voice.transcribing")
+        : t("thread.composer.tools.voice");
+  const voiceButtonTooltip =
+    voiceRecorder.state === "recording"
+      ? t("thread.composer.voice.stop")
+      : voiceRecorder.state === "transcribing"
+        ? t("thread.composer.voice.transcribing")
+        : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const inputTextClasses = cn(
@@ -1625,44 +1643,45 @@ export function ThreadComposer({
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {showVoiceButton ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                disabled={voiceRecorder.buttonDisabled}
-                aria-label={
-                  voiceRecorder.state === "recording"
-                    ? t("thread.composer.voice.stop")
-                    : voiceRecorder.state === "transcribing"
-                      ? t("thread.composer.voice.transcribing")
-                      : t("thread.composer.tools.voice")
-                }
-                title={
-                  voiceRecorder.state === "recording"
-                    ? t("thread.composer.voice.stop")
-                    : voiceRecorder.state === "transcribing"
-                      ? t("thread.composer.voice.transcribing")
-                      : t("thread.composer.tools.voice")
-                }
-                onPointerDown={voiceRecorder.beginPress}
-                onPointerUp={voiceRecorder.endPress}
-                onPointerCancel={voiceRecorder.endPress}
-                onClick={voiceRecorder.handleClick}
-                className={cn(
-                  "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
-                  isHero ? "h-8 w-8" : "h-9 w-9",
-                  voiceRecorder.isRecording &&
-                    "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
-                )}
-              >
-                {voiceRecorder.state === "transcribing" ? (
-                  <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-                ) : voiceRecorder.isRecording ? (
-                  <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
-                ) : (
-                  <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
-                )}
-              </Button>
+              <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={voiceRecorder.buttonDisabled}
+                      aria-label={voiceButtonLabel}
+                      title={voiceButtonTooltip}
+                      onPointerDown={voiceRecorder.beginPress}
+                      onPointerUp={voiceRecorder.endPress}
+                      onPointerCancel={voiceRecorder.endPress}
+                      onClick={voiceRecorder.handleClick}
+                      className={cn(
+                        "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        isHero ? "h-8 w-8" : "h-9 w-9",
+                        voiceRecorder.isRecording &&
+                          "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
+                      )}
+                    >
+                      {voiceRecorder.state === "transcribing" ? (
+                        <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
+                      ) : voiceRecorder.isRecording ? (
+                        <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
+                      ) : (
+                        <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    align="center"
+                    className="rounded-full border-0 bg-neutral-900 px-3 py-1.5 text-[12px] text-white shadow-lg dark:bg-neutral-100 dark:text-neutral-900"
+                  >
+                    {voiceButtonTooltip}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : null}
             {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
