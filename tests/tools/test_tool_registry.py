@@ -5,20 +5,6 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
-_SUGGESTION_TOOL_NAMES = [
-    "read_file",
-    "write_file",
-    "edit_file",
-    "apply_patch",
-    "web_search",
-    "web_fetch",
-    "execute_command",
-    "list_exec_sessions",
-    "write_stdin",
-    "mcp_fs_read_file",
-    "mcp_git_status",
-]
-
 
 class _FakeTool(Tool):
     def __init__(self, name: str, schema: dict[str, Any] | None = None):
@@ -85,62 +71,39 @@ def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
     assert "must match exactly" in error
 
 
-def test_suggest_name_handles_common_model_tool_name_typos() -> None:
-    registry = _registry_with_names(_SUGGESTION_TOOL_NAMES)
+def test_suggest_name_handles_canonical_tool_name_variants() -> None:
+    registry = _registry_with_names(["read_file"])
     expected = {
         "readFile": "read_file",
         "read-file": "read_file",
         "READ_FILE": "read_file",
         "read file": "read_file",
-        "readfil": "read_file",
-        "read_file_tool": "read_file",
-        "writefilee": "write_file",
-        "editfile": "edit_file",
-        "applypatch": "apply_patch",
-        "apply_path": "apply_patch",
-        "webserach": "web_search",
-        "websearch": "web_search",
-        "webfeth": "web_fetch",
-        "execute_cmd": "execute_command",
-        "list_exec_session": "list_exec_sessions",
-        "write-stdin": "write_stdin",
-        "mcpfsreadfile": "mcp_fs_read_file",
-        "mcp_gitstatus": "mcp_git_status",
+        "readfile": "read_file",
     }
 
     assert {name: registry._suggest_name(name) for name in expected} == expected
 
 
-def test_suggest_name_suppresses_low_confidence_and_ambiguous_matches() -> None:
-    registry = _registry_with_names(_SUGGESTION_TOOL_NAMES)
+def test_suggest_name_suppresses_low_confidence_and_non_unique_matches() -> None:
+    registry = _registry_with_names(["read_file", "write_file"])
 
-    for name in [
-        "",
-        "foo",
-        "delete_everything",
-        "read",
-        "file",
-        "fetch",
-        "message_user",
-        "mcp_unknown_status",
-    ]:
+    for name in ["", "foo", "read", "file", "readfil", "read_file_tool"]:
         assert registry._suggest_name(name) is None
 
-    ambiguous = _registry_with_names(["read_file", "read_files"])
+    ambiguous = _registry_with_names(["read_file", "readFile"])
     assert ambiguous._suggest_name("readfile") is None
-    assert ambiguous._suggest_name("readfiles") is None
 
 
-def test_suggest_name_cache_updates_after_register_and_unregister() -> None:
+def test_suggest_name_updates_after_register_and_unregister() -> None:
     registry = _registry_with_names(["read_file"])
 
     assert registry._suggest_name("readFile") == "read_file"
 
-    registry.register(_FakeTool("read_files"))
-    assert registry._suggest_name("readfiles") is None
+    registry.register(_FakeTool("readFile"))
+    assert registry._suggest_name("read-file") is None
 
     registry.unregister("read_file")
-    assert registry._suggest_name("readfiles") == "read_files"
+    assert registry._suggest_name("read-file") == "readFile"
 
 
 def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
