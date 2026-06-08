@@ -164,6 +164,32 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
 
 
 @pytest.mark.asyncio
+async def test_group_policy_mention_accepts_reply_to_bot_message():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "mention"}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps(
+            {
+                "type": "message",
+                "id": "m-reply",
+                "sender": "12345@g.us",
+                "pn": "user@s.whatsapp.net",
+                "content": "replying to bot",
+                "timestamp": 1,
+                "isGroup": True,
+                "wasMentioned": False,
+                "isReplyToBot": True,
+            }
+        )
+    )
+
+    ch._handle_message.assert_awaited_once()
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["metadata"]["is_reply_to_bot"] is True
+
+
+@pytest.mark.asyncio
 async def test_sender_id_prefers_phone_jid_over_lid():
     """sender_id should resolve to phone number when @s.whatsapp.net JID is present."""
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
@@ -182,6 +208,30 @@ async def test_sender_id_prefers_phone_jid_over_lid():
 
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["sender_id"] == "5551234"
+
+
+@pytest.mark.asyncio
+async def test_group_sender_id_uses_participant_when_phone_jid_missing():
+    """Group messages should identify the participant, not the group chat JID."""
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["SENDERLID"]}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "group-lid",
+            "sender": "12345@g.us",
+            "pn": "",
+            "participant": "SENDERLID@lid.whatsapp.net",
+            "content": "hi",
+            "timestamp": 1,
+            "isGroup": True,
+        })
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "SENDERLID"
+    assert kwargs["metadata"]["participant"] == "SENDERLID@lid.whatsapp.net"
 
 
 @pytest.mark.asyncio
