@@ -40,6 +40,7 @@ describe("provider brand logos", () => {
     expect(providerBrand("stepfun")?.logoUrls[0]).toBe("https://www.stepfun.com/step_favicon.svg");
     expect(providerBrand("xiaomi_mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
     expect(providerBrand("mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
+    expect(providerBrand("xiaomi")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
   });
 
   it("keeps OpenRouter voice settings on the first-party brand domain", () => {
