@@ -1666,7 +1666,7 @@ function OverviewSettings({
   return (
     <div className="space-y-7">
       <section>
-        <TokenUsageHeatmap usage={settings.usage} />
+        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>
