@@ -272,6 +272,35 @@ class TestSandboxPlatform:
         spawned_cmd = mock_spawn.call_args[0][0]
         assert "bwrap" in spawned_cmd
 
+    @pytest.mark.asyncio
+    async def test_bwrap_userns_failure_adds_actionable_hint(self):
+        """Ubuntu/AppArmor namespace failures should explain the host fix."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (
+            b"",
+            b"bwrap: creating new namespace failed: Operation not permitted\n",
+        )
+        mock_proc.returncode = 1
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch("nanobot.agent.tools.shell.wrap_command", return_value="bwrap -- sh -c ls"),
+            patch(
+                "nanobot.agent.tools.sandbox._read_sysctl",
+                side_effect=lambda name: {
+                    "kernel.apparmor_restrict_unprivileged_userns": "1",
+                }.get(name),
+            ),
+            patch.object(ExecTool, "_spawn", return_value=mock_proc),
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            tool = ExecTool(sandbox="bwrap", working_dir="/workspace")
+            result = await tool.execute(command="ls")
+
+        assert "Bubblewrap sandbox failed while creating Linux namespaces" in result
+        assert "Ubuntu 24.04" in result
+        assert "kernel.apparmor_restrict_unprivileged_userns=1" in result
+
 
 # ---------------------------------------------------------------------------
 # end-to-end (mocked subprocess, full execute path)

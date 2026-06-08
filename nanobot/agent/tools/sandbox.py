@@ -10,6 +10,54 @@ from pathlib import Path
 
 from nanobot.config.paths import get_media_dir
 
+_BWRAP_USERNS_ERROR_PATTERNS = (
+    "operation not permitted",
+    "permission denied",
+    "creating new namespace failed",
+    "namespace setup failed",
+    "clone3",
+    "clone",
+    "unshare",
+    "user namespace",
+)
+
+
+def _read_sysctl(name: str) -> str | None:
+    path = Path("/proc/sys") / Path(name.replace(".", "/"))
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def bwrap_userns_failure_hint(stderr: str) -> str | None:
+    """Return an actionable hint for common bwrap user namespace failures."""
+    lower = stderr.lower()
+    if not any(pattern in lower for pattern in _BWRAP_USERNS_ERROR_PATTERNS):
+        return None
+
+    details: list[str] = []
+    unprivileged = _read_sysctl("kernel.unprivileged_userns_clone")
+    if unprivileged == "0":
+        details.append("kernel.unprivileged_userns_clone=0")
+
+    max_namespaces = _read_sysctl("user.max_user_namespaces")
+    if max_namespaces == "0":
+        details.append("user.max_user_namespaces=0")
+
+    apparmor_userns = _read_sysctl("kernel.apparmor_restrict_unprivileged_userns")
+    if apparmor_userns == "1":
+        details.append("kernel.apparmor_restrict_unprivileged_userns=1")
+
+    suffix = f" Detected: {', '.join(details)}." if details else ""
+    return (
+        "Bubblewrap sandbox failed while creating Linux namespaces. This is common on "
+        "Ubuntu 24.04+ when AppArmor restricts unprivileged user namespaces, or when "
+        "the host/container disables user namespaces."
+        f"{suffix} See docs/configuration.md#bubblewrap-on-ubuntu-2404 for the "
+        "AppArmor profile and container capability requirements."
+    )
+
 
 def _bwrap(command: str, workspace: str, cwd: str) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
@@ -31,8 +79,10 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
                  "/etc/ssl/certs", "/etc/resolv.conf", "/etc/ld.so.cache"]
 
     args = ["bwrap", "--new-session", "--die-with-parent"]
-    for p in required: args += ["--ro-bind",     p, p]
-    for p in optional: args += ["--ro-bind-try", p, p]
+    for p in required:
+        args += ["--ro-bind", p, p]
+    for p in optional:
+        args += ["--ro-bind-try", p, p]
     args += [
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
         "--tmpfs", str(ws.parent),        # mask config dir

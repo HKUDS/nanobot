@@ -1483,6 +1483,31 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
+### Bubblewrap on Ubuntu 24.04
+
+Ubuntu 23.10 and 24.04 added AppArmor restrictions for unprivileged user namespaces. On affected hosts, `tools.exec.sandbox: "bwrap"` can fail before the command starts with errors such as `Operation not permitted`, `clone3: Operation not permitted`, or `creating new namespace failed`.
+
+Nanobot detects these failures and adds a diagnostic hint to the exec output. A targeted AppArmor profile for `/usr/bin/bwrap` is preferred over globally disabling user namespace restrictions:
+
+```text
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+```
+
+Save this as `/etc/apparmor.d/bwrap-userns-restrict`, then load it:
+
+```bash
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+```
+
+If you run Nanobot in Docker on an Ubuntu 24.04 host, the container still needs the security options shown in [Docker](deployment.md#docker): `--cap-add SYS_ADMIN`, `apparmor=unconfined`, and `seccomp=unconfined`.
+
+For background on the Ubuntu/AppArmor restriction model, see Canonical's [AppArmor user namespace restriction explanation](https://discourse.ubuntu.com/t/understanding-apparmor-user-namespace-restriction/58007).
+
 
 ## Pairing
 
