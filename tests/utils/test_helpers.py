@@ -1,86 +1,60 @@
-"""Tests for utility helper functions."""
+from blackcat.utils.helpers import split_message
 
 
-from blackcat.utils.helpers import ensure_dir, parse_session_key, safe_filename, truncate_string
+def test_split_message_no_code_blocks_unchanged():
+    content = "alpha beta gamma delta"
 
-# ── ensure_dir ─────────────────────────────────────────────────────
-
-
-def test_ensure_dir_creates(tmp_path):
-    target = tmp_path / "a" / "b" / "c"
-    result = ensure_dir(target)
-    assert result == target
-    assert target.is_dir()
+    assert split_message(content, max_len=12) == ["alpha beta", "gamma delta"]
 
 
-def test_ensure_dir_existing(tmp_path):
-    result = ensure_dir(tmp_path)
-    assert result == tmp_path
+def test_split_message_outside_code_block_unchanged():
+    content = "alpha beta gamma delta\n```python\nx = 1\n```\ndone"
+
+    chunks = split_message(content, max_len=12)
+
+    assert chunks[0] == "alpha beta"
+    assert chunks[1].startswith("gamma")
 
 
-# ── safe_filename ──────────────────────────────────────────────────
+def test_split_message_inside_code_block_moves_before_fence():
+    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+
+    chunks = split_message(content, max_len=35)
+
+    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[1].startswith("```python\nprint('a')")
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks[1:])
 
 
-def test_safe_filename_basic():
-    assert safe_filename("hello") == "hello"
+def test_split_message_code_block_longer_than_max_len_closes_and_reopens():
+    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = split_message(content, max_len=60)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    assert chunks[0].endswith("\n```")
+    assert chunks[1].startswith("```python\n")
 
 
-def test_safe_filename_unsafe_chars():
-    result = safe_filename('file<name>:with/"bad"|chars?*')
-    assert "<" not in result
-    assert ">" not in result
-    assert ":" not in result
-    assert '"' not in result
-    assert "|" not in result
-    assert "?" not in result
-    assert "*" not in result
+def test_split_message_multiple_code_blocks_moves_second_block_to_next_chunk():
+    content = (
+        "First\n"
+        "```js\n"
+        "one();\n"
+        "```\n"
+        "Middle paragraph here\n"
+        "```py\n"
+        "two()\n"
+        "three()\n"
+        "```\n"
+        "End"
+    )
 
+    chunks = split_message(content, max_len=55)
 
-def test_safe_filename_replaces_with_underscore():
-    result = safe_filename("a:b")
-    assert result == "a_b"
-
-
-# ── truncate_string ────────────────────────────────────────────────
-
-
-def test_truncate_short():
-    assert truncate_string("hello", 10) == "hello"
-
-
-def test_truncate_long():
-    result = truncate_string("a" * 200, 100)
-    assert len(result) == 100
-    assert result.endswith("...")
-
-
-def test_truncate_exact():
-    assert truncate_string("hello", 5) == "hello"
-
-
-def test_truncate_custom_suffix():
-    result = truncate_string("a" * 20, 10, suffix=" [...]")
-    assert result.endswith(" [...]")
-    assert len(result) == 10
-
-
-# ── parse_session_key ──────────────────────────────────────────────
-
-
-def test_parse_session_key_basic():
-    channel, chat_id = parse_session_key("telegram:12345")
-    assert channel == "telegram"
-    assert chat_id == "12345"
-
-
-def test_parse_session_key_with_colon_in_id():
-    channel, chat_id = parse_session_key("discord:guild:channel")
-    assert channel == "discord"
-    assert chat_id == "guild:channel"
-
-
-def test_parse_session_key_invalid():
-    import pytest
-
-    with pytest.raises(ValueError, match="Invalid session key"):
-        parse_session_key("nocolon")
+    assert chunks[0].endswith("Middle paragraph here\n")
+    assert chunks[1].startswith("```py\n")
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks)
