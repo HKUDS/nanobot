@@ -404,6 +404,7 @@
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
       "imageGeneration": "Image generation",
+      "voiceInput": "Voice input",
       "workspace": "Workspace"
     },
     "usage": {

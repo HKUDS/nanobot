@@ -296,6 +296,7 @@
       "totalProviders": "{{count}} tersedia",
       "webSearch": "Pencarian web",
       "imageGeneration": "Pembuatan gambar",
+      "voiceInput": "Input suara",
       "workspace": "Ruang kerja"
     },
     "usage": {

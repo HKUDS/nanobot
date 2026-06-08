@@ -296,6 +296,7 @@
       "totalProviders": "{{count}} disponibles",
       "webSearch": "Recherche web",
       "imageGeneration": "Génération d’images",
+      "voiceInput": "Saisie vocale",
       "workspace": "Espace de travail"
     },
     "usage": {

@@ -404,6 +404,7 @@
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "网页搜索",
       "imageGeneration": "图片生成",
+      "voiceInput": "语音输入",
       "workspace": "工作区"
     },
     "usage": {

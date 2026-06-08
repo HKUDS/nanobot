@@ -296,6 +296,7 @@
       "totalProviders": "{{count}}개 사용 가능",
       "webSearch": "웹 검색",
       "imageGeneration": "이미지 생성",
+      "voiceInput": "음성 입력",
       "workspace": "작업공간"
     },
     "usage": {

@@ -296,6 +296,7 @@
       "totalProviders": "共 {{count}} 個可用",
       "webSearch": "網頁搜尋",
       "imageGeneration": "圖片生成",
+      "voiceInput": "語音輸入",
       "workspace": "工作區"
     },
     "usage": {

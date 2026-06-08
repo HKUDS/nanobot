@@ -1739,6 +1739,15 @@ function OverviewSettings({
       ? tx("settings.values.configured", "Configured")
       : tx("settings.values.notConfigured", "Not configured")
   }`;
+  const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
+  const voiceStatus = transcription.enabled
+    ? tx("settings.values.enabled", "Enabled")
+    : tx("settings.values.disabled", "Disabled");
+  const voiceCaption = `${providerDisplayLabel(transcription.providers, transcription.provider)} · ${
+    transcription.provider_configured
+      ? tx("settings.values.configured", "Configured")
+      : tx("settings.values.notConfigured", "Not configured")
+  }`;
   const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
   const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
   const runtimeTitle = isNativeHost
@@ -1793,6 +1802,15 @@ function OverviewSettings({
             caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
+          />
+          <OverviewListRow
+            icon={Mic}
+            valueLogoProvider={transcription.provider}
+            title={tx("settings.overview.voiceInput", "Voice input")}
+            value={voiceStatus}
+            caption={voiceCaption}
+            showBrandLogos={showBrandLogos}
+            onClick={() => onSelectSection("voice")}
           />
         </SettingsGroup>
       </section>

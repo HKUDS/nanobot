@@ -296,6 +296,7 @@
       "totalProviders": "{{count}} 個利用可能",
       "webSearch": "Web 検索",
       "imageGeneration": "画像生成",
+      "voiceInput": "音声入力",
       "workspace": "ワークスペース"
     },
     "usage": {

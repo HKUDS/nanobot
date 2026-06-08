@@ -296,6 +296,7 @@
       "totalProviders": "{{count}} khả dụng",
       "webSearch": "Tìm kiếm web",
       "imageGeneration": "Tạo hình ảnh",
+      "voiceInput": "Nhập bằng giọng nói",
       "workspace": "Không gian làm việc"
     },
     "usage": {
