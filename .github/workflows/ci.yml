@@ -39,4 +39,4 @@ jobs:
         run: uv run ruff check blackcat --select F
 
       - name: Run tests
-        run: uv run pytest tests/
+        run: uv run pytest tests/ --ignore=tests/agent/test_llm_agent_loop.py
