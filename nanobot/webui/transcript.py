@@ -113,14 +113,7 @@ def webui_transcript_path(session_key: str) -> Path:
     return get_webui_dir() / f"{stem}.jsonl"
 
 
-def read_transcript_lines(session_key: str) -> list[dict[str, Any]]:
-    path = webui_transcript_path(session_key)
-    if not path.is_file():
-        return []
-    size = path.stat().st_size
-    if size > _MAX_TRANSCRIPT_FILE_BYTES:
-        logger.warning("webui transcript too large, skipping: {}", path)
-        return []
+def _read_all_transcript_lines(path: Path) -> list[dict[str, Any]]:
     lines_out: list[dict[str, Any]] = []
     try:
         with open(path, encoding="utf-8") as f:
@@ -141,6 +134,76 @@ def read_transcript_lines(session_key: str) -> list[dict[str, Any]]:
     return lines_out
 
 
+def _compact_transcript_lines(lines: list[dict[str, Any]], target_bytes: int) -> list[dict[str, Any]]:
+    """Compact transcript lines by discarding oldest turns until total encoded size <= target_bytes."""
+    turns = _split_transcript_turns(lines)
+    if not turns:
+        return []
+    kept_turns: list[list[dict[str, Any]]] = []
+    current_bytes = 0
+    for turn in reversed(turns):
+        turn_bytes = 0
+        for rec in turn:
+            raw = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
+            turn_bytes += len(raw.encode("utf-8")) + 1  # +1 for newline
+        if not kept_turns or current_bytes + turn_bytes <= target_bytes:
+            kept_turns.append(turn)
+            current_bytes += turn_bytes
+        else:
+            break
+    kept_turns.reverse()
+    compacted_lines: list[dict[str, Any]] = []
+    for turn in kept_turns:
+        compacted_lines.extend(turn)
+    return compacted_lines
+
+
+def _write_transcript_lines(path: Path, lines: list[dict[str, Any]]) -> None:
+    """Overwrite transcript file with specified lines atomically."""
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for rec in lines:
+                raw = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
+                f.write(raw + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        tmp_path.rename(path)
+    except Exception as e:
+        if tmp_path.is_file():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise e
+
+
+def read_transcript_lines(session_key: str) -> list[dict[str, Any]]:
+    path = webui_transcript_path(session_key)
+    if not path.is_file():
+        return []
+    size = path.stat().st_size
+    if size > _MAX_TRANSCRIPT_FILE_BYTES:
+        logger.warning("webui transcript too large ({}), compacting: {}", size, path)
+        lines = _read_all_transcript_lines(path)
+        if not lines:
+            return []
+        try:
+            compacted = _compact_transcript_lines(lines, _MAX_TRANSCRIPT_FILE_BYTES // 2)
+            _write_transcript_lines(path, compacted)
+            return compacted
+        except Exception as e:
+            logger.warning("Failed to compact transcript {}: {}", path, e)
+            return lines
+    return _read_all_transcript_lines(path)
+
+
 def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
     raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
     if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
@@ -153,6 +216,18 @@ def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
         f.write(line)
         f.flush()
         os.fsync(f.fileno())
+
+    if obj.get("event") == "turn_end":
+        try:
+            size = path.stat().st_size
+            if size > _MAX_TRANSCRIPT_FILE_BYTES:
+                logger.info("webui transcript too large ({}), compacting: {}", size, path)
+                lines = _read_all_transcript_lines(path)
+                if lines:
+                    compacted = _compact_transcript_lines(lines, _MAX_TRANSCRIPT_FILE_BYTES // 2)
+                    _write_transcript_lines(path, compacted)
+        except Exception as e:
+            logger.warning("Failed to compact transcript {} after turn_end: {}", path, e)
 
 
 def normalize_webui_turn_id(value: Any) -> str:
