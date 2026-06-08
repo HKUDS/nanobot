@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanobot.config.loader import load_config
-from nanobot.transcription import (
+from nanobot.audio.transcription import (
     TranscriptionIngressError,
     resolve_transcription_config,
     transcribe_audio_data_url,
 )
+from nanobot.config.loader import load_config
 
 _MAX_REQUEST_ID_LENGTH = 80
 

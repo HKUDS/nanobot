@@ -48,8 +48,11 @@ class BaseChannel(ABC):
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
         try:
+            from nanobot.audio.transcription import (
+                resolve_transcription_config,
+                transcribe_audio_file,
+            )
             from nanobot.config.loader import load_config
-            from nanobot.transcription import resolve_transcription_config, transcribe_audio_file
 
             return await transcribe_audio_file(file_path, resolve_transcription_config(load_config()))
         except Exception:

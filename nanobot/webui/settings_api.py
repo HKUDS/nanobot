@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from nanobot.audio.transcription import resolve_transcription_config
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.image_generation import (
@@ -23,7 +24,6 @@ from nanobot.providers.image_generation import (
 )
 from nanobot.providers.registry import PROVIDERS, find_by_name
 from nanobot.security.workspace_access import workspace_sandbox_status
-from nanobot.transcription import resolve_transcription_config
 from nanobot.webui.token_usage import token_usage_payload
 from nanobot.webui.workspaces import (
     read_webui_default_access_mode,

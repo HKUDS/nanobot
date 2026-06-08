@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from nanobot.audio.transcription import resolve_transcription_config
 from nanobot.config.schema import Config
 from nanobot.providers.transcription import (
     GroqTranscriptionProvider,
     OpenAITranscriptionProvider,
     _resolve_transcription_url,
 )
-from nanobot.transcription import resolve_transcription_config
 
 
 @pytest.fixture
