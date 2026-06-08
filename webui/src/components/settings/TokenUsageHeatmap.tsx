@@ -78,16 +78,13 @@ function buildTokenUsageCalendar(
   const today = utcDateFromIsoDay(isoDayInTimeZone(new Date(), timeZone));
   const end = addUtcDays(today, 6 - today.getUTCDay());
   const start = addUtcDays(end, -(TOKEN_HEATMAP_CELLS - 1));
-  const seenMonths = new Set<string>();
   const monthLabels: TokenUsageMonthLabel[] = [];
 
   const cells = Array.from({ length: TOKEN_HEATMAP_CELLS }, (_, index) => {
     const date = addUtcDays(start, index);
     const key = isoDay(date);
     const row = byDate.get(key);
-    const monthKey = key.slice(0, 7);
-    if (!seenMonths.has(monthKey)) {
-      seenMonths.add(monthKey);
+    if (date.getUTCDate() === 1) {
       monthLabels.push({
         label: monthFormatter.format(date),
         column: Math.floor(index / 7) + 1,
@@ -186,16 +183,12 @@ export function TokenUsageHeatmap({
             {tx("settings.usage.shortTitle", "Token Usage")}
           </span>
         </div>
-        <div
-          className="mb-2 grid min-h-4 gap-1.5 text-[10px] font-normal leading-4 text-muted-foreground/62"
-          style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
-          aria-hidden
-        >
+        <div className="relative mb-2 h-4 text-[10px] font-normal leading-4 text-muted-foreground/62" aria-hidden>
           {monthLabels.map((month) => (
             <span
               key={`${month.label}-${month.column}`}
-              className="whitespace-nowrap"
-              style={{ gridColumnStart: month.column, gridColumnEnd: "span 4" }}
+              className="absolute top-0 whitespace-nowrap"
+              style={{ left: `${((month.column - 1) / TOKEN_HEATMAP_COLUMNS) * 100}%` }}
             >
               {month.label}
             </span>
