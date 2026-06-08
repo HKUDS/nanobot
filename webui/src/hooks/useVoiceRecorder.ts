@@ -166,6 +166,15 @@ export function useVoiceRecorder({
     recorder.stop();
   }, []);
 
+  const stopRecordingWhenReady = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      stopRecording();
+    } else if (startPendingRef.current) {
+      stopAfterStartRef.current = true;
+    }
+  }, [stopRecording]);
+
   const startRecording = useCallback(async () => {
     if (!onTranscribeAudio || state !== "idle" || startPendingRef.current) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
@@ -252,11 +261,19 @@ export function useVoiceRecorder({
     stopRecording,
   ]);
 
+  const startRecordingWithDeferredStop = useCallback(() => {
+    stopAfterStartRef.current = false;
+    void startRecording().then(() => {
+      if (!stopAfterStartRef.current) return;
+      stopAfterStartRef.current = false;
+      stopRecording();
+    });
+  }, [startRecording, stopRecording]);
+
   const beginPress = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (!onTranscribeAudio || disabled || state !== "idle") return;
     clearTimer(holdTimerRef);
-    stopAfterStartRef.current = false;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -266,14 +283,9 @@ export function useVoiceRecorder({
       holdTimerRef.current = null;
       holdActiveRef.current = true;
       suppressNextClick();
-      void startRecording().then(() => {
-        if (stopAfterStartRef.current) {
-          stopAfterStartRef.current = false;
-          stopRecording();
-        }
-      });
+      startRecordingWithDeferredStop();
     }, VOICE_HOLD_START_MS);
-  }, [disabled, onTranscribeAudio, startRecording, state, stopRecording, suppressNextClick]);
+  }, [disabled, onTranscribeAudio, startRecordingWithDeferredStop, state, suppressNextClick]);
 
   const endPress = useCallback(() => {
     const wasHoldRecording = holdActiveRef.current;
@@ -281,12 +293,8 @@ export function useVoiceRecorder({
     if (!wasHoldRecording) return;
     holdActiveRef.current = false;
     suppressNextClick();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      stopRecording();
-    } else {
-      stopAfterStartRef.current = true;
-    }
-  }, [stopRecording, suppressNextClick]);
+    stopRecordingWhenReady();
+  }, [stopRecordingWhenReady, suppressNextClick]);
 
   const handleClick = useCallback(() => {
     if (suppressClickRef.current) {
@@ -301,24 +309,14 @@ export function useVoiceRecorder({
   const beginShortcutHold = useCallback(() => {
     if (!onTranscribeAudio || disabled || state !== "idle" || shortcutActiveRef.current) return;
     shortcutActiveRef.current = true;
-    stopAfterStartRef.current = false;
-    void startRecording().then(() => {
-      if (stopAfterStartRef.current) {
-        stopAfterStartRef.current = false;
-        stopRecording();
-      }
-    });
-  }, [disabled, onTranscribeAudio, startRecording, state, stopRecording]);
+    startRecordingWithDeferredStop();
+  }, [disabled, onTranscribeAudio, startRecordingWithDeferredStop, state]);
 
   const endShortcutHold = useCallback(() => {
     if (!shortcutActiveRef.current) return;
     shortcutActiveRef.current = false;
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      stopRecording();
-    } else if (startPendingRef.current) {
-      stopAfterStartRef.current = true;
-    }
-  }, [stopRecording]);
+    stopRecordingWhenReady();
+  }, [stopRecordingWhenReady]);
 
   useEffect(() => {
     if (state !== "recording") {
