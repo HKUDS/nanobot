@@ -1137,7 +1137,7 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "ls -la"}'
 
 
-def test_openai_compat_preserves_non_json_tool_arguments_string() -> None:
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -1158,7 +1158,7 @@ def test_openai_compat_preserves_non_json_tool_arguments_string() -> None:
         {"role": "user", "content": "done"},
     ])
 
-    assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == "{'cmd': 'pwd'}"
+    assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "pwd"}'
 
 
 def test_openai_compat_defaults_missing_tool_arguments_to_empty_object() -> None:

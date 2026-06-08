@@ -15,7 +15,7 @@ from nanobot.providers.base import (
     LLMResponse,
     ToolCallRequest,
     parse_tool_arguments,
-    tool_arguments_object,
+    tool_arguments_object_for_replay,
 )
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
@@ -180,7 +180,7 @@ class BedrockProvider(LLMProvider):
         function = tool_call.get("function")
         if not isinstance(function, dict):
             return None
-        args = tool_arguments_object(function.get("arguments", {}))
+        args = tool_arguments_object_for_replay(function.get("arguments", {}))
         return {
             "toolUse": {
                 "toolUseId": str(tool_call.get("id") or ""),

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+import json_repair
 from loguru import logger
 
 from nanobot.utils.helpers import image_placeholder_text
@@ -72,10 +73,37 @@ def parse_tool_arguments(arguments: Any) -> Any:
         return arguments
 
 
-def tool_arguments_object(arguments: Any) -> dict[str, Any]:
-    """Return object-shaped arguments for provider history replay only."""
-    parsed = parse_tool_arguments(arguments)
+def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
+    """Return object-shaped arguments for provider history replay only.
+
+    This compatibility path may repair malformed JSON because it only shapes
+    existing conversation history for provider protocols. Do not use it for
+    newly generated tool calls that are about to execute.
+    """
+    if arguments is None:
+        return {}
+    if isinstance(arguments, dict):
+        return arguments
+    if not isinstance(arguments, str):
+        return {}
+
+    stripped = arguments.strip()
+    if not stripped:
+        return {}
+
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        try:
+            parsed = json_repair.loads(stripped)
+        except Exception:
+            return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def tool_arguments_json_for_replay(arguments: Any) -> str:
+    """Return JSON object string arguments for provider history replay only."""
+    return json.dumps(tool_arguments_object_for_replay(arguments), ensure_ascii=False)
 
 
 @dataclass

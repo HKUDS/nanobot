@@ -24,6 +24,7 @@ from nanobot.providers.base import (
     LLMResponse,
     ToolCallRequest,
     parse_tool_arguments,
+    tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
@@ -481,26 +482,8 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _normalize_tool_call_arguments(arguments: Any) -> str:
-        """Normalize function.arguments without guessing executable parameters."""
-        if isinstance(arguments, str):
-            stripped = arguments.strip()
-            if not stripped:
-                return "{}"
-            try:
-                parsed = json.loads(stripped)
-            except Exception:
-                return stripped
-            if isinstance(parsed, dict):
-                return json.dumps(parsed, ensure_ascii=False)
-            return stripped
-        if isinstance(arguments, dict):
-            return json.dumps(arguments, ensure_ascii=False)
-        if arguments is None:
-            return "{}"
-        try:
-            return json.dumps(arguments, ensure_ascii=False)
-        except Exception:
-            return str(arguments)
+        """Normalize history replay function.arguments to a JSON object string."""
+        return tool_arguments_json_for_replay(arguments)
 
     @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:

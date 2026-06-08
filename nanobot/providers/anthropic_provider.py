@@ -14,7 +14,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
-    tool_arguments_object,
+    tool_arguments_object_for_replay,
 )
 
 _ALNUM = string.ascii_letters + string.digits
@@ -214,7 +214,7 @@ class AnthropicProvider(LLMProvider):
                 "type": "tool_use",
                 "id": tc.get("id") or _gen_tool_id(),
                 "name": func.get("name", ""),
-                "input": tool_arguments_object(args),
+                "input": tool_arguments_object_for_replay(args),
             })
 
         return blocks or [{"type": "text", "text": ""}]

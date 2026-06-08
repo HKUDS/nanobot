@@ -155,6 +155,19 @@ class TestConvertMessages:
         assert items[0]["call_id"] == "call_abc"
         assert items[0]["id"] == "fc_1"
         assert items[0]["name"] == "get_weather"
+        assert items[0]["arguments"] == '{"city": "SF"}'
+
+    def test_assistant_tool_call_history_repairs_malformed_arguments(self):
+        _, items = convert_messages([{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_abc|fc_1",
+                "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
+            }],
+        }])
+
+        assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
 
     def test_duplicate_response_item_ids_are_made_unique(self):
         """Codex rejects replayed Responses input items with duplicate ids."""
