@@ -11,12 +11,13 @@ const VOICE_RECORDING_MIN_MS = 650;
 const VOICE_NO_INPUT_HINT_MS = 1_100;
 const VOICE_HOLD_START_MS = 140;
 const VOICE_WAVEFORM_BAR_COUNT = 64;
+const VOICE_WAVEFORM_SILENT_HEIGHT = 3;
 const VOICE_WAVEFORM_MIN_HEIGHT = 7;
 const VOICE_WAVEFORM_MAX_HEIGHT = 34;
 const VOICE_MIN_LEVEL = 0.018;
 const VOICE_WAVEFORM_IDLE_LEVELS = Array.from(
   { length: VOICE_WAVEFORM_BAR_COUNT },
-  () => VOICE_WAVEFORM_MIN_HEIGHT,
+  () => VOICE_WAVEFORM_SILENT_HEIGHT,
 );
 const VOICE_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -393,9 +394,11 @@ function voiceLevelFromSamples(samples: ArrayLike<number>): number {
 }
 
 function waveformHeightFromLevel(level: number): number {
+  if (level < VOICE_MIN_LEVEL) return VOICE_WAVEFORM_SILENT_HEIGHT;
+  const activeLevel = Math.min(1, (level - VOICE_MIN_LEVEL) / (1 - VOICE_MIN_LEVEL));
   return Math.round(
     VOICE_WAVEFORM_MIN_HEIGHT
-      + level * (VOICE_WAVEFORM_MAX_HEIGHT - VOICE_WAVEFORM_MIN_HEIGHT),
+      + activeLevel * (VOICE_WAVEFORM_MAX_HEIGHT - VOICE_WAVEFORM_MIN_HEIGHT),
   );
 }
 
