@@ -1,4 +1,9 @@
-"""Voice transcription providers (Groq and OpenAI Whisper)."""
+"""Provider-specific voice transcription adapters.
+
+This module only knows how to call external transcription APIs such as Groq
+and OpenAI Whisper. Product-level config fallback, WebUI upload validation,
+and channel integration live in ``nanobot.audio.transcription``.
+"""
 
 import asyncio
 import mimetypes

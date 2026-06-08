@@ -1,4 +1,10 @@
-"""Shared transcription configuration and provider resolution."""
+"""Application-level audio transcription service.
+
+This module owns nanobot's transcription behavior: config resolution,
+legacy channel fallback, upload validation, temporary-file handling, and
+dispatch to provider adapters. It deliberately does not know provider-specific
+HTTP details; those live in ``nanobot.providers.transcription``.
+"""
 
 from __future__ import annotations
 
