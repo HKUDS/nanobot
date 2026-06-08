@@ -61,6 +61,43 @@ class _DelayTool(Tool):
         return self._name
 
 
+async def _run_optional_tool_response(response: LLMResponse):
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return response
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "optional_tool",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "try optional"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+    return result, shared_events
+
+
+def _tool_message(result, tool_call_id: str) -> dict:
+    return [
+        msg for msg in result.messages
+        if msg.get("role") == "tool" and msg.get("tool_call_id") == tool_call_id
+    ][0]
+
+
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
     tools = ToolRegistry()
@@ -224,40 +261,12 @@ async def test_runner_rejects_openai_compat_malformed_arguments_without_executin
             "usage": {},
         })
 
-    provider = MagicMock()
-    calls = {"n": 0}
-
-    async def chat_with_retry(*, messages, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return parsed
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
-    tools = ToolRegistry()
-    shared_events: list[str] = []
-    tools.register(_DelayTool(
-        "optional_tool",
-        delay=0,
-        read_only=True,
-        shared_events=shared_events,
-    ))
-
-    result = await AgentRunner(provider).run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "try optional"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result, shared_events = await _run_optional_tool_response(parsed)
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == '{path:"notes.txt"}'
     assert shared_events == []
-    tool_message = [
-        msg for msg in result.messages
-        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1"
-    ][0]
+    tool_message = _tool_message(result, "call_1")
     assert "parameters must be a JSON object" in tool_message["content"]
 
 
@@ -275,40 +284,12 @@ async def test_runner_rejects_openai_responses_malformed_arguments_without_execu
         "usage": {},
     })
 
-    provider = MagicMock()
-    calls = {"n": 0}
-
-    async def chat_with_retry(*, messages, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return parsed
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
-    tools = ToolRegistry()
-    shared_events: list[str] = []
-    tools.register(_DelayTool(
-        "optional_tool",
-        delay=0,
-        read_only=True,
-        shared_events=shared_events,
-    ))
-
-    result = await AgentRunner(provider).run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "try optional"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result, shared_events = await _run_optional_tool_response(parsed)
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == "{bad"
     assert shared_events == []
-    tool_message = [
-        msg for msg in result.messages
-        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1|fc_1"
-    ][0]
+    tool_message = _tool_message(result, "call_1|fc_1")
     assert "parameters must be a JSON object" in tool_message["content"]
 
 
@@ -326,40 +307,12 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
         "usage": {},
     })
 
-    provider = MagicMock()
-    calls = {"n": 0}
-
-    async def chat_with_retry(*, messages, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return parsed
-        return LLMResponse(content="done", tool_calls=[], usage={})
-
-    provider.chat_with_retry = chat_with_retry
-    tools = ToolRegistry()
-    shared_events: list[str] = []
-    tools.register(_DelayTool(
-        "optional_tool",
-        delay=0,
-        read_only=True,
-        shared_events=shared_events,
-    ))
-
-    result = await AgentRunner(provider).run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "try optional"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result, shared_events = await _run_optional_tool_response(parsed)
 
     assert result.final_content == "done"
     assert parsed.tool_calls[0].arguments == []
     assert shared_events == []
-    tool_message = [
-        msg for msg in result.messages
-        if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_1|fc_1"
-    ][0]
+    tool_message = _tool_message(result, "call_1|fc_1")
     assert "parameters must be a JSON object" in tool_message["content"]
 
 

@@ -44,16 +44,14 @@ def _usage_from_response_obj(response: Any) -> dict[str, int]:
 
 
 def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
-    if isinstance(args_raw, str) and args_raw.strip():
-        try:
-            json.loads(args_raw)
-        except Exception:
-            logger.warning(
-                "Failed to parse tool call arguments for '{}': {}",
-                name,
-                args_raw[:200],
-            )
-    return parse_tool_arguments(args_raw)
+    parsed = parse_tool_arguments(args_raw)
+    if parsed == args_raw and isinstance(args_raw, str) and args_raw.strip():
+        logger.warning(
+            "Failed to parse tool call arguments for '{}': {}",
+            name,
+            args_raw[:200],
+        )
+    return parsed
 
 
 def _tool_arguments_source(*values: Any) -> Any:
