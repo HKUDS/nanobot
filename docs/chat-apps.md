@@ -581,6 +581,7 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
 >   This runs only after an accepted email is successfully delivered to the AI pipeline.
 > - `postActionMoveMailbox`: Destination mailbox used when `postAction` is `"move"` (for example `"Processed"` or `"[Gmail]/Trash"`).
 > - `postActionIgnoreSkipped`: If `true` (default), skipped emails are ignored for post-action and not moved/deleted.
+> - `postActionExpunge`: When `true`, the channel performs a full mailbox cleanup after processing emails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
 > - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
 > - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
 > - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
@@ -604,6 +605,7 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
       "postActionIgnoreSkipped": true,
+      "postActionExpunge": false,
       "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }

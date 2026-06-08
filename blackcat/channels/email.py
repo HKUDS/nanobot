@@ -56,6 +56,7 @@ class EmailConfig(Base):
     mark_seen: bool = True
     post_action: Literal["delete", "move"] | None = None
     post_action_move_mailbox: str | None = None
+    post_action_expunge: bool = False
     post_action_ignore_skipped: bool = True
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
@@ -739,7 +740,8 @@ class EmailChannel(BaseChannel):
             if status == "OK":
                 return
             self.logger.warning("UID EXPUNGE failed for UID {}, falling back to EXPUNGE", uid)
-        client.expunge()
+        if self.config.post_action_expunge:
+            client.expunge()
 
     @classmethod
     def _is_stale_imap_error(cls, exc: Exception) -> bool:
