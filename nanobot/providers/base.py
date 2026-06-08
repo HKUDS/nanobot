@@ -68,9 +68,10 @@ def parse_tool_arguments(arguments: Any) -> Any:
         return {}
 
     try:
-        return json.loads(stripped)
+        parsed = json.loads(stripped)
     except Exception:
         return arguments
+    return arguments if parsed is None else parsed
 
 
 def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:

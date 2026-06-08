@@ -14,6 +14,7 @@ def test_parse_tool_arguments_preserves_malformed_executable_arguments() -> None
 def test_parse_tool_arguments_preserves_non_object_executable_arguments() -> None:
     assert parse_tool_arguments('["foo.txt"]') == ["foo.txt"]
     assert parse_tool_arguments("false") is False
+    assert parse_tool_arguments("null") == "null"
 
 
 def test_tool_arguments_object_for_replay_repairs_object_like_history_arguments() -> None:
@@ -21,7 +22,7 @@ def test_tool_arguments_object_for_replay_repairs_object_like_history_arguments(
 
 
 def test_tool_arguments_object_for_replay_keeps_history_object_shaped() -> None:
-    for arguments in ['["foo.txt"]', "false", "0", ["foo.txt"], False, 0]:
+    for arguments in ['["foo.txt"]', "false", "null", "0", ["foo.txt"], False, None, 0]:
         assert tool_arguments_object_for_replay(arguments) == {}
 
 

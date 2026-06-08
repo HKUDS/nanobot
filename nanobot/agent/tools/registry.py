@@ -130,7 +130,7 @@ class ToolRegistry:
         if not stripped:
             return {}
 
-        if not stripped.startswith(("{", "[")) and stripped != "null":
+        if not stripped.startswith(("{", "[")):
             return value
 
         try:
@@ -138,7 +138,7 @@ class ToolRegistry:
         except Exception:
             return value
 
-        return {} if parsed is None else parsed
+        return parsed
 
     @classmethod
     def _coerce_params(cls, tool: Tool, params: Any) -> Any:

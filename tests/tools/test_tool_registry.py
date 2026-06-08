@@ -202,7 +202,7 @@ def test_prepare_call_unwraps_arguments_payload() -> None:
     assert error is None
 
 
-def test_prepare_call_treats_null_arguments_as_empty_object() -> None:
+def test_prepare_call_treats_none_arguments_as_empty_object() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("list_exec_sessions"))
 
@@ -211,6 +211,13 @@ def test_prepare_call_treats_null_arguments_as_empty_object() -> None:
     assert tool is not None
     assert params == {}
     assert error is None
+
+    tool, params, error = registry.prepare_call("list_exec_sessions", "null")
+
+    assert tool is not None
+    assert params == "null"
+    assert error is not None
+    assert "parameters must be a JSON object" in error
 
 
 def test_prepare_call_other_tools_keep_generic_object_validation() -> None:

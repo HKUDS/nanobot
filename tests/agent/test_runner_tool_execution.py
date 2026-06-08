@@ -242,7 +242,8 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
 
 
 @pytest.mark.asyncio
-async def test_runner_rejects_openai_compat_malformed_arguments_without_executing():
+@pytest.mark.parametrize("arguments", ['{path:"notes.txt"}', "null"])
+async def test_runner_rejects_openai_compat_invalid_arguments_without_executing(arguments):
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         parsed = OpenAICompatProvider()._parse({
             "choices": [{
@@ -252,7 +253,7 @@ async def test_runner_rejects_openai_compat_malformed_arguments_without_executin
                         "type": "function",
                         "function": {
                             "name": "optional_tool",
-                            "arguments": '{path:"notes.txt"}',
+                            "arguments": arguments,
                         },
                     }],
                 },
@@ -264,7 +265,7 @@ async def test_runner_rejects_openai_compat_malformed_arguments_without_executin
     result, shared_events = await _run_optional_tool_response(parsed)
 
     assert result.final_content == "done"
-    assert parsed.tool_calls[0].arguments == '{path:"notes.txt"}'
+    assert parsed.tool_calls[0].arguments == arguments
     assert result.tools_used == []
     assert shared_events == []
     tool_message = _tool_message(result, "call_1")
