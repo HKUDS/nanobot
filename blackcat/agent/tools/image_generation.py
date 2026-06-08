@@ -28,7 +28,7 @@ from blackcat.utils.artifacts import (
     generated_image_tool_result,
     store_generated_image_artifact,
 )
-from blackcat.utils.helpers import detect_image_mime
+from blackcat.utils.media import detect_image_mime
 
 if TYPE_CHECKING:
     from blackcat.config.schema import ProviderConfig

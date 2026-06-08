@@ -170,7 +170,7 @@ class CronTool(Tool, ContextAware):
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, tool_name, metadata)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, tool_name, metadata, deliver)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -227,8 +227,9 @@ class CronTool(Tool, ContextAware):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
-        tool_name: str | None,
-        metadata: dict | None,
+        tool_name: str | None = None,
+        metadata: dict | None = None,
+        deliver: bool = True,
     ) -> str:
         if not message and not tool_name:
             return "Error: action='add' requires a non-empty 'message' (or 'tool_name'). Retry including message='...' in your request."
@@ -256,7 +257,7 @@ class CronTool(Tool, ContextAware):
             name=name or (message[:30] if message else (tool_name or "untitled")),
             schedule=schedule,
             message=job_message,
-            deliver=True,
+            deliver=deliver,
             channel=channel,
             to=chat_id,
             channel_meta=self._metadata.get() or None,

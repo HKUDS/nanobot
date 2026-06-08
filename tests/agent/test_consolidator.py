@@ -4,9 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from blackcat.agent.consolidate import _ARCHIVE_SUMMARY_MAX_CHARS, Consolidator
 from blackcat.agent.memory import (
-    _ARCHIVE_SUMMARY_MAX_CHARS,
-    Consolidator,
     MemoryStore,
 )
 from blackcat.session.manager import Session
@@ -530,7 +529,8 @@ class TestConsolidatorSessionRefresh:
     @pytest.mark.asyncio
     async def test_reloads_before_empty_session_guard(self, tmp_path):
         """A stale empty reference must not skip a non-empty cached session."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from blackcat.agent.consolidate import Consolidator
+        from blackcat.agent.memory import MemoryStore
         from blackcat.session.manager import Session, SessionManager
 
         store = MemoryStore(tmp_path)
@@ -573,7 +573,8 @@ class TestConsolidatorSessionRefresh:
         """After compact_idle_session replaces the session, a concurrent
         maybe_consolidate_by_tokens with the old reference should use the
         fresh session from cache instead of overwriting."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from blackcat.agent.consolidate import Consolidator
+        from blackcat.agent.memory import MemoryStore
         from blackcat.session.manager import SessionManager
 
         store = MemoryStore(tmp_path)

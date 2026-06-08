@@ -15,7 +15,7 @@ import httpx
 from loguru import logger
 
 from blackcat.providers.registry import find_by_name
-from blackcat.utils.helpers import detect_image_mime
+from blackcat.utils.media import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
     "HTTP-Referer": "https://github.com/HKUDS/blackcat",

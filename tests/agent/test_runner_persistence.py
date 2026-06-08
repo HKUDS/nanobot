@@ -55,7 +55,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
 
 
 def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
-    from blackcat.utils.helpers import maybe_persist_tool_result
+    from blackcat.utils.tools import maybe_persist_tool_result
 
     root = tmp_path / ".blackcat" / "tool-results"
     old_bucket = root / "old_session"
@@ -84,7 +84,7 @@ def test_persist_tool_result_prunes_old_session_buckets(tmp_path):
 
 
 def test_persist_tool_result_leaves_no_temp_files(tmp_path):
-    from blackcat.utils.helpers import maybe_persist_tool_result
+    from blackcat.utils.tools import maybe_persist_tool_result
 
     root = tmp_path / ".blackcat" / "tool-results"
     maybe_persist_tool_result(
@@ -100,7 +100,7 @@ def test_persist_tool_result_leaves_no_temp_files(tmp_path):
 
 
 def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
-    from blackcat.utils.helpers import maybe_persist_tool_result
+    from blackcat.utils.tools import maybe_persist_tool_result
 
     warnings: list[str] = []
 

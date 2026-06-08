@@ -18,7 +18,7 @@ from typing import Any
 from loguru import logger
 
 from blackcat.config.paths import get_data_dir
-from blackcat.utils.helpers import _write_text_atomic
+from blackcat.utils.tools import _write_text_atomic
 
 # threading.Lock is used so store functions remain callable from both sync CLI
 # and async channel handlers.  At private-assistant scale (small JSON file,

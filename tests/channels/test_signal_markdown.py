@@ -1,7 +1,7 @@
 """Unit tests for the Signal markdown → plain text + textStyle converter."""
 
 from blackcat.channels.signal import _markdown_to_signal, _partition_styles
-from blackcat.utils.helpers import split_message
+from blackcat.utils.formatting import split_message
 
 
 def _utf16_len(s: str) -> int:

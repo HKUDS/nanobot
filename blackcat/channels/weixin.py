@@ -33,7 +33,7 @@ from blackcat.bus.queue import MessageBus
 from blackcat.channels.base import BaseChannel
 from blackcat.config.paths import get_media_dir, get_runtime_subdir
 from blackcat.config.schema import Base
-from blackcat.utils.helpers import split_message
+from blackcat.utils.formatting import split_message
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)

@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from blackcat.agent.hook import AgentHook, AgentHookContext
-from blackcat.utils.helpers import IncrementalThinkExtractor, strip_think
+from blackcat.utils.formatting import IncrementalThinkExtractor, strip_think
 from blackcat.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
@@ -37,7 +37,7 @@ class AgentProgressHook(AgentHook):
         set_tool_context: Callable[..., None] | None = None,
         on_iteration: Callable[[int], None] | None = None,
     ) -> None:
-        super().__init__(reraise=True)
+        super().__init__()
         self._on_progress = on_progress
         self._on_stream = on_stream
         self._on_stream_end = on_stream_end

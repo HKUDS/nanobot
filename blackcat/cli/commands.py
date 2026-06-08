@@ -919,7 +919,6 @@ def _run_gateway(
         provider_snapshot_loader=load_provider_snapshot,
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
-        config=config,
     )
     WebuiTurnCoordinator(
         bus=bus,

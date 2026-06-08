@@ -17,7 +17,7 @@ from blackcat.bus.events import InboundMessage
 from blackcat.session.goal_state import goal_state_runtime_lines
 from blackcat.session.manager import SessionManager
 from blackcat.utils.formatting import truncate_text
-from blackcat.utils.helpers import current_time_str
+from blackcat.utils.helpers import current_time_str, load_bundled_template
 from blackcat.utils.media import detect_image_mime
 from blackcat.utils.prompt_templates import render_template
 
@@ -108,6 +108,7 @@ class ContextBuilder:
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
+        self.authors: dict[str, Any] = {}
         self.skills = SkillsLoader(
             workspace,
             disabled_skills=set(disabled_skills) if disabled_skills else None,
@@ -558,6 +559,7 @@ class ContextBuilder:
     async def _build_dynamic_blocks(
         self,
         author: str = "unknown",
+        sender_id: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
         history: list[dict[str, Any]] | None = None,
@@ -573,7 +575,7 @@ class ContextBuilder:
         blocks: list[dict[str, Any]] = []
 
         # Dynamic: session block (time, channel, author, trust)
-        session_block = await self._build_session_block(author, channel, chat_id, history)
+        session_block = await self._build_session_block(author, channel, sender_id, chat_id, history)
         blocks.append({"type": "text", "text": session_block})
 
         return blocks
@@ -705,7 +707,7 @@ You are within blackcat harness/structure.
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
 
         messages.extend(history)
-        
+
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
             last["content"] = self._merge_message_content(last.get("content"), merged)

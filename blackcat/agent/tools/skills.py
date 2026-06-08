@@ -16,6 +16,10 @@ class _SkillTool(Tool):
         self._workspace = workspace
         self._skills = SkillsLoader(workspace)
 
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(workspace=Path(ctx.workspace))
+
     def _skill_path(self, name: str) -> Path:
         """Get path to skill directory."""
         return self._workspace / "skills" / name

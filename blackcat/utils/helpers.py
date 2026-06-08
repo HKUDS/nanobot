@@ -1,11 +1,8 @@
 """Utility functions for blackcat."""
 
-import base64
 import json
 import re
-import shutil
 import time
-import uuid
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path

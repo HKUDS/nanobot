@@ -7,12 +7,9 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar
 
-if typing.TYPE_CHECKING:
-    from pydantic import BaseModel
-
-    from blackcat.agent.tools.context import ToolContext
-
-_ToolT = TypeVar("_ToolT", bound="Tool")
+def set_context(self, ctx: RequestContext) -> None:
+        """Set routing context for tools that need it (optional override)."""
+        pass
 
 # Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
@@ -261,7 +258,7 @@ class Tool(ABC):
             },
         }
 
-    def set_context(self, _channel: str, _chat_id: str, *_args: Any, **_kwargs: Any) -> None:
+    def set_context(self, ctx: RequestContext) -> None:
         """Set routing context for tools that need it (optional override)."""
         pass
 

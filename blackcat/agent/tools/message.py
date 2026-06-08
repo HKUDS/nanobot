@@ -189,7 +189,7 @@ class MessageTool(Tool, ContextAware):
         buttons: list[list[str]] | None = None,
         **kwargs: Any,
     ) -> str:
-        from blackcat.utils.helpers import strip_think
+        from blackcat.utils.formatting import strip_think
 
         content = strip_think(content)
 

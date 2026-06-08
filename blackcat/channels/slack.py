@@ -19,7 +19,8 @@ from blackcat.channels.base import BaseChannel
 from blackcat.config.paths import get_media_dir
 from blackcat.config.schema import Base
 from blackcat.pairing import is_approved
-from blackcat.utils.helpers import safe_filename, split_message
+from blackcat.utils.helpers import safe_filename
+from blackcat.utils.formatting import split_message
 
 
 class SlackDMConfig(Base):

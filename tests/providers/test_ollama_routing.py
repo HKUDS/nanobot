@@ -5,7 +5,7 @@ with the right base URL, model name, and API key. Also covers Ollama
 cloud/local routing and edge cases.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -41,6 +41,9 @@ def _make_mock_config(
     config.tools.mcp_servers = {}
     config.get_provider_name.return_value = provider_name
     config.get_api_base.return_value = api_base
+    # resolve_preset returns a ModelPresetConfig with the model
+    from blackcat.config.schema import ModelPresetConfig
+    config.resolve_preset.return_value = ModelPresetConfig(model=model)
     return config
 
 
@@ -54,13 +57,34 @@ def _make_mock_provider(api_key="test-key", api_base=None, extra_headers=None):
 
 
 def _call_make_provider(config):
-    """Call _make_provider with find_by_name mocked (import is local)."""
-    from blackcat.blackcat import _make_provider
+    """Call make_provider with find_by_name mocked (import is local)."""
+    from blackcat.providers.factory import make_provider
 
     with patch("blackcat.providers.registry.find_by_name") as mock_find:
         name = config.get_provider_name.return_value
         mock_find.return_value = find_by_name(name) if name else None
-        return _make_provider(config)
+        return make_provider(config)
+
+
+def _patch_async_openai():
+    """Patch the module-level AsyncOpenAI so _build_client() works in tests."""
+    import blackcat.providers.openai_compat_provider as ocp
+
+    class _MockAsyncOpenAI:
+        def __init__(self, *args, **kwargs):
+            self.base_url = kwargs.get("base_url", "http://localhost:11434/v1")
+            self.api_key = kwargs.get("api_key", "")
+            self.default_headers = kwargs.get("default_headers", {})
+
+    ocp.AsyncOpenAI = _MockAsyncOpenAI
+    return _MockAsyncOpenAI
+
+
+@pytest.fixture(autouse=True)
+def _auto_patch_async_openai():
+    """Auto-patch AsyncOpenAI for all tests that call _build_client()."""
+    _patch_async_openai()
+    yield
 
 
 # ── Registry integrity ─────────────────────────────────────────────
@@ -91,6 +115,8 @@ class TestOllamaCloudRouting:
         config.get_api_base.return_value = "https://ollama.com/v1/"
 
         provider = _call_make_provider(config)
+        _patch_async_openai()
+        provider._build_client()
         parsed_base_url = urlparse(str(provider._client.base_url))
         assert parsed_base_url.hostname == "ollama.com"
 
@@ -110,6 +136,7 @@ class TestOllamaCloudRouting:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert "localhost" in str(provider._client.base_url)
         assert "ollama.com" not in str(provider._client.base_url)
 
@@ -135,6 +162,7 @@ class TestOllamaCloudRouting:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert "localhost" in str(provider._client.base_url)
 
 
@@ -172,6 +200,7 @@ class TestStandardProviders:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert isinstance(provider, OpenAICompatProvider)
         parsed_base_url = urlparse(str(provider._client.base_url))
         assert parsed_base_url.hostname == "api.openai.com"
@@ -189,6 +218,7 @@ class TestStandardProviders:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert isinstance(provider, OpenAICompatProvider)
         host = urlparse(str(provider._client.base_url)).hostname
         assert host == "api.deepseek.com"
@@ -206,6 +236,7 @@ class TestStandardProviders:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert isinstance(provider, OpenAICompatProvider)
         host = urlparse(str(provider._client.base_url)).hostname
         assert host == "api.groq.com"
@@ -223,6 +254,7 @@ class TestStandardProviders:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert isinstance(provider, OpenAICompatProvider)
         assert "localhost" in str(provider._client.base_url)
 
@@ -238,6 +270,7 @@ class TestStandardProviders:
         )
 
         provider = _call_make_provider(config)
+        provider._build_client()
         assert isinstance(provider, OpenAICompatProvider)
         host = urlparse(str(provider._client.base_url)).hostname
         assert host == "localhost"

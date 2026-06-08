@@ -25,7 +25,7 @@ from blackcat.bus.runtime_events import (
 from blackcat.providers.base import LLMProvider
 from blackcat.session.goal_state import goal_state_ws_blob
 from blackcat.session.manager import Session, SessionManager
-from blackcat.utils.helpers import strip_think, truncate_text
+from blackcat.utils.formatting import strip_think, truncate_text
 from blackcat.utils.llm_runtime import LLMRuntime
 
 WEBUI_SESSION_METADATA_KEY = "webui"

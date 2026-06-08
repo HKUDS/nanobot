@@ -384,7 +384,7 @@ class Consolidator:
 
             tail = list(session.messages[session.last_consolidated:])
             if not tail:
-                session.updated_at = datetime.now()
+                session.updated_at = datetime.datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -401,7 +401,7 @@ class Consolidator:
             archive_msgs = dropped[already_consolidated:]
 
             if not archive_msgs and not kept:
-                session.updated_at = datetime.now()
+                session.updated_at = datetime.datetime.now()
                 self.sessions.save(session)
                 return ""
 
@@ -418,7 +418,7 @@ class Consolidator:
 
             session.messages = kept
             session.last_consolidated = 0
-            session.updated_at = datetime.now()
+            session.updated_at = datetime.datetime.now()
             self.sessions.save(session)
 
             if archive_msgs:
@@ -431,4 +431,4 @@ class Consolidator:
                 )
 
             return summary
-        
+

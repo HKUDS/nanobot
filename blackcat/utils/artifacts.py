@@ -12,7 +12,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from blackcat.config.paths import get_media_dir
-from blackcat.utils.helpers import detect_image_mime, ensure_dir
+from blackcat.utils.helpers import ensure_dir
+from blackcat.utils.media import detect_image_mime
 
 _DATA_IMAGE_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _MIME_EXTENSIONS = {

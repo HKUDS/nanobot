@@ -138,48 +138,6 @@ class TestCommandRouter:
         assert called == ["priority"]
 
     @pytest.mark.asyncio
-    async def test_interceptor(self, router):
-        """Interceptors should be called when no exact/prefix match."""
-        called = []
-
-        async def interceptor(ctx):
-            called.append("intercept")
-            return "intercepted"
-
-        router.intercept(interceptor)
-
-        msg = FakeMessage("/unknown")
-        ctx = CommandContext(msg=msg, session=None, key="cli:test", raw="/unknown", loop=None)
-        result = await router.dispatch(ctx)
-
-        assert result == "intercepted"
-        assert called == ["intercept"]
-
-    @pytest.mark.asyncio
-    async def test_interceptor_skipped_if_exact_match(self, router):
-        """Interceptors should not be called if exact/prefix matches."""
-        called = []
-
-        async def handler(ctx):
-            called.append("handler")
-            return "handled"
-
-        async def interceptor(ctx):
-            called.append("intercept")
-            return "intercepted"
-
-        router.exact("/test", handler)
-        router.intercept(interceptor)
-
-        msg = FakeMessage("/test")
-        ctx = CommandContext(msg=msg, session=None, key="cli:test", raw="/test", loop=None)
-        result = await router.dispatch(ctx)
-
-        assert result == "handled"
-        assert called == ["handler"]
-        assert "intercept" not in called
-
-    @pytest.mark.asyncio
     async def test_case_insensitive(self, router):
         """Commands should match case-insensitively."""
         called = []

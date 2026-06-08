@@ -53,10 +53,10 @@ from blackcat.session.goal_state import (
 )
 from blackcat.session.manager import Session, SessionManager
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
-from blackcat.utils.helpers import image_placeholder_text
-from blackcat.utils.helpers import truncate_text as truncate_text_fn
+from blackcat.utils.formatting import truncate_text as truncate_text_fn
 from blackcat.utils.image_generation_intent import image_generation_prompt
 from blackcat.utils.llm_runtime import LLMRuntime
+from blackcat.utils.media import image_placeholder_text
 from blackcat.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     SUSTAINED_GOAL_CONTINUE_PROMPT,
@@ -587,7 +587,7 @@ class AgentLoop:
             return True
         return False
 
-    def _build_initial_messages(
+    async def _build_initial_messages(
         self,
         msg: InboundMessage,
         session: Session,
@@ -1405,7 +1405,7 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = self._build_initial_messages(
+        ctx.initial_messages = await self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,

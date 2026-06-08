@@ -18,7 +18,7 @@ if not DINGTALK_AVAILABLE:
 
 import blackcat.channels.dingtalk as dingtalk_module
 from blackcat.bus.queue import MessageBus
-from blackcat.channels.dingtalk import DingTalkChannel, DingTalkConfig, NanobotDingTalkHandler
+from blackcat.channels.dingtalk import DingTalkChannel, DingTalkConfig, BlackcatDingTalkHandler
 
 
 class _FakeResponse:
@@ -174,7 +174,7 @@ async def test_handler_uses_voice_recognition_text_when_text_is_empty(monkeypatc
         DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
         bus,
     )
-    handler = NanobotDingTalkHandler(channel)
+    handler = BlackcatDingTalkHandler(channel)
 
     class _FakeChatbotMessage:
         text = None
@@ -218,7 +218,7 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
         DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
         bus,
     )
-    handler = NanobotDingTalkHandler(channel)
+    handler = BlackcatDingTalkHandler(channel)
 
     class _FakeFileChatbotMessage:
         text = None

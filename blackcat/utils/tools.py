@@ -1,4 +1,4 @@
-_import json
+import json
 import shutil
 import time
 import uuid
@@ -8,8 +8,7 @@ from typing import Any
 from loguru import logger
 
 from blackcat.utils.formatting import stringify_text_blocks
-from blackcat.utils.helpers import safe_filename
-from blackcat.utils.paths import ensure_dir
+from blackcat.utils.helpers import ensure_dir, safe_filename
 
 _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".blackcat/tool-results"

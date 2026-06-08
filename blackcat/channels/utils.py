@@ -168,3 +168,96 @@ def _render_table_box(table_lines: list[str]) -> str:
         out.append(dr(row))
     return '\n'.join(out)
 
+
+# ============================================================================
+# File Extension Mapping
+# ============================================================================
+
+MIME_TO_EXT: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/wav": ".wav",
+    "video/mp4": ".mp4",
+    "application/pdf": ".pdf",
+}
+
+MEDIA_TYPE_TO_EXT: dict[str, str] = {
+    "image": ".jpg",
+    "voice": ".ogg",
+    "audio": ".mp3",
+    "video": ".mp4",
+    "file": "",
+}
+
+
+def get_file_extension(media_type: str, mime_type: str | None = None) -> str:
+    """Get file extension based on MIME type or media type."""
+    if mime_type and mime_type in MIME_TO_EXT:
+        return MIME_TO_EXT[mime_type]
+    return MEDIA_TYPE_TO_EXT.get(media_type, "")
+
+
+# ============================================================================
+# Reply Context & Message Splitting
+# ============================================================================
+
+
+def split_message(text: str, limit: int) -> list[str]:
+    """Split a message into chunks that fit within a platform's character limit.
+
+    Tries to split on newlines first, then on spaces, and only hard-splits
+    as a last resort.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+
+        # Try to split at the last newline within the limit
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            # Try to split at the last space within the limit
+            cut = text.rfind(" ", 0, limit)
+        if cut <= 0:
+            # Hard split
+            cut = limit
+
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+
+    return chunks
+
+
+def format_reply_context(author: str | None, content: str, max_length: int = 200) -> str | None:
+    """Format a reply/reference message as context.
+
+    Args:
+        author: Username or identifier of the original author.
+        content: Content of the referenced message.
+        max_length: Maximum content length before truncation.
+
+    Returns:
+        Formatted string like "[replying to author: content]" or None if no content.
+    """
+    if not content:
+        return None
+
+    content = content.strip()
+    if not content:
+        return None
+
+    if len(content) > max_length:
+        content = content[:max_length].rsplit(" ", 1)[0] + "..."
+
+    author = author or "someone"
+    return f"[replying to {author}: {content}]"
+

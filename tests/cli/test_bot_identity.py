@@ -11,7 +11,7 @@ def test_bot_name_and_icon_defaults_preserve_current_branding() -> None:
     defaults = AgentDefaults()
 
     assert defaults.bot_name == "blackcat"
-    assert defaults.bot_icon == "🐈"
+    assert defaults.bot_icon == "🐈‍⬛"
 
 
 def test_bot_name_and_icon_can_be_overridden_via_config() -> None:

@@ -1,4 +1,4 @@
-from blackcat.utils.helpers import extract_reasoning, extract_think, strip_think
+from blackcat.utils.formatting import extract_reasoning, extract_think, strip_think
 
 
 class TestStripThinkTag:

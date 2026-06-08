@@ -49,7 +49,7 @@ async def test_openai_compat_provider_sets_timeout_on_local_http_client() -> Non
 
 
 async def test_openai_compat_provider_timeout_can_be_overridden_by_env(monkeypatch) -> None:
-    monkeypatch.setenv("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", "45")
+    monkeypatch.setenv("BLACKCAT_OPENAI_COMPAT_TIMEOUT_S", "45")
 
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         provider = OpenAICompatProvider(api_key="test-key", api_base="https://example.com/v1")

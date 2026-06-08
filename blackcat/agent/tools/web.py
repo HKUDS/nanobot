@@ -23,6 +23,13 @@ from blackcat.config.schema import Base
 from blackcat.utils.media import build_image_content_blocks
 
 # Shared constants
+_WEB_FETCH_PARAMETERS = tool_parameters_schema(
+    url=StringSchema("URL to fetch"),
+    extractMode=StringSchema("Output format", enum=["markdown", "text"]),
+    maxChars=IntegerSchema(50000, minimum=100, description="Maximum characters to return"),
+    required=["url"],
+    description="Fetch a URL and extract readable content (HTML → markdown/text). Output is capped at maxChars (default 50000).",
+)
 _DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 _VOLCENGINE_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search"
