@@ -1128,6 +1128,14 @@ Configure transcription under the top-level `transcription` section:
 | `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
 | `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |
 
+Provider and language resolution is intentionally ordered for backwards compatibility:
+
+1. `transcription.provider` / `transcription.language`
+2. Legacy `channels.transcriptionProvider` / `channels.transcriptionLanguage`
+3. Built-in defaults (`provider: "groq"`, no language hint)
+
+The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI/desktop microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
+
 Transcription credentials are intentionally not stored in `transcription`. Put the API key and optional endpoint in the matching provider config:
 
 ```json
@@ -1145,7 +1153,7 @@ Transcription credentials are intentionally not stored in `transcription`. Put t
 }
 ```
 
-Legacy `channels.transcriptionProvider` and `channels.transcriptionLanguage` are still accepted for older configs, but new Settings UI writes only the top-level `transcription` fields. If both are present, `transcription.provider` and `transcription.language` take priority.
+Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
 
 ## Channel Settings
 
@@ -1171,7 +1179,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `extractDocumentText` | `true` | Extract supported document/text attachments into the model prompt. Set to `false` to keep document content out of the prompt and include attachment path references instead. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
-`channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. Prefer top-level `transcription.provider` and `transcription.language`.
+`channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 
 `sendProgress` and `sendToolHints` can also be overridden per channel. The
 global values stay as defaults for channels that do not set their own value:

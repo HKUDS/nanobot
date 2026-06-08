@@ -1731,6 +1731,24 @@ function OverviewSettings({
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
+  const webSearchProvider =
+    settings.web_search.providers.find((provider) => provider.name === settings.web_search.provider) ??
+    settings.web_search.providers[0];
+  const webSearchProviderLabel = providerDisplayLabel(
+    settings.web_search.providers,
+    settings.web_search.provider,
+  );
+  const webSearchCredentialStatus =
+    webSearchProvider?.credential === "none"
+      ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
+      : webSearchProvider?.credential === "base_url"
+        ? settings.web_search.base_url
+          ? tx("settings.values.configured", "Configured")
+          : tx("settings.values.notConfigured", "Not configured")
+        : settings.web_search.api_key_hint
+          ? tx("settings.values.configured", "Configured")
+          : tx("settings.values.notConfigured", "Not configured");
+  const webCaption = `${webSearchProviderLabel} · ${webSearchCredentialStatus}`;
   const imageStatus = settings.image_generation.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
@@ -1789,8 +1807,8 @@ function OverviewSettings({
             icon={Globe2}
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
-            value={providerDisplayLabel(settings.web_search.providers, settings.web_search.provider)}
-            caption={webStatus}
+            value={webStatus}
+            caption={webCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("browser")}
           />
