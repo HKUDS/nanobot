@@ -5,6 +5,20 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
+_SUGGESTION_TOOL_NAMES = [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "apply_patch",
+    "web_search",
+    "web_fetch",
+    "execute_command",
+    "list_exec_sessions",
+    "write_stdin",
+    "mcp_fs_read_file",
+    "mcp_git_status",
+]
+
 
 class _FakeTool(Tool):
     def __init__(self, name: str, schema: dict[str, Any] | None = None):
@@ -72,19 +86,7 @@ def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
 
 
 def test_suggest_name_handles_common_model_tool_name_typos() -> None:
-    registry = _registry_with_names([
-        "read_file",
-        "write_file",
-        "edit_file",
-        "apply_patch",
-        "web_search",
-        "web_fetch",
-        "execute_command",
-        "list_exec_sessions",
-        "write_stdin",
-        "mcp_fs_read_file",
-        "mcp_git_status",
-    ])
+    registry = _registry_with_names(_SUGGESTION_TOOL_NAMES)
     expected = {
         "readFile": "read_file",
         "read-file": "read_file",
@@ -110,19 +112,7 @@ def test_suggest_name_handles_common_model_tool_name_typos() -> None:
 
 
 def test_suggest_name_suppresses_low_confidence_and_ambiguous_matches() -> None:
-    registry = _registry_with_names([
-        "read_file",
-        "write_file",
-        "edit_file",
-        "apply_patch",
-        "web_search",
-        "web_fetch",
-        "execute_command",
-        "list_exec_sessions",
-        "write_stdin",
-        "mcp_fs_read_file",
-        "mcp_git_status",
-    ])
+    registry = _registry_with_names(_SUGGESTION_TOOL_NAMES)
 
     for name in [
         "",

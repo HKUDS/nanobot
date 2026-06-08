@@ -16,6 +16,7 @@ _SUGGESTION_NOISE_TOKENS = frozenset({"call", "function", "tool"})
 _SUGGESTION_TOKEN_ALIASES = {
     "cmd": "command",
 }
+_SuggestionEntry = tuple[str, str, tuple[str, ...], frozenset[str]]
 
 
 class ToolRegistry:
@@ -28,9 +29,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
-        self._cached_suggestion_entries: (
-            list[tuple[str, str, tuple[str, ...], frozenset[str]]] | None
-        ) = None
+        self._cached_suggestion_entries: list[_SuggestionEntry] | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -69,9 +68,10 @@ class ToolRegistry:
         return tokens[:end]
 
     @classmethod
-    def _suggestion_key(cls, name: str) -> str:
+    def _suggestion_parts(cls, name: str) -> tuple[str, tuple[str, ...], frozenset[str]]:
         tokens = cls._trim_noise_tokens(cls._name_tokens(name))
-        return "".join(tokens) if tokens else cls._lookup_key(name)
+        key = "".join(tokens) if tokens else cls._lookup_key(name)
+        return key, tokens, cls._key_bigrams(key)
 
     @staticmethod
     def _key_bigrams(key: str) -> frozenset[str]:
@@ -116,27 +116,20 @@ class ToolRegistry:
         ).ratio()
         return max(key_score, token_score)
 
-    def _suggestion_entries(self) -> list[tuple[str, str, tuple[str, ...], frozenset[str]]]:
+    def _suggestion_entries(self) -> list[_SuggestionEntry]:
         if self._cached_suggestion_entries is None:
             entries = []
             for registered in self._tools:
-                key = self._suggestion_key(registered)
-                entries.append((
-                    registered,
-                    key,
-                    self._trim_noise_tokens(self._name_tokens(registered)),
-                    self._key_bigrams(key),
-                ))
+                key, tokens, bigrams = self._suggestion_parts(registered)
+                entries.append((registered, key, tokens, bigrams))
             self._cached_suggestion_entries = entries
         return self._cached_suggestion_entries
 
     def _suggest_name(self, name: str) -> str | None:
         raw_name = str(name or "")
-        key = self._suggestion_key(raw_name)
+        key, tokens, bigrams = self._suggestion_parts(raw_name)
         if not key:
             return None
-        tokens = self._trim_noise_tokens(self._name_tokens(raw_name))
-        bigrams = self._key_bigrams(key)
         scored = []
         for registered, registered_key, registered_tokens, registered_bigrams in (
             self._suggestion_entries()
