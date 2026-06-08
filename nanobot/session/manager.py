@@ -16,6 +16,7 @@ from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
+    drop_orphan_tool_results,
     find_legal_message_start,
     image_placeholder_text,
     safe_filename,
@@ -164,7 +165,9 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
+        # Drop orphan tool results before boundary trimming so a trailing
+        # orphan cannot advance the legal suffix past the latest user turn.
+        sliced = drop_orphan_tool_results(sliced)
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -265,6 +268,7 @@ class Session:
                     kept = out[recovered_user:]
 
             # And keep a legal tool-call boundary at the front.
+            kept = drop_orphan_tool_results(kept)
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
@@ -315,7 +319,9 @@ class Session:
             if latest_user is not None:
                 retained = list(self.messages[latest_user: latest_user + max_messages])
 
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
+        # Mirror get_history(): avoid persisting orphan tool results before
+        # boundary trimming so a trailing orphan cannot empty the suffix.
+        retained = drop_orphan_tool_results(retained)
         start = find_legal_message_start(retained)
         if start:
             retained = retained[start:]
@@ -323,6 +329,7 @@ class Session:
         # Hard-cap guarantee: never keep more than max_messages.
         if len(retained) > max_messages:
             retained = retained[-max_messages:]
+            retained = drop_orphan_tool_results(retained)
             start = find_legal_message_start(retained)
             if start:
                 retained = retained[start:]

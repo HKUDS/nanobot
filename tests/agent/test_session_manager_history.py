@@ -142,6 +142,30 @@ def test_retain_recent_legal_suffix_keeps_recent_messages():
     assert session.messages[-1]["content"] == "msg9"
 
 
+def test_retain_recent_legal_suffix_drops_trailing_orphan_tool_result():
+    session = Session(key="test:trim-trailing-orphan")
+    session.messages.extend([
+        {"role": "user", "content": "question 1"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "A", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "A", "name": "x", "content": "ok"},
+        {"role": "user", "content": "question 2"},
+        {"role": "tool", "tool_call_id": "B", "name": "x", "content": "orphan"},
+    ])
+
+    session.retain_recent_legal_suffix(3)
+
+    assert session.messages == [
+        {"role": "user", "content": "question 2"},
+    ]
+
+    history = session.get_history(max_messages=500)
+    assert history == [{"role": "user", "content": "question 2"}]
+
+
 def test_retain_recent_legal_suffix_adjusts_last_consolidated():
     session = Session(key="test:trim-cons")
     for i in range(10):

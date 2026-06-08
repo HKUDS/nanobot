@@ -255,6 +255,27 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     return start
 
 
+def drop_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return messages without tool results that lack assistant declarations."""
+    declared: set[str] = set()
+    legal: list[dict[str, Any]] = []
+
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict) and tc.get("id"):
+                    declared.add(str(tc["id"]))
+            legal.append(msg)
+        elif role == "tool":
+            tid = msg.get("tool_call_id")
+            if tid and str(tid) in declared:
+                legal.append(msg)
+        else:
+            legal.append(msg)
+    return legal
+
+
 def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
     parts: list[str] = []
     for block in content:
