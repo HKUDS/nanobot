@@ -88,6 +88,8 @@ import { cn } from "@/lib/utils";
  * deliberately excluded to avoid an embedded-script XSS surface. */
 const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
 const VOICE_SHORTCUT_CODE = "KeyD";
+const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
+type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -113,9 +115,34 @@ function isVoiceShortcutRelease(event: KeyboardEvent): boolean {
   );
 }
 
+function getVoiceShortcutPlatform(): VoiceShortcutPlatform {
+  if (typeof navigator === "undefined") return "other";
+  const userAgentData = (navigator as Navigator & { userAgentData?: { platform?: string } })
+    .userAgentData;
+  const platform = [
+    userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const isIpadPretendingToBeMac =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  if (isIpadPretendingToBeMac || /mac|iphone|ipad|ipod/.test(platform)) return "apple";
+  if (/win/.test(platform)) return "windows";
+  if (/cros/.test(platform)) return "chromeos";
+  if (/linux|x11|android/.test(platform)) return "linux";
+  return "other";
+}
+
 function getVoiceShortcutLabel(): string {
-  if (typeof navigator === "undefined") return "Ctrl ⇧ D";
-  return /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌃⇧D" : "Ctrl ⇧ D";
+  switch (getVoiceShortcutPlatform()) {
+    case "apple":
+      return "⌃⇧D";
+    case "chromeos":
+    case "linux":
+    case "windows":
+    case "other":
+      return "Ctrl ⇧ D";
+  }
 }
 
 interface ThreadComposerProps {
@@ -1711,6 +1738,7 @@ export function ThreadComposer({
                       variant="ghost"
                       disabled={voiceRecorder.buttonDisabled}
                       aria-label={voiceButtonLabel}
+                      aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
                       title={voiceButtonTooltip}
                       onPointerDown={voiceRecorder.beginPress}
                       onPointerUp={voiceRecorder.endPress}

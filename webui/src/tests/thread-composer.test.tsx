@@ -388,6 +388,7 @@ describe("ThreadComposer", () => {
 
     const voiceButton = screen.getByRole("button", { name: "Voice input" });
     expect(voiceButton).toHaveAttribute("title", "Click to dictate or hold");
+    expect(voiceButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+D");
     fireEvent.keyDown(window, { code: "KeyD", ctrlKey: true, key: "D", shiftKey: true });
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     await waitForVoiceCapture();
