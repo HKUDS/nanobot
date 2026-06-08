@@ -481,11 +481,6 @@ class OpenAICompatProvider(LLMProvider):
         return bool(self._spec and self._spec.name == "mistral")
 
     @staticmethod
-    def _normalize_tool_call_arguments(arguments: Any) -> str:
-        """Normalize history replay function.arguments to a JSON object string."""
-        return tool_arguments_json_for_replay(arguments)
-
-    @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
         """Coerce block/list content into plain text for strict string-only APIs."""
         if content is None or isinstance(content, str):
@@ -561,7 +556,7 @@ class OpenAICompatProvider(LLMProvider):
                     if isinstance(function, dict):
                         function_clean = dict(function)
                         if "arguments" in function_clean:
-                            function_clean["arguments"] = self._normalize_tool_call_arguments(
+                            function_clean["arguments"] = tool_arguments_json_for_replay(
                                 function_clean.get("arguments")
                             )
                         else:
