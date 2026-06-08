@@ -557,6 +557,9 @@ Black Cat integrates with VS Code via the **lens** extension for Language Server
   }
 }
 ```
+### Contribution Flow
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution
+guidelines.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/blackcat/pulls)!
 

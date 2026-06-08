@@ -18,7 +18,7 @@ Channels and providers are allowed to repeat similar logic (send retries, media 
 
 ## Minimal change that solves the real problem
 
-Fix bugs by changing only what is necessary. Do not bundle unrelated refactors or clean-ups into a feature or bugfix PR. If a refactor is genuinely required, it should be a separate PR targeting `nightly`.
+Fix bugs by changing only what is necessary. Do not bundle unrelated refactors or clean-ups into a feature or bugfix PR. If a refactor is genuinely required, it should be a separate, clearly scoped PR.
 
 ## Keep PRs reviewable
 
