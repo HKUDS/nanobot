@@ -1,9 +1,21 @@
 """Tool registry for dynamic tool management."""
 
 import json
+import re
+from difflib import SequenceMatcher
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+
+_CAMEL_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_SUGGESTION_MIN_SCORE = 0.84
+_SUGGESTION_TIE_MARGIN = 0.08
+_SUGGESTION_BIGRAM_MIN_OVERLAP = 0.45
+_SUGGESTION_NOISE_TOKENS = frozenset({"call", "function", "tool"})
+_SUGGESTION_TOKEN_ALIASES = {
+    "cmd": "command",
+}
 
 
 class ToolRegistry:
@@ -16,16 +28,21 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._cached_suggestion_entries: (
+            list[tuple[str, str, tuple[str, ...], frozenset[str]]] | None
+        ) = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
         self._cached_definitions = None
+        self._cached_suggestion_entries = None
 
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
         self._cached_definitions = None
+        self._cached_suggestion_entries = None
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -36,18 +53,107 @@ class ToolRegistry:
         """Normalize names for suggestions only; never for execution."""
         return "".join(ch.lower() for ch in name if ch.isalnum())
 
+    @staticmethod
+    def _name_tokens(name: str) -> tuple[str, ...]:
+        spaced = _CAMEL_BOUNDARY_RE.sub(r"\1 \2", str(name or ""))
+        return tuple(
+            _SUGGESTION_TOKEN_ALIASES.get(token.lower(), token.lower())
+            for token in _TOKEN_RE.findall(spaced)
+        )
+
+    @staticmethod
+    def _trim_noise_tokens(tokens: tuple[str, ...]) -> tuple[str, ...]:
+        end = len(tokens)
+        while end and tokens[end - 1] in _SUGGESTION_NOISE_TOKENS:
+            end -= 1
+        return tokens[:end]
+
+    @classmethod
+    def _suggestion_key(cls, name: str) -> str:
+        tokens = cls._trim_noise_tokens(cls._name_tokens(name))
+        return "".join(tokens) if tokens else cls._lookup_key(name)
+
+    @staticmethod
+    def _key_bigrams(key: str) -> frozenset[str]:
+        if not key:
+            return frozenset()
+        if len(key) == 1:
+            return frozenset({key})
+        return frozenset(key[idx:idx + 2] for idx in range(len(key) - 1))
+
+    @staticmethod
+    def _candidate_allowed(
+        key: str,
+        bigrams: frozenset[str],
+        registered_key: str,
+        registered_bigrams: frozenset[str],
+    ) -> bool:
+        if key == registered_key:
+            return True
+        if abs(len(key) - len(registered_key)) > max(2, len(key) // 3):
+            return False
+        if not bigrams or not registered_bigrams:
+            return False
+        overlap = len(bigrams & registered_bigrams) / max(len(bigrams), len(registered_bigrams))
+        return overlap >= _SUGGESTION_BIGRAM_MIN_OVERLAP
+
+    @staticmethod
+    def _suggestion_score(
+        key: str,
+        tokens: tuple[str, ...],
+        registered_key: str,
+        registered_tokens: tuple[str, ...],
+    ) -> float:
+        key_score = (
+            1.0
+            if key == registered_key
+            else SequenceMatcher(None, key, registered_key).ratio()
+        )
+        token_score = SequenceMatcher(
+            None,
+            tokens,
+            registered_tokens,
+        ).ratio()
+        return max(key_score, token_score)
+
+    def _suggestion_entries(self) -> list[tuple[str, str, tuple[str, ...], frozenset[str]]]:
+        if self._cached_suggestion_entries is None:
+            entries = []
+            for registered in self._tools:
+                key = self._suggestion_key(registered)
+                entries.append((
+                    registered,
+                    key,
+                    self._trim_noise_tokens(self._name_tokens(registered)),
+                    self._key_bigrams(key),
+                ))
+            self._cached_suggestion_entries = entries
+        return self._cached_suggestion_entries
+
     def _suggest_name(self, name: str) -> str | None:
-        key = self._lookup_key(str(name or ""))
+        raw_name = str(name or "")
+        key = self._suggestion_key(raw_name)
         if not key:
             return None
-        matches = [
-            registered
-            for registered in self._tools
-            if self._lookup_key(registered) == key
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        return None
+        tokens = self._trim_noise_tokens(self._name_tokens(raw_name))
+        bigrams = self._key_bigrams(key)
+        scored = []
+        for registered, registered_key, registered_tokens, registered_bigrams in (
+            self._suggestion_entries()
+        ):
+            if not self._candidate_allowed(key, bigrams, registered_key, registered_bigrams):
+                continue
+            score = self._suggestion_score(key, tokens, registered_key, registered_tokens)
+            scored.append((score, registered))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_name = scored[0]
+        if best_score < _SUGGESTION_MIN_SCORE:
+            return None
+        if len(scored) > 1 and best_score - scored[1][0] < _SUGGESTION_TIE_MARGIN:
+            return None
+        return best_name
 
     def has(self, name: str) -> bool:
         """Check if a tool is registered."""

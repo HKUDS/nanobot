@@ -35,6 +35,13 @@ def _tool_names(definitions: list[dict[str, Any]]) -> list[str]:
     return names
 
 
+def _registry_with_names(names: list[str]) -> ToolRegistry:
+    registry = ToolRegistry()
+    for name in names:
+        registry.register(_FakeTool(name))
+    return registry
+
+
 def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("mcp_git_status"))
@@ -62,6 +69,88 @@ def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:
     assert "Tool 'readFile' not found" in error
     assert "Did you mean 'read_file'?" in error
     assert "must match exactly" in error
+
+
+def test_suggest_name_handles_common_model_tool_name_typos() -> None:
+    registry = _registry_with_names([
+        "read_file",
+        "write_file",
+        "edit_file",
+        "apply_patch",
+        "web_search",
+        "web_fetch",
+        "execute_command",
+        "list_exec_sessions",
+        "write_stdin",
+        "mcp_fs_read_file",
+        "mcp_git_status",
+    ])
+    expected = {
+        "readFile": "read_file",
+        "read-file": "read_file",
+        "READ_FILE": "read_file",
+        "read file": "read_file",
+        "readfil": "read_file",
+        "read_file_tool": "read_file",
+        "writefilee": "write_file",
+        "editfile": "edit_file",
+        "applypatch": "apply_patch",
+        "apply_path": "apply_patch",
+        "webserach": "web_search",
+        "websearch": "web_search",
+        "webfeth": "web_fetch",
+        "execute_cmd": "execute_command",
+        "list_exec_session": "list_exec_sessions",
+        "write-stdin": "write_stdin",
+        "mcpfsreadfile": "mcp_fs_read_file",
+        "mcp_gitstatus": "mcp_git_status",
+    }
+
+    assert {name: registry._suggest_name(name) for name in expected} == expected
+
+
+def test_suggest_name_suppresses_low_confidence_and_ambiguous_matches() -> None:
+    registry = _registry_with_names([
+        "read_file",
+        "write_file",
+        "edit_file",
+        "apply_patch",
+        "web_search",
+        "web_fetch",
+        "execute_command",
+        "list_exec_sessions",
+        "write_stdin",
+        "mcp_fs_read_file",
+        "mcp_git_status",
+    ])
+
+    for name in [
+        "",
+        "foo",
+        "delete_everything",
+        "read",
+        "file",
+        "fetch",
+        "message_user",
+        "mcp_unknown_status",
+    ]:
+        assert registry._suggest_name(name) is None
+
+    ambiguous = _registry_with_names(["read_file", "read_files"])
+    assert ambiguous._suggest_name("readfile") is None
+    assert ambiguous._suggest_name("readfiles") is None
+
+
+def test_suggest_name_cache_updates_after_register_and_unregister() -> None:
+    registry = _registry_with_names(["read_file"])
+
+    assert registry._suggest_name("readFile") == "read_file"
+
+    registry.register(_FakeTool("read_files"))
+    assert registry._suggest_name("readfiles") is None
+
+    registry.unregister("read_file")
+    assert registry._suggest_name("readfiles") == "read_files"
 
 
 def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
