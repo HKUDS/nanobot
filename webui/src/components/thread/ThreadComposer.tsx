@@ -42,6 +42,38 @@ import {
     Undo2,
     X,
     type LucideIcon,
+  CliAppMentionToken,
+  McpPresetMentionToken,
+  cliAppInitials,
+  mcpPresetInitials,
+  splitCapabilityMentionSegments,
+  type CapabilityMentionSegment,
+} from "@/components/CliAppMentionText";
+import {
+  Activity,
+  ArrowUp,
+  BookOpen,
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
+  CornerDownRight,
+  GripVertical,
+  History,
+  ImageIcon,
+  Loader2,
+  Mic,
+  Plus,
+  RotateCw,
+  Shield,
+  Sparkles,
+  Square,
+  SquarePen,
+  Target,
+  Trash2,
+  Undo2,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -56,9 +88,36 @@ import {
     type AttachedImage,
     type AttachmentError,
     type RestoredReadyImage,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  WorkspaceAccessMenu,
+  WorkspaceProjectPicker,
+} from "@/components/thread/WorkspaceControls";
+import {
+  useAttachedImages,
+  type AttachedImage,
+  type AttachmentError,
+  MAX_IMAGES_PER_MESSAGE,
+  type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import type { SendImage, SendOptions } from "@/hooks/useBlackcatStream";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
+import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
+import type {
+  CliAppInfo,
+  GoalStateWsPayload,
+  McpPresetInfo,
+  OutboundCliAppMention,
+  OutboundMcpPresetMention,
+  SlashCommand,
+  WorkspaceScopePayload,
+  WorkspacesPayload,
+} from "@/lib/types";
 import {
     inferProviderFromModelName,
     logoFallbackUrls,
@@ -79,11 +138,62 @@ import { cn } from "@/lib/utils";
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
  * deliberately excluded to avoid an embedded-script XSS surface. */
 const ACCEPT_ATTR = "image/png,image/jpeg,image/webp,image/gif";
+const VOICE_SHORTCUT_CODE = "KeyD";
+const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
+type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isVoiceShortcutDown(event: KeyboardEvent): boolean {
+  return (
+    event.code === VOICE_SHORTCUT_CODE
+    && event.ctrlKey
+    && event.shiftKey
+    && !event.altKey
+    && !event.metaKey
+  );
+}
+
+function isVoiceShortcutRelease(event: KeyboardEvent): boolean {
+  return (
+    event.code === VOICE_SHORTCUT_CODE
+    || event.key === "Control"
+    || event.key === "Shift"
+  );
+}
+
+function getVoiceShortcutPlatform(): VoiceShortcutPlatform {
+  if (typeof navigator === "undefined") return "other";
+  const userAgentData = (navigator as Navigator & { userAgentData?: { platform?: string } })
+    .userAgentData;
+  const platform = [
+    userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const isIpadPretendingToBeMac =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  if (isIpadPretendingToBeMac || /mac|iphone|ipad|ipod/.test(platform)) return "apple";
+  if (/win/.test(platform)) return "windows";
+  if (/cros/.test(platform)) return "chromeos";
+  if (/linux|x11|android/.test(platform)) return "linux";
+  return "other";
+}
+
+function getVoiceShortcutLabel(): string {
+  switch (getVoiceShortcutPlatform()) {
+    case "apple":
+      return "⌃⇧D";
+    case "chromeos":
+    case "linux":
+    case "windows":
+    case "other":
+      return "Ctrl ⇧ D";
+  }
 }
 
 interface ThreadComposerProps {
@@ -101,6 +211,7 @@ interface ThreadComposerProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onStop?: () => void;
+  onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
@@ -137,6 +248,45 @@ const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "blackcat.webui.composerQueuedGuidance.v1:";
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
+
+function VoiceRecordingMeter({
+  ariaLabel,
+  className,
+  elapsedLabel,
+  isHero,
+  levels,
+}: {
+  ariaLabel: string;
+  className?: string;
+  elapsedLabel: string;
+  isHero: boolean;
+  levels: number[];
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-2 text-neutral-700 dark:text-white",
+        isHero ? "h-8" : "h-9",
+        className,
+      )}
+      aria-live="polite"
+      aria-label={ariaLabel}
+    >
+      <span className="flex h-5 min-w-0 flex-1 items-center justify-between overflow-hidden" aria-hidden>
+        {levels.map((height, index) => (
+          <span
+            key={index}
+            className="w-[2px] rounded-full bg-current opacity-85 transition-[height] duration-75 ease-linear motion-reduce:transition-none"
+            style={{ height }}
+          />
+        ))}
+      </span>
+      <span className="min-w-[2.1rem] text-right text-[12px] font-medium tabular-nums text-muted-foreground">
+        {elapsedLabel}
+      </span>
+    </div>
+  );
+}
 
 type SlashPalettePlacement = "above" | "below";
 
@@ -656,6 +806,7 @@ export function ThreadComposer({
   cliApps = [],
   mcpPresets = [],
   onStop,
+  onTranscribeAudio,
   runStartedAt = null,
   goalState,
   workspaceScope = null,
@@ -685,7 +836,9 @@ export function ThreadComposer({
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
+  const voiceShortcutDownRef = useRef(false);
   const isHero = variant === "hero";
+  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const queuedPromptStorageKey = useMemo(
     () => queuedPromptsStorageKey(pendingQueueKey),
     [pendingQueueKey],
@@ -1026,6 +1179,65 @@ export function ThreadComposer({
     });
   }, []);
 
+  const appendTranscription = useCallback((text: string) => {
+    const transcript = text.trim();
+    if (!transcript) return;
+    setValue((current) => {
+      if (!current.trim()) return transcript;
+      const separator = /[\s\n]$/.test(current) ? "" : " ";
+      return `${current}${separator}${transcript}`;
+    });
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setInlineError(null);
+    resizeTextarea();
+  }, [resizeTextarea]);
+
+  const clearInlineError = useCallback(() => setInlineError(null), []);
+  const setVoiceError = useCallback((key: VoiceRecorderErrorKey) => {
+    setInlineError(t(`thread.composer.voiceErrors.${key}`));
+  }, [t]);
+  const voiceRecorder = useVoiceRecorder({
+    disabled,
+    onClearError: clearInlineError,
+    onError: setVoiceError,
+    onTranscript: appendTranscription,
+    onTranscribeAudio,
+  });
+
+  useEffect(() => {
+    if (!onTranscribeAudio) return;
+
+    function onKeyDown(event: KeyboardEvent): void {
+      if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
+      event.preventDefault();
+      voiceShortcutDownRef.current = true;
+      voiceRecorder.beginShortcutHold();
+    }
+
+    function onKeyUp(event: KeyboardEvent): void {
+      if (!voiceShortcutDownRef.current || !isVoiceShortcutRelease(event)) return;
+      event.preventDefault();
+      voiceShortcutDownRef.current = false;
+      voiceRecorder.endShortcutHold();
+    }
+
+    function onWindowBlur(): void {
+      if (!voiceShortcutDownRef.current) return;
+      voiceShortcutDownRef.current = false;
+      voiceRecorder.endShortcutHold();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
+
   const chooseSlashCommand = useCallback(
     (command: SlashCommand) => {
       if (command.command === "/stop" && isStreaming && onStop) {
@@ -1341,6 +1553,23 @@ export function ThreadComposer({
   );
 
   const attachButtonDisabled = disabled || full;
+  const showVoiceButton = Boolean(onTranscribeAudio);
+  const voiceRecordingStatusLabel = t("thread.composer.voice.recordingStatus", {
+    time: voiceRecorder.elapsedLabel,
+    defaultValue: `Recording ${voiceRecorder.elapsedLabel}`,
+  });
+  const voiceButtonLabel =
+    voiceRecorder.state === "recording"
+      ? t("thread.composer.voice.stop")
+      : voiceRecorder.state === "transcribing"
+        ? t("thread.composer.voice.transcribing")
+        : t("thread.composer.tools.voice");
+  const voiceButtonTooltip =
+    voiceRecorder.state === "recording"
+      ? t("thread.composer.voice.stop")
+      : voiceRecorder.state === "transcribing"
+        ? t("thread.composer.voice.transcribing")
+        : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const inputTextClasses = cn(
@@ -1531,7 +1760,15 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-[18px] w-[18px]" : "h-4 w-4")} />
             </Button>
-            {workspaceScope ? (
+            {voiceRecorder.isRecording ? (
+              <VoiceRecordingMeter
+                ariaLabel={voiceRecordingStatusLabel}
+                className="mx-1 flex-1"
+                elapsedLabel={voiceRecorder.elapsedLabel}
+                isHero={isHero}
+                levels={voiceRecorder.levels}
+              />
+            ) : workspaceScope ? (
               <WorkspaceAccessMenu
                 scope={workspaceScope}
                 disabled={disabled || workspaceScopeDisabled}
@@ -1542,7 +1779,7 @@ export function ThreadComposer({
             ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
-            {modelLabel ? (
+            {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
                 label={modelLabel}
                 provider={modelProvider}
@@ -1551,6 +1788,53 @@ export function ThreadComposer({
                 isHero={isHero}
                 onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
               />
+            ) : null}
+            {showVoiceButton ? (
+              <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={voiceRecorder.buttonDisabled}
+                      aria-label={voiceButtonLabel}
+                      aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
+                      title={voiceButtonTooltip}
+                      onPointerDown={voiceRecorder.beginPress}
+                      onPointerUp={voiceRecorder.endPress}
+                      onPointerCancel={voiceRecorder.endPress}
+                      onClick={voiceRecorder.handleClick}
+                      className={cn(
+                        "rounded-full border border-transparent text-muted-foreground hover:bg-muted/65 hover:text-foreground",
+                        isHero ? "h-8 w-8" : "h-9 w-9",
+                        voiceRecorder.isRecording &&
+                          "bg-red-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)] hover:bg-red-500 hover:text-white",
+                      )}
+                    >
+                      {voiceRecorder.state === "transcribing" ? (
+                        <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
+                      ) : voiceRecorder.isRecording ? (
+                        <Square className={cn(isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} fill="currentColor" />
+                      ) : (
+                        <Mic className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    align="center"
+                    className="flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(15,23,42,0.13)] dark:border-white/10 dark:bg-neutral-900 dark:text-white"
+                  >
+                    <span>{voiceButtonTooltip}</span>
+                    {voiceRecorder.state === "idle" ? (
+                      <kbd className="rounded-full bg-muted px-2 py-0.5 font-sans text-[12px] font-semibold leading-none text-muted-foreground dark:bg-white/10 dark:text-white/80">
+                        {voiceShortcutLabel}
+                      </kbd>
+                    ) : null}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : null}
             <Button
               type={showStopButton || modelNeedsSetup ? "button" : "submit"}

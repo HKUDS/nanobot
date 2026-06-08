@@ -24,6 +24,7 @@ DEFAULT_WAIT_FOR_MS = 10_000
 MAX_WAIT_FOR_MS = 120_000
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
+OUTPUT_DRAIN_GRACE_S = 0.1
 
 
 @dataclass(slots=True)
@@ -139,6 +140,8 @@ class _ExecSession:
                     asyncio.gather(self._stdout_task, self._stderr_task),
                     timeout=2.0,
                 )
+        elif yield_time_ms > 0:
+            await self._wait_for_buffered_output()
 
         async with self._lock:
             output = "".join(self._chunks)
@@ -162,6 +165,14 @@ class _ExecSession:
         self.process.kill()
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self.process.wait(), timeout=5.0)
+
+    async def _wait_for_buffered_output(self) -> None:
+        deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
+        while time.monotonic() < deadline:
+            async with self._lock:
+                if self._chunks:
+                    return
+            await asyncio.sleep(0.01)
 
 
 class ExecSessionManager:

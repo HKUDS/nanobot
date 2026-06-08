@@ -28,10 +28,6 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
-    transcription_provider: str = "groq"
-    transcription_api_key: str = ""
-    transcription_api_base: str = ""
-    transcription_language: str | None = None
     send_progress: bool = True
     send_tool_hints: bool = False
     show_reasoning: bool = True
@@ -51,8 +47,6 @@ class BaseChannel(ABC):
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
         try:
             if self.transcription_provider == "openai":
                 from blackcat.providers.transcription import OpenAITranscriptionProvider
@@ -69,6 +63,13 @@ class BaseChannel(ABC):
                     language=self.transcription_language or None,
                 )
             return await provider.transcribe(file_path)
+            from blackcat.audio.transcription import (
+                resolve_transcription_config,
+                transcribe_audio_file,
+            )
+            from blackcat.config.loader import load_config
+
+            return await transcribe_audio_file(file_path, resolve_transcription_config(load_config()))
         except Exception:
             self.logger.exception("Audio transcription failed")
             return ""

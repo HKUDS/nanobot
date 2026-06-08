@@ -391,6 +391,23 @@ export interface SettingsPayload {
       default_api_base?: string | null;
     }>;
   };
+  transcription?: {
+    enabled: boolean;
+    provider: string;
+    provider_configured: boolean;
+    model: string;
+    language: string | null;
+    max_duration_sec: number;
+    max_upload_mb: number;
+    providers: Array<{
+      name: string;
+      label: string;
+      configured: boolean;
+      api_key_hint?: string | null;
+      api_base?: string | null;
+      default_api_base?: string | null;
+    }>;
+  };
   runtime: {
     config_path: string;
     workspace_path: string;
@@ -680,6 +697,15 @@ export interface ImageGenerationSettingsUpdate {
   maxImagesPerTurn: number;
 }
 
+export interface TranscriptionSettingsUpdate {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  language: string;
+  maxDurationSec: number;
+  maxUploadMb: number;
+}
+
 export interface SlashCommand {
   command: string;
   title: string;
@@ -782,6 +808,13 @@ export type InboundEvent =
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
     }
+  | { event: "transcription_result"; request_id: string; text: string }
+  | {
+      event: "transcription_error";
+      request_id?: string;
+      detail?: string;
+      provider?: string;
+    }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
@@ -845,6 +878,7 @@ export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
+  | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {
       type: "message";
       chat_id: string;

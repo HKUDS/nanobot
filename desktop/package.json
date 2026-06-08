@@ -47,6 +47,9 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "nanobot uses the microphone to transcribe voice input before you send messages."
+      },
       "target": [
         "dmg"
       ]

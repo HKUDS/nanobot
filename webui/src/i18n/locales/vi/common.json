@@ -73,6 +73,7 @@
       "models": "Mô hình",
       "providers": "Nhà cung cấp",
       "image": "Hình ảnh",
+      "voice": "Giọng nói",
       "browser": "Trang web",
       "runtime": "Hệ thống",
       "advanced": "Bảo mật",
@@ -99,7 +100,8 @@
       "mcp": "Dịch vụ MCP",
       "apps": "Ứng dụng",
       "nativeHost": "Host gốc",
-      "hostSafety": "An toàn ứng dụng"
+      "hostSafety": "An toàn ứng dụng",
+      "voiceInput": "Nhap giong noi"
     },
     "rows": {
       "theme": "Chủ đề",
@@ -142,7 +144,13 @@
       "engine": "Bộ máy",
       "logs": "Nhật ký",
       "diagnostics": "Chẩn đoán",
-      "contextWindow": "Cửa sổ ngữ cảnh"
+      "contextWindow": "Cửa sổ ngữ cảnh",
+      "transcription": "Phien am",
+      "transcriptionProvider": "Nha cung cap",
+      "transcriptionProviderStatus": "Trang thai nha cung cap",
+      "transcriptionModel": "Mo hinh",
+      "transcriptionLanguage": "Ngon ngu",
+      "voiceLimits": "Gioi han"
     },
     "help": {
       "theme": "Chuyển giữa giao diện sáng và tối.",
@@ -181,7 +189,12 @@
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
       "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
       "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
-      "contextWindow": "Chọn ngân sách ngữ cảnh mặc định cho cấu hình mô hình này."
+      "contextWindow": "Chọn ngân sách ngữ cảnh mặc định cho cấu hình mô hình này.",
+      "transcription": "Phien am dau vao micro truoc khi gui. Tin nhan giong noi tu kenh chat dung cung cai dat.",
+      "transcriptionProvider": "Dung thong tin xac thuc cua nha cung cap tu Providers.",
+      "transcriptionProviderStatus": "API key nam trong providers, khong nam trong cai dat transcription.",
+      "transcriptionModel": "Giu mac dinh da resolve tru khi nha cung cap can id model tuy chinh.",
+      "transcriptionLanguage": "Goi y ISO-639 tuy chon, nhu en, zh, ja hoac ko."
     },
     "values": {
       "light": "Sáng",
@@ -283,6 +296,7 @@
       "totalProviders": "{{count}} khả dụng",
       "webSearch": "Tìm kiếm web",
       "imageGeneration": "Tạo hình ảnh",
+      "voiceInput": "Nhập bằng giọng nói",
       "workspace": "Không gian làm việc"
     },
     "usage": {
@@ -486,6 +500,11 @@
       "rawInstructions": "SKILL.md gốc",
       "rawInstructionsEmpty": "Không có hướng dẫn gốc.",
       "detailDescription": "Chi tiết cho {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Chon nha cung cap",
+      "configureProvider": "Cau hinh nha cung cap",
+      "languageAuto": "Tu dong"
     }
   },
   "chat": {
@@ -677,6 +696,21 @@
         "reason": "Suy luận",
         "deepResearch": "Nghiên cứu sâu",
         "voice": "Nhập bằng giọng nói"
+      },
+      "voice": {
+        "hint": "Bấm để đọc chính tả hoặc nhấn giữ",
+        "stop": "Dừng ghi âm",
+        "transcribing": "Đang chép lời...",
+        "recordingStatus": "Đang ghi {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Trình duyệt này không hỗ trợ nhập bằng giọng nói.",
+        "permission": "Cần quyền truy cập micrô.",
+        "notConfigured": "Hãy cấu hình nhà cung cấp chép lời trước.",
+        "tooLong": "Bản ghi âm quá dài.",
+        "tooShort": "Giữ lâu hơn một chút để ghi âm giọng nói.",
+        "noInput": "Không phát hiện đầu vào micrô.",
+        "failed": "Không thể chép lời âm thanh."
       },
       "slash": {
         "ariaLabel": "Lệnh slash",

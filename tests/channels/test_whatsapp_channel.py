@@ -271,8 +271,6 @@ async def test_lid_to_phone_cache_resolves_lid_only_messages():
 async def test_voice_message_transcription_uses_media_path():
     """Voice messages are transcribed when media path is available."""
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
-    ch.transcription_provider = "openai"
-    ch.transcription_api_key = "sk-test"
     ch._handle_message = AsyncMock()
     ch.transcribe_audio = AsyncMock(return_value="Hello world")
 
