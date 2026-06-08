@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import sys
 from contextlib import suppress
@@ -630,6 +631,17 @@ class ExecTool(Tool):
                         + _WORKSPACE_BOUNDARY_NOTE
                     )
 
+            for raw in self._extract_existing_relative_paths(cmd, cwd_path):
+                try:
+                    p = (cwd_path / os.path.expandvars(raw)).expanduser().resolve()
+                except Exception:
+                    continue
+                if not is_path_within(p, cwd_path):
+                    return (
+                        "Error: Command blocked by safety guard (path outside working dir)"
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
+
         return None
 
     @classmethod
@@ -650,3 +662,29 @@ class ExecTool(Tool):
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths
+
+    @staticmethod
+    def _extract_existing_relative_paths(command: str, cwd: Path) -> list[str]:
+        """Return relative shell words that already exist in the current cwd.
+
+        This catches symlink escapes such as ``cat link.txt`` without treating
+        ordinary command arguments like ``echo ok`` as filesystem paths.
+        """
+        try:
+            words = shlex.split(command, posix=not _IS_WINDOWS)
+        except ValueError:
+            return []
+        out: list[str] = []
+        for word in words:
+            if not word or word.startswith("-") or "=" in word:
+                continue
+            if any(ch in word for ch in "*?[{"):
+                continue
+            path = Path(os.path.expandvars(word)).expanduser()
+            if path.is_absolute():
+                continue
+            with suppress(OSError, RuntimeError, ValueError):
+                candidate = cwd / path
+                if candidate.exists() or candidate.is_symlink():
+                    out.append(word)
+        return out

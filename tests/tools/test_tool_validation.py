@@ -374,6 +374,24 @@ def test_exec_guard_blocks_non_benign_dev_path(tmp_path) -> None:
     assert "path outside working dir" in error
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink behavior differs on Windows")
+def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("sentinel", encoding="utf-8")
+    (workspace / "link.txt").symlink_to(secret)
+
+    tool = ExecTool(restrict_to_workspace=True, working_dir=str(workspace))
+    prepared = tool._prepare_command("cat link.txt")
+
+    assert isinstance(prepared, str)
+    assert "path outside working dir" in prepared
+    assert "hard policy boundary" in prepared
+
+
 def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     cmd = "python query.py --query '{job=\"app\"} |~ \"error\"'"
     paths = ExecTool._extract_absolute_paths(cmd)
