@@ -1728,6 +1728,16 @@ export function ThreadComposer({
             ) : null}
           </div>
           <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+            {modelLabel && !voiceRecorder.isRecording ? (
+              <ComposerModelBadge
+                label={modelLabel}
+                provider={modelProvider}
+                providerLabel={modelProviderLabel}
+                needsSetup={modelNeedsSetup}
+                isHero={isHero}
+                onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
+              />
+            ) : null}
             {showVoiceButton ? (
               <TooltipProvider delayDuration={220} skipDelayDuration={80}>
                 <Tooltip>
@@ -1774,16 +1784,6 @@ export function ThreadComposer({
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-            ) : null}
-            {modelLabel && !voiceRecorder.isRecording ? (
-              <ComposerModelBadge
-                label={modelLabel}
-                provider={modelProvider}
-                providerLabel={modelProviderLabel}
-                needsSetup={modelNeedsSetup}
-                isHero={isHero}
-                onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
-              />
             ) : null}
             <Button
               type={showStopButton || modelNeedsSetup ? "button" : "submit"}
