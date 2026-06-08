@@ -446,3 +446,47 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestAdvanceDreamCursorToHistoryTail:
+    @pytest.fixture
+    def store(self, tmp_path):
+        return MemoryStore(tmp_path)
+
+    def test_no_history_returns_current_cursor(self, store):
+        """When no history exists, should return current dream cursor (0)."""
+        result = store.advance_dream_cursor_to_history_tail()
+        assert result == 0
+        assert store.get_last_dream_cursor() == 0
+
+    def test_advances_to_history_tail(self, store):
+        """With multiple entries, cursor should advance to the last entry's cursor."""
+        store.append_history("first")
+        store.append_history("second")
+        c3 = store.append_history("third")
+
+        result = store.advance_dream_cursor_to_history_tail()
+        assert result == c3
+        assert store.get_last_dream_cursor() == c3
+
+        # After advancing, read_unprocessed_history should return nothing
+        entries = store.read_unprocessed_history(since_cursor=store.get_last_dream_cursor())
+        assert entries == []
+
+    def test_advances_past_existing_dream_cursor(self, store):
+        """When dream cursor is older than history tail, should advance to tail."""
+        store.append_history("first")
+        store.append_history("second")
+        store.set_last_dream_cursor(0)  # Simulate stale cursor
+
+        result = store.advance_dream_cursor_to_history_tail()
+        assert result > 0
+        assert store.get_last_dream_cursor() == result
+
+    def test_idempotent_when_already_at_tail(self, store):
+        """Calling twice should be idempotent."""
+        store.append_history("entry")
+        first = store.advance_dream_cursor_to_history_tail()
+        second = store.advance_dream_cursor_to_history_tail()
+        assert first == second
+        assert store.get_last_dream_cursor() == first

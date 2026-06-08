@@ -403,6 +403,22 @@ class MemoryStore:
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
+    def advance_dream_cursor_to_history_tail(self) -> int:
+        """Advance the dream cursor to the current history tail.
+
+        Useful when Dream is disabled: without this, the cursor stays
+        frozen and every history entry appears "unprocessed", bloating
+        the system prompt's Recent History section.
+
+        Returns the cursor value that was written, or 0 if no history
+        exists (preserving get_last_dream_cursor()==0 semantics).
+        """
+        tail = self._next_cursor() - 1
+        if tail <= 0:
+            return self.get_last_dream_cursor()
+        self.set_last_dream_cursor(tail)
+        return tail
+
     def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 

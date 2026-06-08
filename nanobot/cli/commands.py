@@ -1367,7 +1367,8 @@ def _run_gateway(
         ))
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
-        console.print("[yellow]○[/yellow] Dream: disabled")
+        agent.context.memory.advance_dream_cursor_to_history_tail()
+        console.print("[yellow]○[/yellow] Dream: disabled (cursor advanced)")
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:
