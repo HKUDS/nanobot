@@ -23,6 +23,8 @@ The active model should normally come from `agents.defaults.modelPreset`, and th
 
 Environment variables keep API keys out of the config file.
 
+Use the variable name shown by the recipe you picked. The commands below use `OPENROUTER_API_KEY` only as an example; an OpenAI direct recipe uses `OPENAI_API_KEY`, an Anthropic direct recipe uses `ANTHROPIC_API_KEY`, and a custom endpoint can use any variable name you reference in `config.json`.
+
 **macOS / Linux**
 
 ```bash
