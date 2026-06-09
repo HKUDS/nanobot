@@ -278,6 +278,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             tools_config=_tc,
+            parent_tools=self.tools,
             max_tool_result_chars=self.max_tool_result_chars,
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,

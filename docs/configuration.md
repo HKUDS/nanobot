@@ -1396,8 +1396,17 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
+Spawned subagents do not receive MCP tools by default. To let new subagents inherit the
+currently connected MCP tools, resources, and prompts from the main agent, opt in with
+`subagentMcpAccess`:
 
-
+```json
+{
+  "tools": {
+    "subagentMcpAccess": true
+  }
+}
+```
 
 ## Security
 
