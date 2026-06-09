@@ -22,6 +22,12 @@ import { AttachmentTile } from "@/components/AttachmentTile";
 import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
@@ -187,50 +193,60 @@ export function MessageBubble({
           </MarkdownText>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
-            <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-              {showCopyButton ? (
-                <button
-                  type="button"
-                  onClick={onCopyAssistantReply}
-                  aria-label={copyReplyLabel}
-                  title={copyReplyLabel}
-                  className={cn(
-                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    "transition-colors hover:bg-muted/55 hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4" aria-hidden />
-                  ) : (
-                    <Copy className="h-4 w-4" aria-hidden />
-                  )}
-                </button>
-              ) : null}
-              {showForkButton ? (
-                <button
-                  type="button"
-                  onClick={onForkFromHere}
-                  aria-label={forkLabel}
-                  title={forkLabel}
-                  className={cn(
-                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    "transition-colors hover:bg-muted/55 hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  <GitFork className="h-4 w-4" aria-hidden />
-                </button>
-              ) : null}
-              {showLatencyFooter ? (
-                <span
-                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                  title={t("message.turnLatencyTitle")}
-                >
-                  {formatTurnLatency(latencyMs)}
-                </span>
-              ) : null}
-            </div>
+            <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+              <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                {showCopyButton ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={onCopyAssistantReply}
+                        aria-label={copyReplyLabel}
+                        className={cn(
+                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                          "transition-colors hover:bg-muted/55 hover:text-foreground",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
+                        {copied ? (
+                          <Check className="h-4 w-4" aria-hidden />
+                        ) : (
+                          <Copy className="h-4 w-4" aria-hidden />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">{copyReplyLabel}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showForkButton ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={onForkFromHere}
+                        aria-label={forkLabel}
+                        className={cn(
+                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                          "transition-colors hover:bg-muted/55 hover:text-foreground",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
+                        <GitFork className="h-4 w-4" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showLatencyFooter ? (
+                  <span
+                    className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                    title={t("message.turnLatencyTitle")}
+                  >
+                    {formatTurnLatency(latencyMs)}
+                  </span>
+                ) : null}
+              </div>
+            </TooltipProvider>
           ) : null}
         </>
       )}
