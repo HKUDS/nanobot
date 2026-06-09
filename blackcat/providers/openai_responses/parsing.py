@@ -7,10 +7,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any, AsyncGenerator
 
 import httpx
-import json_repair
 from loguru import logger
 
-from blackcat.providers.base import LLMResponse, ToolCallRequest
+from blackcat.providers.base import LLMResponse, ToolCallRequest, parse_tool_arguments
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -42,6 +41,27 @@ def _usage_from_response_obj(response: Any) -> dict[str, int]:
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _parse_tool_call_arguments(args_raw: Any, name: str | None) -> Any:
+    parsed = parse_tool_arguments(args_raw)
+    if parsed == args_raw and isinstance(args_raw, str) and args_raw.strip():
+        logger.warning(
+            "Failed to parse tool call arguments for '{}': {}",
+            name,
+            args_raw[:200],
+        )
+    return parsed
+
+
+def _tool_arguments_source(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return "{}"
 
 
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
@@ -116,10 +136,11 @@ async def consume_sse_with_reasoning(
                 call_id = item.get("call_id")
                 if not call_id:
                     continue
+                arguments = item.get("arguments")
                 tool_call_buffers[call_id] = {
                     "id": item.get("id") or "fc_0",
                     "name": item.get("name"),
-                    "arguments": item.get("arguments") or "",
+                    "arguments": "" if arguments is None else arguments,
                 }
                 if on_tool_call_delta:
                     await on_tool_call_delta({
@@ -156,7 +177,10 @@ async def consume_sse_with_reasoning(
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:
                 delta = event.get("delta") or ""
-                tool_call_buffers[call_id]["arguments"] += delta
+                current = tool_call_buffers[call_id].get("arguments")
+                if not isinstance(current, str):
+                    current = ""
+                tool_call_buffers[call_id]["arguments"] = current + delta
                 if on_tool_call_delta and delta:
                     await on_tool_call_delta({
                         "call_id": str(call_id),
@@ -166,14 +190,14 @@ async def consume_sse_with_reasoning(
         elif event_type == "response.function_call_arguments.done":
             call_id = event.get("call_id")
             if call_id and call_id in tool_call_buffers:
-                arguments = event.get("arguments") or ""
+                arguments = event.get("arguments")
                 tool_call_buffers[call_id]["arguments"] = arguments
                 if on_tool_call_delta:
                     tool_call_args_emitted.add(str(call_id))
                     await on_tool_call_delta({
                         "call_id": str(call_id),
                         "name": str(tool_call_buffers[call_id].get("name") or ""),
-                        "arguments": str(arguments),
+                        "arguments": "" if arguments is None else str(arguments),
                     })
         elif event_type == "response.output_item.done":
             item = event.get("item") or {}
@@ -182,7 +206,7 @@ async def consume_sse_with_reasoning(
                 if not call_id:
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
-                args_raw = buf.get("arguments") or item.get("arguments") or "{}"
+                args_raw = _tool_arguments_source(buf.get("arguments"), item.get("arguments"))
                 if on_tool_call_delta and str(call_id) not in tool_call_args_emitted:
                     tool_call_args_emitted.add(str(call_id))
                     await on_tool_call_delta({
@@ -190,17 +214,10 @@ async def consume_sse_with_reasoning(
                         "name": str(buf.get("name") or item.get("name") or ""),
                         "arguments": str(args_raw),
                     })
-                try:
-                    args = json.loads(args_raw)
-                except Exception:
-                    logger.warning(
-                        "Failed to parse tool call arguments for '{}': {}",
-                        buf.get("name") or item.get("name"),
-                        args_raw[:200],
-                    )
-                    args = json_repair.loads(args_raw)
-                    if not isinstance(args, dict):
-                        args = {"raw": args_raw}
+                args = _parse_tool_call_arguments(
+                    args_raw,
+                    buf.get("name") or item.get("name"),
+                )
                 tool_calls.append(
                     ToolCallRequest(
                         id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
@@ -283,22 +300,12 @@ def parse_response_output(response: Any) -> LLMResponse:
         elif item_type == "function_call":
             call_id = item.get("call_id") or ""
             item_id = item.get("id") or "fc_0"
-            args_raw = item.get("arguments") or "{}"
-            try:
-                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-            except Exception:
-                logger.warning(
-                    "Failed to parse tool call arguments for '{}': {}",
-                    item.get("name"),
-                    str(args_raw)[:200],
-                )
-                args = json_repair.loads(args_raw) if isinstance(args_raw, str) else args_raw
-                if not isinstance(args, dict):
-                    args = {"raw": args_raw}
+            args_raw = _tool_arguments_source(item.get("arguments"))
+            args = _parse_tool_call_arguments(args_raw, item.get("name"))
             tool_calls.append(ToolCallRequest(
                 id=f"{call_id}|{item_id}",
                 name=item.get("name") or "",
-                arguments=args if isinstance(args, dict) else {},
+                arguments=args,
             ))
 
     usage = _usage_from_response_obj(response)
@@ -337,10 +344,11 @@ async def consume_sdk_stream(
                 call_id = getattr(item, "call_id", None)
                 if not call_id:
                     continue
+                arguments = getattr(item, "arguments", None)
                 tool_call_buffers[call_id] = {
                     "id": getattr(item, "id", None) or "fc_0",
                     "name": getattr(item, "name", None),
-                    "arguments": getattr(item, "arguments", None) or "",
+                    "arguments": "" if arguments is None else arguments,
                 }
                 if on_tool_call_delta:
                     await on_tool_call_delta({
@@ -357,7 +365,10 @@ async def consume_sdk_stream(
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
                 delta = getattr(event, "delta", "") or ""
-                tool_call_buffers[call_id]["arguments"] += delta
+                current = tool_call_buffers[call_id].get("arguments")
+                if not isinstance(current, str):
+                    current = ""
+                tool_call_buffers[call_id]["arguments"] = current + delta
                 if on_tool_call_delta and delta:
                     await on_tool_call_delta({
                         "call_id": str(call_id),
@@ -367,14 +378,14 @@ async def consume_sdk_stream(
         elif event_type == "response.function_call_arguments.done":
             call_id = getattr(event, "call_id", None)
             if call_id and call_id in tool_call_buffers:
-                arguments = getattr(event, "arguments", "") or ""
+                arguments = getattr(event, "arguments", None)
                 tool_call_buffers[call_id]["arguments"] = arguments
                 if on_tool_call_delta:
                     tool_call_args_emitted.add(str(call_id))
                     await on_tool_call_delta({
                         "call_id": str(call_id),
                         "name": str(tool_call_buffers[call_id].get("name") or ""),
-                        "arguments": str(arguments),
+                        "arguments": "" if arguments is None else str(arguments),
                     })
         elif event_type == "response.output_item.done":
             item = getattr(event, "item", None)
@@ -383,7 +394,10 @@ async def consume_sdk_stream(
                 if not call_id:
                     continue
                 buf = tool_call_buffers.get(call_id) or {}
-                args_raw = buf.get("arguments") or getattr(item, "arguments", None) or "{}"
+                args_raw = _tool_arguments_source(
+                    buf.get("arguments"),
+                    getattr(item, "arguments", None),
+                )
                 if on_tool_call_delta and str(call_id) not in tool_call_args_emitted:
                     tool_call_args_emitted.add(str(call_id))
                     await on_tool_call_delta({
@@ -391,17 +405,10 @@ async def consume_sdk_stream(
                         "name": str(buf.get("name") or getattr(item, "name", None) or ""),
                         "arguments": str(args_raw),
                     })
-                try:
-                    args = json.loads(args_raw)
-                except Exception:
-                    logger.warning(
-                        "Failed to parse tool call arguments for '{}': {}",
-                        buf.get("name") or getattr(item, "name", None),
-                        str(args_raw)[:200],
-                    )
-                    args = json_repair.loads(args_raw)
-                    if not isinstance(args, dict):
-                        args = {"raw": args_raw}
+                args = _parse_tool_call_arguments(
+                    args_raw,
+                    buf.get("name") or getattr(item, "name", None),
+                )
                 tool_calls.append(
                     ToolCallRequest(
                         id=f"{call_id}|{buf.get('id') or getattr(item, 'id', None) or 'fc_0'}",

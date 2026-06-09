@@ -500,7 +500,7 @@ async def test_openrouter_user_headers_override_default_attribution() -> None:
             default_model="anthropic/claude-sonnet-4-5",
             extra_headers={
                 "HTTP-Referer": "https://blackcat.ai",
-                "X-OpenRouter-Title": "Blackcat Pro",
+                "X-OpenRouter-Title": "Nanobot Pro",
                 "X-Custom-App": "enabled",
             },
             spec=spec,
@@ -509,7 +509,7 @@ async def test_openrouter_user_headers_override_default_attribution() -> None:
 
     headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://blackcat.ai"
-    assert headers["X-OpenRouter-Title"] == "Blackcat Pro"
+    assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert headers["X-Custom-App"] == "enabled"
 
@@ -929,47 +929,6 @@ def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
     assert "temperature" not in kwargs
 
 
-@pytest.mark.parametrize(
-    ("model_name", "expected_key"),
-    [
-        ("gpt-5.4", "max_completion_tokens"),
-        ("o1-mini", "max_completion_tokens"),
-        ("o3-mini", "max_completion_tokens"),
-        ("o4-mini", "max_completion_tokens"),
-        ("gpt-4", "max_tokens"),
-        ("foo3-mini", "max_tokens"),
-        ("foo4-mini", "max_tokens"),
-    ],
-)
-def test_openai_compat_build_kwargs_max_completion_tokens_by_model_name(
-    model_name: str,
-    expected_key: str,
-) -> None:
-    spec = find_by_name("custom")
-    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider(
-            api_key="sk-test-key",
-            default_model=model_name,
-            spec=spec,
-        )
-
-    kwargs = provider._build_kwargs(
-        messages=[{"role": "user", "content": "hello"}],
-        tools=None,
-        model=model_name,
-        max_tokens=2048,
-        temperature=0.7,
-        reasoning_effort=None,
-        tool_choice=None,
-    )
-
-    other_key = (
-        "max_tokens" if expected_key == "max_completion_tokens" else "max_completion_tokens"
-    )
-    assert kwargs[expected_key] == 2048
-    assert other_key not in kwargs
-
-
 def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
@@ -1178,12 +1137,9 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "ls -la"}'
 
 
-def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
-
-def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
-    provider = OpenAICompatProvider()
 
     sanitized = provider._sanitize_messages([
         {"role": "user", "content": "hi"},
@@ -1231,7 +1187,7 @@ def test_openai_compat_defaults_missing_tool_arguments_to_empty_object() -> None
 
 @pytest.mark.asyncio
 async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
-    monkeypatch.setenv("BLACKCAT_STREAM_IDLE_TIMEOUT_S", "0")
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
     mock_create = AsyncMock(return_value=_StalledStream())
     spec = find_by_name("openai")
 

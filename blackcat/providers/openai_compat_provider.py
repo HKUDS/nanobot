@@ -93,14 +93,6 @@ def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
 
 
-def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
-    slug = _model_slug(model_name)
-    return "gpt-5" in slug or any(
-        slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
-    )
-
-
 def _model_thinking_style(model_name: str) -> str:
     return _MODEL_THINKING_STYLES.get(_model_slug(model_name), "")
 
@@ -129,7 +121,7 @@ def _gateway_reasoning_extra_body(style: str, effort: str | None) -> dict[str, A
 
 def _openai_compat_timeout_s() -> float:
     """Return the bounded request timeout used for OpenAI-compatible providers."""
-    return _float_env("BLACKCAT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
+    return _float_env("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
 
 
 def _float_env(name: str, default: float) -> float:
@@ -209,7 +201,7 @@ def _extract_tc_extras(tc: Any) -> tuple[
 
 
 def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | None) -> bool:
-    """Apply Blackcat attribution headers to OpenRouter requests by default."""
+    """Apply Nanobot attribution headers to OpenRouter requests by default."""
     if spec and spec.name == "openrouter":
         return True
     return bool(api_base and "openrouter" in api_base.lower())
@@ -638,9 +630,7 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
-        if (
-            spec and getattr(spec, "supports_max_completion_tokens", False)
-        ) or _requires_max_completion_tokens(model_name):
+        if spec and getattr(spec, "supports_max_completion_tokens", False):
             kwargs["max_completion_tokens"] = max(1, max_tokens)
         else:
             kwargs["max_tokens"] = max(1, max_tokens)
@@ -1353,7 +1343,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("BLACKCAT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:

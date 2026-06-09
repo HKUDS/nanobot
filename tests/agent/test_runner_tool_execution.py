@@ -100,8 +100,6 @@ def _tool_message(result, tool_call_id: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
-    from blackcat.agent.runner import AgentRunner, AgentRunSpec
-
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.05, read_only=True, shared_events=shared_events)
@@ -139,8 +137,6 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_batch_exclusive_read_only_tools():
-    from blackcat.agent.runner import AgentRunner, AgentRunSpec
-
     tools = ToolRegistry()
     shared_events: list[str] = []
     read_a = _DelayTool("read_a", delay=0.03, read_only=True, shared_events=shared_events)
@@ -181,8 +177,6 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
 
 
 @pytest.mark.asyncio
-async def test_runner_blocks_repeated_external_fetches():
-    pass
 async def test_runner_rejects_near_miss_tool_name_without_executing():
     provider = MagicMock()
     call_count = {"n": 0}
