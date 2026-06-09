@@ -54,6 +54,15 @@ def _fake_tool_call_response() -> SimpleNamespace:
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
+def _fake_tool_call_response_with_arguments(arguments) -> SimpleNamespace:
+    """Build a minimal chat response with caller-supplied tool arguments."""
+    function = SimpleNamespace(name="optional_tool", arguments=arguments)
+    tool_call = SimpleNamespace(id="call_123", type="function", function=function)
+    message = SimpleNamespace(content=None, tool_calls=[tool_call], reasoning_content=None)
+    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
+    return SimpleNamespace(choices=[choice], usage=SimpleNamespace())
+
+
 def _fake_responses_response(content: str = "ok") -> MagicMock:
     """Build a minimal Responses API response object."""
     resp = MagicMock()
@@ -611,6 +620,24 @@ async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
     assert serialized["function"]["provider_specific_fields"] == {"inner": "value"}
 
 
+def test_openai_compat_parse_preserves_malformed_tool_arguments() -> None:
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('{path:"foo.txt"}'))
+
+    assert result.tool_calls[0].arguments == '{path:"foo.txt"}'
+
+
+def test_openai_compat_parse_preserves_array_tool_arguments() -> None:
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('["foo.txt"]'))
+
+    assert result.tool_calls[0].arguments == ["foo.txt"]
+
+
 def test_openai_model_passthrough() -> None:
     """OpenAI models pass through unchanged."""
     spec = find_by_name("openai")
@@ -1112,6 +1139,7 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
 
 def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
         provider = OpenAICompatProvider()
 
     sanitized = provider._sanitize_messages([

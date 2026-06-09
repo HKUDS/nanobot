@@ -13,6 +13,12 @@ from typing import Any
 import json_repair
 
 from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from blackcat.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    tool_arguments_object_for_replay,
+)
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -207,13 +213,11 @@ class AnthropicProvider(LLMProvider):
                 continue
             func = tc.get("function", {})
             args = func.get("arguments", "{}")
-            if isinstance(args, str):
-                args = json_repair.loads(args)
             blocks.append({
                 "type": "tool_use",
                 "id": tc.get("id") or _gen_tool_id(),
                 "name": func.get("name", ""),
-                "input": args,
+                "input": tool_arguments_object_for_replay(args),
             })
 
         return blocks or [{"type": "text", "text": ""}]
@@ -509,7 +513,7 @@ class AnthropicProvider(LLMProvider):
                 tool_calls.append(ToolCallRequest(
                     id=block.id,
                     name=block.name,
-                    arguments=block.input if isinstance(block.input, dict) else {},
+                    arguments=block.input,
                 ))
             elif block.type == "thinking":
                 thinking_blocks.append({

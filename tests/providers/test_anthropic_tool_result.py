@@ -80,3 +80,17 @@ def test_convert_user_content_coerces_mixed_typeless():
     ])
     assert result[0] == {"type": "text", "text": "42"}
     assert result[1] == {"type": "text", "text": str({"key": "val"})}
+
+
+def test_convert_assistant_message_repairs_history_tool_arguments():
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{
+            "id": "toolu_1",
+            "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
+        }],
+    })
+
+    assert blocks[0]["type"] == "tool_use"
+    assert blocks[0]["input"] == {"path": "foo.txt"}
