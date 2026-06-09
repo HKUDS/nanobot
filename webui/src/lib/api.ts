@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./http";
 import type {
   ChatSummary,
   CliAppsPayload,
@@ -18,29 +19,9 @@ import type {
   SlashCommand,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
-  WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
-} from "./types";
-import { fetchWithTimeout } from "./http";
-import type {
-    ChatSummary,
-    CliAppsPayload,
-    ImageGenerationSettingsUpdate,
-    McpPresetsPayload,
-    ModelConfigurationCreate,
-    ModelConfigurationUpdate,
-    NetworkSafetySettingsUpdate,
-    ProviderModelsPayload,
-    ProviderSettingsUpdate,
-    SettingsPayload,
-    SettingsUpdate,
-    SidebarStatePayload,
-    SlashCommand,
-    WebSearchSettingsUpdate,
-    WebuiThreadPersistedPayload,
-    WorkspaceScopePayload,
-    WorkspacesPayload,
+  WorkspacesPayload,
 } from "./types";
 
 const API_READ_TIMEOUT_MS = 20_000;

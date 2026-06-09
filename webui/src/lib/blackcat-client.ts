@@ -96,13 +96,6 @@ interface PendingNewChat {
 }
 
 export interface BlackcatClientOptions {
-interface PendingTranscription {
-  resolve: (text: string) => void;
-  reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-export interface NanobotClientOptions {
   url: string;
   reconnect?: boolean;
   /** Called when a connection drops so the app can refresh its token. */
@@ -139,7 +132,6 @@ export class BlackcatClient {
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingNewChat | null = null;
-  private pendingTranscriptions = new Map<string, PendingTranscription>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -328,27 +320,6 @@ export class BlackcatClient {
     });
   }
 
-  transcribeAudio(
-    dataUrl: string,
-    options?: { durationMs?: number; timeoutMs?: number },
-  ): Promise<string> {
-    const requestId = crypto.randomUUID();
-    const timeoutMs = options?.timeoutMs ?? 120_000;
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingTranscriptions.delete(requestId);
-        reject(new Error("transcription timed out"));
-      }, timeoutMs);
-      this.pendingTranscriptions.set(requestId, { resolve, reject, timer });
-      this.queueSend({
-        type: "transcribe_audio",
-        request_id: requestId,
-        data_url: dataUrl,
-        ...(options?.durationMs !== undefined ? { duration_ms: options.durationMs } : {}),
-      });
-    });
-  }
-
   attach(chatId: string): void {
     this.knownChats.add(chatId);
     if (this.socket?.readyState === WS_OPEN) {
@@ -365,7 +336,6 @@ export class BlackcatClient {
       cliApps?: OutboundCliAppMention[];
       mcpPresets?: OutboundMcpPresetMention[];
       workspaceScope?: WorkspaceScopePayload | null;
-      turnId?: string;
     },
   ): void {
     this.knownChats.add(chatId);
@@ -378,7 +348,6 @@ export class BlackcatClient {
       ...(options?.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options?.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
-      ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
     };
     this.queueSend(frame);
@@ -392,6 +361,8 @@ export class BlackcatClient {
       workspace_scope: workspaceScope,
     });
   }
+
+  // TODO: add the method transcribeAudio(dataUrl, options)
 
   // -- internals ---------------------------------------------------------
 
@@ -451,16 +422,6 @@ export class BlackcatClient {
 
     if (parsed.event === "runtime_model_updated") {
       this.emitRuntimeModelUpdate(parsed.model_name || null, parsed.model_preset ?? null);
-      return;
-    }
-
-    if (parsed.event === "transcription_result") {
-      this.resolveTranscription(parsed.request_id, parsed.text);
-      return;
-    }
-
-    if (parsed.event === "transcription_error") {
-      this.rejectTranscription(parsed.request_id, parsed.detail || "error");
       return;
     }
 
@@ -539,7 +500,6 @@ export class BlackcatClient {
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
-    this.rejectAllTranscriptions("socket closed");
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -565,34 +525,6 @@ export class BlackcatClient {
       } catch {
         // best-effort: subscriber fault must not stall transport bookkeeping
       }
-    }
-  }
-
-  private resolveTranscription(requestId: string, text: string): void {
-    const pending = this.pendingTranscriptions.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingTranscriptions.delete(requestId);
-    pending.resolve(text);
-  }
-
-  private rejectTranscription(requestId: string | undefined, detail: string): void {
-    if (!requestId) {
-      this.rejectAllTranscriptions(detail);
-      return;
-    }
-    const pending = this.pendingTranscriptions.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingTranscriptions.delete(requestId);
-    pending.reject(new Error(detail));
-  }
-
-  private rejectAllTranscriptions(detail: string): void {
-    for (const [requestId, pending] of this.pendingTranscriptions) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error(detail));
-      this.pendingTranscriptions.delete(requestId);
     }
   }
 

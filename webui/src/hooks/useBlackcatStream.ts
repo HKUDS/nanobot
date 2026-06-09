@@ -3,35 +3,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { StreamError } from "@/lib/blackcat-client";
 import { toMediaAttachment } from "@/lib/media";
 import {
-    mergeToolProgressEvents,
-    mergeUniqueToolTraceLines,
-    normalizeToolProgressEvents,
-    toolTraceLinesFromEvents,
+  mergeToolProgressEvents,
+  mergeUniqueToolTraceLines,
+  normalizeToolProgressEvents,
+  toolTraceLinesFromEvents,
 } from "@/lib/tool-traces";
 import type {
-    GoalStateWsPayload,
-    InboundEvent,
-    OutboundCliAppMention,
-    OutboundImageGeneration,
-    OutboundMcpPresetMention,
-    OutboundMedia,
-    ToolProgressEvent,
-    UIFileEdit,
-    UIImage,
-    UIMessage,
-    WorkspaceScopePayload,
+  GoalStateWsPayload,
   InboundEvent,
   OutboundCliAppMention,
   OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
-  GoalStateWsPayload,
   ToolProgressEvent,
-  UIImage,
   UIFileEdit,
+  UIImage,
   UIMessage,
   UITurnPhase,
-  WorkspaceScopePayload,
+  WorkspaceScopePayload
 } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -436,7 +425,7 @@ export interface SendOptions {
   workspaceScope?: WorkspaceScopePayload | null;
 }
 
-export function useNanobotStream(
+export function useBlackcatStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,

@@ -865,7 +865,7 @@
     "close": "關閉檔案預覽",
     "loading": "正在載入預覽...",
     "failed": "無法預覽這個檔案。",
-    "routeMissing": "檔案預覽需要最新的 gateway。請重啟 nanobot gateway 後再試。",
+    "routeMissing": "檔案預覽需要最新的 gateway。請重啟 blackcat gateway 後再試。",
     "resize": "調整檔案預覽寬度",
     "truncated": "檔案較大，目前只顯示前半部分預覽。"
   },

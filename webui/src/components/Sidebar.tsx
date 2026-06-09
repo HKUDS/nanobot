@@ -1,17 +1,11 @@
 import {
-    Archive,
-    Blocks,
-    Menu,
-    Search,
-    Settings,
-    SquarePen,
   Archive,
+  Blocks,
   Brain,
   Menu,
   Search,
   Settings,
-  SquarePen,
-  Blocks,
+  SquarePen
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,10 +15,11 @@ import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type {
-    ChatSummary,
-    SidebarViewState,
+  ChatSummary,
+  SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BlackcatBrandLogo } from "./settings/SettingsView";
 
 interface SidebarProps {
   sessions: ChatSummary[];
@@ -118,12 +113,7 @@ export function Sidebar(props: SidebarProps) {
               : "pointer-events-none -ml-0.5",
           )}
         >
-          <img
-            src="/brand/blackcat_icon.png"
-            alt=""
-            className="h-8 w-8 select-none object-contain"
-            draggable={false}
-          />
+          <BlackcatBrandLogo />
         </button>
         {!collapsed && !props.hostChromeInset && (
           <Button
