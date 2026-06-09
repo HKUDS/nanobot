@@ -67,14 +67,13 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 2. Set a different `agents.defaults.workspace` for that instance.
 3. Start the instance with `--config`.
 
-Example config:
+Example config fragment:
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace",
-      "model": "anthropic/claude-sonnet-4-6"
+      "workspace": "~/.nanobot-telegram/workspace"
     }
   },
   "channels": {
@@ -89,6 +88,8 @@ Example config:
   }
 }
 ```
+
+The copied base config can keep using the same `modelPresets` and `agents.defaults.modelPreset`. If this instance needs a different model, add another preset and set `agents.defaults.modelPreset` to that preset name.
 
 Start separate instances:
 

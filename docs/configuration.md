@@ -262,10 +262,15 @@ The `azure_openai` provider talks to your Azure OpenAI resource via the OpenAI *
       "apiBase": "https://my-resource.openai.azure.com"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "azure": {
       "provider": "azure_openai",
       "model": "my-gpt-5-deployment"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "azure"
     }
   }
 }
@@ -282,10 +287,15 @@ Omit `apiKey` (or leave it empty / unset). The provider falls back to [`DefaultA
       "apiBase": "https://my-resource.openai.azure.com"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "azure": {
       "provider": "azure_openai",
       "model": "my-gpt-5-deployment"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "azure"
     }
   }
 }
@@ -326,12 +336,17 @@ Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provi
       "apiBase": "https://api.apifree.ai/agent/v1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "skywork": {
       "provider": "skywork",
       "model": "skywork-ai/skyclaw-v1",
       "maxTokens": 32768,
       "contextWindowTokens": 131072
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "skywork"
     }
   }
 }
@@ -383,11 +398,16 @@ For a non-Anthropic model such as Amazon Nova:
       "region": "us-east-1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "bedrockNova": {
       "provider": "bedrock",
       "model": "bedrock/amazon.nova-lite-v1:0",
       "reasoningEffort": null
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "bedrockNova"
     }
   }
 }
@@ -403,11 +423,16 @@ With a Bedrock API key:
       "apiKey": "${AWS_BEARER_TOKEN_BEDROCK}"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "bedrockNova": {
       "provider": "bedrock",
       "model": "bedrock/amazon.nova-lite-v1:0",
       "reasoningEffort": null
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "bedrockNova"
     }
   }
 }
@@ -423,10 +448,15 @@ With a named AWS profile:
       "profile": "my-bedrock-profile"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "bedrockNova": {
       "provider": "bedrock",
       "model": "bedrock/amazon.nova-lite-v1:0"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "bedrockNova"
     }
   }
 }
@@ -441,12 +471,17 @@ With a named AWS profile:
       "region": "us-east-1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "bedrockClaude": {
       "provider": "bedrock",
       "model": "bedrock/global.anthropic.claude-opus-4-7",
       "reasoningEffort": "medium",
       "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "bedrockClaude"
     }
   }
 }
@@ -532,9 +567,15 @@ nanobot provider login openai-codex
 **2. Set model** (merge into `~/.nanobot/config.json`):
 ```json
 {
+  "modelPresets": {
+    "codex": {
+      "provider": "openai_codex",
+      "model": "openai-codex/gpt-5.1-codex"
+    }
+  },
   "agents": {
     "defaults": {
-      "model": "openai-codex/gpt-5.1-codex"
+      "modelPreset": "codex"
     }
   }
 }
@@ -569,9 +610,15 @@ nanobot provider login github-copilot
 **2. Set model** (merge into `~/.nanobot/config.json`):
 ```json
 {
+  "modelPresets": {
+    "copilot": {
+      "provider": "github_copilot",
+      "model": "github-copilot/gpt-4.1"
+    }
+  },
   "agents": {
     "defaults": {
-      "model": "github-copilot/gpt-4.1"
+      "modelPreset": "copilot"
     }
   }
 }
@@ -604,10 +651,15 @@ LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
       "apiKey": "${LONGCAT_API_KEY}"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "longcat": {
       "provider": "longcat",
       "model": "LongCat-Flash-Chat"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "longcat"
     }
   }
 }
@@ -663,10 +715,15 @@ Step Plan is StepFun's subscription-based service for high-frequency AI develope
       "apiBase": "https://api.stepfun.com/step_plan/v1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "stepfun": {
       "provider": "stepfun",
       "model": "step-3.5-flash"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "stepfun"
     }
   }
 }
@@ -688,10 +745,15 @@ Ant Ling is available through nanobot's built-in OpenAI-compatible provider flow
       "apiKey": "${ANT_LING_API_KEY}"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "antLing": {
       "provider": "ant_ling",
       "model": "Ling-2.6-flash"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "antLing"
     }
   }
 }
@@ -714,9 +776,15 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
       "apiBase": "https://api.your-provider.com/v1"
     }
   },
+  "modelPresets": {
+    "custom": {
+      "provider": "custom",
+      "model": "your-model-name"
+    }
+  },
   "agents": {
     "defaults": {
-      "model": "your-model-name"
+      "modelPreset": "custom"
     }
   }
 }
@@ -737,10 +805,15 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
 >       "defaultModel": "your-model-name"
 >     }
 >   },
->   "agents": {
->     "defaults": {
+>   "modelPresets": {
+>     "responsesProxy": {
 >       "provider": "azure_openai",
 >       "model": "your-model-name"
+>     }
+>   },
+>   "agents": {
+>     "defaults": {
+>       "modelPreset": "responsesProxy"
 >     }
 >   }
 > }
@@ -789,16 +862,21 @@ ollama run llama3.2
       "apiBase": "http://localhost:11434"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "ollama": {
       "provider": "ollama",
       "model": "llama3.2"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "ollama"
     }
   }
 }
 ```
 
-> `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but setting `"provider": "ollama"` is the clearest option.
+> `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but pinning `"provider": "ollama"` inside the preset is the clearest option.
 
 </details>
 
@@ -822,16 +900,21 @@ ollama run llama3.2
       "apiBase": "http://localhost:1234/v1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "lmStudio": {
       "provider": "lm_studio",
       "model": "local-model"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "lmStudio"
     }
   }
 }
 ```
 
-> **Note:** Set `apiKey` to `null` for LM Studio since it runs locally and doesn't require authentication. The model name should match what's shown in the LM Studio UI. `provider: "auto"` also works when `providers.lm_studio.apiBase` is configured, but setting `"provider": "lm_studio"` is the clearest option.
+> **Note:** Set `apiKey` to `null` for LM Studio since it runs locally and doesn't require authentication. The model name should match what's shown in the LM Studio UI. `provider: "auto"` also works when `providers.lm_studio.apiBase` is configured, but pinning `"provider": "lm_studio"` inside the preset is the clearest option.
 
 </details>
 
@@ -857,10 +940,15 @@ ollama run llama3.2
       "apiBase": "http://localhost:1337/v1"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "atomic": {
       "provider": "atomic_chat",
       "model": "qwen3-32b"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "atomic"
     }
   }
 }
@@ -868,7 +956,7 @@ ollama run llama3.2
 
 > **Note:** Replace `qwen3-32b` with the model ID from Atomic Chat. Set `apiKey` to `null` if your Atomic Chat server does not require a key. If it does, set `apiKey` (or the `ATOMIC_CHAT_API_KEY` environment variable) to the value Atomic Chat expects.
 
-> `provider: "auto"` also works when `providers.atomic_chat.apiBase` is configured, but setting `"provider": "atomic_chat"` is the clearest option.
+> `provider: "auto"` also works when `providers.atomic_chat.apiBase` is configured, but pinning `"provider": "atomic_chat"` inside the preset is the clearest option.
 
 </details>
 
@@ -934,10 +1022,15 @@ docker run -d \
       "apiBase": "http://localhost:8000/v3"
     }
   },
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "ovms": {
       "provider": "ovms",
       "model": "openai/gpt-oss-20b"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "ovms"
     }
   }
 }
@@ -971,12 +1064,18 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 }
 ```
 
-*Model:*
+*Model preset:*
 ```json
 {
+  "modelPresets": {
+    "vllm": {
+      "provider": "vllm",
+      "model": "meta-llama/Llama-3.1-8B-Instruct"
+    }
+  },
   "agents": {
     "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
+      "modelPreset": "vllm"
     }
   }
 }
