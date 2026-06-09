@@ -19,7 +19,7 @@ function Write-Info {
 
 function Fail {
     param([string]$Message)
-    Write-Error $Message
+    [Console]::Error.WriteLine("Error: $Message")
     exit 1
 }
 
