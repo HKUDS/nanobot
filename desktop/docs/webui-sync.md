@@ -44,7 +44,7 @@ The host loads `http://127.0.0.1:5173` in development, so React changes hot relo
    bun run make:mac:x64
    ```
 
-`electron-builder` packages `nanobot/web/dist` as `Resources/nanobot-webui`.
+   `electron-builder` packages `nanobot/web/dist` as `Resources/nanobot-webui`.
 
 ## Checklist
 
@@ -54,7 +54,7 @@ The host loads `http://127.0.0.1:5173` in development, so React changes hot relo
   rg -n "from ['\\\"]electron|desktop/src|nanobotDesktop" webui/src
   ```
 
-This command should print nothing.
+  This command should print nothing.
 
 - Native host behavior is implemented in `desktop/src`.
 - Provider, model, credential, and login setup stay in shared WebUI settings. Do not duplicate those flows in Electron-owned HTML.
