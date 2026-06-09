@@ -93,7 +93,7 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 |---|---|
 | 401, unauthorized, invalid API key | Key is missing, expired, pasted with whitespace, or under the wrong provider key. |
 | Model not found | The model ID belongs to a different provider or gateway. |
-| Provider cannot be inferred | Pin `agents.defaults.provider` instead of using `"auto"`. |
+| Provider cannot be inferred | Pin `modelPresets.<name>.provider` in the active preset instead of using `"auto"`. For legacy direct configs, pin `agents.defaults.provider`. |
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |

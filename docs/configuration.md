@@ -174,7 +174,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
-| `openrouter` | LLM (recommended, access to all models) + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
+| `openrouter` | LLM gateway for hosted model families + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
@@ -1005,7 +1005,7 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
   "modelPresets": {
     "fast": {
       "label": "Fast",
-      "model": "openai/gpt-4.1-mini",
+      "model": "gpt-4.1-mini",
       "provider": "openai",
       "maxTokens": 4096,
       "contextWindowTokens": 128000,
@@ -1063,7 +1063,7 @@ Preset fallback chain:
 {
   "modelPresets": {
     "fast": {
-      "model": "openai/gpt-4.1-mini",
+      "model": "gpt-4.1-mini",
       "provider": "openai",
       "maxTokens": 4096,
       "contextWindowTokens": 128000,

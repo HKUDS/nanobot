@@ -37,7 +37,7 @@ nanobot agent -m "Hello!"
 
 Environment variables set this way apply only to the current terminal. For long-running services such as systemd, Docker, LaunchAgent, or a remote shell, set the variables in that service environment before starting nanobot.
 
-## Recipe: OpenRouter First Setup
+## Recipe: OpenRouter Gateway
 
 Use this when you want one API key that can route many hosted model families.
 

@@ -13,7 +13,7 @@ You will see these words during setup:
 | Terminal | A text window where you paste commands and press Enter. |
 | Command | One line of text you run in the terminal. |
 | API key | A password-like token from an AI provider. Do not share it publicly. |
-| Provider | The service that owns the API key. This guide uses OpenRouter. |
+| Provider | The service that owns the API key. This guide uses OpenRouter as one example. |
 | Model | The AI model ID that the provider can run. |
 | Config file | The settings file nanobot reads when it starts. |
 | Wizard | An interactive terminal menu that edits the config file for you. |
@@ -40,7 +40,17 @@ py --version
 
 If `py` works but `python` does not, replace `python` with `py` in the commands below.
 
-## 2. Install nanobot
+## 2. Get an OpenRouter API Key
+
+This guide uses OpenRouter as one example provider. If you already have another supported provider, use that provider's key and model instead.
+
+1. Open [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Create or copy an API key.
+3. Keep the key private.
+
+The key usually starts with `sk-or-v1-`. Keep it nearby because the setup wizard will ask you to paste it.
+
+## 3. Install nanobot
 
 The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard.
 
@@ -94,19 +104,9 @@ If the terminal cannot find `nanobot`, use the module form:
 python -m nanobot --version
 ```
 
-## 3. Get an OpenRouter API Key
-
-OpenRouter is the simplest first provider for many users because one API key can access many model families.
-
-1. Open [openrouter.ai/keys](https://openrouter.ai/keys).
-2. Create or copy an API key.
-3. Keep the key private.
-
-The key usually starts with `sk-or-v1-`.
-
 ## 4. Run the Setup Wizard
 
-The one-command installer starts this for you. If you installed manually, run:
+The one-command installer starts this for you after installation. If you installed manually, run:
 
 ```bash
 nanobot onboard --wizard

@@ -9,7 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider you can call. OpenRouter is a simple first choice for global users because one key can route many model families.
+- One LLM provider you can call. The examples below use OpenRouter; any supported provider works when the key, provider name, and model ID match.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -149,7 +149,9 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 }
 ```
 
-The provider and model inside a preset should match. An OpenRouter key should be used with `"provider": "openrouter"` and a model ID OpenRouter can serve. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For Anthropic direct, OpenAI direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local models, see [`providers.md`](./providers.md).
+The provider and model inside a preset should match. In the OpenRouter example, use `"provider": "openrouter"` and a model ID OpenRouter can serve.
+
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For Anthropic direct, OpenAI direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local models, see [`providers.md`](./providers.md).
 
 **What about `apiBase` / base URL?**
 

@@ -1,6 +1,6 @@
 # Providers and Models
 
-Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the default OpenRouter example. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
+Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the OpenRouter example. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
 For every setup, answer three questions:
 
@@ -55,7 +55,7 @@ You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Ant
 
 ### OpenRouter Gateway
 
-Good first setup for global users and mixed model families.
+Gateway-style setup for model IDs served through OpenRouter.
 
 ```json
 {

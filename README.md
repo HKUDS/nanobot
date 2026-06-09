@@ -258,7 +258,7 @@ Use `nanobot onboard --wizard` if you prefer an interactive setup.
 
 `nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
 
-*Set your API key* (e.g. [OpenRouter](https://openrouter.ai/keys), recommended for global users):
+*Set your API key* (the example below uses [OpenRouter](https://openrouter.ai/keys)):
 
 ```json
 {
