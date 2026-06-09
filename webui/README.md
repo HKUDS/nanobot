@@ -6,9 +6,27 @@ For the project overview, install guide, and general docs map, see the root [`RE
 
 ## Just want to use the WebUI?
 
-If you installed nanobot via `python -m pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. First prove the provider path with `nanobot agent -m "Hello!"`, then enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md) for the 3-step setup. You do **not** need anything in this directory.
+If you installed nanobot via `python -m pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. You do **not** need Node.js, Bun, Vite, or anything in this directory unless you are changing the WebUI source code.
 
-Merge the WebSocket snippet into your existing config instead of replacing the whole file. By default, the browser UI opens on `http://127.0.0.1:8765`; the gateway's `18790` port is only the health endpoint. For setup failures, use [`docs/troubleshooting.md`](../docs/troubleshooting.md#webui-problems).
+First prove the provider path:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+Then merge this WebSocket snippet into your existing `~/.nanobot/config.json` instead of replacing the whole file:
+
+```json
+{ "channels": { "websocket": { "enabled": true } } }
+```
+
+Start the gateway:
+
+```bash
+nanobot gateway
+```
+
+Open [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The gateway's `18790` port is only the health endpoint, not the browser UI. For setup failures, use [`docs/troubleshooting.md`](../docs/troubleshooting.md#webui-problems).
 
 This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
 
