@@ -150,7 +150,7 @@ Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter mo
 
 ### Custom OpenAI-Compatible Endpoint
 
-Use `custom` when the endpoint is OpenAI-compatible but not represented by a named provider.
+The `custom` provider fits OpenAI-compatible endpoints that are not represented by a named provider.
 
 ```json
 {

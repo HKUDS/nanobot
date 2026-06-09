@@ -1,6 +1,6 @@
 # Provider Cookbook
 
-Use this page when you know what you want to connect and need a pasteable setup. Each recipe shows what to set, what to run, and what a failure usually means.
+This page is for cases where you already know what you want to connect and need a pasteable setup. Each recipe shows what to set, what to run, and what a failure usually means.
 
 If this is your first install and terminal commands are new to you, start with [`start-without-technical-background.md`](./start-without-technical-background.md). If you want the field-by-field explanation, read [`providers.md`](./providers.md) and then [`configuration.md#providers`](./configuration.md#providers).
 
@@ -43,7 +43,7 @@ Environment variables set this way apply only to the current terminal. For long-
 
 ## Recipe: OpenRouter Gateway
 
-Use this when you want one API key that can route many hosted model families.
+This recipe applies when one API key routes many hosted model families.
 
 ```json
 {
@@ -81,7 +81,7 @@ If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is v
 
 ## Recipe: OpenAI Direct
 
-Use this when you have an OpenAI API key and want to call OpenAI directly instead of through a gateway.
+This recipe applies when you have an OpenAI API key and want to call OpenAI directly instead of through a gateway.
 
 ```json
 {
@@ -118,7 +118,7 @@ If your shell cannot use inline environment variables, set `OPENAI_API_KEY` firs
 
 ## Recipe: Anthropic Direct
 
-Use this when your key comes from Anthropic and your model name is an Anthropic model ID, not an OpenRouter model path.
+This recipe applies when your key comes from Anthropic and your model name is an Anthropic model ID, not an OpenRouter model path.
 
 ```json
 {
@@ -155,7 +155,7 @@ If you copied a model name such as `anthropic/claude-sonnet-4-5`, that is a gate
 
 ## Recipe: Custom OpenAI-Compatible Provider
 
-Use this for an OpenAI-compatible service that is not a named nanobot provider.
+This recipe applies to an OpenAI-compatible service that is not a named nanobot provider.
 
 ```json
 {
@@ -194,7 +194,7 @@ nanobot agent -m "Hello!"
 
 ## Recipe: Ollama Local Model
 
-Use this when Ollama is already installed and the model has been pulled locally.
+This recipe applies when Ollama is already installed and the model has been pulled locally.
 
 ```bash
 ollama serve
@@ -237,7 +237,7 @@ If you see `connection refused`, Ollama is not running or `apiBase` points to th
 
 ## Recipe: vLLM or LM Studio
 
-Use this when a local server exposes an OpenAI-compatible `/v1` API.
+This recipe applies when a local server exposes an OpenAI-compatible `/v1` API.
 
 ```json
 {
@@ -295,7 +295,7 @@ The config key can be `lmStudio` or `lm_studio`, but the preset provider should 
 
 ## Recipe: Fallback Presets
 
-Use this when one provider sometimes rate-limits, one model is expensive, or you want a local backup.
+This recipe applies when one provider sometimes rate-limits, one model is expensive, or you want a local backup.
 
 ```json
 {
@@ -340,7 +340,7 @@ Keep fallback candidates realistic. If the local fallback has a smaller context 
 
 ## Recipe: Langfuse Tracing
 
-Use this when the agent works and you want observability for OpenAI-compatible provider calls.
+This recipe applies after the agent works and you want observability for OpenAI-compatible provider calls.
 
 Install the optional package in the same Python environment that runs nanobot:
 

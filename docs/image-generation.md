@@ -6,6 +6,8 @@ The feature is disabled by default. Enable it in `~/.nanobot/config.json`, confi
 
 ## Quick Setup
 
+This snippet uses the current built-in image-generation default so the JSON has concrete names. It is not a provider recommendation; replace `provider` and `model` with any supported image provider and model you intend to use.
+
 ```json
 {
   "providers": {
@@ -46,7 +48,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Current built-in image provider default. Supported values: `openrouter`, `custom`, `aihubmix`, `minimax`, `gemini`, `ollama`, `stepfun`, `zhipu` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -86,7 +88,7 @@ Use a model that supports image generation and image editing if you want referen
 
 ### Custom (OpenAI-compatible)
 
-Use the `custom` provider for services that implement the synchronous OpenAI Images API:
+The `custom` image provider fits services that implement the synchronous OpenAI Images API:
 
 ```text
 POST /v1/images/generations
