@@ -14,6 +14,12 @@ First prove the provider path:
 nanobot agent -m "Hello!"
 ```
 
+If the shell cannot find `nanobot`, use the module form from the same Python environment:
+
+```bash
+python -m nanobot agent -m "Hello!"
+```
+
 Then merge this WebSocket snippet into your existing `~/.nanobot/config.json` instead of replacing the whole file:
 
 ```json
@@ -25,6 +31,8 @@ Start the gateway:
 ```bash
 nanobot gateway
 ```
+
+Leave this terminal running while you use the WebUI. Closing it stops the browser UI and WebSocket connection.
 
 Open [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The gateway's `18790` port is only the health endpoint, not the browser UI. For setup failures, use [`docs/troubleshooting.md`](../docs/troubleshooting.md#webui-problems).
 

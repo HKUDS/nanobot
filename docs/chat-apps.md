@@ -12,6 +12,32 @@ If that fails, fix installation, config, provider, or model setup first with [`q
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`.
 
+## Common Setup Pattern
+
+Every chat app uses the same shape:
+
+1. Create or prepare the bot/account in the chat platform.
+2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
+3. Merge that platform's JSON snippet into `~/.nanobot/config.json`.
+4. Keep access control narrow at first with `allowFrom` or the platform-specific allow list.
+5. Check that nanobot can see the configured channel:
+
+```bash
+nanobot channels status
+```
+
+6. Start the gateway and leave that terminal running:
+
+```bash
+nanobot gateway
+```
+
+7. Send a message from the allowed account. In group chats, mention the bot unless that channel's `groupPolicy` is explicitly set to `"open"`.
+
+If `nanobot channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one nanobot is reading. If the channel is enabled but messages do not arrive, run `nanobot gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
+
+> `["*"]` allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
+
 | Channel | What you need |
 |---------|---------------|
 | **Telegram** | Bot token from @BotFather |
@@ -424,7 +450,7 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 
 **1. Set up Napcat**
 
-- Install and log into Napcat, then enable a **Forward WebSocket** server. Recommends: [official napcat docker tutorial](https://github.com/NapNeko/NapCat-Docker)
+- Install and log into Napcat, then enable a **Forward WebSocket** server. See the [official Napcat Docker tutorial](https://github.com/NapNeko/NapCat-Docker).
 - In the webui, follow "网络配置" -> "新建" -> "Websocket 服务器" to create a forward websocket server. By default, the URL is `ws://127.0.0.1:3001`
 - Copy the forward websocket server's token
 - (Optional) In the webui, follow "系统配置" -> "登陆配置" -> "快速登录QQ" to automatically login after restarts
