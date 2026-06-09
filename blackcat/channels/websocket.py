@@ -28,7 +28,11 @@ from blackcat.security.workspace_access import (
     WorkspaceScopeError,
 )
 from blackcat.session.goal_state import goal_state_ws_blob
-from blackcat.session.webui_turns import websocket_turn_wall_started_at
+from blackcat.session.webui_turns import (
+    WEBUI_TITLE_METADATA_KEY,
+    clean_generated_title,
+    websocket_turn_wall_started_at,
+)
 from blackcat.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
@@ -46,6 +50,7 @@ from blackcat.webui.http_utils import (
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from blackcat.webui.transcript import (
+    append_fork_marker,
     delete_webui_transcript,
     fork_transcript_before_user_index,
     write_session_messages_as_transcript,
@@ -709,6 +714,13 @@ class WebSocketChannel(BaseChannel):
                 )
                 if not transcript_ok:
                     write_session_messages_as_transcript(target_key, forked.messages)
+                append_fork_marker(target_key)
+                fork_title = clean_generated_title(
+                    envelope.get("title") if isinstance(envelope.get("title"), str) else None,
+                )
+                if fork_title:
+                    forked.metadata[WEBUI_TITLE_METADATA_KEY] = fork_title
+                    self.gateway.session_manager.save(forked, fsync=True)
             except Exception as exc:
                 delete_webui_transcript(target_key)
                 self.gateway.session_manager.delete_session(target_key)

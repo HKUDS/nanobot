@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from blackcat.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
+    append_fork_marker,
     append_transcript_object,
     build_webui_thread_response,
     fork_transcript_before_user_index,
@@ -45,6 +46,33 @@ def test_fork_transcript_before_user_index_copies_only_prefix(tmp_path, monkeypa
     assert "round3 must not appear" not in "\n".join(str(line.get("text")) for line in lines)
 
 
+def test_fork_transcript_from_middle_assistant_reply_keeps_selected_turn(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    source = "websocket:source"
+    for ev in (
+        {"event": "user", "chat_id": "source", "text": "round1"},
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+        {"event": "user", "chat_id": "source", "text": "round2"},
+        {"event": "message", "chat_id": "source", "text": "answer2"},
+        {"event": "user", "chat_id": "source", "text": "round3 must not appear"},
+        {"event": "message", "chat_id": "source", "text": "answer3 must not appear"},
+    ):
+        append_transcript_object(source, ev)
+
+    ok = fork_transcript_before_user_index(source, "websocket:fork", 2)
+
+    assert ok is True
+    assert [line.get("text") for line in read_transcript_lines("websocket:fork")] == [
+        "round1",
+        "answer1",
+        "round2",
+        "answer2",
+    ]
+
+
 def test_fork_transcript_rejects_out_of_range_user_index(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     source = "websocket:source"
@@ -70,6 +98,58 @@ def test_fork_transcript_allows_index_equal_to_user_count(tmp_path, monkeypatch)
         "round1",
         "answer1",
     ]
+
+
+def test_build_response_reports_fork_boundary_from_marker(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:fork"
+    for ev in (
+        {"event": "user", "chat_id": "fork", "text": "round1"},
+        {"event": "message", "chat_id": "fork", "text": "answer1"},
+    ):
+        append_transcript_object(key, ev)
+    append_fork_marker(key)
+    append_transcript_object(key, {"event": "user", "chat_id": "fork", "text": "new branch"})
+
+    out = build_webui_thread_response(key)
+
+    assert out is not None
+    assert [m["content"] for m in out["messages"]] == ["round1", "answer1", "new branch"]
+    assert out["fork_boundary_message_count"] == 2
+
+
+def test_nested_fork_drops_inherited_fork_marker(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    source = "websocket:source"
+    for ev in (
+        {"event": "user", "chat_id": "source", "text": "round1"},
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+    ):
+        append_transcript_object(source, ev)
+    append_fork_marker(source)
+    for ev in (
+        {"event": "user", "chat_id": "source", "text": "round2"},
+        {"event": "message", "chat_id": "source", "text": "answer2"},
+    ):
+        append_transcript_object(source, ev)
+
+    ok = fork_transcript_before_user_index(source, "websocket:nested", 2)
+    append_fork_marker("websocket:nested")
+
+    lines = read_transcript_lines("websocket:nested")
+    out = build_webui_thread_response("websocket:nested")
+
+    assert ok is True
+    assert [line.get("event") for line in lines] == [
+        "user",
+        "message",
+        "user",
+        "message",
+        "fork_marker",
+    ]
+    assert out is not None
+    assert [m["content"] for m in out["messages"]] == ["round1", "answer1", "round2", "answer2"]
+    assert out["fork_boundary_message_count"] == 4
 
 
 def test_write_session_messages_as_transcript_builds_canonical_prefix(

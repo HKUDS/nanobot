@@ -2422,7 +2422,12 @@ async def test_fork_chat_copies_only_prefix_session_and_transcript(
     await channel._dispatch_envelope(
         conn,
         "webui-client",
-        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
+        {
+            "type": "fork_chat",
+            "source_chat_id": "source",
+            "before_user_index": 1,
+            "title": "Fork: Old title",
+        },
     )
 
     sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
@@ -2430,8 +2435,10 @@ async def test_fork_chat_copies_only_prefix_session_and_transcript(
     fork_id = attached["chat_id"]
     saved = sessions.read_session_file(f"websocket:{fork_id}")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+    assert saved["metadata"]["title"] == "Fork: Old title"
     fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None, None]
+    assert fork_lines[-1]["event"] == "fork_marker"
     assert all(line.get("chat_id") == fork_id for line in fork_lines)
     assert "round3 must not appear" not in json.dumps(saved, ensure_ascii=False)
     bus.publish_inbound.assert_not_awaited()
@@ -2477,7 +2484,8 @@ async def test_fork_chat_falls_back_to_session_prefix_when_transcript_lacks_user
     saved = sessions.read_session_file(f"websocket:{fork_id}")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
     fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1"]
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
+    assert fork_lines[-1]["event"] == "fork_marker"
     assert "round3 must not appear" not in json.dumps(fork_lines, ensure_ascii=False)
     bus.publish_inbound.assert_not_awaited()
 
@@ -2520,7 +2528,8 @@ async def test_fork_chat_allows_index_equal_to_user_count(
     saved = sessions.read_session_file(f"websocket:{fork_id}")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
     fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1"]
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
+    assert fork_lines[-1]["event"] == "fork_marker"
     bus.publish_inbound.assert_not_awaited()
 
 
