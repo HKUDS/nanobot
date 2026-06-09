@@ -220,6 +220,40 @@ The wizard creates or updates:
 | `~/.nanobot/config.json` | Settings file. |
 | `~/.nanobot/workspace/` | Working folder for memory, sessions, and generated files. |
 
+## How to Merge JSON Snippets
+
+Most docs examples are snippets, not whole files. Your `config.json` has one outer `{ ... }`. Add new top-level sections such as `providers`, `modelPresets`, `agents`, or `channels` inside that same outer object.
+
+Do not paste two separate JSON objects into one file:
+
+```text
+{
+  "providers": { "...": "..." }
+}
+{
+  "channels": { "...": "..." }
+}
+```
+
+Merge them into one object:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-your-key-here"
+    }
+  },
+  "channels": {
+    "websocket": {
+      "enabled": true
+    }
+  }
+}
+```
+
+Notice the comma after the `providers` block. JSON needs commas between sibling sections, but not after the last section. If this feels hard, use `nanobot onboard --wizard` whenever possible.
+
 ## 6. Manual Config Fallback
 
 Use this only if the wizard is unavailable or you prefer opening the file yourself.
