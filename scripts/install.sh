@@ -16,6 +16,16 @@ fail() {
   exit 1
 }
 
+install_failure_hint() {
+  printf '%s\n' "Error: pip could not install nanobot from $install_source." >&2
+  printf '%s\n' "If pip mentioned externally-managed-environment, install in a virtual environment or use uv/pipx." >&2
+  printf '%s\n' "You can also run manually:" >&2
+  printf '  %s\n' "$python_bin -m pip install --upgrade $install_target" >&2
+  printf '%s\n' "Then start setup with:" >&2
+  printf '  %s\n' "$python_bin -m nanobot onboard --wizard" >&2
+  exit 1
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [--dev] [--dry-run]
@@ -88,6 +98,7 @@ fi
 if [ "$dry_run" = "1" ]; then
   info "Dry run: would install or upgrade nanobot from $install_source."
   info "Dry run: would run: $python_bin -m pip install --upgrade $install_target"
+  info "Dry run: if that fails because system site-packages are not writable, would retry: $python_bin -m pip install --user --upgrade $install_target"
   if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
     info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
   else
@@ -98,7 +109,10 @@ if [ "$dry_run" = "1" ]; then
 fi
 
 info "Installing or upgrading nanobot from $install_source..."
-"$python_bin" -m pip install --upgrade "$install_target"
+if ! "$python_bin" -m pip install --upgrade "$install_target"; then
+  info "Install failed. Retrying as a user install..."
+  "$python_bin" -m pip install --user --upgrade "$install_target" || install_failure_hint
+fi
 
 info "Installed nanobot:"
 "$python_bin" -m nanobot --version

@@ -23,6 +23,16 @@ function Fail {
     exit 1
 }
 
+function Show-InstallFailureHint {
+    [Console]::Error.WriteLine("Error: pip could not install nanobot from $InstallSource.")
+    [Console]::Error.WriteLine("If pip mentioned externally-managed-environment, install in a virtual environment or use uv/pipx.")
+    [Console]::Error.WriteLine("You can also run manually:")
+    [Console]::Error.WriteLine("  $Python -m pip install --upgrade $InstallTarget")
+    [Console]::Error.WriteLine("Then start setup with:")
+    [Console]::Error.WriteLine("  $Python -m nanobot onboard --wizard")
+    exit 1
+}
+
 function Show-Usage {
     Write-Host "Usage: install.ps1 [-Dev|--dev] [-DryRun|--dry-run]"
     Write-Host ""
@@ -113,6 +123,7 @@ if ($LASTEXITCODE -ne 0) {
 if ($DryRun) {
     Write-Info "Dry run: would install or upgrade nanobot from $InstallSource."
     Write-Info "Dry run: would run: $Python -m pip install --upgrade $InstallTarget"
+    Write-Info "Dry run: if that fails because system site-packages are not writable, would retry: $Python -m pip install --user --upgrade $InstallTarget"
     if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
         Write-Info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
     } else {
@@ -125,7 +136,11 @@ if ($DryRun) {
 Write-Info "Installing or upgrading nanobot from $InstallSource..."
 & $Python -m pip install --upgrade $InstallTarget
 if ($LASTEXITCODE -ne 0) {
-    Fail "Failed to install nanobot from $InstallSource."
+    Write-Info "Install failed. Retrying as a user install..."
+    & $Python -m pip install --user --upgrade $InstallTarget
+    if ($LASTEXITCODE -ne 0) {
+        Show-InstallFailureHint
+    }
 }
 
 Write-Info "Installed nanobot:"
