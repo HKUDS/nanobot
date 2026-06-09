@@ -1,8 +1,17 @@
-# nanobot webui
+# nanobot WebUI
 
-The browser front-end for the nanobot gateway. It is built with Vite + React 18 + TypeScript + Tailwind 3 + shadcn/ui, talks to the gateway over the WebSocket multiplex protocol, and reads session metadata from the embedded REST surface on the same port.
+The WebUI is the browser workbench served by `nanobot gateway`. If you installed `nanobot-ai` from PyPI, the WebUI bundle is already included; this `webui/` source tree is only needed when you are changing the frontend.
 
 For the project overview, install guide, and general docs map, see the root [`README.md`](../README.md) and [`docs/README.md`](../docs/README.md).
+
+## Pick a Path
+
+| Goal | Start with | Opens at |
+|---|---|---|
+| Use the bundled browser UI | [Just want to use the WebUI?](#just-want-to-use-the-webui) | `http://127.0.0.1:8765` |
+| Use the WebUI from another device | [Access from another device (LAN)](#access-from-another-device-lan) | `http://<your-ip>:8765` |
+| Change WebUI source code | [Develop the WebUI (Vite HMR)](#develop-the-webui-vite-hmr) | `http://127.0.0.1:5173` |
+| Debug setup failures | [`docs/troubleshooting.md#webui-problems`](../docs/troubleshooting.md#webui-problems) | Diagnosis order and common fixes |
 
 ## Just want to use the WebUI?
 
@@ -26,6 +35,8 @@ Then merge this WebSocket snippet into your existing `~/.nanobot/config.json` in
 { "channels": { "websocket": { "enabled": true } } }
 ```
 
+If you are new to JSON snippets, see [`docs/start-without-technical-background.md#how-to-merge-json-snippets`](../docs/start-without-technical-background.md#how-to-merge-json-snippets).
+
 Start the gateway:
 
 ```bash
@@ -36,7 +47,7 @@ Leave this terminal running while you use the WebUI. Closing it stops the browse
 
 Open [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The gateway's `18790` port is only the health endpoint, not the browser UI. For setup failures, use [`docs/troubleshooting.md`](../docs/troubleshooting.md#webui-problems).
 
-This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
+This `webui/` tree is for people **changing the WebUI source code**. It is built with Vite + React 18 + TypeScript + Tailwind 3 + shadcn/ui, talks to the gateway over the WebSocket multiplex protocol, and reads session metadata from the embedded REST surface on the same port.
 
 ## Layout
 
