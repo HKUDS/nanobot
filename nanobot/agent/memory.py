@@ -743,6 +743,32 @@ class Consolidator:
         except Exception:
             return truncate_text(text, budget * 4)
 
+    _TOOL_RESULT_MAX_CHARS = 2_000  # ~500 tokens, enough context without noise
+
+    @staticmethod
+    def _compress_tool_results(messages: list[dict]) -> list[dict]:
+        """Truncate long tool results so they don't dominate the archive LLM's input.
+
+        A single file-read or shell-exec result can easily be 10k+ characters,
+        drowning out the surrounding conversation turns.  We keep the first
+        *_TOOL_RESULT_MAX_CHARS* characters as a preview, then append a marker.
+        """
+        limit = Consolidator._TOOL_RESULT_MAX_CHARS
+        out: list[dict] = []
+        for msg in messages:
+            if msg.get("role") != "tool":
+                out.append(msg)
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str) or len(content) <= limit:
+                out.append(msg)
+                continue
+            out.append({
+                **msg,
+                "content": content[:limit] + f"\n…(compressed {len(content) - limit} chars)",
+            })
+        return out
+
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -751,6 +777,7 @@ class Consolidator:
         if not messages:
             return None
         try:
+            messages = self._compress_tool_results(messages)
             formatted = MemoryStore._format_messages(messages)
             formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
