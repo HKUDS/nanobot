@@ -172,7 +172,6 @@ interface ThreadComposerProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
-  externalError?: string | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -766,7 +765,6 @@ export function ThreadComposer({
   workspaceError = null,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
-  externalError = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1148,10 +1146,6 @@ export function ThreadComposer({
       el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     });
   }, [clear, pendingQueueKey]);
-
-  useEffect(() => {
-    if (externalError) setInlineError(externalError);
-  }, [externalError]);
 
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();

@@ -76,22 +76,6 @@ describe("MessageBubble", () => {
 
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
-  });
-
-  it("does not render fork control for user messages", () => {
-    const onForkFromHere = vi.fn();
-    const message: UIMessage = {
-      id: "u-fork",
-      role: "user",
-      content: "continue from here",
-      createdAt: new Date("2026-06-06T09:04:00Z").getTime(),
-    };
-
-    render(<MessageBubble message={message} onForkFromHere={onForkFromHere} />);
-
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 

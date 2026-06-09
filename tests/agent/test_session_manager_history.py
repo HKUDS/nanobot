@@ -454,34 +454,6 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
 
 
-def test_fork_session_from_middle_assistant_reply_keeps_selected_turn(tmp_path):
-    manager = SessionManager(tmp_path)
-    source = manager.get_or_create("websocket:source")
-    source.add_message("user", "round1")
-    source.add_message("assistant", "answer1")
-    source.add_message("user", "round2")
-    source.add_message("assistant", "answer2")
-    source.add_message("user", "round3 must not appear")
-    source.add_message("assistant", "answer3 must not appear")
-    manager.save(source)
-
-    forked = manager.fork_session_before_user_index(
-        "websocket:source",
-        "websocket:fork",
-        2,
-    )
-
-    assert forked is not None
-    assert [m["content"] for m in forked.messages] == [
-        "round1",
-        "answer1",
-        "round2",
-        "answer2",
-    ]
-    saved = manager.read_session_file("websocket:fork")
-    assert "round3 must not appear" not in str(saved)
-
-
 def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
     manager = SessionManager(tmp_path)
     source = manager.get_or_create("websocket:source")

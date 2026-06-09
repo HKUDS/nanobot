@@ -811,10 +811,7 @@
     },
     "scrollToBottom": "Desplazarse al final",
     "loadEarlier": "Cargar mensajes anteriores",
-    "fork": {
-      "failed": "No se pudo bifurcar este chat. Inténtalo de nuevo.",
-      "fromHistory": "Bifurcado desde el historial"
-    },
+    "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {
       "open": "Abrir navegador de prompts",
       "title": "Prompts",
@@ -840,8 +837,6 @@
     "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
     "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
     "imageAttachment": "Imagen adjunta",
-    "copyMessage": "Copiar",
-    "copiedMessage": "Copiado",
     "forkFromHere": "Bifurcar",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",

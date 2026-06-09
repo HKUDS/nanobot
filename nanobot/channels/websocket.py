@@ -696,22 +696,23 @@ class WebSocketChannel(BaseChannel):
                 if forked is None:
                     await self._send_event(connection, "error", detail="invalid fork source or index")
                     return
+                fork_id, fork_key = forked
             except Exception as exc:
                 self.logger.warning("fork_chat failed: {}", exc)
                 await self._send_event(connection, "error", detail="fork_chat_failed")
                 return
 
-            scope = self._workspaces.scope_for_session_key(forked.session_key)
-            self._attach(connection, forked.chat_id)
-            await self._send_event(connection, "attached", chat_id=forked.chat_id)
+            scope = self._workspaces.scope_for_session_key(fork_key)
+            self._attach(connection, fork_id)
+            await self._send_event(connection, "attached", chat_id=fork_id)
             await self._send_event(
                 connection,
                 "session_updated",
-                chat_id=forked.chat_id,
+                chat_id=fork_id,
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
-            await self._hydrate_after_subscribe(forked.chat_id)
+            await self._hydrate_after_subscribe(fork_id)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
