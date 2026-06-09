@@ -720,6 +720,36 @@ async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering() -> None:
+    """Final streamed replies must not split Telegram HTML inside <pre><code>."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    raw_text = "```python\n" + ("print(\"line\")\n" * 450) + "```\nDone"
+    channel._stream_bufs["123"] = _StreamBuf(text=raw_text, message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    html_chunks = [
+        channel._app.bot.edit_message_text.call_args.kwargs.get("text", ""),
+        *[
+            call.kwargs.get("text", "")
+            for call in channel._app.bot.send_message.call_args_list
+        ],
+    ]
+    assert len(html_chunks) > 1
+    for html in html_chunks:
+        assert len(html) <= 4096
+        assert html.count("<pre><code>") == html.count("</code></pre>")
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_send_delta_new_stream_id_replaces_stale_buffer() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),

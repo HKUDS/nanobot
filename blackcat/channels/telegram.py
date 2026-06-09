@@ -42,9 +42,9 @@ from blackcat.utils.formatting import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 # Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
-# safety margin for mid-stream edits (plain text).  For _stream_end, we
-# convert to HTML first and then split at the true 4096-char boundary so
-# the final rendered message never overflows.
+# safety margin for mid-stream edits (plain text).  For _stream_end, we split
+# raw markdown into chunks whose rendered HTML fits Telegram's true 4096-char
+# boundary so the final rendered message never overflows.
 TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
@@ -289,6 +289,32 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
+
+
+def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
+    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
+    chunks: list[str] = []
+    pending = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
+    while pending:
+        chunk = pending.pop(0)
+        html = _markdown_to_telegram_html(chunk)
+        if len(html) <= max_html_len:
+            chunks.append(html)
+            continue
+
+        # Markdown can expand when rendered as HTML (tags/entities). Re-split
+        # the raw markdown with a smaller budget instead of slicing HTML tags.
+        next_limit = max(1, int(len(chunk) * max_html_len / len(html)) - 8)
+        next_limit = min(next_limit, len(chunk) - 1)
+        if next_limit <= 0:
+            chunks.extend(split_message(html, max_html_len))
+            continue
+        parts = _split_telegram_markdown(chunk, next_limit)
+        if len(parts) == 1 and parts[0] == chunk:
+            chunks.extend(split_message(html, max_html_len))
+            continue
+        pending = parts + pending
+    return chunks
 
 
 _SEND_MAX_RETRIES = 3
@@ -810,14 +836,9 @@ class TelegramChannel(BaseChannel):
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
-            html = _markdown_to_telegram_html(raw_text)
-            if len(html) <= TELEGRAM_HTML_MAX_LEN:
-                primary_html = html
-                extra_html_chunks = []
-            else:
-                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
-                primary_html = html_chunks[0]
-                extra_html_chunks = html_chunks[1:]
+            html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
+            primary_html = html_chunks[0]
+            extra_html_chunks = html_chunks[1:]
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
