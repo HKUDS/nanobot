@@ -63,10 +63,10 @@ function ForkArrowIcon({ className }: { className?: string }) {
       className={className}
       aria-hidden
     >
-      <path d="M5 19c8 0 8-14 16-14" />
-      <path d="M14 5h7v7" />
-      <path d="M5 5c5 0 7 3 9 7" />
-      <path d="M14 12h5v-5" />
+      <path d="M16 3h5v5" />
+      <path d="M8 3H3v5" />
+      <path d="m21 3-7.536 7.536A5 5 0 0 0 12 14.07V21" />
+      <path d="m3 3 7.536 7.536A5 5 0 0 1 12 14.07V15" />
     </svg>
   );
 }
