@@ -368,22 +368,6 @@ def maybe_persist_tool_result(
     )
 
 
-def _fence_line(content: str, fence_pos: int) -> str:
-    line_end = content.find("\n", fence_pos)
-    if line_end < 0:
-        return content[fence_pos:]
-    return content[fence_pos:line_end]
-
-
-def _split_inside_fenced_code_block(content: str, pos: int) -> tuple[bool, int, str]:
-    if content[:pos].count("```") % 2 == 0:
-        return False, -1, ""
-    opening = content.rfind("```", 0, pos)
-    if opening < 0:
-        return True, -1, "```"
-    return True, opening, _fence_line(content, opening)
-
-
 def split_message(content: str, max_len: int = 2000) -> list[str]:
     """
     Split content into chunks within max_len, preferring line breaks.
@@ -411,36 +395,6 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
             pos = cut.rfind(" ")
         if pos <= 0:
             pos = max_len
-        inside_code, opening, fence = _split_inside_fenced_code_block(content, pos)
-        if inside_code:
-            if opening > 0:
-                pos = opening
-            else:
-                closing = "\n```"
-                min_code_pos = len(fence)
-                if content.startswith(fence + "\n"):
-                    min_code_pos += 1
-                if pos < min_code_pos and min_code_pos + len(closing) > max_len:
-                    chunks.append(content[:max_len])
-                    content = content[max_len:].lstrip()
-                    continue
-                if pos + len(closing) > max_len:
-                    budget = max_len - len(closing)
-                    if budget > 0:
-                        recut = content[:budget]
-                        adjusted = recut.rfind("\n")
-                        if adjusted <= 0:
-                            adjusted = recut.rfind(" ")
-                        pos = adjusted if adjusted > 0 else budget
-                    else:
-                        closing = "```"
-                        pos = max_len - len(closing)
-                chunks.append(content[:pos] + closing)
-                remainder = content[pos:]
-                if remainder.startswith("\n"):
-                    remainder = remainder[1:]
-                content = f"{fence}\n{remainder}"
-                continue
         chunks.append(content[:pos])
         content = content[pos:].lstrip()
     return chunks

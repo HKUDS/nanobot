@@ -17,6 +17,8 @@ from blackcat.channels.telegram import (
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
     TelegramChannel,
     TelegramConfig,
+    _markdown_to_telegram_html,
+    _split_telegram_markdown,
     _StreamBuf,
 )
 
@@ -177,6 +179,67 @@ def _make_telegram_update(
         message_id=1,
     )
     return SimpleNamespace(message=message, effective_user=user)
+
+
+def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
+    for chunk in chunks:
+        html = _markdown_to_telegram_html(chunk)
+        assert html.count("<pre><code>") == html.count("</code></pre>")
+
+
+def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
+    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=35)
+
+    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[1].startswith("```python\nprint('a')")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_long_code_block_closes_and_reopens() -> None:
+    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    assert chunks[0].endswith("\n```")
+    assert chunks[1].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_multiple_code_blocks() -> None:
+    content = (
+        "First\n"
+        "```js\n"
+        "one();\n"
+        "```\n"
+        "Middle paragraph here\n"
+        "```py\n"
+        "two()\n"
+        "three()\n"
+        "```\n"
+        "End"
+    )
+
+    chunks = _split_telegram_markdown(content, max_len=55)
+
+    assert chunks[0].endswith("Middle paragraph here\n")
+    assert chunks[1].startswith("```py\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
+    content = "\n```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert chunks
+    assert all(chunk.strip() for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
 
 
 @pytest.mark.asyncio
