@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import ProviderSpec, find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -927,6 +927,49 @@ def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
     assert kwargs["max_completion_tokens"] == 4096
     assert "max_tokens" not in kwargs
     assert "temperature" not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected_key"),
+    [
+        ("gpt-5.4", "max_completion_tokens"),
+        ("o3-mini", "max_completion_tokens"),
+        ("gpt-4", "max_tokens"),
+    ],
+)
+def test_openai_compat_build_kwargs_max_completion_model_name_fallback(
+    model_name: str,
+    expected_key: str,
+) -> None:
+    spec = ProviderSpec(
+        name="test_gateway",
+        keywords=(),
+        env_key="TEST_API_KEY",
+        is_gateway=True,
+    )
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model=model_name,
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model=model_name,
+        max_tokens=2048,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    other_key = (
+        "max_tokens" if expected_key == "max_completion_tokens" else "max_completion_tokens"
+    )
+    assert expected_key in kwargs, kwargs
+    assert kwargs[expected_key] == 2048
+    assert other_key not in kwargs
 
 
 def test_openai_compat_preserves_message_level_reasoning_fields() -> None:

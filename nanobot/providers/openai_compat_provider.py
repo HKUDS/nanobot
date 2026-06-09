@@ -630,7 +630,13 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
-        if spec and getattr(spec, "supports_max_completion_tokens", False):
+        wants_max_completion = (
+            spec and getattr(spec, "supports_max_completion_tokens", False)
+        ) or any(
+            token in model_name.lower()
+            for token in ("gpt-5", "o1", "o3", "o4")
+        )
+        if wants_max_completion:
             kwargs["max_completion_tokens"] = max(1, max_tokens)
         else:
             kwargs["max_tokens"] = max(1, max_tokens)
