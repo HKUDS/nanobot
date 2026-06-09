@@ -28,16 +28,13 @@ from blackcat.security.workspace_access import (
     WorkspaceScopeError,
 )
 from blackcat.session.goal_state import goal_state_ws_blob
-from blackcat.session.webui_turns import (
-    WEBUI_TITLE_METADATA_KEY,
-    clean_generated_title,
-    websocket_turn_wall_started_at,
-)
+from blackcat.session.webui_turns import websocket_turn_wall_started_at
 from blackcat.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
 from blackcat.webui.cli_apps_api import normalize_cli_app_mentions
+from blackcat.webui.forking import create_webui_chat_fork
 from blackcat.webui.gateway_services import GatewayServices
 from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -49,12 +46,6 @@ from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
-from blackcat.webui.transcript import (
-    append_fork_marker,
-    delete_webui_transcript,
-    fork_transcript_before_user_index,
-    write_session_messages_as_transcript,
-)
 from blackcat.webui.transcription_ws import webui_transcription_event
 from blackcat.webui.websocket_logging import websockets_server_logger
 
@@ -695,50 +686,32 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail="session_manager_unavailable")
                 return
 
-            new_id = str(uuid.uuid4())
-            source_key = f"websocket:{source_chat_id}"
-            target_key = f"websocket:{new_id}"
             try:
-                forked = self.gateway.session_manager.fork_session_before_user_index(
-                    source_key,
-                    target_key,
-                    raw_index,
+                forked = create_webui_chat_fork(
+                    self.gateway.session_manager,
+                    source_chat_id=source_chat_id,
+                    before_user_index=raw_index,
+                    title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
                 )
                 if forked is None:
                     await self._send_event(connection, "error", detail="invalid fork source or index")
                     return
-                transcript_ok = fork_transcript_before_user_index(
-                    source_key,
-                    target_key,
-                    raw_index,
-                )
-                if not transcript_ok:
-                    write_session_messages_as_transcript(target_key, forked.messages)
-                append_fork_marker(target_key)
-                fork_title = clean_generated_title(
-                    envelope.get("title") if isinstance(envelope.get("title"), str) else None,
-                )
-                if fork_title:
-                    forked.metadata[WEBUI_TITLE_METADATA_KEY] = fork_title
-                    self.gateway.session_manager.save(forked, fsync=True)
             except Exception as exc:
-                delete_webui_transcript(target_key)
-                self.gateway.session_manager.delete_session(target_key)
                 self.logger.warning("fork_chat failed: {}", exc)
                 await self._send_event(connection, "error", detail="fork_chat_failed")
                 return
 
-            scope = self._workspaces.scope_for_session_key(target_key)
-            self._attach(connection, new_id)
-            await self._send_event(connection, "attached", chat_id=new_id)
+            scope = self._workspaces.scope_for_session_key(forked.session_key)
+            self._attach(connection, forked.chat_id)
+            await self._send_event(connection, "attached", chat_id=forked.chat_id)
             await self._send_event(
                 connection,
                 "session_updated",
-                chat_id=new_id,
+                chat_id=forked.chat_id,
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
-            await self._hydrate_after_subscribe(new_id)
+            await self._hydrate_after_subscribe(forked.chat_id)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
