@@ -34,7 +34,7 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
   "modelPresets": {
     "primary": {
       "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5",
+      "model": "anthropic/claude-opus-4.5",
       "maxTokens": 8192,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -79,7 +79,7 @@ Gateway-style setup for model IDs served through OpenRouter.
   "modelPresets": {
     "primary": {
       "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5",
+      "model": "anthropic/claude-opus-4.5",
       "maxTokens": 8192,
       "contextWindowTokens": 65536
     }
@@ -277,7 +277,7 @@ Bedrock can use the AWS credential chain, profile, region, or Bedrock bearer tok
   "modelPresets": {
     "primary": {
       "provider": "bedrock",
-      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "model": "bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0",
       "maxTokens": 8192,
       "contextWindowTokens": 200000
     }
@@ -327,7 +327,7 @@ Model presets are the recommended model configuration surface. Use them when you
     "fast": {
       "label": "Fast",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -361,7 +361,7 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
     "fast": {
       "label": "Fast",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -398,6 +398,14 @@ Use inline fallback objects only when a model is not worth naming as a preset:
 
 ```json
 {
+  "modelPresets": {
+    "fast": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4.5",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
       "modelPreset": "fast",

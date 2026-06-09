@@ -691,7 +691,9 @@ LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
   "modelPresets": {
     "longcat": {
       "provider": "longcat",
-      "model": "LongCat-Flash-Chat"
+      "model": "LongCat-2.0-Preview",
+      "maxTokens": 8192,
+      "contextWindowTokens": 1048576
     }
   },
   "agents": {
@@ -702,7 +704,7 @@ LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
 }
 ```
 
-Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`, `LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
+Current LongCat API docs list `LongCat-2.0-Preview` as the supported model. The older `LongCat-Flash-*` models were retired by LongCat on 2026-05-29.
 
 </details>
 
@@ -1130,6 +1132,14 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
 
 ```json
 {
+  "modelPresets": {
+    "fast": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4.5",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
       "modelPreset": "fast",
@@ -1232,6 +1242,14 @@ Inline fallback object:
 
 ```json
 {
+  "modelPresets": {
+    "fast": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4.5",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
       "modelPreset": "fast",

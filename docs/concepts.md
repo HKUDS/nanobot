@@ -83,7 +83,7 @@ Pin the provider inside the preset when setting up for the first time. It is eas
   "modelPresets": {
     "primary": {
       "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "model": "anthropic/claude-opus-4.5"
     }
   },
   "agents": {

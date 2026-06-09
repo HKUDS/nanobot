@@ -141,7 +141,7 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
     "primary": {
       "label": "Primary",
       "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5",
+      "model": "anthropic/claude-opus-4.5",
       "maxTokens": 8192,
       "contextWindowTokens": 65536,
       "temperature": 0.1

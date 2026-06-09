@@ -32,7 +32,7 @@ nanobot channels status
 nanobot gateway
 ```
 
-7. Send a message from the allowed account. In group chats, mention the bot unless that channel's `groupPolicy` is explicitly set to `"open"`.
+7. Send a message from the allowed account. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
 
 If `nanobot channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one nanobot is reading. If the channel is enabled but messages do not arrive, run `nanobot gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
 

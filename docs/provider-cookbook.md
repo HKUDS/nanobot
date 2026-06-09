@@ -71,7 +71,7 @@ This recipe applies when one API key routes many hosted model families.
     "primary": {
       "label": "Primary",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -166,7 +166,7 @@ Verify:
 ANTHROPIC_API_KEY="sk-ant-..." nanobot agent -m "Hello!"
 ```
 
-If you copied a model name such as `anthropic/claude-sonnet-4-5`, that is a gateway-style model path and belongs under `provider: "openrouter"`, not `provider: "anthropic"`.
+If you copied a model name such as `anthropic/claude-sonnet-4.5`, that is a gateway-style model path and belongs under `provider: "openrouter"`, not `provider: "anthropic"`.
 
 ## Recipe: Custom OpenAI-Compatible Provider
 
@@ -318,7 +318,7 @@ This recipe applies when one provider sometimes rate-limits, one model is expens
     "fast": {
       "label": "Fast",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -393,7 +393,7 @@ Use this after you have more than one preset and are chatting through a supporte
     "fast": {
       "label": "Fast",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536
     },

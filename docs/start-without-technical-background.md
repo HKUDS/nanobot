@@ -192,7 +192,7 @@ If you are following the OpenRouter example:
 ```text
 label: Primary
 provider: openrouter
-model: anthropic/claude-sonnet-4-5
+model: anthropic/claude-sonnet-4.5
 maxTokens: 4096
 contextWindowTokens: 65536
 temperature: 0.1
@@ -291,7 +291,7 @@ If this is a brand-new install and you have not configured anything else yet, re
     "primary": {
       "label": "Primary",
       "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4-5",
+      "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
