@@ -89,6 +89,69 @@ def test_apply_patch_edits_add_to_existing_file(tmp_path):
     )
 
 
+def test_apply_patch_edits_add_to_existing_file_without_final_newline(tmp_path):
+    target = tmp_path / "notes.txt"
+    target.write_text("alpha", encoding="utf-8")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "notes.txt",
+                    "action": "add",
+                    "new_text": "beta",
+                }
+            ]
+        )
+    )
+
+    assert "update notes.txt" in result
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+
+def test_apply_patch_edits_add_to_existing_crlf_file_without_final_newline(tmp_path):
+    target = tmp_path / "notes.txt"
+    target.write_bytes(b"alpha\r\nbravo")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "notes.txt",
+                    "action": "add",
+                    "new_text": "charlie",
+                }
+            ]
+        )
+    )
+
+    assert "update notes.txt" in result
+    assert target.read_bytes() == b"alpha\r\nbravo\r\ncharlie\r\n"
+
+
+def test_apply_patch_edits_add_to_existing_file_respects_leading_newline(tmp_path):
+    target = tmp_path / "notes.txt"
+    target.write_text("alpha", encoding="utf-8")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "notes.txt",
+                    "action": "add",
+                    "new_text": "\nbeta",
+                }
+            ]
+        )
+    )
+
+    assert "update notes.txt" in result
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+
 def test_apply_patch_rejects_delete_action(tmp_path):
     target = tmp_path / "utils.py"
     target.write_text("def unused():\n    pass\ndef used():\n    return 1\n")
