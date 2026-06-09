@@ -24,7 +24,7 @@ Your job as the skill:
 ## Before First Run — Register Cron
 
 Call `cron(action="list")` and look for a job named `daily-english-read`.
-- If missing: `cron(action="add", name="daily-english-read", message="朗读练习", cron_expr="0 6 * * *", tz="Asia/Shanghai")`
+- If missing: `cron(action="add", name="daily-english-read", message="朗读练习", cron_expr="0 6 */2 * *", tz="Asia/Shanghai")`
 - If present: skip.
 
 ## Running the Script
