@@ -155,7 +155,7 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 
 The provider and model inside a preset should match. In the OpenRouter example, use `"provider": "openrouter"` and a model ID OpenRouter can serve.
 
-Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For Anthropic direct, OpenAI direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local models, see [`providers.md`](./providers.md).
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For provider-specific examples across direct, gateway, OAuth, cloud, and local setups, see [`providers.md`](./providers.md).
 
 **What about `apiBase` / base URL?**
 

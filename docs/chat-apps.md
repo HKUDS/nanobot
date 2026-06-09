@@ -31,7 +31,7 @@ Most examples below are snippets to merge into `~/.nanobot/config.json`.
 | **Signal** | signal-cli daemon + phone number |
 
 <details>
-<summary><b>Telegram</b> (Recommended)</summary>
+<summary><b>Telegram</b></summary>
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
