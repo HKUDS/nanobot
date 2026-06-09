@@ -336,12 +336,58 @@ Skip these until the first local message works:
 
 ## Next Steps
 
-After the first reply works:
+After the first reply works, choose only one next goal. Keep the terminal that runs `nanobot gateway` open whenever you use the WebUI or a chat app.
 
-| Goal | Read |
-|---|---|
-| Understand the normal quick start | [`quick-start.md`](./quick-start.md) |
-| Open the browser UI | [`../webui/README.md`](../webui/README.md) |
-| Connect chat apps | [`chat-apps.md`](./chat-apps.md) |
-| Choose another provider or local model | [`providers.md`](./providers.md) |
-| Understand config fields | [`configuration.md`](./configuration.md) |
+### Open the Browser UI
+
+1. Add this snippet to `~/.nanobot/config.json`. Merge it into the existing file instead of replacing the whole file:
+
+```json
+{ "channels": { "websocket": { "enabled": true } } }
+```
+
+2. Run:
+
+```bash
+nanobot gateway
+```
+
+3. Leave that terminal open.
+4. Open `http://127.0.0.1:8765` in your browser.
+
+To stop the WebUI later, return to the gateway terminal and press `Ctrl+C`.
+
+If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`../webui/README.md`](../webui/README.md).
+
+### Connect a Chat App
+
+1. Read the section for one app in [`chat-apps.md`](./chat-apps.md).
+2. Add only that app's config snippet. Merge it into the existing file instead of replacing the whole file.
+3. Run:
+
+```bash
+nanobot channels status
+nanobot gateway
+```
+
+4. Leave the gateway terminal open, then send a message from the allowed account.
+
+Start with a private chat or a test server. Do not set `allowFrom` to `["*"]` unless you intentionally want anyone who can reach that channel to talk to the bot.
+
+### Change Models or Add Backups
+
+Use [`providers.md`](./providers.md) when a provider/model pair fails, and [`provider-cookbook.md`](./provider-cookbook.md) when you want copyable snippets. Keep model choices in `modelPresets`, then select the active one with `agents.defaults.modelPreset`.
+
+### Ask for Help
+
+When you ask for help, include:
+
+- your operating system;
+- the command you ran;
+- `nanobot --version`;
+- `nanobot status`;
+- whether `nanobot agent -m "Hello!"` works;
+- the exact error text;
+- a config snippet with API keys and tokens removed.
+
+Never paste real API keys, bot tokens, OAuth tokens, or private chat IDs into a public issue or chat.
