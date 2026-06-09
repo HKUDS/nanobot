@@ -6,6 +6,17 @@ If you have never used a terminal or edited a config file before, start with [`s
 
 Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.json`, not full replacement files.
 
+Provider examples are concrete walkthroughs, not rankings or endorsements. Use the provider whose key, endpoint, and model ID you actually control.
+
+## Pick a Track
+
+| You are | Start with | Then use |
+|---|---|---|
+| New to terminals and config files | [`start-without-technical-background.md`](./start-without-technical-background.md) | [`troubleshooting.md`](./troubleshooting.md) if the first reply fails |
+| Comfortable pasting commands and JSON | [`quick-start.md`](./quick-start.md) | [`provider-cookbook.md`](./provider-cookbook.md) for pasteable provider setups |
+| Operating a long-running bot | [`concepts.md`](./concepts.md) | [`chat-apps.md`](./chat-apps.md), [`../webui/README.md`](../webui/README.md), and [`deployment.md`](./deployment.md) |
+| Integrating or extending nanobot | [`architecture.md`](./architecture.md) | [`configuration.md`](./configuration.md), [`openai-api.md`](./openai-api.md), [`python-sdk.md`](./python-sdk.md), [`development.md`](./development.md), and [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
+
 ## Start Here
 
 | Goal | Read | Outcome |
@@ -57,7 +68,7 @@ Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.j
 
 Use the docs in this order when you are unsure where to go:
 
-1. If terminal commands or config files are new to you, [`start-without-technical-background.md`](./start-without-technical-background.md) explains the setup words and uses one guided OpenRouter path.
+1. If terminal commands or config files are new to you, [`start-without-technical-background.md`](./start-without-technical-background.md) explains the setup words and uses one concrete provider example so there is only one decision at a time.
 2. [`quick-start.md`](./quick-start.md) proves installation, config loading, and provider access.
 3. [`concepts.md`](./concepts.md) explains the runtime model so later pages are easier to scan.
 4. [`provider-cookbook.md`](./provider-cookbook.md) gives pasteable provider, fallback, local model, and Langfuse recipes.

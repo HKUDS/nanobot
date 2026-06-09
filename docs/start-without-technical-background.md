@@ -42,7 +42,7 @@ If `py` works but `python` does not, replace `python` with `py` in the commands 
 
 ## 2. Get an OpenRouter API Key
 
-This guide uses OpenRouter as one example provider. If you already have another supported provider, use that provider's key and model instead.
+This guide uses OpenRouter as one example provider so every step has concrete names to copy. It is not an endorsement. If you already have another supported provider, use that provider's key and model instead.
 
 1. Open [openrouter.ai/keys](https://openrouter.ai/keys).
 2. Create or copy an API key.
@@ -234,6 +234,12 @@ nanobot agent -m "Hello!"
 ```
 
 If that works, nanobot is installed and can call the model.
+
+You should see a normal assistant reply in the terminal. The exact words will differ, but it should look like this shape:
+
+```text
+Hello! How can I help you today?
+```
 
 If `nanobot` is not found, run:
 

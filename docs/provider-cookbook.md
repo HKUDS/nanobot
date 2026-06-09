@@ -6,6 +6,8 @@ If this is your first install and terminal commands are new to you, start with [
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`. Keep any existing sections you still need, and replace placeholder keys such as `${OPENROUTER_API_KEY}` with environment-variable references or real values only on your own machine.
 
+Recipes are examples, not rankings. Pick the recipe that matches the credential, endpoint, and model ID you already intend to use.
+
 ## How to Use a Recipe
 
 1. Install nanobot and run `nanobot onboard` or `nanobot onboard --wizard` once so `~/.nanobot/config.json` exists.

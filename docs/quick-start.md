@@ -213,6 +213,8 @@ A successful first run proves that:
 - the selected provider and model can answer;
 - the default workspace can be created and used.
 
+The reply text itself will vary. Any normal assistant answer means the install, config, provider, model, and workspace path are all usable.
+
 If that works, start an interactive CLI chat:
 
 ```bash
