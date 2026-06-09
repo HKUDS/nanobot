@@ -33,6 +33,17 @@
 
 🐈 **nanobot** is an open-source, ultra-lightweight personal AI agent you can truly own. It keeps the agent core small and readable while giving you the practical pieces for real long-running work: WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
 
+## Start Here
+
+| You want to... | Go to |
+|---|---|
+| Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
+| Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
+| Open the bundled browser UI after the CLI works | [WebUI](#-webui) |
+| Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [Chat Apps](./docs/chat-apps.md) |
+| Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
+| Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
+
 ## 📢 News
 
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
