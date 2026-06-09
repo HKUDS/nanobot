@@ -10,9 +10,11 @@ For every setup, answer three questions:
 3. Does the provider need `apiKey`, `apiBase`, OAuth login, cloud credentials,
    or only a local server URL?
 
-Pin `agents.defaults.provider` while setting up. You can switch back to
-`"auto"` later, but explicit provider selection makes failures easier to
-diagnose.
+Prefer a named `modelPresets` entry for the model/provider pair, then select it
+with `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and
+`agents.defaults.model` still work for existing configs, but presets make
+runtime `/model` switching and fallback chains clearer. Pin `provider` inside
+the preset while setting up; you can switch back to `"auto"` later.
 
 ## Minimal Shape
 
@@ -23,17 +25,25 @@ diagnose.
       "apiKey": "sk-or-v1-xxx"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "modelPreset": "primary"
     }
   }
 }
 ```
 
 The provider config gives nanobot credentials and endpoint details. The agent
-defaults choose which provider/model to use for normal turns.
+defaults choose which named preset to use for normal turns.
 
 ## Common Provider Patterns
 
@@ -48,10 +58,17 @@ Good first setup for global users and mixed model families.
       "apiKey": "${OPENROUTER_API_KEY}"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "modelPreset": "primary"
     }
   }
 }
@@ -68,10 +85,17 @@ Use the model ID exactly as OpenRouter lists it.
       "apiKey": "${ANTHROPIC_API_KEY}"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "anthropic",
-      "model": "claude-opus-4-5"
+      "modelPreset": "primary"
     }
   }
 }
@@ -89,10 +113,17 @@ model ID unless the provider is OpenRouter.
       "apiKey": "${OPENAI_API_KEY}"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "openai",
+      "model": "gpt-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 128000
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openai",
-      "model": "gpt-5"
+      "modelPreset": "primary"
     }
   }
 }
@@ -116,10 +147,17 @@ named provider.
       "apiBase": "https://example.com/v1"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "custom",
+      "model": "provider-model-name",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "custom",
-      "model": "provider-model-name"
+      "modelPreset": "primary"
     }
   }
 }
@@ -138,10 +176,17 @@ Start Ollama separately, then point nanobot at the OpenAI-compatible endpoint.
       "apiBase": "http://localhost:11434/v1"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "ollama",
+      "model": "llama3.2",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "ollama",
-      "model": "llama3.2"
+      "modelPreset": "primary"
     }
   }
 }
@@ -159,10 +204,17 @@ Most Ollama setups do not require an API key.
       "apiKey": "EMPTY"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "vllm",
+      "model": "served-model-name",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "vllm",
-      "model": "served-model-name"
+      "modelPreset": "primary"
     }
   }
 }
@@ -180,17 +232,24 @@ they do not validate it.
       "apiBase": "http://localhost:1234/v1"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "lm_studio",
+      "model": "local-model",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "lm_studio",
-      "model": "local-model"
+      "modelPreset": "primary"
     }
   }
 }
 ```
 
 Config keys may be camelCase or snake_case. Provider names in
-`agents.defaults.provider` should use the registry name, such as `lm_studio`.
+model presets should use the registry name, such as `lm_studio`.
 
 ### AWS Bedrock
 
@@ -205,10 +264,17 @@ token depending on your AWS setup.
       "profile": "default"
     }
   },
+  "modelPresets": {
+    "primary": {
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "bedrock",
-      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0"
+      "modelPreset": "primary"
     }
   }
 }
@@ -226,20 +292,22 @@ nanobot provider login openai-codex
 nanobot provider login github-copilot
 ```
 
-Then explicitly select the provider and model in config. OAuth providers are
+Then explicitly select the provider and model in a preset. OAuth providers are
 not valid automatic fallbacks.
 
 ## Provider Resolution
 
-The effective model parameters come from:
+The recommended path is a named preset selected by
+`agents.defaults.modelPreset`. The effective model parameters come from:
 
-1. `agents.defaults.modelPreset`, if set;
-2. otherwise `agents.defaults.model`, `provider`, `maxTokens`,
-   `contextWindowTokens`, `temperature`, and related fields.
+1. the named `modelPresets` entry referenced by `agents.defaults.modelPreset`;
+2. otherwise the implicit `default` preset built from `agents.defaults.model`,
+   `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and related
+   fields.
 
 Provider selection follows this practical rule:
 
-- Explicit `provider` wins.
+- Explicit `provider` in the active preset or implicit default config wins.
 - `provider: "auto"` tries model-name keywords, configured keys, local base
   URLs, and gateway providers.
 - Gateway providers such as OpenRouter and AiHubMix can route many model
@@ -249,7 +317,9 @@ Provider selection follows this practical rule:
 
 ## Model Presets
 
-Use presets when you switch models at runtime or from chat commands.
+Model presets are the recommended model configuration surface. Use them when
+you want named model choices, runtime `/model` switching, or reusable fallback
+targets.
 
 ```json
 {
@@ -280,25 +350,71 @@ Use presets when you switch models at runtime or from chat commands.
 ```
 
 The preset name `default` is reserved for the implicit `agents.defaults`
-settings.
+settings. Do not define `modelPresets.default`; use `/model default` to return
+to the direct `agents.defaults.*` fields in older configs.
 
 ## Fallback Models
 
 Fallbacks are useful for transient provider failures, rate limits, or model
 availability issues. Keep fallbacks compatible with the task size and tool use.
+Prefer fallback presets so each candidate has a name and a complete provider,
+model, generation, and context-window configuration.
+
+```json
+{
+  "modelPresets": {
+    "fast": {
+      "label": "Fast",
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4-5",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    },
+    "deep": {
+      "label": "Deep",
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "temperature": 0.1
+    },
+    "localSmall": {
+      "label": "Local Small",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768,
+      "temperature": 0.2
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": ["deep", "localSmall"]
+    }
+  }
+}
+```
+
+String entries in `fallbackModels` are preset names, not raw model names.
+nanobot tries them in order after the active preset. Each fallback preset uses
+its own `provider`, `model`, `maxTokens`, `contextWindowTokens`, `temperature`,
+and optional `reasoningEffort`.
+
+Use inline fallback objects only when a model is not worth naming as a preset:
 
 ```json
 {
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5",
+      "modelPreset": "fast",
       "fallbackModels": [
         {
-          "provider": "openrouter",
-          "model": "anthropic/claude-sonnet-4-5",
-          "maxTokens": 8192,
-          "contextWindowTokens": 65536
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "maxTokens": 4096,
+          "contextWindowTokens": 262144
         }
       ]
     }
@@ -306,7 +422,11 @@ availability issues. Keep fallbacks compatible with the task size and tool use.
 }
 ```
 
-You can also reference named presets in `fallbackModels`.
+`fallbackModels` belongs under `agents.defaults`, not inside each preset. If
+fallback candidates use smaller context windows, nanobot builds context using
+the smallest window in the active chain so every candidate can receive the same
+prompt. See [`configuration.md#model-fallbacks`](./configuration.md#model-fallbacks)
+for failure conditions.
 
 ## Quick Checks
 
@@ -324,7 +444,7 @@ If `nanobot agent -m "Hello!"` fails:
 | 401, unauthorized, invalid API key | Key is missing, expired, copied with whitespace, or stored under the wrong provider |
 | model not found | Model ID does not exist for the selected provider or gateway |
 | connection refused | Local provider server is not running or `apiBase` points to the wrong port |
-| provider not found | `agents.defaults.provider` is misspelled; use registry names such as `openrouter`, `anthropic`, `ollama`, `vllm`, `lm_studio` |
+| provider not found | The active preset uses a misspelled provider; use registry names such as `openrouter`, `anthropic`, `ollama`, `vllm`, `lm_studio` |
 | works in CLI but not chat app | Provider is fine; debug gateway/channel setup in [`chat-apps.md`](./chat-apps.md) or [`troubleshooting.md`](./troubleshooting.md) |
 
 For the complete provider table and advanced provider-specific notes, see

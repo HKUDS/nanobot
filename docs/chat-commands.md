@@ -43,7 +43,11 @@ Use `/model` to inspect the current runtime model:
 /model
 ```
 
-The response shows the current model, the current preset, and the available preset names. `default` is always available and represents the model settings from `agents.defaults.*`.
+The response shows the current model, the current preset, and the available
+preset names. Named presets come from the top-level `modelPresets` config and
+are the recommended way to configure model choices. `default` is always
+available and represents the model settings from direct `agents.defaults.*`
+fields.
 
 To switch presets for future turns:
 
@@ -53,7 +57,11 @@ To switch presets for future turns:
 /model default
 ```
 
-Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+Preset names come from the top-level `modelPresets` config. Switching is
+runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps
+using the model it started with. See
+[Configuration: Model presets](./configuration.md#model-presets) for setup
+details.
 
 ## Periodic Tasks
 

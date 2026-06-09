@@ -984,25 +984,27 @@ Contributor notes for adding new providers live in
 
 ## Model Presets
 
-Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`.
+Model presets let you name a complete model configuration and switch it at
+runtime with `/model <preset>`. They are the recommended way to configure
+models because the same names can be reused for startup selection, chat-command
+switching, and fallback chains.
 
-Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, nanobot keeps using `agents.defaults.*` exactly as before.
+Existing configs do not need to change. Direct `agents.defaults.model`,
+`provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and
+`reasoningEffort` fields still define the implicit `default` preset. For new
+configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 
 ```json
 {
   "agents": {
     "defaults": {
-      "model": "openai/gpt-4.1",
-      "provider": "openai",
-      "maxTokens": 8192,
-      "contextWindowTokens": 128000,
-      "temperature": 0.1,
       "modelPreset": "fast",
-      "fallbackModels": ["deep"]
+      "fallbackModels": ["deep", "localSmall"]
     }
   },
   "modelPresets": {
     "fast": {
+      "label": "Fast",
       "model": "openai/gpt-4.1-mini",
       "provider": "openai",
       "maxTokens": 4096,
@@ -1011,20 +1013,31 @@ Existing configs do not need to change. If you do not set `modelPresets` or `age
       "reasoningEffort": "low"
     },
     "deep": {
-      "model": "anthropic/claude-opus-4-5",
+      "label": "Deep",
+      "model": "claude-opus-4-5",
       "provider": "anthropic",
       "maxTokens": 8192,
       "contextWindowTokens": 200000,
       "reasoningEffort": "high"
+    },
+    "localSmall": {
+      "label": "Local Small",
+      "model": "llama3.2",
+      "provider": "ollama",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768,
+      "temperature": 0.2
     }
   }
 }
 ```
 
-`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+`modelPresets` is a top-level object. The keys under it (`fast`, `deep`,
+`coding`, etc.) are user-defined preset names. Each preset supports:
 
 | Field | Description |
 |-------|-------------|
+| `label` | Optional display name shown in model lists. |
 | `model` | Model name to use for this preset. |
 | `provider` | Provider name, or `"auto"` to use provider auto-detection. |
 | `maxTokens` | Maximum completion/output tokens. |
@@ -1032,16 +1045,75 @@ Existing configs do not need to change. If you do not set `modelPresets` or `age
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
 
-`default` is reserved and always means the implicit preset built from `agents.defaults.*`; do not define `modelPresets.default`. Use `/model default` to switch back to `agents.defaults.*`.
+`default` is reserved and always means the implicit preset built from direct
+`agents.defaults.*` fields; do not define `modelPresets.default`. Use
+`/model default` to switch back to those direct fields in an existing config.
+
+Set `agents.defaults.modelPreset` to choose the startup preset. When
+`modelPreset` is `null` or omitted, startup uses the implicit `default` preset
+from direct `agents.defaults.*` fields. Runtime changes made with
+`/model <preset>` are not written back to `config.json`; they affect future
+turns until the process restarts or another model/config change replaces them.
 
 ### Model Fallbacks
 
-`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` (or the implicit default config when no preset is active).
+`agents.defaults.fallbackModels` defines an ordered failover chain for the
+active model configuration. The primary model is still selected by
+`agents.defaults.modelPreset` or, in older configs, by the implicit `default`
+preset from direct `agents.defaults.*` fields.
 
 Each fallback candidate can be either:
 
-- A preset name from `modelPresets`, such as `"deep"`. The preset's full model, provider, generation, and context-window config is used.
-- An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
+- A preset name from `modelPresets`, such as `"deep"`. This is the recommended
+  form. The preset's full model, provider, generation, and context-window config
+  is used.
+- An inline fallback object with at least `provider` and `model`. Optional
+  `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the
+  active primary config when omitted. `reasoningEffort` does not inherit; omit
+  it to leave reasoning off for that fallback, or set it explicitly for models
+  that support reasoning.
+
+Preset fallback chain:
+
+```json
+{
+  "modelPresets": {
+    "fast": {
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.2
+    },
+    "deep": {
+      "model": "claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "reasoningEffort": "high"
+    },
+    "localSmall": {
+      "model": "llama3.2",
+      "provider": "ollama",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": ["deep", "localSmall"]
+    }
+  }
+}
+```
+
+String entries are preset names, not raw model names. In the example above,
+`"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider
+model ID. Changing a preset updates both `/model <preset>` switching and any
+fallback chain that references it.
+
+Inline fallback object:
 
 ```json
 {
@@ -1049,7 +1121,6 @@ Each fallback candidate can be either:
     "defaults": {
       "modelPreset": "fast",
       "fallbackModels": [
-        "deep",
         {
           "provider": "deepseek",
           "model": "deepseek-v4-pro",
@@ -1062,25 +1133,20 @@ Each fallback candidate can be either:
 }
 ```
 
-String entries are preset names, not raw model names. If you want to use a model that is not already a preset, use the inline object form.
+Use inline objects only when a fallback is not worth naming as a reusable preset.
+`fallbackModels` belongs under `agents.defaults`, not inside individual
+`modelPresets` entries.
 
-Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
+Failover only runs when the primary provider returns a retryable model/provider
+error before any answer text has been streamed. Typical fallback cases include
+timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and
+quota/balance exhaustion. It does not run for malformed requests,
+authentication/permission errors, content filtering/refusals, or
+context-length/message-format errors.
 
-If fallback candidates use smaller `contextWindowTokens` values, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt.
-
-Set `agents.defaults.modelPreset` to start with a named preset:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "modelPreset": "fast"
-    }
-  }
-}
-```
-
-When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
+If fallback candidates use smaller `contextWindowTokens` values, nanobot builds
+context using the smallest window in the active chain so every candidate can
+receive the same prompt.
 
 ## Transcription Settings
 

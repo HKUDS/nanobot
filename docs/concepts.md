@@ -88,24 +88,33 @@ the health endpoint.
 
 ## Provider and Model Selection
 
-The active model comes from either `agents.defaults` or a named model preset.
+The active model should normally come from a named `modelPresets` entry selected
+by `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and
+`agents.defaults.model` still form the implicit `default` preset for older or
+minimal configs.
 The active provider is resolved in this order:
 
-1. If `agents.defaults.provider` or the preset provider is not `"auto"`,
+1. If the active preset provider or implicit default provider is not `"auto"`,
    nanobot uses that provider.
 2. If provider is `"auto"`, nanobot tries to infer the provider from the model
    name, configured API keys, local provider base URLs, or gateway providers.
 3. OAuth providers such as OpenAI Codex and GitHub Copilot require explicit
-   login and explicit provider/model selection.
+   login and explicit provider/model selection inside the active preset.
 
-Pin the provider when setting up for the first time. It is easier to debug:
+Pin the provider inside the preset when setting up for the first time. It is
+easier to debug:
 
 ```json
 {
-  "agents": {
-    "defaults": {
+  "modelPresets": {
+    "primary": {
       "provider": "openrouter",
       "model": "anthropic/claude-opus-4-5"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
     }
   }
 }

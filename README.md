@@ -235,18 +235,31 @@ blocks into the existing file instead of replacing the whole file.
 }
 ```
 
-*Set your model and provider*:
+*Set a model preset and make it active*:
 
 ```json
 {
+  "modelPresets": {
+    "primary": {
+      "label": "Primary",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "modelPreset": "primary"
     }
   }
 }
 ```
+
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for
+existing configs, but named presets are the recommended path because they also
+power `/model` switching and `fallbackModels`.
 
 **3. Test one message**
 

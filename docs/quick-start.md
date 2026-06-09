@@ -95,23 +95,35 @@ config.
 }
 ```
 
-**Default model:**
+**Model preset:**
 
 ```json
 {
+  "modelPresets": {
+    "primary": {
+      "label": "Primary",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4-5"
+      "modelPreset": "primary"
     }
   }
 }
 ```
 
-The provider and model should match. An OpenRouter key should be used with
-`"provider": "openrouter"` and a model ID OpenRouter can serve. For Anthropic
-direct, OpenAI direct, Ollama, vLLM, Bedrock, gateway providers, OAuth
-providers, and local models, see [`providers.md`](./providers.md).
+The provider and model inside a preset should match. An OpenRouter key should
+be used with `"provider": "openrouter"` and a model ID OpenRouter can serve.
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for
+existing configs, but named presets are the recommended path because they also
+power `/model` switching and fallback chains. For Anthropic direct, OpenAI
+direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local
+models, see [`providers.md`](./providers.md).
 
 If you prefer not to store secrets in `config.json`, reference an environment
 variable and set it before starting nanobot:
@@ -200,7 +212,7 @@ nanobot channels login whatsapp
 | `ModuleNotFoundError: nanobot` | Confirm you installed into the same Python environment that is running the command. |
 | JSON parse errors | Check commas and braces in `~/.nanobot/config.json`; examples above are partial snippets to merge. |
 | Authentication or 401 errors | Check that the API key is valid, copied without spaces, and placed under the provider you selected. |
-| Provider/model errors | Make sure `agents.defaults.provider` matches the provider that owns your API key and the model exists there. |
+| Provider/model errors | Make sure the active preset uses the provider that owns your API key and that the model exists there. |
 | The CLI works but a chat app does not reply | First keep `nanobot gateway` running, then follow [`chat-apps.md`](./chat-apps.md). |
 | WebUI does not open | Enable the WebSocket channel and open port `8765`, not the gateway health port `18790`. |
 
