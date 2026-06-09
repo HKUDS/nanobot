@@ -180,6 +180,34 @@ Pick **one** install method:
 
 Prerequisites: Python 3.11 or newer. Git is only needed for a source install; Node.js/Bun are only needed if you are developing the WebUI itself.
 
+**One-command setup**
+
+macOS / Linux:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+```
+
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`.
+
+To install the current `main` branch instead, pass `--dev`:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
+```
+
+If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
+
 **Install from source**
 
 ```bash

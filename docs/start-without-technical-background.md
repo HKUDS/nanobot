@@ -42,7 +42,31 @@ If `py` works but `python` does not, replace `python` with `py` in the commands 
 
 ## 2. Install nanobot
 
-Run:
+The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard.
+
+**macOS / Linux**
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+```
+
+These commands install the stable PyPI package. Use the development installer only when a maintainer asks you to test the current `main` branch:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
+```
+
+If you prefer to install manually, run:
 
 ```bash
 python -m pip install nanobot-ai
@@ -72,7 +96,7 @@ The key usually starts with `sk-or-v1-`.
 
 ## 4. Run the Setup Wizard
 
-Run:
+The one-command installer starts this for you. If you installed manually, run:
 
 ```bash
 nanobot onboard --wizard

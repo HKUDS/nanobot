@@ -10,7 +10,7 @@ Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.j
 
 | Goal | Read | Outcome |
 |---|---|---|
-| Start with no technical background | [`start-without-technical-background.md`](./start-without-technical-background.md) | A guided path through terminal commands, config, API keys, and the first reply |
+| Start with no technical background | [`start-without-technical-background.md`](./start-without-technical-background.md) | One-command setup, terminal basics, config, API keys, and the first reply |
 | Install and get the first reply | [`quick-start.md`](./quick-start.md) | A working CLI agent and a known-good config path |
 | Understand how the pieces fit | [`concepts.md`](./concepts.md) | Mental model for config, workspace, gateway, channels, tools, memory, and sessions |
 | Choose or change a model provider | [`providers.md`](./providers.md) | Correct provider/model pairing without reading the full config reference |

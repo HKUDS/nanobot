@@ -1,0 +1,94 @@
+#!/bin/sh
+set -eu
+
+package="nanobot-ai"
+main_source="https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
+install_target="$package"
+install_source="PyPI"
+
+info() {
+  printf '%s\n' "$*"
+}
+
+fail() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh [--dev]
+
+By default this installs or upgrades nanobot-ai from PyPI.
+Use --dev to install from the current main branch on GitHub.
+EOF
+}
+
+find_python() {
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      if "$candidate" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
+PY
+      then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dev)
+      install_target="$main_source"
+      install_source="GitHub main"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+python_bin="${PYTHON:-}"
+
+if [ -n "$python_bin" ]; then
+  command -v "$python_bin" >/dev/null 2>&1 || fail "PYTHON=$python_bin was not found"
+  "$python_bin" - <<'PY' >/dev/null 2>&1 || fail "nanobot requires Python 3.11 or newer"
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
+PY
+else
+  python_bin="$(find_python)" || fail "Python 3.11 or newer was not found. Install Python first, then rerun this command."
+fi
+
+info "Using Python: $("$python_bin" --version 2>&1)"
+
+if ! "$python_bin" -m pip --version >/dev/null 2>&1; then
+  info "pip was not found for this Python. Trying ensurepip..."
+  "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1 || fail "pip is not available. Install pip for $python_bin, then rerun this command."
+fi
+
+info "Installing or upgrading nanobot from $install_source..."
+"$python_bin" -m pip install --upgrade "$install_target"
+
+info "Installed nanobot:"
+"$python_bin" -m nanobot --version
+
+if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
+  info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
+  info "Run this later: $python_bin -m nanobot onboard --wizard"
+  exit 0
+fi
+
+info "Starting setup wizard..."
+"$python_bin" -m nanobot onboard --wizard
+
+info "Done. Try: $python_bin -m nanobot agent -m \"Hello!\""

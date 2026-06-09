@@ -22,6 +22,32 @@ You need:
 
 Pick one install method.
 
+**One-command setup:**
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+```
+
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
+```
+
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`.
+
+To install the current `main` branch instead, pass `--dev`:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
+```
+
+If you prefer to inspect the script first, open [`../scripts/install.sh`](../scripts/install.sh) or [`../scripts/install.ps1`](../scripts/install.ps1).
+
 **Stable release with `uv`:**
 
 ```bash

@@ -1,0 +1,128 @@
+param(
+    [switch]$Dev,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArgs
+)
+
+$ErrorActionPreference = "Stop"
+
+$Package = "nanobot-ai"
+$MainSource = "https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
+$InstallTarget = $Package
+$InstallSource = "PyPI"
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host $Message
+}
+
+function Fail {
+    param([string]$Message)
+    Write-Error $Message
+    exit 1
+}
+
+function Show-Usage {
+    Write-Host "Usage: install.ps1 [-Dev|--dev]"
+    Write-Host ""
+    Write-Host "By default this installs or upgrades nanobot-ai from PyPI."
+    Write-Host "Use --dev to install from the current main branch on GitHub."
+}
+
+function Test-Python {
+    param([string]$Command)
+    try {
+        & $Command -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Find-Python {
+    if ($env:PYTHON) {
+        if (Get-Command $env:PYTHON -ErrorAction SilentlyContinue) {
+            if (Test-Python $env:PYTHON) {
+                return $env:PYTHON
+            }
+            Fail "PYTHON=$env:PYTHON is not Python 3.11 or newer."
+        }
+        Fail "PYTHON=$env:PYTHON was not found."
+    }
+
+    foreach ($Candidate in @("python", "py")) {
+        if (Get-Command $Candidate -ErrorAction SilentlyContinue) {
+            if (Test-Python $Candidate) {
+                return $Candidate
+            }
+        }
+    }
+
+    Fail "Python 3.11 or newer was not found. Install Python first, then rerun this command."
+}
+
+foreach ($Arg in $RemainingArgs) {
+    switch ($Arg) {
+        "--dev" {
+            $Dev = $true
+        }
+        "-h" {
+            Show-Usage
+            exit 0
+        }
+        "--help" {
+            Show-Usage
+            exit 0
+        }
+        default {
+            Fail "Unknown option: $Arg"
+        }
+    }
+}
+
+if ($Dev) {
+    $InstallTarget = $MainSource
+    $InstallSource = "GitHub main"
+}
+
+$Python = Find-Python
+$Version = & $Python --version
+Write-Info "Using Python: $Version"
+
+try {
+    & $Python -m pip --version *> $null
+} catch {}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Info "pip was not found for this Python. Trying ensurepip..."
+    & $Python -m ensurepip --upgrade *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Fail "pip is not available. Install pip for $Python, then rerun this command."
+    }
+}
+
+Write-Info "Installing or upgrading nanobot from $InstallSource..."
+& $Python -m pip install --upgrade $InstallTarget
+if ($LASTEXITCODE -ne 0) {
+    Fail "Failed to install nanobot from $InstallSource."
+}
+
+Write-Info "Installed nanobot:"
+& $Python -m nanobot --version
+if ($LASTEXITCODE -ne 0) {
+    Fail "nanobot was installed, but the command could not be started."
+}
+
+if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
+    Write-Info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
+    Write-Info "Run this later: $Python -m nanobot onboard --wizard"
+    exit 0
+}
+
+Write-Info "Starting setup wizard..."
+& $Python -m nanobot onboard --wizard
+if ($LASTEXITCODE -ne 0) {
+    Fail "Setup wizard did not complete."
+}
+
+Write-Info "Done. Try: $Python -m nanobot agent -m `"Hello!`""
