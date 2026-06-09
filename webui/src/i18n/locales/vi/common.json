@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Trò chuyện {{id}}",
+    "forkTitle": "Nhánh: {{title}}",
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "showMore": "Hiển thị thêm {{count}}",
@@ -811,7 +812,8 @@
     "scrollToBottom": "Cuộn xuống cuối",
     "loadEarlier": "Tải tin nhắn trước đó",
     "fork": {
-      "failed": "Không thể rẽ nhánh cuộc trò chuyện này. Hãy thử lại."
+      "failed": "Không thể rẽ nhánh cuộc trò chuyện này. Hãy thử lại.",
+      "fromHistory": "Tách nhánh từ lịch sử"
     },
     "promptNavigator": {
       "open": "Mở trình điều hướng prompt",
@@ -838,11 +840,11 @@
     "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
     "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
     "imageAttachment": "Tệp hình ảnh đính kèm",
-    "copyMessage": "Sao chép tin nhắn",
-    "copiedMessage": "Đã sao chép tin nhắn",
-    "forkFromHere": "Rẽ nhánh từ đây",
-    "copyReply": "Sao chép trả lời",
-    "copiedReply": "Đã sao chép trả lời",
+    "copyMessage": "Sao chép",
+    "copiedMessage": "Đã sao chép",
+    "forkFromHere": "Tách nhánh",
+    "copyReply": "Sao chép",
+    "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",

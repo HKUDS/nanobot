@@ -230,6 +230,24 @@ describe("useSessions", () => {
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
+  it("keeps a fork title visible while the server session list catches up", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.forkChat.mockResolvedValue("chat-fork");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.forkChat("source", 2, "Fork: Original title");
+    });
+
+    expect(client.forkChat).toHaveBeenCalledWith("source", 2, "Fork: Original title");
+    expect(result.current.sessions[0]?.title).toBe("Fork: Original title");
+  });
+
   it("passes through WebUI transcript user media as images and media", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

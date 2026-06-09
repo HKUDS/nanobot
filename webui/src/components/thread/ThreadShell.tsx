@@ -253,6 +253,7 @@ export function ThreadShell({
     hasPendingToolCalls,
     refresh: refreshHistory,
     version: historyVersion,
+    forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
@@ -776,6 +777,7 @@ export function ThreadShell({
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           allMessages={displayMessages}
+          forkBoundaryMessageCount={forkBoundaryMessageCount}
           onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
           onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
         />

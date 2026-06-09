@@ -76,8 +76,8 @@ describe("MessageBubble", () => {
 
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
-    expect(screen.getByRole("button", { name: "Copy message" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
   it("does not render fork control for user messages", () => {
@@ -91,8 +91,8 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} onForkFromHere={onForkFromHere} />);
 
-    expect(screen.getByRole("button", { name: "Copy message" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Fork from here" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
   it("renders fork control in completed assistant action rows", () => {
@@ -107,7 +107,7 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} onForkFromHere={onForkFromHere} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Fork from here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
@@ -207,11 +207,11 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
 
     expect(writeText).toHaveBeenCalledWith("I can help with the next step.");
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Copied reply" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
     );
   });
 
@@ -235,11 +235,11 @@ describe("MessageBubble", () => {
     try {
       render(<MessageBubble message={message} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
 
       await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Copied reply" })).toBeInTheDocument(),
+        expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
       );
     } finally {
       Reflect.deleteProperty(navigator, "clipboard");
@@ -268,12 +268,12 @@ describe("MessageBubble", () => {
     try {
       render(<MessageBubble message={message} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
 
       expect(writeText).toHaveBeenCalledWith("Rejected clipboard copy.");
       await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Copied reply" })).toBeInTheDocument(),
+        expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
       );
     } finally {
       Reflect.deleteProperty(navigator, "clipboard");
@@ -292,7 +292,7 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
 
   it("does not show copy when showAssistantCopyAction is false", () => {
@@ -305,7 +305,7 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} showAssistantCopyAction={false} />);
 
-    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
 
   it("renders trace messages as collapsible tool groups", () => {

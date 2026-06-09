@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "チャット {{id}}",
+    "forkTitle": "分岐：{{title}}",
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
     "showMore": "さらに {{count}} 件表示",
@@ -811,7 +812,8 @@
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む",
     "fork": {
-      "failed": "このチャットを分岐できませんでした。もう一度お試しください。"
+      "failed": "このチャットを分岐できませんでした。もう一度お試しください。",
+      "fromHistory": "履歴から分岐"
     },
     "promptNavigator": {
       "open": "プロンプトナビゲーターを開く",
@@ -838,11 +840,11 @@
     "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
     "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
     "imageAttachment": "画像の添付",
-    "copyMessage": "メッセージをコピー",
-    "copiedMessage": "メッセージをコピーしました",
-    "forkFromHere": "ここから分岐",
-    "copyReply": "返信をコピー",
-    "copiedReply": "返信をコピーしました",
+    "copyMessage": "コピー",
+    "copiedMessage": "コピー済み",
+    "forkFromHere": "分岐",
+    "copyReply": "コピー",
+    "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",

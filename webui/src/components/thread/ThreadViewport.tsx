@@ -38,6 +38,7 @@ interface ThreadViewportProps {
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -72,6 +73,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
+  forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
 }, ref) {
@@ -98,6 +100,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     [messages, visibleMessageCount],
   );
   const hiddenMessageCount = messages.length - visibleMessages.length;
+  const visibleForkBoundaryMessageCount =
+    forkBoundaryMessageCount !== null && forkBoundaryMessageCount > hiddenMessageCount
+      ? forkBoundaryMessageCount - hiddenMessageCount
+      : null;
   const scrollButtonBottom = composerDockHeight > 0
     ? composerDockHeight + SCROLL_BUTTON_COMPOSER_GAP_PX
     : DEFAULT_SCROLL_BUTTON_BOTTOM_PX;
@@ -299,6 +305,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onLoadEarlier={loadEarlierMessages}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
+                  forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}
                 />

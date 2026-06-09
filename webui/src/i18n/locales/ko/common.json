@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "채팅 {{id}}",
+    "forkTitle": "분기: {{title}}",
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
     "showMore": "{{count}}개 더 보기",
@@ -811,7 +812,8 @@
     "scrollToBottom": "맨 아래로 스크롤",
     "loadEarlier": "이전 메시지 불러오기",
     "fork": {
-      "failed": "이 채팅을 분기할 수 없습니다. 다시 시도해 주세요."
+      "failed": "이 채팅을 분기할 수 없습니다. 다시 시도해 주세요.",
+      "fromHistory": "기록에서 분기됨"
     },
     "promptNavigator": {
       "open": "프롬프트 탐색기 열기",
@@ -838,11 +840,11 @@
     "agentActivityLiveSummary": "진행 중… · {{reasoning}}단계 · 도구 호출 {{tools}}회",
     "agentActivityLiveToolsOnly": "진행 중… · 도구 호출 {{tools}}회",
     "imageAttachment": "이미지 첨부",
-    "copyMessage": "메시지 복사",
-    "copiedMessage": "메시지가 복사됨",
-    "forkFromHere": "여기서 분기",
-    "copyReply": "답변 복사",
-    "copiedReply": "답변이 복사됨",
+    "copyMessage": "복사",
+    "copiedMessage": "복사됨",
+    "forkFromHere": "분기",
+    "copyReply": "복사",
+    "copiedReply": "복사됨",
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",

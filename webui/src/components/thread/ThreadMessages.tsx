@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MessageBubble } from "@/components/MessageBubble";
@@ -15,6 +15,7 @@ interface ThreadMessagesProps {
   onLoadEarlier?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  forkBoundaryMessageCount?: number | null;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -70,11 +71,16 @@ export function ThreadMessages({
   onLoadEarlier,
   cliApps = [],
   mcpPresets = [],
+  forkBoundaryMessageCount = null,
   onOpenFilePreview,
   onForkFromMessage,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const units = useMemo(() => buildDisplayUnits(messages, isStreaming), [isStreaming, messages]);
+  const forkBoundaryAfterUnitIndex = useMemo(
+    () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
+    [forkBoundaryMessageCount, units],
+  );
   const assistantForkIndexById = useMemo(
     () => assistantForkIndexByMessageId(allMessages ?? messages),
     [allMessages, messages],
@@ -119,47 +125,72 @@ export function ThreadMessages({
             : undefined;
 
         return (
-          <div
-            key={unitKey(unit, index)}
-            className={marginTop}
-            data-user-prompt-id={userPromptId}
-          >
-            {unit.type === "activity" ? (
-              <AgentActivityCluster
-                messages={unit.messages}
-                isTurnStreaming={liveActivityClusterIndices.has(index)}
-                hasBodyBelow={hasBodyBelow}
-                turnLatencyMs={unit.turnLatencyMs}
-                cliApps={cliApps}
-                mcpPresets={mcpPresets}
-                onOpenFilePreview={onOpenFilePreview}
-              />
-            ) : (
-              <MessageBubble
-                message={unit.message}
-                showAssistantCopyAction={
-                  unit.message.role === "assistant"
-                    ? copyFlags[index]
-                    : true
-                }
-                cliApps={cliApps}
-                mcpPresets={mcpPresets}
-                onOpenFilePreview={onOpenFilePreview}
-                onForkFromHere={
-                  onForkFromMessage
-                    ? forkHandlerForAssistantMessage(
-                        unit.message,
-                        copyFlags[index],
-                        assistantForkIndexById,
-                        onForkFromMessage,
-                      )
-                    : undefined
-                }
-              />
-            )}
-          </div>
+          <Fragment key={unitKey(unit, index)}>
+            <div className={marginTop} data-user-prompt-id={userPromptId}>
+              {unit.type === "activity" ? (
+                <AgentActivityCluster
+                  messages={unit.messages}
+                  isTurnStreaming={liveActivityClusterIndices.has(index)}
+                  hasBodyBelow={hasBodyBelow}
+                  turnLatencyMs={unit.turnLatencyMs}
+                  cliApps={cliApps}
+                  mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
+                />
+              ) : (
+                <MessageBubble
+                  message={unit.message}
+                  showAssistantCopyAction={
+                    unit.message.role === "assistant"
+                      ? copyFlags[index]
+                      : true
+                  }
+                  cliApps={cliApps}
+                  mcpPresets={mcpPresets}
+                  onOpenFilePreview={onOpenFilePreview}
+                  onForkFromHere={
+                    onForkFromMessage
+                      ? forkHandlerForAssistantMessage(
+                          unit.message,
+                          copyFlags[index],
+                          assistantForkIndexById,
+                          onForkFromMessage,
+                        )
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+            {index === forkBoundaryAfterUnitIndex ? (
+              <ForkBoundaryDivider label={t("thread.fork.fromHistory")} />
+            ) : null}
+          </Fragment>
         );
       })}
+    </div>
+  );
+}
+
+function unitIndexAfterMessageCount(
+  units: DisplayUnit[],
+  messageCount: number | null | undefined,
+): number | null {
+  if (messageCount == null || messageCount <= 0) return null;
+  let seen = 0;
+  for (let i = 0; i < units.length; i += 1) {
+    const unit = units[i];
+    seen += unit.type === "activity" ? unit.messages.length : 1;
+    if (seen >= messageCount) return i;
+  }
+  return null;
+}
+
+function ForkBoundaryDivider({ label }: { label: string }) {
+  return (
+    <div className="my-5 flex items-center gap-3 text-[11px] text-muted-foreground/80">
+      <span aria-hidden className="h-px flex-1 bg-border/70" />
+      <span className="shrink-0">{label}</span>
+      <span aria-hidden className="h-px flex-1 bg-border/70" />
     </div>
   );
 }
