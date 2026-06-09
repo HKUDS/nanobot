@@ -220,12 +220,10 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 
 If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
 
-**Install from source**
+**Install from PyPI**
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-python -m pip install -e .
+python -m pip install nanobot-ai
 ```
 
 **Install with `uv`**
@@ -234,10 +232,12 @@ python -m pip install -e .
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI**
+**Install from source**
 
 ```bash
-python -m pip install nanobot-ai
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+python -m pip install -e .
 ```
 
 Verify the install:
