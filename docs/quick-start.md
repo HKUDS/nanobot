@@ -34,7 +34,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Test One Message](#4-test-one-message).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -92,6 +92,8 @@ On Windows, `~` in the docs means your user profile directory, for example `C:\U
 
 ## 2. Initialize
 
+Skip this section if the one-command setup already started the wizard and you saved the config there.
+
 ```bash
 nanobot onboard
 ```
@@ -112,6 +114,8 @@ Initialization creates:
 If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
 
 ## 3. Configure a Provider
+
+Skip this section if you already configured provider and model settings in the wizard.
 
 Open `~/.nanobot/config.json`. Add or merge these blocks into the file created by `nanobot onboard`; do not replace the whole file unless you want to reset the config.
 
