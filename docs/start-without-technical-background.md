@@ -52,6 +52,14 @@ py --version
 
 If `py` works but `python` does not, replace `python` with `py` in the commands below.
 
+If macOS or Linux says `python` is not found, try:
+
+```bash
+python3 --version
+```
+
+If `python3` works but `python` does not, replace `python` with `python3` in the manual commands below. The one-command installer already checks both `python3` and `python`.
+
 ## 3. Get an OpenRouter API Key
 
 This guide uses OpenRouter as one example provider so every step has concrete names to copy. It is not an endorsement. If you already have another supported provider, use that provider's key and model instead.
@@ -116,6 +124,8 @@ If the terminal cannot find `nanobot`, use the module form:
 python -m nanobot --version
 ```
 
+Use `python3 -m nanobot --version` or `py -m nanobot --version` if that is the Python command that worked in step 2.
+
 ## 5. Run the Setup Wizard
 
 The one-command installer starts this for you after installation. If you installed manually, run:
@@ -129,6 +139,8 @@ If `nanobot` is not found, run:
 ```bash
 python -m nanobot onboard --wizard
 ```
+
+Use `python3 -m nanobot onboard --wizard` or `py -m nanobot onboard --wizard` if that is the Python command that worked in step 2.
 
 The wizard is a terminal menu. It is not a graphical app, but it lets you choose options instead of hand-editing every JSON field.
 
@@ -254,7 +266,7 @@ First check that nanobot can read the saved setup:
 nanobot status
 ```
 
-This should show the config file path, workspace path, and the active model or preset. If `nanobot` is not found, use `python -m nanobot status`.
+This should show the config file path, workspace path, and the active model or preset. If `nanobot` is not found, use `python -m nanobot status`, `python3 -m nanobot status`, or `py -m nanobot status`, matching the Python command that worked in step 2.
 
 It is normal for most providers to say `not set`. Only the provider you selected for the active preset needs to look configured.
 
@@ -278,6 +290,8 @@ If `nanobot` is not found, run:
 python -m nanobot agent -m "Hello!"
 ```
 
+Use `python3 -m nanobot agent -m "Hello!"` or `py -m nanobot agent -m "Hello!"` if that is the Python command that worked in step 2.
+
 ## 8. If Something Fails
 
 Do not change many things at once. Check the exact error:
@@ -287,7 +301,7 @@ Do not change many things at once. Check the exact error:
 | `JSON parse error` | The config file has a missing comma, extra comma, or mismatched brace. Copy the example again. |
 | `401`, `unauthorized`, or `invalid API key` | The API key is wrong, expired, has extra spaces, or was pasted under the wrong provider. |
 | `model not found` | The model ID is not available through OpenRouter or your account cannot use it. |
-| `nanobot: command not found` | The install worked in Python, but your shell cannot find the script. Use `python -m nanobot ...`. |
+| `nanobot: command not found` | The install worked in Python, but your shell cannot find the script. Use `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`, matching the Python command that worked earlier. |
 | No response after editing config | Restart the command. Long-running processes read config when they start. |
 
 For a fuller diagnosis path, see [`troubleshooting.md`](./troubleshooting.md).

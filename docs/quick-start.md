@@ -88,6 +88,8 @@ python -m nanobot onboard
 
 On Windows, `~` in the docs means your user profile directory, for example `C:\Users\you`.
 
+The docs use `python` in commands. If your system exposes Python 3.11+ as `python3` or `py`, use that command in the same place, for example `python3 -m pip install nanobot-ai` or `py -m nanobot --version`.
+
 ## 2. Initialize
 
 Skip this section if the one-command setup already started the wizard and you saved the config there.
