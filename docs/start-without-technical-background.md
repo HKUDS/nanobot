@@ -20,13 +20,25 @@ You will see these words during setup:
 | Model preset | A named model choice in the config file. |
 | `apiBase` | The HTTP address of a provider endpoint. You usually do not need it for OpenRouter. |
 
-## 1. Install Python
+## 1. Open a Terminal
+
+You will paste commands into a terminal. Copy only the command text inside each code block; do not copy the ``` marks.
+
+| System | How to open it |
+|---|---|
+| Windows | Press `Win`, type `PowerShell`, then open **Windows PowerShell**. |
+| macOS | Press `Command` + `Space`, type `Terminal`, then press `Enter`. |
+| Linux | Open your app launcher, search for `Terminal`, then open it. |
+
+When the terminal opens, click inside it, paste the command, and press `Enter`. If a command prints text and returns to a prompt, that is usually normal.
+
+## 2. Install Python
 
 Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/).
 
 On Windows, enable **Add python.exe to PATH** during installation if the installer shows that option.
 
-Open a terminal and check Python:
+In that terminal, check Python:
 
 ```bash
 python --version
@@ -40,7 +52,7 @@ py --version
 
 If `py` works but `python` does not, replace `python` with `py` in the commands below.
 
-## 2. Get an OpenRouter API Key
+## 3. Get an OpenRouter API Key
 
 This guide uses OpenRouter as one example provider so every step has concrete names to copy. It is not an endorsement. If you already have another supported provider, use that provider's key and model instead.
 
@@ -50,7 +62,7 @@ This guide uses OpenRouter as one example provider so every step has concrete na
 
 The key usually starts with `sk-or-v1-`. Keep it nearby because the setup wizard will ask you to paste it.
 
-## 3. Install nanobot
+## 4. Install nanobot
 
 The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard.
 
@@ -104,7 +116,7 @@ If the terminal cannot find `nanobot`, use the module form:
 python -m nanobot --version
 ```
 
-## 4. Run the Setup Wizard
+## 5. Run the Setup Wizard
 
 The one-command installer starts this for you after installation. If you installed manually, run:
 
@@ -168,7 +180,7 @@ The wizard creates or updates:
 | `~/.nanobot/config.json` | Settings file. |
 | `~/.nanobot/workspace/` | Working folder for memory, sessions, and generated files. |
 
-## 5. Manual Config Fallback
+## 6. Manual Config Fallback
 
 Use this only if the wizard is unavailable or you prefer opening the file yourself.
 
@@ -225,7 +237,7 @@ If OpenRouter says your account cannot use that model, replace the `model` value
 
 Save the file.
 
-## 6. Send the First Message
+## 7. Send the First Message
 
 Run:
 
@@ -247,7 +259,7 @@ If `nanobot` is not found, run:
 python -m nanobot agent -m "Hello!"
 ```
 
-## 7. If Something Fails
+## 8. If Something Fails
 
 Do not change many things at once. Check the exact error:
 
