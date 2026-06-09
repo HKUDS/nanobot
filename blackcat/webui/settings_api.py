@@ -34,8 +34,17 @@ from blackcat.webui.workspaces import (
     write_webui_default_access_mode,
 )
 
+from nanobot import __version__
+
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
+
+
+def _version_payload() -> dict[str, Any]:
+    """Return version info for the settings payload."""
+    return {
+        "current": __version__,
+    }
 
 _RUNTIME_CAPABILITIES = {
     "can_restart_engine": False,
@@ -803,6 +812,7 @@ def settings_payload(
             "exec_path_append_set": bool(exec_config.path_append),
         },
         "requires_restart": requires_restart,
+        "version": _version_payload(),
     }
     return decorate_settings_payload(
         payload,

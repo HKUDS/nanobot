@@ -485,6 +485,9 @@ export interface SettingsPayload {
   };
   requires_restart: boolean;
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
+  version?: {
+    current: string;
+  };
 }
 
 export interface AppPackageRef {
