@@ -6,8 +6,6 @@ history.jsonl (e.g. ``"cursor": "abc"``).  The original ``_next_cursor`` and
 ``TypeError`` / ``ValueError``, blocking all subsequent history appends.
 """
 
-import json
-
 import pytest
 
 from nanobot.agent.memory import MemoryStore
@@ -69,6 +67,40 @@ class TestNextCursorRecovery:
         )
         cursor = store.append_history("after bad cursor file")
         assert cursor == 11
+
+    def test_stale_cursor_file_does_not_reuse_history_cursor(self, store):
+        """A stale .cursor file must not allocate a duplicate cursor."""
+        store.history_file.write_text(
+            '{"cursor": 10, "timestamp": "2026-04-01 10:00", "content": "valid"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.write_text("2", encoding="utf-8")
+
+        cursor = store.append_history("after stale cursor file")
+
+        assert cursor == 11
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [e["cursor"] for e in entries] == [10, 11]
+
+    def test_cursor_file_stays_ahead_after_history_compaction(self, store):
+        """A cursor counter ahead of the tail preserves monotonic allocation."""
+        store.history_file.write_text(
+            '{"cursor": 10, "timestamp": "2026-04-01 10:00", "content": "valid"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.write_text("100", encoding="utf-8")
+
+        cursor = store.append_history("after compacted history")
+
+        assert cursor == 101
+
+    def test_negative_cursor_file_content_falls_back(self, store):
+        """A negative .cursor value is corrupt and should not produce negative IDs."""
+        store._cursor_file.write_text("-5", encoding="utf-8")
+
+        cursor = store.append_history("after negative cursor file")
+
+        assert cursor == 1
 
 
 class TestReadUnprocessedWithCorruption:
@@ -159,6 +191,7 @@ class TestCursorValidationInvariant:
         warning, subsequent reads on the same store stay quiet.  Without
         this, a poisoned file produces one warning per agent turn."""
         import logging
+
         from loguru import logger as loguru_logger
 
         store.history_file.write_text(

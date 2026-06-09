@@ -336,18 +336,32 @@ class MemoryStore:
         session_key = entry.get("session_key")
         return session_key is None or isinstance(session_key, str)
 
+    def _read_cursor_counter(self) -> int | None:
+        """Return the persisted cursor counter when it is usable."""
+        if not self._cursor_file.exists():
+            return None
+        with suppress(ValueError, OSError):
+            cursor = int(self._cursor_file.read_text(encoding="utf-8").strip())
+            if cursor >= 0:
+                return cursor
+        return None
+
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return the next value."""
-        if self._cursor_file.exists():
-            with suppress(ValueError, OSError):
-                return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
+        cursor_counter = self._read_cursor_counter()
+        last = self._read_last_entry() or {}
+        last_cursor = self._valid_cursor(last.get("cursor"))
+        if cursor_counter is not None:
+            if last_cursor is not None:
+                return max(cursor_counter, last_cursor) + 1
+            max_history_cursor = max((c for _, c in self._iter_valid_entries()), default=0)
+            return max(cursor_counter, max_history_cursor) + 1
+
         # Fast path: trust the tail when intact.  Otherwise scan the whole
         # file and take ``max`` — that stays correct even if the monotonic
         # invariant was broken by external writes.
-        last = self._read_last_entry() or {}
-        cursor = self._valid_cursor(last.get("cursor"))
-        if cursor is not None:
-            return cursor + 1
+        if last_cursor is not None:
+            return last_cursor + 1
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
