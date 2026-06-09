@@ -125,6 +125,43 @@ power `/model` switching and fallback chains. For Anthropic direct, OpenAI
 direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local
 models, see [`providers.md`](./providers.md).
 
+**What about `apiBase` / base URL?**
+
+`apiBase` is the HTTP base URL of the provider endpoint, not the model name.
+Most hosted providers in nanobot already know their default endpoint, so you
+usually only set `apiKey` and a model preset. Set `apiBase` when you are using:
+
+- `custom` for a third-party or self-hosted OpenAI-compatible API;
+- a local OpenAI-compatible server such as Ollama, vLLM, or LM Studio;
+- a provider-specific alternate endpoint, regional endpoint, proxy, or
+  subscription endpoint.
+
+Examples:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "${CUSTOM_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
+    }
+  }
+}
+```
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiBase": "http://localhost:11434/v1"
+    }
+  }
+}
+```
+
+If the provider's docs say the endpoint is `/v1`, include `/v1` in `apiBase`.
+The model ID still belongs in the active `modelPresets` entry.
+
 If you prefer not to store secrets in `config.json`, reference an environment
 variable and set it before starting nanobot:
 

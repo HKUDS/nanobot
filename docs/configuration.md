@@ -134,6 +134,48 @@ ANTHROPIC_API_KEY="$(pass show api/anthropic)" nanobot agent
 ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 ```
 
+## Langfuse Observability
+
+nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI
+SDK wrapper. This is configured with environment variables, not `config.json`.
+
+Install the optional package in the same Python environment that runs nanobot:
+
+```bash
+python -m pip install langfuse
+```
+
+Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or
+`nanobot serve`:
+
+```bash
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_BASE_URL="https://cloud.langfuse.com"
+```
+
+For PowerShell:
+
+```powershell
+$env:LANGFUSE_SECRET_KEY = "sk-lf-..."
+$env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
+$env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
+```
+
+When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed,
+nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so
+model requests are sent to Langfuse in the background. If the secret key is set
+but `langfuse` is missing, nanobot logs a warning and falls back to the regular
+OpenAI client.
+
+Use the Langfuse region or self-hosted URL that matches your project. The
+[Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py)
+use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
+
+Tracing covers the providers that go through nanobot's OpenAI-compatible client
+path. Native providers that do not use that client may not produce Langfuse
+OpenAI-wrapper traces.
+
 ## Providers
 
 > [!TIP]

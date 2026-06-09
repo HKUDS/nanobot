@@ -101,6 +101,20 @@ Then compare your config against [`providers.md`](./providers.md).
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run `nanobot provider login openai-codex` or `nanobot provider login github-copilot`, then select the provider explicitly. |
 
+## Langfuse Problems
+
+Langfuse tracing is optional and controlled by environment variables.
+
+| Symptom | Check |
+|---|---|
+| `LANGFUSE_SECRET_KEY is set but langfuse is not installed` | Install `langfuse` in the same Python environment that runs nanobot, then restart the process. |
+| No traces appear | Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` before starting nanobot. |
+| Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
+| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls; native providers may not use that client path. |
+
+See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability)
+for setup commands.
+
 ## Gateway Problems
 
 `nanobot gateway` is required for WebUI, chat apps, heartbeat, Dream, and

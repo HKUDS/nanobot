@@ -45,6 +45,24 @@ the preset while setting up; you can switch back to `"auto"` later.
 The provider config gives nanobot credentials and endpoint details. The agent
 defaults choose which named preset to use for normal turns.
 
+## Provider, Model, API Key, and Base URL
+
+These fields answer different questions:
+
+| Field | Where it lives | Meaning |
+|---|---|---|
+| `provider` | `modelPresets.<name>.provider` | Which nanobot provider adapter should send the request. |
+| `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
+| `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
+| `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
+
+You usually omit `apiBase` for hosted built-in providers such as OpenRouter,
+Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their
+default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers,
+provider proxies, regional endpoints, or subscription endpoints. Include the API
+version path when the endpoint requires it, for example
+`https://api.example.com/v1` or `http://localhost:11434/v1`.
+
 ## Common Provider Patterns
 
 ### OpenRouter Gateway
