@@ -22,15 +22,11 @@ from websockets.http11 import Response
 
 from blackcat.command.builtin import builtin_command_palette
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from blackcat.webui.http_utils import (
-from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
     case_insensitive_header as _case_insensitive_header,
-)
-from blackcat.webui.http_utils import (
     host_for_url as _host_for_url,
-)
-from blackcat.webui.http_utils import (
     http_error as _http_error,
 )
 from blackcat.webui.http_utils import (
@@ -71,10 +67,10 @@ from blackcat.webui.workspaces import WebUIWorkspaceController
 
 if TYPE_CHECKING:
     from blackcat.bus.queue import MessageBus
+    from blackcat.cron.service import CronService
     from blackcat.session.manager import SessionManager
 from blackcat.webui.session_automations import session_automations_payload
 from blackcat.webui.skills_api import webui_skill_detail_payload, webui_skills_payload
-    from blackcat.cron.service import CronService
 
 
 def _decode_api_key(raw_key: str) -> str | None:

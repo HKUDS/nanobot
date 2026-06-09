@@ -90,6 +90,9 @@ _WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
 _PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
     "proactive_webui_metadata",
     default=None,
+)
+
+
 def _proactive_delivery_metadata(
     channel: str,
     metadata: dict[str, Any] | None,

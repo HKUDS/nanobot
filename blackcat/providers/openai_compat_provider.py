@@ -19,8 +19,6 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from blackcat.providers.openai_responses import (
 from blackcat.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -28,6 +26,7 @@ from blackcat.providers.base import (
     parse_tool_arguments,
     tool_arguments_json_for_replay,
 )
+from blackcat.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
     convert_tools,

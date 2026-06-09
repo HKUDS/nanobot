@@ -13,11 +13,10 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from blackcat.agent.hook import AgentHook, AgentHookContext
+from blackcat.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from blackcat.agent.tools.registry import ToolRegistry
 from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from blackcat.utils.file_edit_events import (
-from blackcat.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
     StreamingFileEditTracker,
     build_file_edit_end_event,
     build_file_edit_error_event,
