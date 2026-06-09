@@ -105,12 +105,12 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
     warnings: list[str] = []
 
     monkeypatch.setattr(
-        "blackcat.utils.helpers._cleanup_tool_result_buckets",
+        "blackcat.utils.tools._cleanup_tool_result_buckets",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("busy")),
     )
     monkeypatch.setattr(
-        "blackcat.utils.helpers.logger.exception",
-        lambda message, *args: warnings.append(message.format(*args)),
+        "blackcat.utils.tools.logger.warning",
+        lambda message, *args, **kwargs: warnings.append(message.format(*args) if args else message),
     )
 
     persisted = maybe_persist_tool_result(

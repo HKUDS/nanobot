@@ -522,6 +522,12 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
             return base
         return self._default_base_url()
 
+    def _ollama_model(self, model: str) -> str:
+        """Strip the ``ollama/`` prefix if present."""
+        if model.startswith(("ollama/", "ollama_")):
+            return model.split("/", 1)[1]
+        return model
+
     async def generate(
         self,
         *,
@@ -538,7 +544,7 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
 
         width, height = _ollama_dimensions(aspect_ratio, image_size)
         body: dict[str, Any] = {
-            "model": model,
+            "model": self._ollama_model(model),
             "prompt": prompt,
             "width": width,
             "height": height,

@@ -2,11 +2,14 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from blackcat.agent.skills import SkillsLoader
 from blackcat.agent.tools.base import Tool, tool_parameters
 from blackcat.agent.tools.schema import BooleanSchema, StringSchema, tool_parameters_schema
+
+if TYPE_CHECKING:
+    from blackcat.agent.tools.context import ToolContext
 
 
 class _SkillTool(Tool):

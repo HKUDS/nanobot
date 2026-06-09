@@ -327,7 +327,7 @@ class MyToolConfig(Base):
     """Self-inspection tool configuration."""
 
     enable: bool = True
-    allowSet: bool = False
+    allow_set: bool = Field(default=False, alias="allowSet")
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""

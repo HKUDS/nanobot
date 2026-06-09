@@ -108,7 +108,7 @@ class _GoalToolsMixin(ContextAware):
         required=["goal"],
     )
 )
-class LongTaskTool(Tool, _GoalToolsMixin):
+class LongTaskTool(_GoalToolsMixin, Tool):
     """Begin or replace focus on a long-running objective stored on the session."""
 
     def __init__(
@@ -190,7 +190,7 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         required=[],
     )
 )
-class CompleteGoalTool(Tool, _GoalToolsMixin):
+class CompleteGoalTool(_GoalToolsMixin, Tool):
     """Mark the active sustained goal finished after all required work is verified."""
 
     def __init__(

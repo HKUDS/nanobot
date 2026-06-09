@@ -889,6 +889,26 @@ def _run_gateway(
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting blackcat gateway version {__version__} on port {port}...")
+
+    # Add file-based logging for runtime debugging (rotated at 10MB, keep 3 backups)
+    from pathlib import Path
+    log_dir = Path.home() / ".blackcat" / ".logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        log_dir / "blackcat.log",
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <5}</level> | "
+            "<cyan>{extra[channel]}</cyan> | "
+            "<level>{message}</level>"
+        ),
+        level="DEBUG",
+        rotation="10 MB",
+        retention=3,
+        enqueue=True,
+        filter=lambda record: record["extra"].setdefault("channel", "-") or True,
+    )
+
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     runtime_events = RuntimeEventBus()

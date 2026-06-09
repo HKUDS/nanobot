@@ -496,6 +496,7 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         session_summary: str | None = None,
         include_memory_recent_history: bool = True,
+        channel: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build static blocks for Anthropic-style prompt caching.
@@ -516,7 +517,7 @@ class ContextBuilder:
 
         system = platform.system()
         workspace_string = render_template("agent/platform_policy.md", system=system)
-        guidelines_string = self._get_guidelines()
+        guidelines_string = self._get_guidelines(channel=channel)
         # Add guideline and workspace blocks (static content)
         blocks.append({"type": "text", "text": guidelines_string})
         blocks.append({"type": "text", "text": workspace_string})
@@ -545,7 +546,7 @@ class ContextBuilder:
                     f"- [{e['timestamp']}] {e['content']}" for e in capped
                 )
                 history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
-                blocks.append({"type": "text", "text": "# Recent History\n\n" + history_text})
+                blocks.append({"type": "text", "text": f"# Recent History\n\n{history_text}"})
 
         if session_summary:
             blocks.append({"type": "text", "text": f"[Archived Context Summary]\n\n{session_summary}"})
@@ -587,6 +588,7 @@ class ContextBuilder:
         chat_id: str | None = None,
         skill_names: list[str] | None = None,
         history: list[dict[str, Any]] | None = None,
+        include_memory_recent_history: bool = True,
     ) -> str:
         """
         Build the complete system prompt for non-Anthropic providers.
@@ -602,7 +604,7 @@ You are within blackcat harness/structure.
 """}] # FIXME: brings the name and sigil of the app dynamically
         author = self.resolve_author(channel, sender_id)
 
-        static_blocks = self._build_static_blocks(skill_names)
+        static_blocks = self._build_static_blocks(skill_names, channel=channel, include_memory_recent_history=include_memory_recent_history)
         dynamic_blocks = await self._build_dynamic_blocks(author, sender_id, channel, chat_id, history)
 
         # Convert blocks to string
@@ -680,7 +682,8 @@ You are within blackcat harness/structure.
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call (nanobot-compatible)."""
         system_prompt = await self.build_system_prompt(
-            sender_id, channel, chat_id, skill_names, history
+            sender_id, channel, chat_id, skill_names, history,
+            include_memory_recent_history=include_memory_recent_history,
             )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -689,7 +692,7 @@ You are within blackcat harness/structure.
             *goal_state_runtime_lines(session_metadata),
         ]
         if runtime_state is not None and inbound_message is not None:
-            extra.extend(runtime_lines(runtime_state, inbound_message, root, skip=skip_runtime_lines))
+            extra.extend(runtime_lines(runtime_state, inbound_message, self.workspace, skip=skip_runtime_lines))
         if current_runtime_lines:
             extra.extend(line for line in current_runtime_lines if line)
         runtime_ctx = self._build_runtime_context(

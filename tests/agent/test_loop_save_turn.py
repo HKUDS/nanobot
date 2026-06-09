@@ -794,7 +794,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
+    loop.context.build_messages = AsyncMock(  # type: ignore[method-assign]
         return_value=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + hello"},
@@ -845,7 +845,7 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
     system_session.metadata = {}
     loop.sessions.save(system_session)
 
-    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
+    loop.context.build_messages = AsyncMock(  # type: ignore[method-assign]
         return_value=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "runtime + system"},
@@ -1150,7 +1150,7 @@ async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp
     ]
 
 
-def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
+async def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
     loop = _mk_loop()
     session = Session(key="cli:merge")
     session.add_message("assistant", "previous assistant")
@@ -1169,7 +1169,7 @@ def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_pat
     assert inserted is True
 
     builder = ContextBuilder(tmp_path)
-    projected = builder.build_messages(
+    projected = await builder.build_messages(
         history=session.get_history(max_messages=0),
         current_message="",
         current_role="assistant",

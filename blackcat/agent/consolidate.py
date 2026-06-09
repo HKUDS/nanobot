@@ -9,7 +9,7 @@
 import asyncio
 import datetime
 import weakref
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 import tiktoken
 from loguru import logger
@@ -44,7 +44,7 @@ class Consolidator:
         model: str,
         sessions: SessionManager,
         context_window_tokens: int,
-        build_messages: Callable[..., list[dict[str, Any]]],
+        build_messages: Callable[..., Coroutine[Any, Any, list[dict[str, Any]]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
@@ -58,6 +58,7 @@ class Consolidator:
         self.consolidation_ratio = consolidation_ratio
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._estimate_tokens = estimate_message_tokens
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -95,7 +96,7 @@ class Consolidator:
                 last_boundary = (idx, removed_tokens)
                 if removed_tokens >= tokens_to_remove:
                     return last_boundary
-            removed_tokens += estimate_message_tokens(message)
+            removed_tokens += self._estimate_tokens(message)
 
         return last_boundary
 
@@ -176,7 +177,7 @@ class Consolidator:
             }
             self.sessions.save(session)
 
-    def estimate_session_prompt_tokens(
+    async def estimate_session_prompt_tokens(
         self,
         session: Session,
     ) -> tuple[int, str]:
@@ -186,7 +187,7 @@ class Consolidator:
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
         summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
-        probe_messages = self._build_messages(
+        probe_messages = await self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -286,7 +287,7 @@ class Consolidator:
                 replay_max_messages,
             )
             try:
-                estimated, source = self.estimate_session_prompt_tokens(
+                estimated, source = await self.estimate_session_prompt_tokens(
                     session,
                 )
             except Exception:
@@ -351,7 +352,7 @@ class Consolidator:
                     break
 
                 try:
-                    estimated, source = self.estimate_session_prompt_tokens(
+                    estimated, source = await self.estimate_session_prompt_tokens(
                         session,
                     )
                 except Exception:

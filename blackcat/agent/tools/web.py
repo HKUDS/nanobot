@@ -379,14 +379,6 @@ class WebSearchTool(Tool):
     """Search the web using configured provider."""
     _scopes = {"core", "subagent"}
 
-    name = "web_search"
-    description = (
-        "Search the web. Returns titles, URLs, and snippets. "
-        "count defaults to 5 (max 10). "
-        "Some providers support timeRange, authLevel, and queryRewrite. "
-        "Use web_fetch to read a specific page in full."
-    )
-
     config_key = "web"
 
     @classmethod

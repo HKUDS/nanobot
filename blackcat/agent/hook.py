@@ -109,10 +109,18 @@ class CompositeHook(AgentHook):
                 logger.exception("AgentHook.before_execute_tools error in {}", type(h).__name__)
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
-        await self._for_each_hook_safe("emit_reasoning", reasoning_content)
+        for h in self._hooks:
+            try:
+                await h.emit_reasoning(reasoning_content)
+            except Exception:
+                logger.exception("AgentHook.emit_reasoning error in {}", type(h).__name__)
 
     async def emit_reasoning_end(self) -> None:
-        await self._for_each_hook_safe("emit_reasoning_end")
+        for h in self._hooks:
+            try:
+                await h.emit_reasoning_end()
+            except Exception:
+                logger.exception("AgentHook.emit_reasoning_end error in {}", type(h).__name__)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         for h in self._hooks:

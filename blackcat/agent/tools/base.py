@@ -1,11 +1,16 @@
 """Base class for agent tools."""
 from __future__ import annotations
 
-import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from blackcat.agent.tools.context import RequestContext, ToolContext
+
 
 def set_context(self, ctx: RequestContext) -> None:
         """Set routing context for tools that need it (optional override)."""
@@ -261,6 +266,9 @@ class Tool(ABC):
     def set_context(self, ctx: RequestContext) -> None:
         """Set routing context for tools that need it (optional override)."""
         pass
+
+
+_ToolT = TypeVar("_ToolT", bound=Tool)
 
 
 def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_ToolT]]:
