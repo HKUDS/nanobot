@@ -2,6 +2,22 @@
 
 Use this page when you know what you want to run and need the command shape. For a guided first run, start with [`quick-start.md`](./quick-start.md).
 
+## Choose a Command
+
+| Goal | Command | Notes |
+|---|---|---|
+| Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
+| Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
+| Check config without calling a model | `nanobot status` | Reads the default config and summarizes the active model/provider |
+| Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
+| Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
+| Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running while those surfaces are in use |
+| Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
+| Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
+| Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
+| Log in to OAuth model providers | `nanobot provider login <provider>` | Used by OAuth providers such as OpenAI Codex and GitHub Copilot |
+
 ## Global
 
 ```bash
@@ -12,6 +28,25 @@ python -m nanobot --version
 ```
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
+
+## Common Patterns
+
+Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
+
+```bash
+nanobot agent --config ./bot-a/config.json --workspace ./bot-a/workspace -m "Hello"
+nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
+nanobot serve --config ./bot-a/config.json --workspace ./bot-a/workspace
+```
+
+Use `--verbose` on long-running processes when you need startup or runtime logs:
+
+```bash
+nanobot gateway --verbose
+nanobot serve --verbose
+```
+
+Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal to stop `nanobot gateway` or `nanobot serve`.
 
 ## Setup
 
