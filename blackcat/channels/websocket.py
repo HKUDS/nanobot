@@ -34,7 +34,7 @@ from blackcat.utils.media_decode import (
     save_base64_data_url,
 )
 from blackcat.webui.cli_apps_api import normalize_cli_app_mentions
-from blackcat.webui.forking import create_webui_chat_fork
+from blackcat.webui.forking import handle_webui_fork_chat
 from blackcat.webui.gateway_services import GatewayServices
 from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -670,49 +670,7 @@ class WebSocketChannel(BaseChannel):
             await self._hydrate_after_subscribe(new_id)
             return
         if t == "fork_chat":
-            source_chat_id = envelope.get("source_chat_id")
-            raw_index = envelope.get("before_user_index")
-            if not _is_valid_chat_id(source_chat_id):
-                await self._send_event(connection, "error", detail="invalid source_chat_id")
-                return
-            if (
-                isinstance(raw_index, bool)
-                or not isinstance(raw_index, int)
-                or raw_index < 0
-            ):
-                await self._send_event(connection, "error", detail="invalid before_user_index")
-                return
-            if self.gateway.session_manager is None:
-                await self._send_event(connection, "error", detail="session_manager_unavailable")
-                return
-
-            try:
-                forked = create_webui_chat_fork(
-                    self.gateway.session_manager,
-                    source_chat_id=source_chat_id,
-                    before_user_index=raw_index,
-                    title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
-                )
-                if forked is None:
-                    await self._send_event(connection, "error", detail="invalid fork source or index")
-                    return
-                fork_id, fork_key = forked
-            except Exception as exc:
-                self.logger.warning("fork_chat failed: {}", exc)
-                await self._send_event(connection, "error", detail="fork_chat_failed")
-                return
-
-            scope = self._workspaces.scope_for_session_key(fork_key)
-            self._attach(connection, fork_id)
-            await self._send_event(connection, "attached", chat_id=fork_id)
-            await self._send_event(
-                connection,
-                "session_updated",
-                chat_id=fork_id,
-                scope="metadata",
-                workspace_scope=scope.payload(),
-            )
-            await self._hydrate_after_subscribe(fork_id)
+            await handle_webui_fork_chat(self, connection, envelope)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
