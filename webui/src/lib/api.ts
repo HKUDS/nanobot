@@ -229,6 +229,26 @@ export async function fetchSettingsUsage(
   );
 }
 
+export interface VersionCheckResult {
+  updateAvailable: {
+    currentVersion: string;
+    latestVersion: string;
+    pypiUrl?: string;
+  } | null;
+}
+
+export async function checkVersion(
+  token: string,
+  base: string = "",
+): Promise<VersionCheckResult> {
+  return request<VersionCheckResult>(
+    `${base}/api/settings/version-check`,
+    token,
+    undefined,
+    10_000,
+  );
+}
+
 export async function fetchWorkspaces(
   token: string,
   base: string = "",
