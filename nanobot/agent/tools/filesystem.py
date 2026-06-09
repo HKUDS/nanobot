@@ -31,6 +31,8 @@ class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
     config_key = "file"
+    _allow_extra_allowed_dirs = False
+    _allow_media_dir = False
 
     @classmethod
     def config_cls(cls):
@@ -74,7 +76,7 @@ class _FsTool(Tool):
         )
         sandbox_restricts = bool(ctx.config.exec.sandbox)
         allowed_dir = Path(ctx.workspace) if restrict else None
-        extra_read = [BUILTIN_SKILLS_DIR]
+        extra_read = [BUILTIN_SKILLS_DIR] if cls._allow_extra_allowed_dirs else None
         return cls(
             workspace=Path(ctx.workspace),
             allowed_dir=allowed_dir,
@@ -100,7 +102,8 @@ class _FsTool(Tool):
             path,
             access.project_path,
             access.allowed_root,
-            self._extra_allowed_dirs,
+            self._extra_allowed_dirs if self._allow_extra_allowed_dirs else None,
+            include_media_dir=self._allow_media_dir,
         )
 
     def _display_workspace(self) -> Path | None:
@@ -179,6 +182,8 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
     _scopes = {"core", "subagent", "memory"}
+    _allow_extra_allowed_dirs = True
+    _allow_media_dir = True
 
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
@@ -968,6 +973,8 @@ class EditFileTool(_FsTool):
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
     _scopes = {"core", "subagent"}
+    _allow_extra_allowed_dirs = True
+    _allow_media_dir = True
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {

@@ -342,13 +342,36 @@ class TestWorkspaceRestriction:
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        outside = tmp_path / "outside"
-        outside.mkdir()
+        extra = tmp_path / "extra"
+        extra.mkdir()
 
-        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
-        result = await tool.execute(path=str(outside / "hack.txt"), content="pwned")
+        tool = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[extra],
+        )
+        target = extra / "hack.txt"
+        result = await tool.execute(path=str(target), content="pwned")
         assert "Error" in result
         assert "outside" in result.lower()
+        assert not target.exists()
+
+    @pytest.mark.asyncio
+    async def test_media_dir_does_not_widen_write(self, tmp_path, monkeypatch):
+        from nanobot.agent.tools.filesystem import WriteFileTool
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+
+        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+        target = media_dir / "generated.txt"
+        result = await tool.execute(path=str(target), content="pwned")
+        assert "Error" in result
+        assert "outside" in result.lower()
+        assert not target.exists()
 
     @pytest.mark.asyncio
     async def test_read_still_blocked_for_unrelated_dir(self, tmp_path):
@@ -398,7 +421,11 @@ class TestWorkspaceRestriction:
         skill_file.parent.mkdir()
         skill_file.write_text("# Weather\nOriginal content.")
 
-        tool = EditFileTool(workspace=workspace, allowed_dir=workspace)
+        tool = EditFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
         result = await tool.execute(
             path=str(skill_file),
             old_text="Original content.",
