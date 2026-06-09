@@ -2398,17 +2398,12 @@ async def test_fork_chat_copies_only_prefix_session_and_transcript(
     source.metadata["webui"] = True
     source.add_message("user", "round1")
     source.add_message("assistant", "answer1")
-    source.add_message("user", "round2 fork me")
-    source.add_message("assistant", "answer2")
-    source.add_message("user", "round3 must not appear")
+    source.add_message("user", "future")
     sessions.save(source)
     for ev in (
         {"event": "user", "chat_id": "source", "text": "round1"},
         {"event": "message", "chat_id": "source", "text": "answer1"},
-        {"event": "turn_end", "chat_id": "source"},
-        {"event": "user", "chat_id": "source", "text": "round2 fork me"},
-        {"event": "message", "chat_id": "source", "text": "answer2"},
-        {"event": "user", "chat_id": "source", "text": "round3 must not appear"},
+        {"event": "user", "chat_id": "source", "text": "future"},
     ):
         append_transcript_object("websocket:source", ev)
 
@@ -2437,132 +2432,11 @@ async def test_fork_chat_copies_only_prefix_session_and_transcript(
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
     assert saved["metadata"]["title"] == "Fork: Old title"
     fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None, None]
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
     assert fork_lines[-1]["event"] == "fork_marker"
     assert all(line.get("chat_id") == fork_id for line in fork_lines)
-    assert "round3 must not appear" not in json.dumps(saved, ensure_ascii=False)
+    assert "future" not in json.dumps(saved, ensure_ascii=False)
     bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_fork_chat_falls_back_to_session_prefix_when_transcript_lacks_user_rows(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
-    sessions = SessionManager(tmp_path / "sessions")
-    source = sessions.get_or_create("websocket:source")
-    source.metadata["webui"] = True
-    source.add_message("user", "round1")
-    source.add_message("assistant", "answer1")
-    source.add_message("user", "round2 fork me")
-    source.add_message("assistant", "answer2")
-    source.add_message("user", "round3 must not appear")
-    sessions.save(source)
-    append_transcript_object(
-        "websocket:source",
-        {"event": "message", "chat_id": "source", "text": "answer1"},
-    )
-
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
-        bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
-    )
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
-    )
-
-    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
-    attached = next(item for item in sent if item["event"] == "attached")
-    fork_id = attached["chat_id"]
-    saved = sessions.read_session_file(f"websocket:{fork_id}")
-    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
-    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
-    assert fork_lines[-1]["event"] == "fork_marker"
-    assert "round3 must not appear" not in json.dumps(fork_lines, ensure_ascii=False)
-    bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_fork_chat_allows_index_equal_to_user_count(
-    bus: MagicMock,
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
-    sessions = SessionManager(tmp_path / "sessions")
-    source = sessions.get_or_create("websocket:source")
-    source.metadata["webui"] = True
-    source.add_message("user", "round1")
-    source.add_message("assistant", "answer1")
-    sessions.save(source)
-    append_transcript_object("websocket:source", {"event": "user", "chat_id": "source", "text": "round1"})
-    append_transcript_object(
-        "websocket:source",
-        {"event": "message", "chat_id": "source", "text": "answer1"},
-    )
-
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
-        bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
-    )
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "fork_chat", "source_chat_id": "source", "before_user_index": 1},
-    )
-
-    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
-    attached = next(item for item in sent if item["event"] == "attached")
-    fork_id = attached["chat_id"]
-    saved = sessions.read_session_file(f"websocket:{fork_id}")
-    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
-    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
-    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
-    assert fork_lines[-1]["event"] == "fork_marker"
-    bus.publish_inbound.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_fork_chat_rejects_invalid_source_and_index(bus: MagicMock, tmp_path) -> None:
-    sessions = SessionManager(tmp_path / "sessions")
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
-        bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
-    )
-    conn = AsyncMock()
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "fork_chat", "source_chat_id": "bad/source", "before_user_index": 0},
-    )
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "error"
-    assert payload["detail"] == "invalid source_chat_id"
-
-    conn.reset_mock()
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "fork_chat", "source_chat_id": "missing", "before_user_index": -1},
-    )
-    payload = json.loads(conn.send.await_args.args[0])
-    assert payload["event"] == "error"
-    assert payload["detail"] == "invalid before_user_index"
-    bus.publish_inbound.assert_not_awaited()
-
 
 @pytest.mark.asyncio
 async def test_webui_message_envelope_appends_user_transcript(

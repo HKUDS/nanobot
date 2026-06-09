@@ -811,10 +811,7 @@
     },
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load earlier messages",
-    "fork": {
-      "failed": "Could not fork this chat. Try again.",
-      "fromHistory": "Forked from history"
-    },
+    "forkedFromHistory": "Forked from history",
     "promptNavigator": {
       "open": "Open prompt navigator",
       "title": "Prompts",
@@ -854,8 +851,6 @@
     "imageAttachment": "Image attachment",
     "automationSourceFallback": "Automation",
     "automationTriggered": "Triggered automatically",
-    "copyMessage": "Copy",
-    "copiedMessage": "Copied",
     "forkFromHere": "Fork",
     "copyReply": "Copy",
     "copiedReply": "Copied",

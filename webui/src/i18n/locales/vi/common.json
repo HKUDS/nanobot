@@ -811,10 +811,7 @@
     },
     "scrollToBottom": "Cuộn xuống cuối",
     "loadEarlier": "Tải tin nhắn trước đó",
-    "fork": {
-      "failed": "Không thể rẽ nhánh cuộc trò chuyện này. Hãy thử lại.",
-      "fromHistory": "Tách nhánh từ lịch sử"
-    },
+    "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {
       "open": "Mở trình điều hướng prompt",
       "title": "Prompt",
@@ -840,8 +837,6 @@
     "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
     "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
     "imageAttachment": "Tệp hình ảnh đính kèm",
-    "copyMessage": "Sao chép",
-    "copiedMessage": "Đã sao chép",
     "forkFromHere": "Tách nhánh",
     "copyReply": "Sao chép",
     "copiedReply": "Đã sao chép",

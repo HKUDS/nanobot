@@ -1,14 +1,8 @@
-"""Helpers for WebUI chat forking.
-
-The WebSocket channel owns transport concerns only. This module owns the
-WebUI-specific session/transcript work needed to make a fork look like a normal
-chat in both browser WebUI and desktop.
-"""
+"""WebUI chat fork orchestration."""
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 
 from blackcat.session.manager import SessionManager
 from blackcat.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
@@ -20,25 +14,14 @@ from blackcat.webui.transcript import (
 )
 
 
-@dataclass(frozen=True)
-class WebuiForkResult:
-    chat_id: str
-    session_key: str
-
-
 def create_webui_chat_fork(
     session_manager: SessionManager,
     *,
     source_chat_id: str,
     before_user_index: int,
     title: str | None = None,
-) -> WebuiForkResult | None:
-    """Create a WebUI chat fork from a completed assistant-turn boundary.
-
-    Returns ``None`` when the source/index is invalid. Exceptions are reserved
-    for unexpected I/O or persistence failures and are rolled back before being
-    re-raised.
-    """
+) -> tuple[str, str] | None:
+    """Return ``(chat_id, session_key)`` for a new fork, or ``None`` for bad input."""
     new_id = str(uuid.uuid4())
     source_key = f"websocket:{source_chat_id}"
     target_key = f"websocket:{new_id}"
@@ -68,4 +51,4 @@ def create_webui_chat_fork(
         delete_webui_transcript(target_key)
         session_manager.delete_session(target_key)
         raise
-    return WebuiForkResult(chat_id=new_id, session_key=target_key)
+    return new_id, target_key

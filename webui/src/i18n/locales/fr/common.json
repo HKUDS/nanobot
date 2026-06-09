@@ -811,10 +811,7 @@
     },
     "scrollToBottom": "Faire défiler vers le bas",
     "loadEarlier": "Charger les messages précédents",
-    "fork": {
-      "failed": "Impossible de bifurquer cette conversation. Réessayez.",
-      "fromHistory": "Bifurqué depuis l'historique"
-    },
+    "forkedFromHistory": "Bifurqué depuis l'historique",
     "promptNavigator": {
       "open": "Ouvrir le navigateur de prompts",
       "title": "Prompts",
@@ -840,8 +837,6 @@
     "agentActivityLiveSummary": "En cours… · {{reasoning}} étapes · {{tools}} appels d’outils",
     "agentActivityLiveToolsOnly": "En cours… · {{tools}} appels d’outils",
     "imageAttachment": "Pièce jointe image",
-    "copyMessage": "Copier",
-    "copiedMessage": "Copié",
     "forkFromHere": "Bifurquer",
     "copyReply": "Copier",
     "copiedReply": "Copié",

@@ -286,6 +286,25 @@ def _is_user_transcript_row(row: dict[str, Any]) -> bool:
     return row.get("event") == "user" or row.get("role") == "user"
 
 
+def _write_transcript_lines(session_key: str, rows: list[dict[str, Any]]) -> None:
+    path = webui_transcript_path(session_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".jsonl.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for row in rows:
+                raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+                    raise ValueError("webui transcript line too large")
+                f.write(raw + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def fork_transcript_before_user_index(
     source_key: str,
     target_key: str,
@@ -324,22 +343,7 @@ def fork_transcript_before_user_index(
     if not found_target:
         return False
 
-    path = webui_transcript_path(target_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(".jsonl.tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for row in copied:
-                raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
-                    raise ValueError("webui transcript line too large")
-                f.write(raw + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    _write_transcript_lines(target_key, copied)
     return True
 
 
@@ -360,51 +364,29 @@ def write_session_messages_as_transcript(
 ) -> None:
     """Write a minimal WebUI transcript from already-truncated session messages."""
     target_chat_id = _chat_id_from_session_key(target_key)
-    path = webui_transcript_path(target_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(".jsonl.tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for msg in messages:
-                role = msg.get("role")
-                content = msg.get("content")
-                text = content if isinstance(content, str) else ""
-                if role == "user":
-                    row: dict[str, Any] = {
-                        "event": "user",
-                        "chat_id": target_chat_id,
-                        "text": text,
-                    }
-                    media = msg.get("media")
-                    if isinstance(media, list) and media:
-                        row["media_paths"] = [str(p) for p in media if isinstance(p, str) and p]
-                    for key in ("cli_apps", "mcp_presets"):
-                        value = msg.get(key)
-                        if isinstance(value, list) and value:
-                            row[key] = json.loads(json.dumps(value, ensure_ascii=False))
-                elif role == "assistant":
-                    if not text.strip():
-                        continue
-                    row = {
-                        "event": "message",
-                        "chat_id": target_chat_id,
-                        "text": text,
-                    }
-                    media = msg.get("media")
-                    if isinstance(media, list) and media:
-                        row["media"] = [str(p) for p in media if isinstance(p, str) and p]
-                else:
-                    continue
-                raw = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
-                    raise ValueError("webui transcript line too large")
-                f.write(raw + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    rows: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+        text = content if isinstance(content, str) else ""
+        if role == "user":
+            row: dict[str, Any] = {"event": "user", "chat_id": target_chat_id, "text": text}
+            media = msg.get("media")
+            if isinstance(media, list) and media:
+                row["media_paths"] = [str(p) for p in media if isinstance(p, str) and p]
+            for key in ("cli_apps", "mcp_presets"):
+                value = msg.get(key)
+                if isinstance(value, list) and value:
+                    row[key] = json.loads(json.dumps(value, ensure_ascii=False))
+        elif role == "assistant" and text.strip():
+            row = {"event": "message", "chat_id": target_chat_id, "text": text}
+            media = msg.get("media")
+            if isinstance(media, list) and media:
+                row["media"] = [str(p) for p in media if isinstance(p, str) and p]
+        else:
+            continue
+        rows.append(row)
+    _write_transcript_lines(target_key, rows)
 
 
 def delete_webui_transcript(session_key: str) -> bool:
@@ -1411,25 +1393,12 @@ def replay_transcript_to_ui_messages(
     return messages
 
 
-def fork_boundary_message_count(
-    lines: list[dict[str, Any]],
-    *,
-    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
-    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
-    augment_assistant_text: Callable[[str], str] | None = None,
-) -> int | None:
+def fork_boundary_message_count(lines: list[dict[str, Any]]) -> int | None:
     """Return the replayed UI message count before the first fork marker, if any."""
     for idx, rec in enumerate(lines):
         if rec.get("event") != WEBUI_FORK_MARKER_EVENT:
             continue
-        return len(
-            replay_transcript_to_ui_messages(
-                lines[:idx],
-                augment_user_media=augment_user_media,
-                augment_assistant_media=augment_assistant_media,
-                augment_assistant_text=augment_assistant_text,
-            ),
-        )
+        return len(replay_transcript_to_ui_messages(lines[:idx]))
     return None
 
 
@@ -1446,12 +1415,7 @@ def build_webui_thread_response(
     if not lines:
         return None
     lines = inject_missing_user_events_from_session(session_key, lines, session_messages)
-    fork_boundary = fork_boundary_message_count(
-        lines,
-        augment_user_media=augment_user_media,
-        augment_assistant_media=augment_assistant_media,
-        augment_assistant_text=augment_assistant_text,
-    )
+    fork_boundary = fork_boundary_message_count(lines)
     msgs = replay_transcript_to_ui_messages(
         lines,
         augment_user_media=augment_user_media,
