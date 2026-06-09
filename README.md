@@ -264,7 +264,9 @@ Skip this step if you already configured provider and model settings in the wiza
 
 `nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
 
-*Set your API key* (the example below uses [OpenRouter](https://openrouter.ai/keys)):
+The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON has concrete names. Provider examples are recipes, not rankings or endorsements. If you use another provider, replace the provider config key, API key, preset provider name, and model ID together.
+
+*Set your API key*:
 
 ```json
 {
@@ -300,6 +302,16 @@ Skip this step if you already configured provider and model settings in the wiza
 
 Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and `fallbackModels`.
 
+For another provider, the same config shape still applies:
+
+| Replace | Where |
+|---|---|
+| Provider config key | `providers.<provider>` |
+| API key | `providers.<provider>.apiKey` |
+| Preset provider name | `modelPresets.primary.provider` |
+| Model ID | `modelPresets.primary.model` |
+| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
+
 **3. Test one message**
 
 ```bash
@@ -317,7 +329,6 @@ nanobot agent
 
 Need help with `PATH`, API keys, provider/model matching, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md) and [Troubleshooting](./docs/troubleshooting.md).
 
-- Provider examples are concrete recipes, not rankings or endorsements. Use the provider whose key, endpoint, and model ID you control.
 - Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
 - Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
 - Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)

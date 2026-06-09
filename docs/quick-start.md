@@ -9,7 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider you can call. The examples below use OpenRouter; any supported provider works when the key, provider name, and model ID match.
+- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use OpenRouter only so the snippets are concrete; any supported provider works when the key, provider name, and model ID match.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -155,7 +155,15 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 }
 ```
 
-The provider and model inside a preset should match. In the OpenRouter example, use `"provider": "openrouter"` and a model ID OpenRouter can serve.
+The provider and model inside a preset must match. The snippet above is only an example. For another provider, replace these values together:
+
+| Replace | Where |
+|---|---|
+| Provider config key, such as `openrouter` | `providers.<provider>` |
+| API key or environment variable | `providers.<provider>.apiKey` |
+| Preset provider name | `modelPresets.primary.provider` |
+| Model ID | `modelPresets.primary.model` |
+| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
 
 Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For provider-specific examples across direct, gateway, OAuth, cloud, and local setups, see [`providers.md`](./providers.md).
 

@@ -1,6 +1,6 @@
 # Providers and Models
 
-Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the OpenRouter example. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
+Use this page when the first reply fails because of provider/model mismatch, or when you want to adapt the concrete setup example to a different provider. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
 For every setup, answer three questions:
 
@@ -9,6 +9,18 @@ For every setup, answer three questions:
 3. Does the provider need `apiKey`, `apiBase`, OAuth login, cloud credentials, or only a local server URL?
 
 Prefer a named `modelPresets` entry for the model/provider pair, then select it with `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but presets make runtime `/model` switching and fallback chains clearer. Pin `provider` inside the preset while setting up; you can switch back to `"auto"` later.
+
+## Choose a Provider Without Guessing
+
+The docs show concrete provider names so the JSON is copyable, not because nanobot ranks providers. Start from the service or endpoint you actually control:
+
+| If you have... | Configure... |
+|---|---|
+| An API key from a hosted provider or gateway | That provider's `providers.<name>.apiKey`, then a preset with that provider name and a model ID from that service. |
+| A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
+| A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
+| An OAuth-based account | Run the matching `nanobot provider login ...` command, then select that provider explicitly in a preset. |
+| No provider yet | Pick one outside nanobot based on account access, pricing, regional availability, privacy requirements, and the model IDs you need. Then come back with its key and model ID. |
 
 ## Minimal Shape
 
@@ -36,7 +48,7 @@ Prefer a named `modelPresets` entry for the model/provider pair, then select it 
 }
 ```
 
-The provider config gives nanobot credentials and endpoint details. The agent defaults choose which named preset to use for normal turns.
+The provider config gives nanobot credentials and endpoint details. The model preset names the provider/model pair. The agent defaults choose which named preset to use for normal turns. Replace the example provider and model together; mixing an API key from one provider with a model ID from another is the most common first-run failure.
 
 ## Provider, Model, API Key, and Base URL
 

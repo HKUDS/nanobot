@@ -13,12 +13,12 @@ You will see these words during setup:
 | Terminal | A text window where you paste commands and press Enter. |
 | Command | One line of text you run in the terminal. |
 | API key | A password-like token from an AI provider. Do not share it publicly. |
-| Provider | The service that owns the API key. This guide uses OpenRouter as one example. |
+| Provider | The service that owns the API key or local model endpoint. |
 | Model | The AI model ID that the provider can run. |
 | Config file | The settings file nanobot reads when it starts. |
 | Wizard | An interactive terminal menu that edits the config file for you. |
 | Model preset | A named model choice in the config file. |
-| `apiBase` | The HTTP address of a provider endpoint. You usually do not need it for OpenRouter. |
+| `apiBase` | The HTTP address of a provider endpoint. Leave it blank unless your provider, proxy, or local server tells you to set one. |
 
 ## 1. Open a Terminal
 
@@ -60,15 +60,19 @@ python3 --version
 
 If `python3` works but `python` does not, replace `python` with `python3` in the manual commands below. The one-command installer already checks both `python3` and `python`.
 
-## 3. Get an OpenRouter API Key
+## 3. Get a Provider API Key
 
-This guide uses OpenRouter as one example provider so every step has concrete names to copy. It is not an endorsement. If you already have another supported provider, use that provider's key and model instead.
+nanobot does not create AI accounts or API keys for you. Use an AI provider account, company endpoint, subscription endpoint, or local model server that you already control. The steps below use OpenRouter only as a concrete example so the commands and wizard choices have real names; it is not a ranking, default choice, or endorsement.
+
+If you use another provider, keep the same shape but replace the provider name, API key, and model ID with values from that provider. [`provider-cookbook.md`](./provider-cookbook.md) has copyable snippets for several common patterns.
+
+For the example path:
 
 1. Open [openrouter.ai/keys](https://openrouter.ai/keys).
 2. Create or copy an API key.
 3. Keep the key private.
 
-The key usually starts with `sk-or-v1-`. Keep it nearby because the setup wizard will ask you to paste it.
+An OpenRouter key usually starts with `sk-or-v1-`. Other providers use different key shapes. Keep the key nearby because the setup wizard will ask you to paste it.
 
 ## 4. Install nanobot
 
@@ -172,7 +176,9 @@ Move through the wizard like this:
 | A field you do not need | Keep the shown default or leave it blank, then press `Enter`. |
 | A back option | Choose it to return to the previous menu. |
 
-For the first setup, only use these choices:
+For the first setup, only configure the model provider and one model preset.
+
+If you are following the OpenRouter example:
 
 1. Choose `[P] LLM Provider`.
 2. Select OpenRouter.
@@ -193,6 +199,17 @@ temperature: 0.1
 ```
 
 If OpenRouter says your account cannot use that model, use another OpenRouter model ID that your account can access.
+
+If you are using another provider, use the same wizard choices but substitute that provider's values:
+
+| Wizard field | What to enter |
+|---|---|
+| Provider menu | The provider that owns your API key or endpoint. |
+| API key | The key from that provider, or leave it blank only if the provider does not use one. |
+| `apiBase` | Leave blank unless the provider docs, proxy docs, or local server docs give you a URL. |
+| Preset `provider` | The nanobot provider name, such as the one shown in [`provider-cookbook.md`](./provider-cookbook.md). |
+| Preset `model` | A model ID that provider can actually serve. |
+| Preset name | `primary` is fine for the first setup. |
 
 Then choose `[S] Save and Exit`.
 
@@ -256,7 +273,7 @@ If this is a brand-new install and you have not configured anything else yet, re
 
 Replace `sk-or-v1-your-key-here` with your real OpenRouter key.
 
-If OpenRouter says your account cannot use that model, replace the `model` value with a model ID from OpenRouter that your account can access.
+If you use another provider, replace `openrouter`, `sk-or-v1-your-key-here`, and the `model` value with that provider's values. If the provider needs `apiBase`, add it under that provider's config block.
 
 Save the file.
 
@@ -302,7 +319,7 @@ Do not change many things at once. Check the exact error:
 |---|---|
 | `JSON parse error` | The config file has a missing comma, extra comma, or mismatched brace. Copy the example again. |
 | `401`, `unauthorized`, or `invalid API key` | The API key is wrong, expired, has extra spaces, or was pasted under the wrong provider. |
-| `model not found` | The model ID is not available through OpenRouter or your account cannot use it. |
+| `model not found` | The model ID is not available through the selected provider or your account cannot use it. |
 | `nanobot: command not found` | The install worked in Python, but your shell cannot find the script. Use `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`, matching the Python command that worked earlier. |
 | No response after editing config | Restart the command. Long-running processes read config when they start. |
 
@@ -312,7 +329,7 @@ For a fuller diagnosis path, see [`troubleshooting.md`](./troubleshooting.md).
 
 Skip these until the first local message works:
 
-- `apiBase`: OpenRouter already has a default endpoint. You only need `apiBase` for local models, proxies, custom OpenAI-compatible providers, or special regional/subscription endpoints.
+- `apiBase`: hosted built-in providers often already have default endpoints. You only need `apiBase` for local models, proxies, custom OpenAI-compatible providers, or special regional/subscription endpoints.
 - WebUI and chat apps: first prove `nanobot agent -m "Hello!"`.
 - fallback models: useful later, but not needed for the first reply.
 - Langfuse: useful for observability, but not needed for first setup.
