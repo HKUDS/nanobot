@@ -149,12 +149,21 @@ You will see a menu like this:
   [X] Exit Without Saving
 ```
 
+Move through the wizard like this:
+
+| When you see | Do this |
+|---|---|
+| A menu | Use the arrow keys to highlight an option, then press `Enter`. |
+| A text field | Type or paste the value, then press `Enter`. |
+| A field you do not need | Keep the shown default or leave it blank, then press `Enter`. |
+| A back option | Choose it to return to the previous menu. |
+
 For the first setup, only use these choices:
 
 1. Choose `[P] LLM Provider`.
 2. Select OpenRouter.
 3. Paste your OpenRouter API key.
-4. Leave `apiBase` empty unless OpenRouter or your deployment guide explicitly tells you to set one.
+4. Keep the default `apiBase`, or leave it blank if the wizard shows no default. Only change it if OpenRouter or your deployment guide explicitly tells you to set one.
 5. Return to the main menu.
 6. Choose `[M] Model Presets`.
 7. Add or edit a preset named `primary`.
