@@ -210,6 +210,15 @@ nanobot status
 
 This should show the config path, workspace path, active model or preset, and provider summary. It does not send a message to the model, so use it as a quick config check before the first real request.
 
+Read it like this:
+
+| Status line | What you want |
+|---|---|
+| `Config` | A check mark. |
+| `Workspace` | A check mark. |
+| `Model` | The model or preset you expect. |
+| Provider list | Most providers can say `not set`; the provider used by the active preset should show a check mark, OAuth status, or local URL. |
+
 ## 5. Test One Message
 
 Run a one-shot CLI message:

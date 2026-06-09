@@ -256,6 +256,8 @@ nanobot status
 
 This should show the config file path, workspace path, and the active model or preset. If `nanobot` is not found, use `python -m nanobot status`.
 
+It is normal for most providers to say `not set`. Only the provider you selected for the active preset needs to look configured.
+
 Run:
 
 ```bash

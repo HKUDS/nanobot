@@ -307,6 +307,8 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
+In `nanobot status`, it is normal for most providers to say `not set`. The active preset's provider should be configured, and `Config` plus `Workspace` should show check marks.
+
 If that works, start an interactive chat:
 
 ```bash
