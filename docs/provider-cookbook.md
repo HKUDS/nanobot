@@ -8,6 +8,21 @@ Most examples below are snippets to merge into `~/.nanobot/config.json`. Keep an
 
 Recipes are examples, not rankings. Pick the recipe that matches the credential, endpoint, and model ID you already intend to use.
 
+## Choose a Recipe
+
+Match the recipe to the credential or endpoint you already have:
+
+| What you have | Recipe | Must match |
+|---|---|---|
+| A gateway key and model IDs that include a model family path, such as `provider/model-name` | [OpenRouter Gateway](#recipe-openrouter-gateway) | API key, provider config key, preset provider, and gateway model ID |
+| An OpenAI platform API key and OpenAI model ID | [OpenAI Direct](#recipe-openai-direct) | `OPENAI_API_KEY`, `provider: "openai"`, and an OpenAI model available to that account |
+| An Anthropic API key and Anthropic model ID | [Anthropic Direct](#recipe-anthropic-direct) | `ANTHROPIC_API_KEY`, `provider: "anthropic"`, and a non-gateway model ID |
+| An OpenAI-compatible `/v1` endpoint that is not a named nanobot provider | [Custom OpenAI-Compatible Provider](#recipe-custom-openai-compatible-provider) | `apiBase`, optional API key, and the model ID served by that endpoint |
+| Ollama already running locally | [Ollama Local Model](#recipe-ollama-local-model) | Ollama `apiBase`, pulled model name, and local server availability |
+| vLLM, LM Studio, or another local OpenAI-compatible server | [vLLM or LM Studio](#recipe-vllm-or-lm-studio) | Local `/v1` base URL, any required key, and served model name |
+| A primary model plus one or more backups | [Fallback Presets](#recipe-fallback-presets) | Named presets in `modelPresets`, referenced from `agents.defaults.fallbackModels` |
+| A working agent and a Langfuse project | [Langfuse Tracing](#recipe-langfuse-tracing) | Langfuse env vars in the same process environment that starts nanobot |
+
 ## How to Use a Recipe
 
 1. Install nanobot and run `nanobot onboard` or `nanobot onboard --wizard` once so `~/.nanobot/config.json` exists.
