@@ -14,6 +14,7 @@ Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.j
 | Install and get the first reply | [`quick-start.md`](./quick-start.md) | A working CLI agent and a known-good config path |
 | Understand how the pieces fit | [`concepts.md`](./concepts.md) | Mental model for config, workspace, gateway, channels, tools, memory, and sessions |
 | Choose or change a model provider | [`providers.md`](./providers.md) | Correct provider/model pairing without reading the full config reference |
+| Copy a provider setup recipe | [`provider-cookbook.md`](./provider-cookbook.md) | Pasteable OpenRouter, OpenAI, Anthropic, local model, fallback, and Langfuse setups |
 | Fix a first-run or runtime problem | [`troubleshooting.md`](./troubleshooting.md) | A diagnosis order and targeted checks for common failures |
 
 ## Use nanobot
@@ -59,6 +60,7 @@ Use the docs in this order when you are unsure where to go:
 1. If terminal commands or config files are new to you, [`start-without-technical-background.md`](./start-without-technical-background.md) explains the setup words and uses one guided OpenRouter path.
 2. [`quick-start.md`](./quick-start.md) proves installation, config loading, and provider access.
 3. [`concepts.md`](./concepts.md) explains the runtime model so later pages are easier to scan.
-4. A task guide, such as [`chat-apps.md`](./chat-apps.md), [`image-generation.md`](./image-generation.md), or [`deployment.md`](./deployment.md), gets one workflow working.
-5. [`configuration.md`](./configuration.md) is the source of truth when you need a specific field, default value, or advanced option.
-6. [`troubleshooting.md`](./troubleshooting.md) helps isolate whether a failure is install, config, provider, gateway, channel, or tool related.
+4. [`provider-cookbook.md`](./provider-cookbook.md) gives pasteable provider, fallback, local model, and Langfuse recipes.
+5. A task guide, such as [`chat-apps.md`](./chat-apps.md), [`image-generation.md`](./image-generation.md), or [`deployment.md`](./deployment.md), gets one workflow working.
+6. [`configuration.md`](./configuration.md) is the source of truth when you need a specific field, default value, or advanced option.
+7. [`troubleshooting.md`](./troubleshooting.md) helps isolate whether a failure is install, config, provider, gateway, channel, or tool related.

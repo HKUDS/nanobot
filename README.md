@@ -308,8 +308,8 @@ nanobot agent
 
 Need help with `PATH`, API keys, provider/model matching, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md) and [Troubleshooting](./docs/troubleshooting.md).
 
-
-- Want different LLM providers or local models? See [Providers and Models](./docs/providers.md)
+- Want a pasteable provider setup? See [Provider Cookbook](./docs/provider-cookbook.md)
+- Want to understand provider/model matching? See [Providers and Models](./docs/providers.md)
 - Want web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
 - Want to run locally? See [Ollama](./docs/providers.md#ollama), [vLLM or another local OpenAI-compatible server](./docs/providers.md#vllm-or-other-local-openai-compatible-server), and the full [provider reference](./docs/configuration.md#providers).
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
@@ -386,6 +386,7 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 - Understand the runtime model: [Concepts](./docs/concepts.md)
 - Read the source-level map: [Architecture](./docs/architecture.md)
 - Choose a provider/model: [Providers and Models](./docs/providers.md)
+- Copy provider setup recipes: [Provider Cookbook](./docs/provider-cookbook.md)
 - Debug setup and runtime failures: [Troubleshooting](./docs/troubleshooting.md)
 - Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
 - Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)

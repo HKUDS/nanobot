@@ -224,7 +224,8 @@ Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Want to... | Go to |
 |---|---|
 | Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
-| Pick another provider or local model | [`providers.md`](./providers.md) |
+| Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
+| Understand provider/model matching | [`providers.md`](./providers.md) |
 | Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |

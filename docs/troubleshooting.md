@@ -87,6 +87,8 @@ nanobot agent -m "Hello!"
 
 Then compare your config against [`providers.md`](./providers.md).
 
+If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.md`](./provider-cookbook.md).
+
 | Symptom | Likely cause |
 |---|---|
 | 401, unauthorized, invalid API key | Key is missing, expired, pasted with whitespace, or under the wrong provider key. |

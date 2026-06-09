@@ -1,6 +1,6 @@
 # Providers and Models
 
-Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the default OpenRouter example.
+Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the default OpenRouter example. If you already know which provider you want and only need a pasteable setup, use [`provider-cookbook.md`](./provider-cookbook.md).
 
 For every setup, answer three questions:
 
