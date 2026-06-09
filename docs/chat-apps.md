@@ -8,10 +8,7 @@ Before configuring a chat app, make sure the local CLI path works:
 nanobot agent -m "Hello!"
 ```
 
-If that fails, fix installation, config, provider, or model setup first with
-[`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and
-[`troubleshooting.md`](./troubleshooting.md). Chat apps require
-`nanobot gateway` to stay running after the channel is configured.
+If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `nanobot gateway` to stay running after the channel is configured.
 
 Most examples below are snippets to merge into `~/.nanobot/config.json`.
 
@@ -67,9 +64,7 @@ nanobot gateway
 
 **Webhook mode (optional)**
 
-Telegram uses long polling by default. To receive updates through a webhook, expose
-a public HTTPS URL that forwards to nanobot's local listener and set `mode` to
-`webhook`:
+Telegram uses long polling by default. To receive updates through a webhook, expose a public HTTPS URL that forwards to nanobot's local listener and set `mode` to `webhook`:
 
 ```json
 {
@@ -243,9 +238,7 @@ python -m pip install "nanobot-ai[matrix]"
   - `userId` (example: `@nanobot:matrix.org`)
   - `password`
 
-(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
-for reliable encryption, password login is recommended instead. If the
-`password` is provided, `accessToken` and `deviceId` will be ignored.)
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but for reliable encryption, password login is recommended instead. If the `password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 

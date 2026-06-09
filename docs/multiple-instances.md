@@ -97,10 +97,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json
 nanobot gateway --config ~/.nanobot-discord/config.json
 ```
 
-Each gateway instance also exposes a lightweight HTTP health endpoint on
-`gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`,
-so the endpoint stays local unless you explicitly set `gateway.host` to a
-public or LAN-facing address.
+Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
 
 - `GET /health` returns `{"status":"ok"}`
 - Other paths return `404`

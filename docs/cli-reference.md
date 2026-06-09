@@ -1,7 +1,6 @@
 # CLI Reference
 
-Use this page when you know what you want to run and need the command shape.
-For a guided first run, start with [`quick-start.md`](./quick-start.md).
+Use this page when you know what you want to run and need the command shape. For a guided first run, start with [`quick-start.md`](./quick-start.md).
 
 ## Global
 
@@ -12,8 +11,7 @@ python -m nanobot --help
 python -m nanobot --version
 ```
 
-`python -m nanobot ...` is useful when the package is installed but the
-`nanobot` script is not on `PATH`.
+`python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
 ## Setup
 
@@ -42,13 +40,11 @@ Default paths:
 | `nanobot agent --no-markdown` | Print plain text instead of Rich-rendered Markdown |
 | `nanobot agent --logs` | Show runtime logs while chatting |
 
-Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or
-`Ctrl+D`.
+Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## Gateway
 
-`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured,
-cron-backed system jobs, Dream, heartbeat, and the health endpoint.
+`nanobot gateway` starts enabled chat channels, WebUI/WebSocket when configured, cron-backed system jobs, Dream, heartbeat, and the health endpoint.
 
 | Command | Description |
 |---|---|
@@ -64,8 +60,7 @@ Default health endpoint:
 http://127.0.0.1:18790/health
 ```
 
-The bundled WebUI is served by the WebSocket channel, usually on port `8765`,
-not by the gateway health endpoint.
+The bundled WebUI is served by the WebSocket channel, usually on port `8765`, not by the gateway health endpoint.
 
 ## OpenAI-Compatible API
 
@@ -93,10 +88,7 @@ See [`openai-api.md`](./openai-api.md) for request examples.
 nanobot status
 ```
 
-Shows the default config path, workspace path, active model, and provider
-summary. This command does not currently accept `--config`; use explicit
-`--config` and `--workspace` on `agent`, `gateway`, or `serve` when debugging a
-specific instance.
+Shows the default config path, workspace path, active model, and provider summary. This command does not currently accept `--config`; use explicit `--config` and `--workspace` on `agent`, `gateway`, or `serve` when debugging a specific instance.
 
 ## Channels
 
@@ -127,8 +119,7 @@ See [`chat-apps.md`](./chat-apps.md) for channel-specific setup.
 | `nanobot provider logout openai-codex` | Remove OpenAI Codex OAuth state |
 | `nanobot provider logout github-copilot` | Remove GitHub Copilot OAuth state |
 
-See [`providers.md`](./providers.md#oauth-providers) for when OAuth providers
-need explicit provider/model selection.
+See [`providers.md`](./providers.md#oauth-providers) for when OAuth providers need explicit provider/model selection.
 
 ## Useful First Checks
 
@@ -138,5 +129,4 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-If these fail, use [`troubleshooting.md`](./troubleshooting.md) before
-debugging WebUI, chat apps, Docker, systemd, or SDK integrations.
+If these fail, use [`troubleshooting.md`](./troubleshooting.md) before debugging WebUI, chat apps, Docker, systemd, or SDK integrations.

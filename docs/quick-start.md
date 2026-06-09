@@ -1,7 +1,6 @@
 # Install and Quick Start
 
-This page gets one local nanobot reply working. After that, you can add the
-WebUI, chat apps, local models, web search, MCP, deployment, or custom plugins.
+This page gets one local nanobot reply working. After that, you can add the WebUI, chat apps, local models, web search, MCP, deployment, or custom plugins.
 
 If you have never used a terminal or edited a config file before, use [`start-without-technical-background.md`](./start-without-technical-background.md) first. This page assumes you are comfortable pasting commands and editing JSON snippets.
 
@@ -10,8 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider you can call. OpenRouter is a simple first choice for global
-  users because one key can route many model families.
+- One LLM provider you can call. OpenRouter is a simple first choice for global users because one key can route many model families.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -54,8 +52,7 @@ python -m nanobot --version
 python -m nanobot onboard
 ```
 
-On Windows, `~` in the docs means your user profile directory, for example
-`C:\Users\you`.
+On Windows, `~` in the docs means your user profile directory, for example `C:\Users\you`.
 
 ## 2. Initialize
 
@@ -76,14 +73,11 @@ Initialization creates:
 | `~/.nanobot/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
 | `~/.nanobot/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
 
-If you already have a config, `nanobot onboard` can refresh missing default
-fields without overwriting your existing values.
+If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
 
 ## 3. Configure a Provider
 
-Open `~/.nanobot/config.json`. Add or merge these blocks into the file created
-by `nanobot onboard`; do not replace the whole file unless you want to reset the
-config.
+Open `~/.nanobot/config.json`. Add or merge these blocks into the file created by `nanobot onboard`; do not replace the whole file unless you want to reset the config.
 
 **API key:**
 
@@ -119,24 +113,15 @@ config.
 }
 ```
 
-The provider and model inside a preset should match. An OpenRouter key should
-be used with `"provider": "openrouter"` and a model ID OpenRouter can serve.
-Direct `agents.defaults.provider` and `agents.defaults.model` still work for
-existing configs, but named presets are the recommended path because they also
-power `/model` switching and fallback chains. For Anthropic direct, OpenAI
-direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local
-models, see [`providers.md`](./providers.md).
+The provider and model inside a preset should match. An OpenRouter key should be used with `"provider": "openrouter"` and a model ID OpenRouter can serve. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For Anthropic direct, OpenAI direct, Ollama, vLLM, Bedrock, gateway providers, OAuth providers, and local models, see [`providers.md`](./providers.md).
 
 **What about `apiBase` / base URL?**
 
-`apiBase` is the HTTP base URL of the provider endpoint, not the model name.
-Most hosted providers in nanobot already know their default endpoint, so you
-usually only set `apiKey` and a model preset. Set `apiBase` when you are using:
+`apiBase` is the HTTP base URL of the provider endpoint, not the model name. Most hosted providers in nanobot already know their default endpoint, so you usually only set `apiKey` and a model preset. Set `apiBase` when you are using:
 
 - `custom` for a third-party or self-hosted OpenAI-compatible API;
 - a local OpenAI-compatible server such as Ollama, vLLM, or LM Studio;
-- a provider-specific alternate endpoint, regional endpoint, proxy, or
-  subscription endpoint.
+- a provider-specific alternate endpoint, regional endpoint, proxy, or subscription endpoint.
 
 Examples:
 
@@ -161,11 +146,9 @@ Examples:
 }
 ```
 
-If the provider's docs say the endpoint is `/v1`, include `/v1` in `apiBase`.
-The model ID still belongs in the active `modelPresets` entry.
+If the provider's docs say the endpoint is `/v1`, include `/v1` in `apiBase`. The model ID still belongs in the active `modelPresets` entry.
 
-If you prefer not to store secrets in `config.json`, reference an environment
-variable and set it before starting nanobot:
+If you prefer not to store secrets in `config.json`, reference an environment variable and set it before starting nanobot:
 
 ```json
 {

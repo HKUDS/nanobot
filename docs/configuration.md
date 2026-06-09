@@ -2,23 +2,13 @@
 
 Config file: `~/.nanobot/config.json`
 
-This is the full reference. If this is your first install, start with
-[`quick-start.md`](./quick-start.md). If you are trying to choose a model or
-fix provider/model matching, use [`providers.md`](./providers.md) first and
-come back here for exact fields and advanced options.
+This is the full reference. If this is your first install, start with [`quick-start.md`](./quick-start.md). If you are trying to choose a model or fix provider/model matching, use [`providers.md`](./providers.md) first and come back here for exact fields and advanced options.
 
-The JSON examples below are usually partial snippets to merge into your
-existing config, not full replacement files. For the mental model behind
-config, workspace, gateway, channels, sessions, tools, and memory, see
-[`concepts.md`](./concepts.md).
+The JSON examples below are usually partial snippets to merge into your existing config, not full replacement files. For the mental model behind config, workspace, gateway, channels, sessions, tools, and memory, see [`concepts.md`](./concepts.md).
 
-The generated `config.json` uses camelCase keys such as `apiKey` and
-`intervalS`. snake_case keys are also accepted for compatibility, but the docs
-prefer camelCase because that is what nanobot writes back to disk.
+The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`. snake_case keys are also accepted for compatibility, but the docs prefer camelCase because that is what nanobot writes back to disk.
 
-For setup and runtime failures, follow the diagnosis order in
-[`troubleshooting.md`](./troubleshooting.md) before changing multiple config
-areas at once.
+For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
@@ -136,8 +126,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 
 ## Langfuse Observability
 
-nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI
-SDK wrapper. This is configured with environment variables, not `config.json`.
+nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper. This is configured with environment variables, not `config.json`.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -145,8 +134,7 @@ Install the optional package in the same Python environment that runs nanobot:
 python -m pip install langfuse
 ```
 
-Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or
-`nanobot serve`:
+Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or `nanobot serve`:
 
 ```bash
 export LANGFUSE_SECRET_KEY="sk-lf-..."
@@ -162,19 +150,11 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed,
-nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so
-model requests are sent to Langfuse in the background. If the secret key is set
-but `langfuse` is missing, nanobot logs a warning and falls back to the regular
-OpenAI client.
+When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so model requests are sent to Langfuse in the background. If the secret key is set but `langfuse` is missing, nanobot logs a warning and falls back to the regular OpenAI client.
 
-Use the Langfuse region or self-hosted URL that matches your project. The
-[Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py)
-use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
+Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 
-Tracing covers the providers that go through nanobot's OpenAI-compatible client
-path. Native providers that do not use that client may not produce Langfuse
-OpenAI-wrapper traces.
+Tracing covers the providers that go through nanobot's OpenAI-compatible client path. Native providers that do not use that client may not produce Langfuse OpenAI-wrapper traces.
 
 ## Providers
 
@@ -338,8 +318,7 @@ The identity that ends up signing the request **must be assigned the `Cognitive 
 <details>
 <summary><b>Skywork / APIFree</b></summary>
 
-Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provider
-once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
+Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provider once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
 
 ```json
 {
@@ -360,8 +339,7 @@ once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
 }
 ```
 
-You can also reference `${APIFREE_API_KEY}` in `apiKey` if that is how your
-environment names the credential.
+You can also reference `${APIFREE_API_KEY}` in `apiKey` if that is how your environment names the credential.
 
 </details>
 
@@ -546,8 +524,7 @@ nanobot agent -m "Reply with one short sentence."
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
 
-Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
-No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account. No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
@@ -584,8 +561,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>GitHub Copilot (OAuth)</b></summary>
 
-GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
-No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
+GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured. No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 
 **1. Login:**
 ```bash
@@ -621,9 +597,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>LongCat (OpenAI-compatible)</b></summary>
 
-LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
-The default API base already points to `https://api.longcat.chat/openai/v1`, so you
-usually only need to set `apiKey`.
+LongCat is available through nanobot's built-in OpenAI-compatible provider flow. The default API base already points to `https://api.longcat.chat/openai/v1`, so you usually only need to set `apiKey`.
 
 ```json
 {
@@ -641,17 +615,14 @@ usually only need to set `apiKey`.
 }
 ```
 
-Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
-`LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
+Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`, `LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
 
 </details>
 
 <details>
 <summary><b>Xiaomi MiMo</b></summary>
 
-Xiaomi MiMo models are automatically detected by the `xiaomi_mimo` provider when
-the model name contains `mimo`. The default API base is
-`https://api.xiaomimimo.com/v1`.
+Xiaomi MiMo models are automatically detected by the `xiaomi_mimo` provider when the model name contains `mimo`. The default API base is `https://api.xiaomimimo.com/v1`.
 
 > **Token Plan**: If you're using MiMo's token plan, override `apiBase` with the
 > dedicated endpoint:
@@ -682,9 +653,7 @@ the model name contains `mimo`. The default API base is
 <details>
 <summary><b>StepFun Step Plan (subscription)</b></summary>
 
-Step Plan is StepFun's subscription-based service for high-frequency AI developers.
-If you're on a Step Plan subscription, override `apiBase` in the existing `stepfun`
-provider config to point to the dedicated Step Plan endpoint.
+Step Plan is StepFun's subscription-based service for high-frequency AI developers. If you're on a Step Plan subscription, override `apiBase` in the existing `stepfun` provider config to point to the dedicated Step Plan endpoint.
 
 ```json
 {
@@ -703,17 +672,14 @@ provider config to point to the dedicated Step Plan endpoint.
 }
 ```
 
-Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and
-`step-router-v1`.
+Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
 
 </details>
 
 <details>
 <summary><b>Ant Ling (OpenAI-compatible)</b></summary>
 
-Ant Ling is available through nanobot's built-in OpenAI-compatible provider flow.
-The default API base points to `https://api.ant-ling.com/v1`, so you usually
-only need to set `apiKey`.
+Ant Ling is available through nanobot's built-in OpenAI-compatible provider flow. The default API base points to `https://api.ant-ling.com/v1`, so you usually only need to set `apiKey`.
 
 ```json
 {
@@ -731,8 +697,7 @@ only need to set `apiKey`.
 }
 ```
 
-Official OpenAI-compatible model names include `Ling-2.6-1T`,
-`Ling-2.6-flash`, `Ling-2.5-1T`, `Ling-1T`, `Ring-2.5-1T`, and `Ring-1T`.
+Official OpenAI-compatible model names include `Ling-2.6-1T`, `Ling-2.6-flash`, `Ling-2.5-1T`, `Ling-1T`, `Ring-2.5-1T`, and `Ring-1T`.
 
 </details>
 
@@ -1021,20 +986,13 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 
 </details>
 
-Contributor notes for adding new providers live in
-[`development.md`](./development.md#adding-an-llm-provider).
+Contributor notes for adding new providers live in [`development.md`](./development.md#adding-an-llm-provider).
 
 ## Model Presets
 
-Model presets let you name a complete model configuration and switch it at
-runtime with `/model <preset>`. They are the recommended way to configure
-models because the same names can be reused for startup selection, chat-command
-switching, and fallback chains.
+Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for startup selection, chat-command switching, and fallback chains.
 
-Existing configs do not need to change. Direct `agents.defaults.model`,
-`provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and
-`reasoningEffort` fields still define the implicit `default` preset. For new
-configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
+Existing configs do not need to change. Direct `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and `reasoningEffort` fields still define the implicit `default` preset. For new configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 
 ```json
 {
@@ -1074,8 +1032,7 @@ configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 }
 ```
 
-`modelPresets` is a top-level object. The keys under it (`fast`, `deep`,
-`coding`, etc.) are user-defined preset names. Each preset supports:
+`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
 
 | Field | Description |
 |-------|-------------|
@@ -1087,33 +1044,18 @@ configs, prefer top-level `modelPresets` plus `agents.defaults.modelPreset`.
 | `temperature` | Sampling temperature. |
 | `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
 
-`default` is reserved and always means the implicit preset built from direct
-`agents.defaults.*` fields; do not define `modelPresets.default`. Use
-`/model default` to switch back to those direct fields in an existing config.
+`default` is reserved and always means the implicit preset built from direct `agents.defaults.*` fields; do not define `modelPresets.default`. Use `/model default` to switch back to those direct fields in an existing config.
 
-Set `agents.defaults.modelPreset` to choose the startup preset. When
-`modelPreset` is `null` or omitted, startup uses the implicit `default` preset
-from direct `agents.defaults.*` fields. Runtime changes made with
-`/model <preset>` are not written back to `config.json`; they affect future
-turns until the process restarts or another model/config change replaces them.
+Set `agents.defaults.modelPreset` to choose the startup preset. When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from direct `agents.defaults.*` fields. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
 
 ### Model Fallbacks
 
-`agents.defaults.fallbackModels` defines an ordered failover chain for the
-active model configuration. The primary model is still selected by
-`agents.defaults.modelPreset` or, in older configs, by the implicit `default`
-preset from direct `agents.defaults.*` fields.
+`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` or, in older configs, by the implicit `default` preset from direct `agents.defaults.*` fields.
 
 Each fallback candidate can be either:
 
-- A preset name from `modelPresets`, such as `"deep"`. This is the recommended
-  form. The preset's full model, provider, generation, and context-window config
-  is used.
-- An inline fallback object with at least `provider` and `model`. Optional
-  `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the
-  active primary config when omitted. `reasoningEffort` does not inherit; omit
-  it to leave reasoning off for that fallback, or set it explicitly for models
-  that support reasoning.
+- A preset name from `modelPresets`, such as `"deep"`. This is the recommended form. The preset's full model, provider, generation, and context-window config is used.
+- An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
 
 Preset fallback chain:
 
@@ -1150,10 +1092,7 @@ Preset fallback chain:
 }
 ```
 
-String entries are preset names, not raw model names. In the example above,
-`"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider
-model ID. Changing a preset updates both `/model <preset>` switching and any
-fallback chain that references it.
+String entries are preset names, not raw model names. In the example above, `"deep"` means `modelPresets.deep`; nanobot will not interpret it as a provider model ID. Changing a preset updates both `/model <preset>` switching and any fallback chain that references it.
 
 Inline fallback object:
 
@@ -1175,20 +1114,11 @@ Inline fallback object:
 }
 ```
 
-Use inline objects only when a fallback is not worth naming as a reusable preset.
-`fallbackModels` belongs under `agents.defaults`, not inside individual
-`modelPresets` entries.
+Use inline objects only when a fallback is not worth naming as a reusable preset. `fallbackModels` belongs under `agents.defaults`, not inside individual `modelPresets` entries.
 
-Failover only runs when the primary provider returns a retryable model/provider
-error before any answer text has been streamed. Typical fallback cases include
-timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and
-quota/balance exhaustion. It does not run for malformed requests,
-authentication/permission errors, content filtering/refusals, or
-context-length/message-format errors.
+Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
 
-If fallback candidates use smaller `contextWindowTokens` values, nanobot builds
-context using the smallest window in the active chain so every candidate can
-receive the same prompt.
+If fallback candidates use smaller `contextWindowTokens` values, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt.
 
 ## Transcription Settings
 
@@ -1245,8 +1175,7 @@ Transcription credentials are intentionally not stored in `transcription`. Put t
 
 Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
 
-If you are adding a new transcription provider, see
-[`development.md`](./development.md#adding-a-transcription-provider).
+If you are adding a new transcription provider, see [`development.md`](./development.md#adding-a-transcription-provider).
 
 ## Channel Settings
 
@@ -1259,7 +1188,9 @@ Global settings that apply to all channels. Configure under the `channels` secti
     "sendToolHints": false,
     "extractDocumentText": true,
     "sendMaxRetries": 3,
-    "telegram": { ... }
+    "telegram": {
+      "enabled": false
+    }
   }
 }
 ```
@@ -1274,8 +1205,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 
 `channels.transcriptionProvider` and `channels.transcriptionLanguage` are deprecated compatibility fields. They remain as a read-only fallback for older configs, but new configuration should use top-level `transcription.provider` and `transcription.language`.
 
-`sendProgress` and `sendToolHints` can also be overridden per channel. The
-global values stay as defaults for channels that do not set their own value:
+`sendProgress` and `sendToolHints` can also be overridden per channel. The global values stay as defaults for channels that do not set their own value:
 
 ```json
 {
@@ -1459,10 +1389,7 @@ You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in c
 }
 ```
 
-You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-search skill.
-Create the key in the [Volcengine web search console](https://console.volcengine.com/search-infinity/web-search),
-then copy it from [API keys](https://console.volcengine.com/search-infinity/api-key).
-Volcengine Ark keys are separate and do not work for this search provider.
+You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-search skill. Create the key in the [Volcengine web search console](https://console.volcengine.com/search-infinity/web-search), then copy it from [API keys](https://console.volcengine.com/search-infinity/api-key). Volcengine Ark keys are separate and do not work for this search provider.
 
 **SearXNG** (self-hosted, no API key needed):
 ```json
@@ -1703,9 +1630,7 @@ nanobot agent -m "/pairing approve ABCD-EFGH"
 
 ## Gateway Heartbeat
 
-The gateway can run a protected heartbeat cron job that periodically checks
-`HEARTBEAT.md` in the active workspace. This is enabled by default when you run
-`nanobot gateway`.
+The gateway can run a protected heartbeat cron job that periodically checks `HEARTBEAT.md` in the active workspace. This is enabled by default when you run `nanobot gateway`.
 
 ```json
 {
@@ -1719,15 +1644,9 @@ The gateway can run a protected heartbeat cron job that periodically checks
 }
 ```
 
-If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and
-delivers useful results to the most recently active chat target. If the file has
-no active tasks, the heartbeat is skipped silently.
+If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and delivers useful results to the most recently active chat target. If the file has no active tasks, the heartbeat is skipped silently.
 
-The heartbeat job is backed by the same cron service as user-created reminders.
-It is stored under the active workspace (`<workspace>/cron/jobs.json`) and shows
-up in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot
-be removed with the `cron` tool. Disable it through config and restart the
-gateway if you do not want periodic heartbeat checks.
+The heartbeat job is backed by the same cron service as user-created reminders. It is stored under the active workspace (`<workspace>/cron/jobs.json`) and shows up in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. Disable it through config and restart the gateway if you do not want periodic heartbeat checks.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -1738,10 +1657,7 @@ gateway if you do not want periodic heartbeat checks.
 
 ## Subagent Concurrency
 
-By default, nanobot only allows one spawned subagent at a time. When the limit is
-reached, the `spawn` tool returns an error so the agent can decide to wait or
-rearrange its work. This protects local LLM servers from loading multiple KV caches
-at once. If your provider can handle more parallel work, raise the limit:
+By default, nanobot only allows one spawned subagent at a time. When the limit is reached, the `spawn` tool returns an error so the agent can decide to wait or rearrange its work. This protects local LLM servers from loading multiple KV caches at once. If your provider can handle more parallel work, raise the limit:
 
 ```json
 {

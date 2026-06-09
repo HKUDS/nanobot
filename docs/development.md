@@ -1,13 +1,10 @@
 # Development
 
-This page collects contributor-facing notes for extending nanobot. User-facing setup
-and runtime options live in [`configuration.md`](./configuration.md).
+This page collects contributor-facing notes for extending nanobot. User-facing setup and runtime options live in [`configuration.md`](./configuration.md).
 
 ## Adding an LLM Provider
 
-nanobot uses the provider registry in `nanobot/providers/registry.py` as the
-source of truth for LLM provider metadata. Most OpenAI-compatible providers need
-only two changes.
+nanobot uses the provider registry in `nanobot/providers/registry.py` as the source of truth for LLM provider metadata. Most OpenAI-compatible providers need only two changes.
 
 1. Add a `ProviderSpec` entry to `PROVIDERS`:
 
@@ -29,8 +26,7 @@ class ProvidersConfig(BaseModel):
     myprovider: ProviderConfig = Field(default_factory=ProviderConfig)
 ```
 
-Environment variables, config matching, provider status, and WebUI credential
-display derive from those two entries.
+Environment variables, config matching, provider status, and WebUI credential display derive from those two entries.
 
 Useful `ProviderSpec` options:
 
@@ -50,12 +46,10 @@ Useful `ProviderSpec` options:
 
 Transcription is intentionally split into two layers:
 
-- `nanobot/audio/transcription_registry.py` owns provider names, aliases, default
-  models, and adapter loading.
+- `nanobot/audio/transcription_registry.py` owns provider names, aliases, default models, and adapter loading.
 - `nanobot/providers/transcription.py` owns provider-specific HTTP behavior.
 
-Credentials still live under `providers.<provider>` so chat channels, WebUI, and
-desktop resolve API keys and API bases the same way.
+Credentials still live under `providers.<provider>` so chat channels, WebUI, and desktop resolve API keys and API bases the same way.
 
 1. Add provider credentials to `ProvidersConfig`.
 
@@ -67,8 +61,7 @@ class ProvidersConfig(BaseModel):
 
 2. Add a `ProviderSpec` in `nanobot/providers/registry.py`.
 
-For transcription-only providers, set `is_transcription_only=True` so they show up
-in credential/settings surfaces but stay out of chat model selection.
+For transcription-only providers, set `is_transcription_only=True` so they show up in credential/settings surfaces but stay out of chat model selection.
 
 ```python
 ProviderSpec(
@@ -83,9 +76,7 @@ ProviderSpec(
 
 3. Add an adapter class in `nanobot/providers/transcription.py`.
 
-Adapters receive resolved credentials and settings. They return an empty string
-for provider errors so channel voice messages fail quietly instead of crashing the
-agent loop.
+Adapters receive resolved credentials and settings. They return an empty string for provider errors so channel voice messages fail quietly instead of crashing the agent loop.
 
 ```python
 class MySTTTranscriptionProvider:
@@ -127,6 +118,4 @@ At minimum, cover:
 
 6. Update user-facing docs.
 
-Add the provider to [`configuration.md`](./configuration.md) where users choose
-`transcription.provider`, but keep implementation details in this development
-guide.
+Add the provider to [`configuration.md`](./configuration.md) where users choose `transcription.provider`, but keep implementation details in this development guide.

@@ -178,8 +178,7 @@
 
 Pick **one** install method:
 
-Prerequisites: Python 3.11 or newer. Git is only needed for a source install;
-Node.js/Bun are only needed if you are developing the WebUI itself.
+Prerequisites: Python 3.11 or newer. Git is only needed for a source install; Node.js/Bun are only needed if you are developing the WebUI itself.
 
 **Install from source**
 
@@ -219,9 +218,7 @@ Use `nanobot onboard --wizard` if you prefer an interactive setup.
 
 **2. Configure** (`~/.nanobot/config.json`)
 
-`nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`.
-Configure these **two parts** in the config file. Add or merge the following
-blocks into the existing file instead of replacing the whole file.
+`nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
 
 *Set your API key* (e.g. [OpenRouter](https://openrouter.ai/keys), recommended for global users):
 
@@ -257,9 +254,7 @@ blocks into the existing file instead of replacing the whole file.
 }
 ```
 
-Direct `agents.defaults.provider` and `agents.defaults.model` still work for
-existing configs, but named presets are the recommended path because they also
-power `/model` switching and `fallbackModels`.
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and `fallbackModels`.
 
 **3. Test one message**
 
@@ -273,9 +268,7 @@ If that works, start an interactive chat:
 nanobot agent
 ```
 
-Need help with `PATH`, API keys, provider/model matching, or JSON errors?
-See the fuller [Install and Quick Start](./docs/quick-start.md) and
-[Troubleshooting](./docs/troubleshooting.md).
+Need help with `PATH`, API keys, provider/model matching, or JSON errors? See the fuller [Install and Quick Start](./docs/quick-start.md) and [Troubleshooting](./docs/troubleshooting.md).
 
 
 - Want different LLM providers or local models? See [Providers and Models](./docs/providers.md)
@@ -367,8 +360,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 ### Contribution Flow
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution
-guidelines.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, review, and contribution guidelines.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 

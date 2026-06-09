@@ -8,8 +8,7 @@ Before debugging SDK code, prove the same config works from the CLI:
 nanobot agent -m "Hello!"
 ```
 
-`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so provider,
-model, tools, and workspace behavior match the CLI unless you override them.
+`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so provider, model, tools, and workspace behavior match the CLI unless you override them.
 
 ## Quick Start
 

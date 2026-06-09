@@ -1,14 +1,10 @@
 # nanobot Docs
 
-For published release documentation, visit
-[nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview).
-The pages in this directory track the current repository and may describe
-features that have not reached the published site yet.
+For published release documentation, visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview). The pages in this directory track the current repository and may describe features that have not reached the published site yet.
 
 If you have never used a terminal or edited a config file before, start with [`start-without-technical-background.md`](./start-without-technical-background.md). Otherwise, start with [`quick-start.md`](./quick-start.md) and get one local `nanobot agent -m "Hello!"` reply working before connecting chat apps, WebUI, Docker, or custom tools.
 
-Most JSON examples in these docs are snippets to merge into
-`~/.nanobot/config.json`, not full replacement files.
+Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.json`, not full replacement files.
 
 ## Start Here
 
@@ -61,14 +57,8 @@ Most JSON examples in these docs are snippets to merge into
 Use the docs in this order when you are unsure where to go:
 
 1. If terminal commands or config files are new to you, [`start-without-technical-background.md`](./start-without-technical-background.md) explains the setup words and uses one guided OpenRouter path.
-2. [`quick-start.md`](./quick-start.md) proves installation, config loading, and
-   provider access.
-3. [`concepts.md`](./concepts.md) explains the runtime model so later pages are
-   easier to scan.
-4. A task guide, such as [`chat-apps.md`](./chat-apps.md),
-   [`image-generation.md`](./image-generation.md), or
-   [`deployment.md`](./deployment.md), gets one workflow working.
-5. [`configuration.md`](./configuration.md) is the source of truth when you need
-   a specific field, default value, or advanced option.
-6. [`troubleshooting.md`](./troubleshooting.md) helps isolate whether a failure
-   is install, config, provider, gateway, channel, or tool related.
+2. [`quick-start.md`](./quick-start.md) proves installation, config loading, and provider access.
+3. [`concepts.md`](./concepts.md) explains the runtime model so later pages are easier to scan.
+4. A task guide, such as [`chat-apps.md`](./chat-apps.md), [`image-generation.md`](./image-generation.md), or [`deployment.md`](./deployment.md), gets one workflow working.
+5. [`configuration.md`](./configuration.md) is the source of truth when you need a specific field, default value, or advanced option.
+6. [`troubleshooting.md`](./troubleshooting.md) helps isolate whether a failure is install, config, provider, gateway, channel, or tool related.

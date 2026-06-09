@@ -1,8 +1,6 @@
 # Troubleshooting
 
-Use this page to isolate where a failure lives. Start with the smallest
-surface that proves the most: local CLI first, then gateway, then WebUI or chat
-apps.
+Use this page to isolate where a failure lives. Start with the smallest surface that proves the most: local CLI first, then gateway, then WebUI or chat apps.
 
 ## Fast Diagnosis Order
 
@@ -29,8 +27,7 @@ This separates failures into layers:
 | `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
 | `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
 
-If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI,
-Telegram, Discord, Docker, systemd, or any chat app.
+If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
 
 ## Installation Problems
 
@@ -55,8 +52,7 @@ Default workspace path:
 ~/.nanobot/workspace/
 ```
 
-`nanobot status` reads the default config. Use explicit paths on commands that
-support them when debugging multiple instances:
+`nanobot status` reads the default config. Use explicit paths on commands that support them when debugging multiple instances:
 
 ```bash
 nanobot agent --config ./bot-a/config.json --workspace ./bot-a/workspace -m "Hello"
@@ -79,8 +75,7 @@ To refresh missing defaults without overwriting existing settings, run:
 nanobot onboard
 ```
 
-When prompted about overwriting the config, choose the option that keeps current
-values and merges missing defaults.
+When prompted about overwriting the config, choose the option that keeps current values and merges missing defaults.
 
 ## Provider and Model Problems
 
@@ -112,13 +107,11 @@ Langfuse tracing is optional and controlled by environment variables.
 | Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
 | Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls; native providers may not use that client path. |
 
-See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability)
-for setup commands.
+See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.
 
 ## Gateway Problems
 
-`nanobot gateway` is required for WebUI, chat apps, heartbeat, Dream, and
-long-running channel connections.
+`nanobot gateway` is required for WebUI, chat apps, heartbeat, Dream, and long-running channel connections.
 
 Default ports:
 
@@ -170,9 +163,7 @@ Open:
 http://127.0.0.1:8765
 ```
 
-If accessing from another device, bind the WebSocket channel to `0.0.0.0` and
-set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds
-without a token or token issue secret.
+If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
 See [`../webui/README.md`](../webui/README.md) for LAN and development setup.
 
@@ -226,10 +217,8 @@ When opening an issue or asking for help, include:
 - operating system and Python version;
 - the command you ran;
 - relevant `nanobot status` output;
-- sanitized config snippets, especially provider, model, channel, and tool
-  settings;
+- sanitized config snippets, especially provider, model, channel, and tool settings;
 - gateway logs from `nanobot gateway --verbose`;
 - whether `nanobot agent -m "Hello!"` works.
 
-Never paste real API keys, bot tokens, OAuth tokens, or private chat IDs into
-public issues.
+Never paste real API keys, bot tokens, OAuth tokens, or private chat IDs into public issues.

@@ -1,20 +1,14 @@
 # Providers and Models
 
-Use this page when the first reply fails because of provider/model mismatch, or
-when you want to move beyond the default OpenRouter example.
+Use this page when the first reply fails because of provider/model mismatch, or when you want to move beyond the default OpenRouter example.
 
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?
 2. What model name does that provider expect?
-3. Does the provider need `apiKey`, `apiBase`, OAuth login, cloud credentials,
-   or only a local server URL?
+3. Does the provider need `apiKey`, `apiBase`, OAuth login, cloud credentials, or only a local server URL?
 
-Prefer a named `modelPresets` entry for the model/provider pair, then select it
-with `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and
-`agents.defaults.model` still work for existing configs, but presets make
-runtime `/model` switching and fallback chains clearer. Pin `provider` inside
-the preset while setting up; you can switch back to `"auto"` later.
+Prefer a named `modelPresets` entry for the model/provider pair, then select it with `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but presets make runtime `/model` switching and fallback chains clearer. Pin `provider` inside the preset while setting up; you can switch back to `"auto"` later.
 
 ## Minimal Shape
 
@@ -42,8 +36,7 @@ the preset while setting up; you can switch back to `"auto"` later.
 }
 ```
 
-The provider config gives nanobot credentials and endpoint details. The agent
-defaults choose which named preset to use for normal turns.
+The provider config gives nanobot credentials and endpoint details. The agent defaults choose which named preset to use for normal turns.
 
 ## Provider, Model, API Key, and Base URL
 
@@ -56,12 +49,7 @@ These fields answer different questions:
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
 
-You usually omit `apiBase` for hosted built-in providers such as OpenRouter,
-Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their
-default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers,
-provider proxies, regional endpoints, or subscription endpoints. Include the API
-version path when the endpoint requires it, for example
-`https://api.example.com/v1` or `http://localhost:11434/v1`.
+You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
 ## Common Provider Patterns
 
@@ -119,8 +107,7 @@ Use the model ID exactly as OpenRouter lists it.
 }
 ```
 
-Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter
-model ID unless the provider is OpenRouter.
+Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter model ID unless the provider is OpenRouter.
 
 ### OpenAI Direct
 
@@ -147,15 +134,11 @@ model ID unless the provider is OpenRouter.
 }
 ```
 
-`providers.openai.apiType` may be set when you need to force a specific OpenAI
-API surface. Other providers reject `apiType`; leave it unset outside
-`providers.openai`. Replace the model with a model ID available to your OpenAI
-account.
+`providers.openai.apiType` may be set when you need to force a specific OpenAI API surface. Other providers reject `apiType`; leave it unset outside `providers.openai`. Replace the model with a model ID available to your OpenAI account.
 
 ### Custom OpenAI-Compatible Endpoint
 
-Use `custom` when the endpoint is OpenAI-compatible but not represented by a
-named provider.
+Use `custom` when the endpoint is OpenAI-compatible but not represented by a named provider.
 
 ```json
 {
@@ -238,8 +221,7 @@ Most Ollama setups do not require an API key.
 }
 ```
 
-Some OpenAI-compatible local servers require any non-empty API key even when
-they do not validate it.
+Some OpenAI-compatible local servers require any non-empty API key even when they do not validate it.
 
 ### LM Studio
 
@@ -266,13 +248,11 @@ they do not validate it.
 }
 ```
 
-Config keys may be camelCase or snake_case. Provider names in
-model presets should use the registry name, such as `lm_studio`.
+Config keys may be camelCase or snake_case. Provider names in model presets should use the registry name, such as `lm_studio`.
 
 ### AWS Bedrock
 
-Bedrock can use the AWS credential chain, profile, region, or Bedrock bearer
-token depending on your AWS setup.
+Bedrock can use the AWS credential chain, profile, region, or Bedrock bearer token depending on your AWS setup.
 
 ```json
 {
@@ -298,8 +278,7 @@ token depending on your AWS setup.
 }
 ```
 
-See [`configuration.md#providers`](./configuration.md#providers) for
-Bedrock-specific notes.
+See [`configuration.md#providers`](./configuration.md#providers) for Bedrock-specific notes.
 
 ### OAuth Providers
 
@@ -310,34 +289,25 @@ nanobot provider login openai-codex
 nanobot provider login github-copilot
 ```
 
-Then explicitly select the provider and model in a preset. OAuth providers are
-not valid automatic fallbacks.
+Then explicitly select the provider and model in a preset. OAuth providers are not valid automatic fallbacks.
 
 ## Provider Resolution
 
-The recommended path is a named preset selected by
-`agents.defaults.modelPreset`. The effective model parameters come from:
+The recommended path is a named preset selected by `agents.defaults.modelPreset`. The effective model parameters come from:
 
 1. the named `modelPresets` entry referenced by `agents.defaults.modelPreset`;
-2. otherwise the implicit `default` preset built from `agents.defaults.model`,
-   `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and related
-   fields.
+2. otherwise the implicit `default` preset built from `agents.defaults.model`, `provider`, `maxTokens`, `contextWindowTokens`, `temperature`, and related fields.
 
 Provider selection follows this practical rule:
 
 - Explicit `provider` in the active preset or implicit default config wins.
-- `provider: "auto"` tries model-name keywords, configured keys, local base
-  URLs, and gateway providers.
-- Gateway providers such as OpenRouter and AiHubMix can route many model
-  families, so the model name must be valid for that gateway.
-- Local providers should normally be explicit because generic local model names
-  such as `llama3.2` do not always contain provider keywords.
+- `provider: "auto"` tries model-name keywords, configured keys, local base URLs, and gateway providers.
+- Gateway providers such as OpenRouter and AiHubMix can route many model families, so the model name must be valid for that gateway.
+- Local providers should normally be explicit because generic local model names such as `llama3.2` do not always contain provider keywords.
 
 ## Model Presets
 
-Model presets are the recommended model configuration surface. Use them when
-you want named model choices, runtime `/model` switching, or reusable fallback
-targets.
+Model presets are the recommended model configuration surface. Use them when you want named model choices, runtime `/model` switching, or reusable fallback targets.
 
 ```json
 {
@@ -367,16 +337,11 @@ targets.
 }
 ```
 
-The preset name `default` is reserved for the implicit `agents.defaults`
-settings. Do not define `modelPresets.default`; use `/model default` to return
-to the direct `agents.defaults.*` fields in older configs.
+The preset name `default` is reserved for the implicit `agents.defaults` settings. Do not define `modelPresets.default`; use `/model default` to return to the direct `agents.defaults.*` fields in older configs.
 
 ## Fallback Models
 
-Fallbacks are useful for transient provider failures, rate limits, or model
-availability issues. Keep fallbacks compatible with the task size and tool use.
-Prefer fallback presets so each candidate has a name and a complete provider,
-model, generation, and context-window configuration.
+Fallbacks are useful for transient provider failures, rate limits, or model availability issues. Keep fallbacks compatible with the task size and tool use. Prefer fallback presets so each candidate has a name and a complete provider, model, generation, and context-window configuration.
 
 ```json
 {
@@ -415,10 +380,7 @@ model, generation, and context-window configuration.
 }
 ```
 
-String entries in `fallbackModels` are preset names, not raw model names.
-nanobot tries them in order after the active preset. Each fallback preset uses
-its own `provider`, `model`, `maxTokens`, `contextWindowTokens`, `temperature`,
-and optional `reasoningEffort`.
+String entries in `fallbackModels` are preset names, not raw model names. nanobot tries them in order after the active preset. Each fallback preset uses its own `provider`, `model`, `maxTokens`, `contextWindowTokens`, `temperature`, and optional `reasoningEffort`.
 
 Use inline fallback objects only when a model is not worth naming as a preset:
 
@@ -440,11 +402,7 @@ Use inline fallback objects only when a model is not worth naming as a preset:
 }
 ```
 
-`fallbackModels` belongs under `agents.defaults`, not inside each preset. If
-fallback candidates use smaller context windows, nanobot builds context using
-the smallest window in the active chain so every candidate can receive the same
-prompt. See [`configuration.md#model-fallbacks`](./configuration.md#model-fallbacks)
-for failure conditions.
+`fallbackModels` belongs under `agents.defaults`, not inside each preset. If fallback candidates use smaller context windows, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt. See [`configuration.md#model-fallbacks`](./configuration.md#model-fallbacks) for failure conditions.
 
 ## Quick Checks
 
@@ -465,5 +423,4 @@ If `nanobot agent -m "Hello!"` fails:
 | provider not found | The active preset uses a misspelled provider; use registry names such as `openrouter`, `anthropic`, `ollama`, `vllm`, `lm_studio` |
 | works in CLI but not chat app | Provider is fine; debug gateway/channel setup in [`chat-apps.md`](./chat-apps.md) or [`troubleshooting.md`](./troubleshooting.md) |
 
-For the complete provider table and advanced provider-specific notes, see
-[`configuration.md#providers`](./configuration.md#providers).
+For the complete provider table and advanced provider-specific notes, see [`configuration.md#providers`](./configuration.md#providers).
