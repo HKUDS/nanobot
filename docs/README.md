@@ -28,6 +28,18 @@ Provider examples are concrete walkthroughs, not rankings or endorsements. Use t
 | Copy a provider setup recipe | [`provider-cookbook.md`](./provider-cookbook.md) | Pasteable OpenRouter, OpenAI, Anthropic, local model, fallback, and Langfuse setups |
 | Fix a first-run or runtime problem | [`troubleshooting.md`](./troubleshooting.md) | A diagnosis order and targeted checks for common failures |
 
+## After the First Reply Works
+
+Do not configure everything at once. Pick one next surface:
+
+| Next goal | Read | First check |
+|---|---|---|
+| Use nanobot in a browser | [`../webui/README.md`](../webui/README.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
+| Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `nanobot channels status`, keep `nanobot gateway` running |
+| Change provider or add fallbacks | [`provider-cookbook.md`](./provider-cookbook.md) | Keep `modelPresets` named and set `agents.defaults.modelPreset` |
+| Understand before operating long-term | [`concepts.md`](./concepts.md) | Know what config, workspace, gateway, sessions, memory, and tools mean |
+| Diagnose a new failure | [`troubleshooting.md`](./troubleshooting.md) | Start with `nanobot status`, then `nanobot agent -m "Hello!"` |
+
 ## Use nanobot
 
 | Goal | Read | Outcome |
@@ -54,6 +66,19 @@ Provider examples are concrete walkthroughs, not rankings or endorsements. Use t
 | OpenAI-compatible API | [`openai-api.md`](./openai-api.md) | `/v1/chat/completions`, `/v1/models`, file uploads, and SDK-compatible usage |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Running nanobot from Python and attaching hooks |
 | Runtime self-inspection | [`my-tool.md`](./my-tool.md) | Inspecting and tuning the current agent run |
+
+## Fast Lookup
+
+| Need | Jump to |
+|---|---|
+| Provider/model resolution order | [`providers.md#provider-resolution`](./providers.md#provider-resolution) |
+| Model presets and fallback chains | [`providers.md#model-presets`](./providers.md#model-presets) and [`providers.md#fallback-models`](./providers.md#fallback-models) |
+| Langfuse environment variables | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) |
+| WebSocket/WebUI protocol details | [`websocket.md`](./websocket.md) |
+| OpenAI-compatible API usage | [`openai-api.md`](./openai-api.md) |
+| Multiple configs, workspaces, and ports | [`multiple-instances.md`](./multiple-instances.md) |
+| Security, sandboxing, and SSRF controls | [`configuration.md#security`](./configuration.md#security) |
+| Channel plugin development | [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
 
 ## Extend nanobot
 
