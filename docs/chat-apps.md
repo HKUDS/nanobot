@@ -2,6 +2,42 @@
 
 Connect blackcat to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./channel-plugin-guide.md).
 
+Before configuring a chat app, make sure the local CLI path works:
+
+```bash
+blackcat agent -m "Hello!"
+```
+
+If that fails, fix installation, config, provider, or model setup first with [`quick-start.md`](./quick-start.md), [`providers.md`](./providers.md), and [`troubleshooting.md`](./troubleshooting.md). Chat apps require `blackcat gateway` to stay running after the channel is configured.
+
+Most examples below are snippets to merge into `~/.blackcat/config.json`.
+
+## Common Setup Pattern
+
+Every chat app uses the same shape:
+
+1. Create or prepare the bot/account in the chat platform.
+2. Copy the token, secret, QR login state, webhook URL, or account ID that platform gives you.
+3. Merge that platform's JSON snippet into `~/.blackcat/config.json`.
+4. Keep access control narrow at first with `allowFrom` or the platform-specific allow list.
+5. Check that blackcat can see the configured channel:
+
+```bash
+blackcat channels status
+```
+
+6. Start the gateway and leave that terminal running:
+
+```bash
+blackcat gateway
+```
+
+7. Send a message from the allowed account. In group chats, follow that channel's `groupPolicy` behavior: many channels default to mention-only, while Matrix and WhatsApp default to open group replies.
+
+If `blackcat channels status` does not show the channel as enabled, the config snippet is in the wrong place, the channel name is misspelled, or the config file you edited is not the one blackcat is reading. If the channel is enabled but messages do not arrive, run `blackcat gateway --verbose` and compare the platform-side credentials, event permissions, and allow lists.
+
+> `["*"]` allows anyone who can reach that channel to talk to the bot. Use it only when that is intentional, or temporarily while testing in a private sandbox.
+
 | Channel | What you need |
 |---------|---------------|
 | **Telegram** | Bot token from @BotFather |
@@ -21,7 +57,7 @@ Connect blackcat to your favorite chat platform. Want to build your own? See the
 | **Signal** | signal-cli daemon + phone number |
 
 <details>
-<summary><b>Telegram</b> (Recommended)</summary>
+<summary><b>Telegram</b></summary>
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
@@ -42,8 +78,7 @@ Connect blackcat to your favorite chat platform. Want to build your own? See the
 }
 ```
 
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
+> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 
 
 **3. Run**
@@ -54,9 +89,7 @@ blackcat gateway
 
 **Webhook mode (optional)**
 
-Telegram uses long polling by default. To receive updates through a webhook, expose
-a public HTTPS URL that forwards to blackcat's local listener and set `mode` to
-`webhook`:
+Telegram uses long polling by default. To receive updates through a webhook, expose a public HTTPS URL that forwards to blackcat's local listener and set `mode` to `webhook`:
 
 ```json
 {
@@ -77,17 +110,9 @@ a public HTTPS URL that forwards to blackcat's local listener and set `mode` to
 }
 ```
 
-> `webhookSecretToken` is required in webhook mode. Do not expose the local
-> webhook listener directly to the public internet without a reverse proxy or
-> tunnel in front of it. TLS/Host policy is handled by your proxy; blackcat only
-> listens on `webhookListenHost:webhookListenPort` and validates Telegram's
-> webhook secret token. `webhookMaxConnections` defaults to `4`; blackcat
-> still serializes Telegram updates per conversation before forwarding them to
-> the agent.
+> `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; blackcat only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; blackcat still serializes Telegram updates per conversation before forwarding them to the agent.
 >
-> `webhookUrl` is the public HTTPS URL registered with Telegram.
-> `webhookPath` is the local path blackcat listens on. They often use the same
-> path, but may differ when a reverse proxy or tunnel rewrites the request path.
+> `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path blackcat listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
 
 </details>
 
@@ -209,15 +234,11 @@ blackcat gateway
 Install Matrix dependencies first:
 
 ```bash
-pip install blackcat-ai[matrix]
+python -m pip install "blackcat-ai[matrix]"
 ```
 
 > [!NOTE]
-> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on
-> `python-olm`, which has no pre-built Windows wheel and is skipped by the
-> `matrix` extra on `sys_platform == 'win32'`. The command above will still
-> succeed on Windows but without `matrix-nio` installed, so enabling the
-> Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
+> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel and is skipped by the `matrix` extra on `sys_platform == 'win32'`. The command above will still succeed on Windows but without `matrix-nio` installed, so enabling the Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
 
 **1. Create/choose a Matrix account**
 
@@ -230,9 +251,7 @@ pip install blackcat-ai[matrix]
   - `userId` (example: `@blackcat:matrix.org`)
   - `password`
 
-(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
-for reliable encryption, password login is recommended instead. If the
-`password` is provided, `accessToken` and `deviceId` will be ignored.)
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but for reliable encryption, password login is recommended instead. If the `password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 
@@ -314,8 +333,7 @@ blackcat channels login whatsapp
 blackcat gateway
 ```
 
-> WhatsApp bridge updates are not applied automatically for existing installations.
-> After upgrading blackcat, rebuild the local bridge with:
+> WhatsApp bridge updates are not applied automatically for existing installations. After upgrading blackcat, rebuild the local bridge with:
 > `rm -rf ~/.blackcat/bridge && blackcat channels login whatsapp`
 
 </details>
@@ -432,7 +450,7 @@ Connects to a [Napcat](https://github.com/NapNeko/NapCatQQ) instance over its **
 
 **1. Set up Napcat**
 
-- Install and log into Napcat, then enable a **Forward WebSocket** server. Recommends: [official napcat docker tutorial](https://github.com/NapNeko/NapCat-Docker)
+- Install and log into Napcat, then enable a **Forward WebSocket** server. See the [official Napcat Docker tutorial](https://github.com/NapNeko/NapCat-Docker).
 - In the webui, follow "网络配置" -> "新建" -> "Websocket 服务器" to create a forward websocket server. By default, the URL is `ws://127.0.0.1:3001`
 - Copy the forward websocket server's token
 - (Optional) In the webui, follow "系统配置" -> "登陆配置" -> "快速登录QQ" to automatically login after restarts
@@ -501,9 +519,7 @@ Uses **Stream Mode** — no public IP required.
 
 > `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
 >
-> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per
-> group chat. Set it to `true` to give each sender in a DingTalk group chat a separate
-> session while replies still go back to the same group.
+> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per group chat. Set it to `true` to give each sender in a DingTalk group chat a separate session while replies still go back to the same group.
 
 **3. Run**
 
@@ -581,7 +597,7 @@ Give blackcat its own email account. It polls **IMAP** for incoming mail and rep
 >   This runs only after an accepted email is successfully delivered to the AI pipeline.
 > - `postActionMoveMailbox`: Destination mailbox used when `postAction` is `"move"` (for example `"Processed"` or `"[Gmail]/Trash"`).
 > - `postActionIgnoreSkipped`: If `true` (default), skipped emails are ignored for post-action and not moved/deleted.
-> - `postActionExpunge`: When `true`, the channel performs a full mailbox cleanup after processing emails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
+> - `postActionExpunge`: When `true`, the channel allows a full-mailbox `EXPUNGE` fallback if UID-scoped expunge is unavailable or fails (default `false`). Enable only on very old IMAP servers that lack modern UIDPLUS support. Note that this fallback will expunge **all** messages marked as deleted in the mailbox, including ones not handled by the agent. Leaving this off is safe for all modern IMAP servers.
 > - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
 > - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
 > - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
@@ -629,7 +645,7 @@ Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. 
 **1. Install with WeChat support**
 
 ```bash
-pip install "blackcat-ai[weixin]"
+python -m pip install "blackcat-ai[weixin]"
 ```
 
 **2. Configure**
@@ -681,7 +697,7 @@ blackcat gateway
 **1. Install the optional dependency**
 
 ```bash
-pip install blackcat-ai[wecom]
+python -m pip install "blackcat-ai[wecom]"
 ```
 
 **2. Create a WeCom AI Bot**
@@ -720,7 +736,7 @@ blackcat gateway
 **1. Install the optional dependency**
 
 ```bash
-pip install blackcat-ai[msteams]
+python -m pip install "blackcat-ai[msteams]"
 ```
 
 **2. Create a Teams / Azure bot app registration**

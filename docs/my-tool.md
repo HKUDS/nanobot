@@ -25,8 +25,7 @@ tools:
 
 To allow the agent to set its configuration (e.g. switch models, adjust parameters), set `tools.my.allow_set: true`.
 
-Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and
-rewritten in-place the next time `blackcat onboard` refreshes the config.
+Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `blackcat onboard` refreshes the config.
 
 All modifications are held in memory only — restart restores defaults.
 

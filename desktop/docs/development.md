@@ -1,12 +1,8 @@
 # Desktop Development Guide
 
-This guide is for GitHub contributors who want to change the desktop app. If
-you are using nanobot rather than developing it, the important bit is simpler:
-desktop runs the local engine for you and shows the same chat, settings, apps,
-skills, and workspace UI as the browser WebUI.
+This guide is for GitHub contributors who want to change the desktop app. If you are using nanobot rather than developing it, the important bit is simpler: desktop runs the local engine for you and shows the same chat, settings, apps, skills, and workspace UI as the browser WebUI.
 
-`desktop` is the native host for the shared nanobot WebUI. It is not a fork of
-the WebUI, and it should not grow a second copy of product UI.
+`desktop` is the native host for the shared nanobot WebUI. It is not a fork of the WebUI, and it should not grow a second copy of product UI.
 
 The healthy mental model is:
 
@@ -34,13 +30,9 @@ cd desktop
 bun run dev:app
 ```
 
-In development, Electron loads `http://127.0.0.1:5173`, so changes under
-`webui/src` hot reload. Changes under `desktop/src` require restarting
-`dev:app`.
+In development, Electron loads `http://127.0.0.1:5173`, so changes under `webui/src` hot reload. Changes under `desktop/src` require restarting `dev:app`.
 
-For source checkouts, the host starts the engine with local `python3` and
-injects the repository root into `PYTHONPATH`. This means Python changes under
-`nanobot/` are picked up from the current checkout.
+For source checkouts, the host starts the engine with local `python3` and injects the repository root into `PYTHONPATH`. This means Python changes under `nanobot/` are picked up from the current checkout.
 
 ## Where Code Goes
 
@@ -57,15 +49,11 @@ Use this table before adding a desktop feature:
 | WebSocket-over-Unix-socket bridge | `desktop/src/unixWebSocket.ts` |
 | Bundled Python runtime preparation | `desktop/scripts/prepare-engine.mjs` |
 
-For example, if desktop Settings needs an "Open logs" button, the button belongs
-in the shared WebUI settings page because it is product UI. The actual filesystem
-operation belongs in the desktop host and is exposed through `window.nanobotHost`.
+For example, if desktop Settings needs an "Open logs" button, the button belongs in the shared WebUI settings page because it is product UI. The actual filesystem operation belongs in the desktop host and is exposed through `window.nanobotHost`.
 
 ## Host Contract
 
-The shared WebUI talks to desktop through `window.nanobotHost`. WebUI code may
-check for host capabilities, but it must not import Electron, Node.js modules,
-or desktop source files.
+The shared WebUI talks to desktop through `window.nanobotHost`. WebUI code may check for host capabilities, but it must not import Electron, Node.js modules, or desktop source files.
 
 Prefer capability-driven UI:
 
@@ -80,8 +68,7 @@ Avoid platform-driven UI:
 if desktop -> run Electron-specific logic in WebUI
 ```
 
-This keeps the WebUI usable in browsers and leaves room for future native hosts
-without rewriting product screens.
+This keeps the WebUI usable in browsers and leaves room for future native hosts without rewriting product screens.
 
 ## Adding A Desktop Feature
 
@@ -101,8 +88,7 @@ Before implementing, answer these questions:
 - Do not add provider-specific onboarding screens to `desktop/`.
 - Do not duplicate WebUI settings or login flows in Electron-owned HTML.
 - Do not make `desktop/src/main.ts` own agent behavior.
-- Do not commit `desktop/node_modules`, `desktop/build`, `desktop/dist`, DMGs,
-  or `desktop/resources/nanobot-engine`.
+- Do not commit `desktop/node_modules`, `desktop/build`, `desktop/dist`, DMGs, or `desktop/resources/nanobot-engine`.
 
 ## Release Shape
 
@@ -112,5 +98,4 @@ Release builds assemble three existing parts:
 2. the Python engine prepared under `desktop/resources/nanobot-engine`,
 3. the Electron host compiled from `desktop/src`.
 
-User config, logs, sessions, workspace state, and the default workspace live in
-the platform app data directory, not inside the app bundle.
+User config, logs, sessions, workspace state, and the default workspace live in the platform app data directory, not inside the app bundle.
