@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "對話 {{id}}",
+    "forkTitle": "分叉：{{title}}",
     "loading": "載入中…",
     "noSessions": "目前還沒有會話。",
     "showMore": "再顯示 {{count}} 個",
@@ -811,7 +812,8 @@
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息",
     "fork": {
-      "failed": "無法分叉這個對話，請重試。"
+      "failed": "無法分叉這個對話，請重試。",
+      "fromHistory": "從歷史訊息分叉"
     },
     "promptNavigator": {
       "open": "開啟輸入導覽",
@@ -838,11 +840,11 @@
     "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
     "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
     "imageAttachment": "圖片附件",
-    "copyMessage": "複製訊息",
-    "copiedMessage": "已複製訊息",
-    "forkFromHere": "從這裡分叉",
-    "copyReply": "複製回覆",
-    "copiedReply": "已複製回覆",
+    "copyMessage": "複製",
+    "copiedMessage": "已複製",
+    "forkFromHere": "分叉",
+    "copyReply": "複製",
+    "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",

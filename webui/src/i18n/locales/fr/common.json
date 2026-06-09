@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "Discussion {{id}}",
+    "forkTitle": "Branche : {{title}}",
     "loading": "Chargement…",
     "noSessions": "Aucune session pour le moment.",
     "showMore": "Afficher {{count}} de plus",
@@ -811,7 +812,8 @@
     "scrollToBottom": "Faire défiler vers le bas",
     "loadEarlier": "Charger les messages précédents",
     "fork": {
-      "failed": "Impossible de bifurquer cette conversation. Réessayez."
+      "failed": "Impossible de bifurquer cette conversation. Réessayez.",
+      "fromHistory": "Bifurqué depuis l'historique"
     },
     "promptNavigator": {
       "open": "Ouvrir le navigateur de prompts",
@@ -838,11 +840,11 @@
     "agentActivityLiveSummary": "En cours… · {{reasoning}} étapes · {{tools}} appels d’outils",
     "agentActivityLiveToolsOnly": "En cours… · {{tools}} appels d’outils",
     "imageAttachment": "Pièce jointe image",
-    "copyMessage": "Copier le message",
-    "copiedMessage": "Message copié",
-    "forkFromHere": "Bifurquer depuis ici",
-    "copyReply": "Copier la réponse",
-    "copiedReply": "Réponse copiée",
+    "copyMessage": "Copier",
+    "copiedMessage": "Copié",
+    "forkFromHere": "Bifurquer",
+    "copyReply": "Copier",
+    "copiedReply": "Copié",
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",

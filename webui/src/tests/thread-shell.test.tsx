@@ -759,7 +759,7 @@ describe("ThreadShell", () => {
 
     const targetText = await screen.findByText("answer 100");
     fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
-      name: "Fork from here",
+      name: "Fork",
     }));
 
     await waitFor(() =>
@@ -805,7 +805,7 @@ describe("ThreadShell", () => {
       target: { value: "keep my current draft" },
     });
     fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
-      name: "Fork from here",
+      name: "Fork",
     }));
 
     await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 1));
@@ -865,7 +865,7 @@ describe("ThreadShell", () => {
 
     const targetText = await screen.findByText("answer2");
     fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
-      name: "Fork from here",
+      name: "Fork",
     }));
 
     await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 2));
@@ -963,7 +963,7 @@ describe("ThreadShell", () => {
     );
 
     await screen.findByText("answer1");
-    fireEvent.click(screen.getAllByRole("button", { name: "Fork from here" }).at(-1)!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Fork" }).at(-1)!);
 
     await waitFor(() => expect(onForkChat).toHaveBeenCalledWith("chat-a", 1));
     await act(async () => {

@@ -117,8 +117,8 @@ export function MessageBubble({
     const showUserActions = hasText;
     const timeLabel = formatMessageClock(message.createdAt);
     const copyLabel = copied
-      ? t("message.copiedMessage", { defaultValue: "Copied message" })
-      : t("message.copyMessage", { defaultValue: "Copy message" });
+      ? t("message.copiedMessage", { defaultValue: "Copied" })
+      : t("message.copyMessage", { defaultValue: "Copy" });
     return (
       <div
         className={cn(

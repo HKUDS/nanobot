@@ -352,6 +352,7 @@ export class NanobotClient {
   forkChat(
     sourceChatId: string,
     beforeUserIndex: number,
+    title?: string,
     timeoutMs: number = 5_000,
   ): Promise<string> {
     if (this.pendingNewChat) {
@@ -367,6 +368,7 @@ export class NanobotClient {
         type: "fork_chat",
         source_chat_id: sourceChatId,
         before_user_index: beforeUserIndex,
+        ...(title?.trim() ? { title: title.trim() } : {}),
       });
     });
   }
