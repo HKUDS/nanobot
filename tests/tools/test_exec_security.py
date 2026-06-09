@@ -238,6 +238,60 @@ async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["cat link.txt", "cat <link.txt", "cat 0<link.txt"])
+async def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path, command):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("sentinel-secret", encoding="utf-8")
+    link = workspace / "link.txt"
+    try:
+        link.symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
+    result = await tool.execute(command=command)
+
+    assert "path outside working dir" in result
+    assert "sentinel-secret" not in result
+
+
+def test_exec_guard_blocks_relative_symlink_redirect_target(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "target.txt"
+    target.write_text("outside", encoding="utf-8")
+    link = workspace / "link.txt"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+    error = tool._guard_command("echo pwn >link.txt", str(workspace))
+
+    assert error is not None
+    assert "path outside working dir" in error
+    assert target.read_text(encoding="utf-8") == "outside"
+
+
+def test_exec_guard_allows_relative_workspace_file(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("ok", encoding="utf-8")
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+    error = tool._guard_command("cat inside.txt", str(workspace))
+
+    assert error is None
+
+
+@pytest.mark.asyncio
 async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     """Without restrict_to_workspace, the LLM may still choose any working_dir."""
     workspace = tmp_path / "workspace"
