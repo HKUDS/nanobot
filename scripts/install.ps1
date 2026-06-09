@@ -19,8 +19,7 @@ function Write-Info {
 
 function Fail {
     param([string]$Message)
-    [Console]::Error.WriteLine("Error: $Message")
-    exit 1
+    throw "Error: $Message"
 }
 
 function Show-InstallFailureHint {
@@ -30,7 +29,7 @@ function Show-InstallFailureHint {
     [Console]::Error.WriteLine("  $Python -m pip install --upgrade $InstallTarget")
     [Console]::Error.WriteLine("Then start setup with:")
     [Console]::Error.WriteLine("  $Python -m nanobot onboard --wizard")
-    exit 1
+    throw "pip could not install nanobot from $InstallSource"
 }
 
 function Show-Usage {
@@ -83,11 +82,11 @@ foreach ($Arg in $RemainingArgs) {
         }
         "-h" {
             Show-Usage
-            exit 0
+            return
         }
         "--help" {
             Show-Usage
-            exit 0
+            return
         }
         default {
             Fail "Unknown option: $Arg"
@@ -130,7 +129,7 @@ if ($DryRun) {
         Write-Info "Dry run: would run: $Python -m nanobot onboard --wizard"
     }
     Write-Info "Dry run: no changes made."
-    exit 0
+    return
 }
 
 Write-Info "Installing or upgrading nanobot from $InstallSource..."
@@ -152,7 +151,7 @@ if ($LASTEXITCODE -ne 0) {
 if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
     Write-Info "Skipping setup wizard because NANOBOT_SKIP_WIZARD=1."
     Write-Info "Run this later: $Python -m nanobot onboard --wizard"
-    exit 0
+    return
 }
 
 Write-Info "Starting setup wizard..."
