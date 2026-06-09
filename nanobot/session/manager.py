@@ -648,8 +648,8 @@ class SessionManager:
         ``before_user_index`` is zero-based over user messages in the full session:
         ``0`` means "before the first user message", ``1`` means "before the
         second user message", and so on. A value equal to the total user-message
-        count copies the full session prefix. The target user message itself is
-        not copied; the WebUI pre-fills it in the composer for editing and resend.
+        count copies the full session prefix. WebUI assistant-reply forks pass
+        the next user index so the selected completed assistant turn is included.
         """
         if before_user_index < 0:
             return None
