@@ -29,6 +29,35 @@ This separates failures into layers:
 
 If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
 
+## How to Read `nanobot status`
+
+`nanobot status` does not call a model. It only checks whether nanobot can find the default config, default workspace, active model or preset, and provider setup summary.
+
+The output has this shape:
+
+```text
+nanobot Status
+
+Config: /path/to/config.json ✓
+Workspace: /path/to/workspace ✓
+Model: provider/model-name (preset: primary)
+Provider A: not set
+Provider B: ✓
+Local Provider: ✓ http://localhost:11434/v1
+OAuth Provider: ✓ (OAuth)
+```
+
+Read it like this:
+
+| Line | Good sign | What to do if it looks wrong |
+|---|---|---|
+| `Config` | It points to the config file you meant to use and shows `✓`. | Run `nanobot onboard`, or pass `--config` to `nanobot agent`, `gateway`, or `serve` when testing a non-default instance. |
+| `Workspace` | It points to the workspace you meant to use and shows `✓`. | Run `nanobot onboard`, create the folder, fix permissions, or pass `--workspace` on commands that support it. |
+| `Model` | It shows the active model or the preset name you expect. | Set `agents.defaults.modelPreset` to the intended preset, or check `/model` if you changed models during a chat session. |
+| Provider rows | The provider used by the active preset shows `✓`, an OAuth marker, or a local URL. | Configure only the active provider first. It is normal for unused providers to say `not set`. |
+
+If `nanobot status` looks right but `nanobot agent -m "Hello!"` fails, the install and config paths are probably fine. Continue with [Provider and Model Problems](#provider-and-model-problems).
+
 ## Installation Problems
 
 | Symptom | Check |
