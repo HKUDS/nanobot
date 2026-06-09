@@ -5,6 +5,7 @@ package="nanobot-ai"
 main_source="https://github.com/HKUDS/nanobot/archive/refs/heads/main.zip"
 install_target="$package"
 install_source="PyPI"
+dry_run="0"
 
 info() {
   printf '%s\n' "$*"
@@ -17,10 +18,11 @@ fail() {
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--dev]
+Usage: install.sh [--dev] [--dry-run]
 
 By default this installs or upgrades nanobot-ai from PyPI.
 Use --dev to install from the current main branch on GitHub.
+Use --dry-run to print what would happen without installing or starting the wizard.
 EOF
 }
 
@@ -45,6 +47,9 @@ while [ "$#" -gt 0 ]; do
     --dev)
       install_target="$main_source"
       install_source="GitHub main"
+      ;;
+    --dry-run)
+      dry_run="1"
       ;;
     -h|--help)
       usage
@@ -72,8 +77,24 @@ fi
 info "Using Python: $("$python_bin" --version 2>&1)"
 
 if ! "$python_bin" -m pip --version >/dev/null 2>&1; then
-  info "pip was not found for this Python. Trying ensurepip..."
-  "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1 || fail "pip is not available. Install pip for $python_bin, then rerun this command."
+  if [ "$dry_run" = "1" ]; then
+    info "Dry run: pip was not found. Install would try: $python_bin -m ensurepip --upgrade"
+  else
+    info "pip was not found for this Python. Trying ensurepip..."
+    "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1 || fail "pip is not available. Install pip for $python_bin, then rerun this command."
+  fi
+fi
+
+if [ "$dry_run" = "1" ]; then
+  info "Dry run: would install or upgrade nanobot from $install_source."
+  info "Dry run: would run: $python_bin -m pip install --upgrade $install_target"
+  if [ "${NANOBOT_SKIP_WIZARD:-}" = "1" ]; then
+    info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
+  else
+    info "Dry run: would run: $python_bin -m nanobot onboard --wizard"
+  fi
+  info "Dry run: no changes made."
+  exit 0
 fi
 
 info "Installing or upgrading nanobot from $install_source..."

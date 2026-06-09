@@ -56,7 +56,17 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-These commands install the stable PyPI package. Use the development installer only when a maintainer asks you to test the current `main` branch:
+These commands install the stable PyPI package. To preview what the installer would do without changing your environment, pass `--dry-run`:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dry-run
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dry-run
+```
+
+Use the development installer only when a maintainer asks you to test the current `main` branch:
 
 ```bash
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev

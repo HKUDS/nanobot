@@ -1,5 +1,6 @@
 param(
     [switch]$Dev,
+    [switch]$DryRun,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArgs
 )
@@ -23,10 +24,11 @@ function Fail {
 }
 
 function Show-Usage {
-    Write-Host "Usage: install.ps1 [-Dev|--dev]"
+    Write-Host "Usage: install.ps1 [-Dev|--dev] [-DryRun|--dry-run]"
     Write-Host ""
     Write-Host "By default this installs or upgrades nanobot-ai from PyPI."
     Write-Host "Use --dev to install from the current main branch on GitHub."
+    Write-Host "Use --dry-run to print what would happen without installing or starting the wizard."
 }
 
 function Test-Python {
@@ -66,6 +68,9 @@ foreach ($Arg in $RemainingArgs) {
         "--dev" {
             $Dev = $true
         }
+        "--dry-run" {
+            $DryRun = $true
+        }
         "-h" {
             Show-Usage
             exit 0
@@ -94,11 +99,27 @@ try {
 } catch {}
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Info "pip was not found for this Python. Trying ensurepip..."
-    & $Python -m ensurepip --upgrade *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Fail "pip is not available. Install pip for $Python, then rerun this command."
+    if ($DryRun) {
+        Write-Info "Dry run: pip was not found. Install would try: $Python -m ensurepip --upgrade"
+    } else {
+        Write-Info "pip was not found for this Python. Trying ensurepip..."
+        & $Python -m ensurepip --upgrade *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "pip is not available. Install pip for $Python, then rerun this command."
+        }
     }
+}
+
+if ($DryRun) {
+    Write-Info "Dry run: would install or upgrade nanobot from $InstallSource."
+    Write-Info "Dry run: would run: $Python -m pip install --upgrade $InstallTarget"
+    if ($env:NANOBOT_SKIP_WIZARD -eq "1") {
+        Write-Info "Dry run: would skip setup wizard because NANOBOT_SKIP_WIZARD=1."
+    } else {
+        Write-Info "Dry run: would run: $Python -m nanobot onboard --wizard"
+    }
+    Write-Info "Dry run: no changes made."
+    exit 0
 }
 
 Write-Info "Installing or upgrading nanobot from $InstallSource..."
