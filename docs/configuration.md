@@ -11,9 +11,7 @@ The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`
 For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
 > [!NOTE]
-> If your config file is older than the current schema, you can refresh it without overwriting your existing values:
-> run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
-> nanobot will merge in missing default fields and keep your current settings.
+> If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
 ## Environment Variables for Secrets
 
@@ -624,8 +622,7 @@ Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`, `Lo
 
 Xiaomi MiMo models are automatically detected by the `xiaomi_mimo` provider when the model name contains `mimo`. The default API base is `https://api.xiaomimimo.com/v1`.
 
-> **Token Plan**: If you're using MiMo's token plan, override `apiBase` with the
-> dedicated endpoint:
+> **Token Plan**: If you're using MiMo's token plan, override `apiBase` with the dedicated endpoint:
 >
 > ```json
 > {
@@ -635,18 +632,21 @@ Xiaomi MiMo models are automatically detected by the `xiaomi_mimo` provider when
 >       "apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"
 >     }
 >   },
+>   "modelPresets": {
+>     "mimo": {
+>       "provider": "xiaomi_mimo",
+>       "model": "xiaomi/mimo-v2.5-pro"
+>     }
+>   },
 >   "agents": {
 >     "defaults": {
->       "model": "xiaomi/mimo-v2.5-pro"
+>       "modelPreset": "mimo"
 >     }
 >   }
 > }
 > ```
 >
-> No need to set `provider` explicitly — the model name contains `mimo`, which
-> auto-matches to the `xiaomi_mimo` provider spec. Use an API key from the MiMo
-> token plan console and check the MiMo platform for the latest supported model
-> names.
+> Use the model ID and API key from the MiMo token plan console, and check the MiMo platform for the latest supported model names.
 
 </details>
 
@@ -831,8 +831,7 @@ ollama run llama3.2
 }
 ```
 
-> **Note:** Set `apiKey` to `null` for LM Studio since it runs locally and doesn't require authentication. The model name should match what's shown in the LM Studio UI.
-> `provider: "auto"` also works when `providers.lm_studio.apiBase` is configured, but setting `"provider": "lm_studio"` is the clearest option.
+> **Note:** Set `apiKey` to `null` for LM Studio since it runs locally and doesn't require authentication. The model name should match what's shown in the LM Studio UI. `provider: "auto"` also works when `providers.lm_studio.apiBase` is configured, but setting `"provider": "lm_studio"` is the clearest option.
 
 </details>
 
@@ -944,8 +943,7 @@ docker run -d \
 }
 ```
 
-> OVMS is a local server — no API key required. Supports tool calling (`--tool_parser gptoss`), reasoning (`--reasoning_parser gptoss`), and streaming.
-> See the [official OVMS docs](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) for more details.
+> OVMS is a local server — no API key required. Supports tool calling (`--tool_parser gptoss`), reasoning (`--reasoning_parser gptoss`), and streaming. See the [official OVMS docs](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) for more details.
 </details>
 
 <a id="vllm-local-openai-compatible"></a>

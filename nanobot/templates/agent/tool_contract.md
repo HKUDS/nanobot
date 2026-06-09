@@ -1,7 +1,6 @@
 # Tool Usage Notes
 
-Tool signatures are provided automatically via function calling. This section
-documents the general tool contract and non-obvious usage patterns.
+Tool signatures are provided automatically via function calling. This section documents the general tool contract and non-obvious usage patterns.
 
 ## General Tool Contract
 

@@ -52,8 +52,7 @@ Most examples below are snippets to merge into `~/.nanobot/config.json`.
 }
 ```
 
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
+> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
 
 
 **3. Run**
@@ -85,17 +84,9 @@ Telegram uses long polling by default. To receive updates through a webhook, exp
 }
 ```
 
-> `webhookSecretToken` is required in webhook mode. Do not expose the local
-> webhook listener directly to the public internet without a reverse proxy or
-> tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only
-> listens on `webhookListenHost:webhookListenPort` and validates Telegram's
-> webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot
-> still serializes Telegram updates per conversation before forwarding them to
-> the agent.
+> `webhookSecretToken` is required in webhook mode. Do not expose the local webhook listener directly to the public internet without a reverse proxy or tunnel in front of it. TLS/Host policy is handled by your proxy; nanobot only listens on `webhookListenHost:webhookListenPort` and validates Telegram's webhook secret token. `webhookMaxConnections` defaults to `4`; nanobot still serializes Telegram updates per conversation before forwarding them to the agent.
 >
-> `webhookUrl` is the public HTTPS URL registered with Telegram.
-> `webhookPath` is the local path nanobot listens on. They often use the same
-> path, but may differ when a reverse proxy or tunnel rewrites the request path.
+> `webhookUrl` is the public HTTPS URL registered with Telegram. `webhookPath` is the local path nanobot listens on. They often use the same path, but may differ when a reverse proxy or tunnel rewrites the request path.
 
 </details>
 
@@ -221,11 +212,7 @@ python -m pip install "nanobot-ai[matrix]"
 ```
 
 > [!NOTE]
-> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on
-> `python-olm`, which has no pre-built Windows wheel and is skipped by the
-> `matrix` extra on `sys_platform == 'win32'`. The command above will still
-> succeed on Windows but without `matrix-nio` installed, so enabling the
-> Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
+> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on `python-olm`, which has no pre-built Windows wheel and is skipped by the `matrix` extra on `sys_platform == 'win32'`. The command above will still succeed on Windows but without `matrix-nio` installed, so enabling the Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
 
 **1. Create/choose a Matrix account**
 
@@ -320,8 +307,7 @@ nanobot channels login whatsapp
 nanobot gateway
 ```
 
-> WhatsApp bridge updates are not applied automatically for existing installations.
-> After upgrading nanobot, rebuild the local bridge with:
+> WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
 > `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
 
 </details>
@@ -507,9 +493,7 @@ Uses **Stream Mode** — no public IP required.
 
 > `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
 >
-> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per
-> group chat. Set it to `true` to give each sender in a DingTalk group chat a separate
-> session while replies still go back to the same group.
+> `groupUserIsolation`: Optional. Defaults to `false`, which keeps one shared session per group chat. Set it to `true` to give each sender in a DingTalk group chat a separate session while replies still go back to the same group.
 
 **3. Run**
 

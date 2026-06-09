@@ -14,9 +14,7 @@ You need:
 - Node.js or Bun only if you are developing the WebUI itself.
 
 > [!IMPORTANT]
-> Repository docs may describe features that are available first in source.
-> Install from PyPI or `uv` for the stable day-to-day release; install from
-> source when you want the newest repository behavior or plan to contribute.
+> Repository docs may describe features that are available first in source. Install from PyPI or `uv` for the stable day-to-day release; install from source when you want the newest repository behavior or plan to contribute.
 
 ## 1. Install
 
