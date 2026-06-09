@@ -146,7 +146,7 @@ async def test_process_message_pairs_unauthorized_sender_before_media_side_effec
     channel._get_typing_ticket = AsyncMock(return_value="")
     channel._send_text = AsyncMock()
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "blackcat.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
     )
 
     await channel._process_message(

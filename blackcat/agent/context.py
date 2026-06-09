@@ -614,14 +614,14 @@ You are within blackcat harness/structure.
 
 
     # ==========================================================================
-    # 7. MESSAGE BUILDING (nanobot-compatible API)
+    # 7. MESSAGE BUILDING (blackcat-compatible API)
     # ==========================================================================
 
     @staticmethod
     def _merge_message_content(
         left: Any, right: Any
     ) -> str | list[dict[str, Any]]:
-        """Merge content, handling both string and list formats (nanobot compat)."""
+        """Merge content, handling both string and list formats (blackcat compat)."""
         if isinstance(left, str) and isinstance(right, str):
             return f"{left}\n\n{right}" if left else right
 
@@ -680,7 +680,7 @@ You are within blackcat harness/structure.
         skip_runtime_lines: bool = False,
         include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call (nanobot-compatible)."""
+        """Build the complete message list for an LLM call (blackcat-compatible)."""
         system_prompt = await self.build_system_prompt(
             sender_id, channel, chat_id, skill_names, history,
             include_memory_recent_history=include_memory_recent_history,

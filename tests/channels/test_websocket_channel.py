@@ -104,7 +104,7 @@ def bus() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def isolate_webui_workspace_state(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
         "blackcat.webui.workspaces.get_webui_dir",
         lambda: tmp_path / "webui",
@@ -278,7 +278,7 @@ async def test_token_issue_route_requires_secret_when_static_token_configured(bu
 
 @pytest.mark.asyncio
 async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
-    from nanobot.webui.transcript import read_transcript_lines
+    from blackcat.webui.transcript import read_transcript_lines
 
     channel = _ch(bus)
     conn = MagicMock()
@@ -319,9 +319,9 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -352,9 +352,9 @@ async def test_webui_stop_control_message_is_not_persisted_as_user_bubble(
     tmp_path,
     monkeypatch,
 ) -> None:
-    from nanobot.webui.transcript import read_transcript_lines
+    from blackcat.webui.transcript import read_transcript_lines
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -378,7 +378,7 @@ async def test_webui_user_transcript_append_failure_does_not_block_inbound(
     def fail_append(_session_key: str, _obj: dict[str, Any]) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", fail_append)
+    monkeypatch.setattr("blackcat.webui.transcript.append_transcript_object", fail_append)
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -1168,7 +1168,7 @@ async def test_send_reasoning_without_subscribers_is_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_transcript_persists_without_subscribers() -> None:
-    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+    from blackcat.webui.transcript import build_webui_thread_response, read_transcript_lines
 
     bus = MagicMock()
     channel = WebSocketChannel(
@@ -2607,7 +2607,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     from websockets.http11 import Request
 
     workspace = tmp_path / "workspace"
-    source = workspace / "nanobot" / "agent" / "hook.py"
+    source = workspace / "blackcat" / "agent" / "hook.py"
     source.parent.mkdir(parents=True)
     source.write_text("print('hello')\n", encoding="utf-8")
 
@@ -2615,7 +2615,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
     key = "websocket:file-preview"
     enc = quote(key, safe="")
-    path = quote("nanobot/agent/hook.py:12", safe="")
+    path = quote("blackcat/agent/hook.py:12", safe="")
     req = Request(
         f"/api/sessions/{enc}/file-preview?path={path}",
         Headers([("Authorization", "Bearer tok")]),
@@ -2625,14 +2625,14 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["display_path"] == "nanobot/agent/hook.py"
+    assert body["display_path"] == "blackcat/agent/hook.py"
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
 
 
 def test_file_preview_normalizes_windows_file_url() -> None:
-    from nanobot.webui.file_preview import _clean_preview_path
+    from blackcat.webui.file_preview import _clean_preview_path
 
     assert _clean_preview_path("file:///C:/Users/me/project/app.py") == (
         "C:/Users/me/project/app.py"
@@ -2674,9 +2674,9 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     workspace = tmp_path / "workspace"
     sessions = SessionManager(workspace)
     key = "websocket:c-legacy"

@@ -350,7 +350,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
-            from nanobot.webui.token_usage import record_response_token_usage
+            from blackcat.webui.token_usage import record_response_token_usage
 
             record_response_token_usage(
                 resp,
@@ -686,7 +686,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈 blackcat commands:"] # FIXME: import the logo and name from the main file
+    lines = ["🐈‍⬛ blackcat commands:"] # FIXME: import the logo and name from the main file
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:

@@ -510,7 +510,7 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
         warnings.append(message.format(*args))
 
     monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _open_connection)
-    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+    monkeypatch.setattr("blackcat.agent.tools.mcp.logger.warning", _warning)
 
     registry = ToolRegistry()
     stacks = await connect_mcp_servers({"local": config}, registry)

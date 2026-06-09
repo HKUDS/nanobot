@@ -303,8 +303,8 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sdk_capture_prefers_run_level_snapshot():
-    from nanobot.agent.hook import AgentHookContext, AgentRunHookContext, SDKCaptureHook
-    from nanobot.providers.base import ToolCallRequest
+    from blackcat.agent.hook import AgentHookContext, AgentRunHookContext, SDKCaptureHook
+    from blackcat.providers.base import ToolCallRequest
 
     hook = SDKCaptureHook()
     iter_messages = [{"role": "user", "content": "work"}]
@@ -331,7 +331,7 @@ async def test_sdk_capture_prefers_run_level_snapshot():
 @pytest.mark.asyncio
 async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     bot._loop.close_mcp = AsyncMock()
 
     await bot.aclose()
@@ -342,7 +342,7 @@ async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_calls_aclose_on_exit(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     bot._loop.close_mcp = AsyncMock()
 
     async with bot as b:
@@ -354,7 +354,7 @@ async def test_context_manager_calls_aclose_on_exit(tmp_path):
 @pytest.mark.asyncio
 async def test_context_manager_does_not_swallow_exceptions(tmp_path):
     config_path = _write_config(tmp_path)
-    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot = Blackcat.from_config(config_path, workspace=tmp_path)
     bot._loop.close_mcp = AsyncMock()
 
     with pytest.raises(ValueError):

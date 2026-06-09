@@ -561,7 +561,7 @@ async def test_on_message_strips_required_leading_bot_mention_for_commands() -> 
     channel._handle_message = _capture
     mention = SimpleNamespace(
         key="@_user_1",
-        name="nanobot",
+        name="blackcat",
         id=SimpleNamespace(open_id="ou_bot", user_id=None),
     )
 
@@ -591,7 +591,7 @@ async def test_on_message_keeps_longer_mention_key_that_shares_bot_prefix() -> N
     channel._handle_message = _capture
     bot_mention = SimpleNamespace(
         key="@_user_1",
-        name="nanobot",
+        name="blackcat",
         id=SimpleNamespace(open_id="ou_bot", user_id=None),
     )
     user_mention = SimpleNamespace(
@@ -610,7 +610,7 @@ async def test_on_message_keeps_longer_mention_key_that_shares_bot_prefix() -> N
         )
 
     assert len(captured) == 1
-    assert captured[0]["content"] == "@Alice (ou_alice) /new @nanobot (ou_bot)"
+    assert captured[0]["content"] == "@Alice (ou_alice) /new @blackcat (ou_bot)"
 
 
 # ---------------------------------------------------------------------------

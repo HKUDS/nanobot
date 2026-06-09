@@ -257,7 +257,7 @@ async def test_tool_reconnects_when_transient_retry_reveals_terminated_session()
 
     wrapper.set_reconnect_handler(reconnect)
 
-    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
+    with patch("blackcat.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
         output = await wrapper.execute(foo="bar")
 
     assert output == "fresh"

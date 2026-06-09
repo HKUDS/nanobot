@@ -108,12 +108,19 @@ class CompositeHook(AgentHook):
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
 
-    async def before_iteration(self, context: AgentHookContext) -> None:
+    async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
+            if getattr(h, "_reraise", False):
+                await getattr(h, method_name)(*args, **kwargs)
+                continue
+
             try:
-                await h.before_iteration(context)
+                await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.before_iteration error in {}", type(h).__name__)
+                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_iteration", context)
 
     async def before_run(self, context: AgentRunHookContext) -> None:
         await self._for_each_hook_safe("before_run", context)

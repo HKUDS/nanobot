@@ -1,6 +1,6 @@
 """Tests for ContextBuilder — system prompt and message assembly."""
 
-# FIXME: this is from nanobot and won't necessarily suit the blackcat's custom builder or not testing all the extras that the blackcat has
+# FIXME: this is from blackcat and won't necessarily suit the blackcat's custom builder or not testing all the extras that the blackcat has
 from pathlib import Path
 
 import pytest

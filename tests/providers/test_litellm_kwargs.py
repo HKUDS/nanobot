@@ -485,7 +485,7 @@ async def test_openrouter_sets_default_attribution_headers() -> None:
         await provider._ensure_client()
 
     headers = mock_client_cls.call_args.kwargs["default_headers"]
-    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/blackcat"
+    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
     assert headers["X-OpenRouter-Title"] == "blackcat"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert "x-session-affinity" in headers
@@ -1139,8 +1139,10 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
 
 def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
-def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
         provider = OpenAICompatProvider()
+
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
+    provider = OpenAICompatProvider()
 
     sanitized = provider._sanitize_messages([
         {"role": "user", "content": "hi"},

@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
+from blackcat.config.paths import get_workspace_path
 from blackcat.cron.types import CronSchedule
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class TranscriptionConfig(Base):
     """Cross-channel audio transcription configuration."""
 
     enabled: bool = True
-    provider: str | None = None  # Validated by nanobot.audio.transcription_registry.
+    provider: str | None = None  # Validated by blackcat.audio.transcription_registry.
     model: str | None = None
     language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
     max_duration_sec: int = Field(default=120, ge=1, le=600)
@@ -91,6 +92,9 @@ class InlineFallbackConfig(Base):
     provider: str
     max_tokens: int | None = None
     context_window_tokens: int | None = None
+    daily_summary_hour: int = 3  # Hour to run daily summary (0-23)
+    llm_timeout: int = 60  # Timeout for LLM API calls in seconds
+    summarizer_model: str | None = None  # Model for summarization
     temperature: float | None = None
     reasoning_effort: str | None = None
 
@@ -124,13 +128,11 @@ class AgentDefaults(Base):
     workspace: str = "~/.blackcat/workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
-    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    summarizer_model: str | None = None  # Model for summarization (defaults to main model)
+    provider: str = (
+        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    )
     max_tokens: int = 8192
-    llm_timeout: int = 60  # Timeout for LLM API calls in seconds
-    daily_summary_hour: int = 3  # Hour to run daily summary (0-23, default 3am)
-    # Context management
-    context_window_tokens: int = 65_536  # Token budget for context window
+    context_window_tokens: int = 65_536
     context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
@@ -285,18 +287,12 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
-
 class WorkspaceConfig(Base):
     """Per-workspace Lens configuration."""
 
     path: str  # absolute path to workspace
     diagnostics_source: Literal["cli", "vscode"] | None = None
     """Override global diagnostics_source for this workspace. None = use global default."""
-
-
-def get_workspace_path(ws_config: str | WorkspaceConfig) -> str:
-    """Extract path from workspace config (str or WorkspaceConfig)."""
-    return ws_config.path if isinstance(ws_config, WorkspaceConfig) else ws_config
 
 
 class LensConfig(Base):
@@ -349,6 +345,15 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     return getattr(module, class_name)()
 
 
+class AuthorIdentity(Base): # FIXME: add all the other platforms
+    """Platform identities for an author (like API keys, keep private)."""
+
+    whatsapp: str | None = None
+    telegram: str | None = None
+    discord: str | None = None
+    cli: str | None = None
+
+
 class ToolsConfig(Base):
     """Tools configuration.
 
@@ -376,16 +381,7 @@ class ToolsConfig(Base):
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     lens: LensConfig = Field(default_factory=LensConfig)
-    ssrf_whitelist: list[str] = Field(default_factory=list)
-
-
-class AuthorIdentity(Base): # FIXME: add all the other platforms
-    """Platform identities for an author (like API keys, keep private)."""
-
-    whatsapp: str | None = None
-    telegram: str | None = None
-    discord: str | None = None
-    cli: str | None = None
+    ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
 class Config(BaseSettings):
@@ -398,13 +394,12 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    my_tool: MyToolConfig = Field(default_factory=MyToolConfig, alias="myTool")
+    author_identity: AuthorIdentity | None = None
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
-    authors: dict[str, AuthorIdentity] = Field(
-        default_factory=dict
-    ) # TODO: messy, simplify this and potentially remove authors from there as it's a channels thing or more specific
 
     def __init__(self, **values: Any) -> None:
         if not type(self).__pydantic_complete__:
@@ -440,7 +435,6 @@ class Config(BaseSettings):
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found in model_presets")
         return self.model_presets[name]
-
 
     @property
     def workspace_path(self) -> Path:
@@ -572,7 +566,7 @@ class Config(BaseSettings):
 
         # Ollama cloud routing: models ending with :cloud use ollama.com
         if name == "ollama" and model and self._is_cloud_model(model):
-            return "https://ollama.com/v1/"
+            return "https://ollama.com/v1/" # TODO: a better integration of this so it can be reflected in the webui too
 
         if p and p.api_base:
             return p.api_base
@@ -582,10 +576,7 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = SettingsConfigDict(
-        env_prefix="BLACKCAT_",
-        env_nested_delimiter="__",
-    )
+    model_config = ConfigDict(env_prefix="BLACKCAT_", env_nested_delimiter="__")
 
 
 def _resolve_tool_config_refs() -> None:

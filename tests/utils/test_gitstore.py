@@ -86,7 +86,7 @@ class TestLineAges:
         with patch("dulwich.worktree.time.time", return_value=now.timestamp()):
             git.auto_commit("commit2")
 
-        with patch("nanobot.utils.gitstore.datetime") as mock_dt:
+        with patch("blackcat.utils.gitstore.datetime") as mock_dt:
             mock_dt.now.return_value = now
             mock_dt.fromtimestamp = datetime.fromtimestamp
             ages = git.line_ages("MEMORY.md")

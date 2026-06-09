@@ -18,7 +18,7 @@ from blackcat.providers.registry import find_by_name
 from blackcat.utils.media import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/blackcat",
+    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
     "X-OpenRouter-Title": "blackcat",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }

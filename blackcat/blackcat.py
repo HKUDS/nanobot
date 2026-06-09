@@ -105,7 +105,7 @@ class Blackcat:
         """Release resources held by this instance (MCP connections, etc.)."""
         await self._loop.close_mcp()
 
-    async def __aenter__(self) -> Nanobot:
+    async def __aenter__(self) -> Blackcat:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

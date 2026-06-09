@@ -116,7 +116,7 @@ def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> No
         def logout(self):
             return "BYE", [b""]
 
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     items, skipped_uids = channel._fetch_new_messages()
@@ -148,7 +148,7 @@ def test_fetch_new_messages_rejected_returns_skipped_uid(monkeypatch) -> None:
         def logout(self):
             return "BYE", [b""]
 
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
 
     channel_skip = EmailChannel(
         _make_config(from_address="bot@example.com", post_action="delete", post_action_ignore_skipped=True),
@@ -213,7 +213,7 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])
@@ -270,7 +270,7 @@ def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(
         _make_config(post_action="move", post_action_move_mailbox="Processed"),
@@ -311,7 +311,7 @@ def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypat
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(
         _make_config(post_action="move", post_action_move_mailbox="Processed"),
@@ -365,7 +365,7 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])
@@ -419,7 +419,7 @@ def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplu
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete", post_action_expunge=True), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])

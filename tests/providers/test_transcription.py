@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from blackcat.providers.transcription import (
-from blackcat.audio.transcription import resolve_transcription_config
-from blackcat.config.schema import Config
 from blackcat.audio.transcription import (
     EffectiveTranscriptionConfig,
     resolve_transcription_config,
@@ -22,6 +19,7 @@ from blackcat.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
+from blackcat.config.schema import Config
 from blackcat.config.schema import Config
 from blackcat.providers.transcription import (
     AssemblyAITranscriptionProvider,

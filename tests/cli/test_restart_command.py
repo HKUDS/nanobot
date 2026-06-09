@@ -98,8 +98,8 @@ class TestRestartCommand:
         )
 
         with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
-             patch("blackcat.command.builtin.os.execv"):
-             patch("blackcat.command.builtin.asyncio", new=fake_asyncio), \
+             patch("blackcat.command.builtin.os.execv"), \
+             patch("blackcat.command.builtin.asyncio", new=fake_asyncio):
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -137,7 +137,6 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
-            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
             assert "blackcat" in out.content.lower() or "Model" in out.content
 
     @pytest.mark.asyncio
@@ -218,11 +217,11 @@ class TestRestartCommand:
     async def test_run_agent_loop_estimates_usage_when_provider_omits_it(self, monkeypatch):
         loop, _bus = _make_loop()
         monkeypatch.setattr(
-            "nanobot.agent.runner.estimate_prompt_tokens_chain",
+            "blackcat.agent.runner.estimate_prompt_tokens_chain",
             lambda *_args, **_kwargs: (123, "test"),
         )
         monkeypatch.setattr(
-            "nanobot.agent.runner.estimate_message_tokens",
+            "blackcat.agent.runner.estimate_message_tokens",
             lambda _message: 7,
         )
         loop.provider.chat_with_retry = AsyncMock(side_effect=[

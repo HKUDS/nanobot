@@ -12,6 +12,29 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application import run_in_terminal
+from prompt_toolkit.formatted_text import ANSI, HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.table import Table
+from rich.text import Text
+
+from blackcat import __logo__, __version__
+from blackcat.agent.loop import AgentLoop
+from blackcat.cli.stream import StreamRenderer, ThinkingSpinner
+from blackcat.config.paths import get_workspace_path, is_default_workspace
+from blackcat.config.schema import Config
+from blackcat.utils.evaluator import evaluate_response
+from blackcat.utils.helpers import sync_workspace_templates
+from blackcat.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
+
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
     if sys.stdout.encoding != "utf-8":
@@ -39,18 +62,6 @@ _log_handler_id = logger.add(
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )
 
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.formatted_text import ANSI, HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.text import Text
-
-from blackcat import __logo__, __version__
-from blackcat.agent.loop import AgentLoop
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -74,16 +85,6 @@ class SafeFileHistory(FileHistory):
 
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
-from blackcat.cli.stream import StreamRenderer, ThinkingSpinner
-from blackcat.config.paths import get_workspace_path, is_default_workspace
-from blackcat.config.schema import Config
-from blackcat.utils.evaluator import evaluate_response
-from blackcat.utils.helpers import sync_workspace_templates
-from blackcat.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
 
 _WEBUI_TURN_META_KEY = "webui_turn_id"
 _WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
@@ -548,7 +549,7 @@ def onboard(
         console.print("     Get one at: https://openrouter.ai/keys")
         console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
     console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/blackcat#-chat-apps[/dim]"
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
     )
 
 

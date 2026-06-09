@@ -3,7 +3,7 @@
 This module only knows how to call external transcription APIs such as Groq,
 OpenAI Whisper, OpenRouter, Xiaomi MiMo ASR, and AssemblyAI. Product-level config fallback,
 WebUI upload validation, and channel integration live in
-``nanobot.audio.transcription``.
+``blackcat.audio.transcription``.
 """
 
 import asyncio

@@ -254,7 +254,7 @@ def test_settings_payload_includes_effective_transcription_config(
     config.channels.transcription_language = "en"
     config.providers.openai.api_key = "sk-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
 
@@ -273,7 +273,7 @@ def test_settings_payload_exposes_openrouter_transcription_provider(
     config = Config()
     config.providers.openrouter.api_key = "sk-or-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
 
@@ -290,7 +290,7 @@ def test_settings_payload_exposes_xiaomi_mimo_transcription_provider(
     config = Config()
     config.providers.xiaomi_mimo.api_key = "mimo-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
 
@@ -308,7 +308,7 @@ def test_settings_payload_exposes_assemblyai_transcription_provider(
     config.transcription.provider = "assemblyai"
     config.providers.assemblyai.api_key = "aai-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
 
@@ -331,7 +331,7 @@ def test_model_configuration_rejects_transcription_only_provider(
     config = Config()
     config.providers.assemblyai.api_key = "aai-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     with pytest.raises(WebUISettingsError, match="does not support chat models"):
         create_model_configuration(
@@ -353,7 +353,7 @@ def test_update_transcription_settings_writes_top_level_only(
     config.channels.transcription_language = "en"
     config.providers.groq.api_key = "gsk-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = update_transcription_settings(
         {
@@ -387,7 +387,7 @@ def test_update_transcription_settings_accepts_openrouter(
     config = Config()
     config.providers.openrouter.api_key = "sk-or-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = update_transcription_settings(
         {
@@ -411,7 +411,7 @@ def test_update_transcription_settings_accepts_xiaomi_mimo(
     config = Config()
     config.providers.xiaomi_mimo.api_key = "mimo-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = update_transcription_settings(
         {
@@ -437,7 +437,7 @@ def test_update_transcription_settings_accepts_assemblyai(
     config = Config()
     config.providers.assemblyai.api_key = "aai-test"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     payload = update_transcription_settings(
         {
@@ -459,7 +459,7 @@ def test_update_transcription_settings_validates_language(
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
 
     with pytest.raises(WebUISettingsError, match="transcription language"):
         update_transcription_settings({"language": ["en-US"]})
@@ -472,10 +472,10 @@ def test_settings_payload_includes_token_usage_summary(
     config_path = tmp_path / "config.json"
     config = Config()
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
 
-    from nanobot.webui.token_usage import record_token_usage
+    from blackcat.webui.token_usage import record_token_usage
 
     record_token_usage({"prompt_tokens": 10, "completion_tokens": 5})
 
@@ -497,10 +497,10 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     config_path = tmp_path / "config.json"
     config = Config()
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
 
-    from nanobot.webui.token_usage import record_token_usage
+    from blackcat.webui.token_usage import record_token_usage
 
     record_token_usage({"prompt_tokens": 20, "completion_tokens": 2})
 

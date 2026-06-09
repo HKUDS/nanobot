@@ -271,8 +271,8 @@ Before deploying blackcat:
 **Last Updated**: 2026-04-05
 
 For the latest security updates and announcements, check:
-- GitHub Security Advisories: https://github.com/HKUDS/blackcat/security/advisories
-- Release Notes: https://github.com/HKUDS/blackcat/releases
+- GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories
+- Release Notes: https://github.com/HKUDS/nanobot/releases
 
 ## License
 

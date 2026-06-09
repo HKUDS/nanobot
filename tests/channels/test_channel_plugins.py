@@ -12,12 +12,11 @@ from blackcat.bus.events import OutboundMessage
 from blackcat.bus.queue import MessageBus
 from blackcat.channels.base import BaseChannel
 from blackcat.channels.manager import ChannelManager
-from blackcat.config.schema import ChannelsConfig
+from blackcat.config.loader import save_config
+from blackcat.config.schema import ChannelsConfig, Config
 from blackcat.providers.transcription import GroqTranscriptionProvider as _GroqProvider
 from blackcat.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
 from blackcat.utils.restart import RestartNotice
-from blackcat.config.loader import save_config
-from blackcat.config.schema import ChannelsConfig, Config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -240,82 +239,12 @@ async def test_manager_loads_plugin_from_dict_config():
 
 
 @pytest.mark.asyncio
-async def test_manager_propagates_groq_transcription_api_base_to_channels():
-    from blackcat.channels.manager import ChannelManager
-
-    fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
-            "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
-            "transcriptionLanguage": "en",
-        }),
-        providers=SimpleNamespace(
-            groq=SimpleNamespace(api_key="groq-key", api_base="http://proxy.local/v1/audio/transcriptions"),
-            openai=SimpleNamespace(api_key="openai-key", api_base="https://api.openai.com/v1/audio/transcriptions"),
-        ),
-    )
-
-    with patch(
-        "blackcat.channels.registry.discover_enabled",
-        return_value={"fakeplugin": _FakePlugin},
-    ):
-        mgr = ChannelManager.__new__(ChannelManager)
-        mgr.config = fake_config
-        mgr.bus = MessageBus()
-        mgr.channels = {}
-        mgr._dispatch_task = None
-        mgr._init_channels()
-
-    channel = mgr.channels["fakeplugin"]
-    assert channel.transcription_provider == "groq"
-    assert channel.transcription_api_key == "groq-key"
-    assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
-    assert channel.transcription_language == "en"
-
-
-@pytest.mark.asyncio
-async def test_manager_propagates_openai_transcription_api_base_to_channels():
-    from blackcat.channels.manager import ChannelManager
-
-    fake_config = SimpleNamespace(
-        channels=ChannelsConfig.model_validate({
-            "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
-            "transcriptionProvider": "openai",
-        }),
-        providers=SimpleNamespace(
-            openai=SimpleNamespace(
-                api_key="openai-key",
-                api_base="http://proxy.local/v1/audio/transcriptions",
-            ),
-            groq=SimpleNamespace(api_key="groq-key", api_base=""),
-        ),
-    )
-
-    with patch(
-        "blackcat.channels.registry.discover_enabled",
-        return_value={"fakeplugin": _FakePlugin},
-    ):
-        mgr = ChannelManager.__new__(ChannelManager)
-        mgr.config = fake_config
-        mgr.bus = MessageBus()
-        mgr.channels = {}
-        mgr._dispatch_task = None
-        mgr._init_channels()
-
-    channel = mgr.channels["fakeplugin"]
-    assert channel.transcription_provider == "openai"
-    assert channel.transcription_api_key == "openai-key"
-    assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
-
-
-@pytest.mark.asyncio
-async def test_base_channel_passes_api_base_to_openai_transcription_provider():
-    """BaseChannel.transcribe_audio must forward transcription_api_base to OpenAI."""
-    from blackcat.providers import transcription as transcription_mod
 async def test_base_channel_reads_current_transcription_config_each_call(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """BaseChannel.transcribe_audio resolves config at call time, not manager init time."""
+    from blackcat.providers import transcription as transcription_mod
 
     config_path = tmp_path / "config.json"
     config = Config()
@@ -419,37 +348,6 @@ def test_openai_transcription_provider_honors_api_base_argument():
         api_key="k", api_base="http://override/v1/audio/transcriptions"
     )
     assert custom.api_url == "http://override/v1/audio/transcriptions"
-
-
-@pytest.mark.asyncio
-async def test_base_channel_passes_language_to_groq_transcription_provider():
-    """BaseChannel.transcribe_audio must forward transcription_language to Groq."""
-    from blackcat.providers import transcription as transcription_mod
-
-    channel = _FakePlugin({"enabled": True, "allowFrom": ["*"]}, MessageBus())
-    channel.transcription_provider = "groq"
-    channel.transcription_api_key = "k"
-    channel.transcription_api_base = "http://override/v1/audio/transcriptions"
-    channel.transcription_language = "ko"
-
-    captured: dict[str, object] = {}
-
-    class _StubGroq:
-        def __init__(self, api_key=None, api_base=None, language=None):
-            captured["api_key"] = api_key
-            captured["api_base"] = api_base
-            captured["language"] = language
-
-        async def transcribe(self, file_path):
-            return "ok"
-
-    with patch.object(transcription_mod, "GroqTranscriptionProvider", _StubGroq):
-        result = await channel.transcribe_audio("/tmp/does-not-matter.wav")
-
-    assert result == "ok"
-    assert captured["api_key"] == "k"
-    assert captured["api_base"] == "http://override/v1/audio/transcriptions"
-    assert captured["language"] == "ko"
 
 
 # ---------------------------------------------------------------------------

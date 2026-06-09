@@ -16,11 +16,19 @@ class _LensTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.lens.enabled
+        from blackcat.config.schema import LensConfig
+        lens_cfg = getattr(ctx.config, "lens", None)
+        if lens_cfg is None or not isinstance(lens_cfg, LensConfig):
+            return False
+        return lens_cfg.enabled
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        return cls(client=LensClient(config=ctx.config.lens))
+        from blackcat.config.schema import LensConfig
+        lens_cfg = getattr(ctx.config, "lens", None)
+        if lens_cfg is None or not isinstance(lens_cfg, LensConfig):
+            lens_cfg = LensConfig()
+        return cls(client=LensClient(config=lens_cfg))
 
 
 class LensDefinitionTool(_LensTool):
@@ -800,8 +808,12 @@ class LensDiagnosticsTool(_LensTool):
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        default_source = getattr(ctx.config.lens, "diagnostics_source", "cli")
-        return cls(client=LensClient(config=ctx.config.lens), default_source=default_source)
+        from blackcat.config.schema import LensConfig
+        lens_cfg = getattr(ctx.config, "lens", None)
+        if lens_cfg is None or not isinstance(lens_cfg, LensConfig):
+            lens_cfg = LensConfig()
+        default_source = getattr(lens_cfg, "diagnostics_source", "cli")
+        return cls(client=LensClient(config=lens_cfg), default_source=default_source)
 
     @property
     def name(self) -> str:

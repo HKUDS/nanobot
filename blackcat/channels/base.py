@@ -48,21 +48,6 @@ class BaseChannel(ABC):
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
         try:
-            if self.transcription_provider == "openai":
-                from blackcat.providers.transcription import OpenAITranscriptionProvider
-                provider = OpenAITranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
-            else:
-                from blackcat.providers.transcription import GroqTranscriptionProvider
-                provider = GroqTranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
-            return await provider.transcribe(file_path)
             from blackcat.audio.transcription import (
                 resolve_transcription_config,
                 transcribe_audio_file,
@@ -107,8 +92,8 @@ class BaseChannel(ABC):
         """
         Send a message through this channel.
 
-        Args:
-            msg: The message to send.
+        Subclasses can either override this method directly or implement
+        ``_send_impl`` which this method delegates to by default.
 
         Implementations should raise on delivery failure so the channel manager
         can apply any retry policy in one place.
@@ -116,12 +101,8 @@ class BaseChannel(ABC):
         await self._send_impl(msg)
 
     async def _send_impl(self, msg: OutboundMessage) -> None:
-        """
-        Internal send implementation - override in subclasses.
-
-        Called by :meth:`send` after basic validation.
-        """
-        pass
+        """Internal send hook – override in subclasses instead of ``send``."""
+        raise NotImplementedError
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Deliver a streaming text chunk.
