@@ -8,6 +8,8 @@ Most JSON examples in these docs are snippets to merge into `~/.nanobot/config.j
 
 Provider examples are concrete walkthroughs, not rankings or endorsements. Use the provider whose key, endpoint, and model ID you actually control.
 
+If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/nanobot/issues>.
+
 ## Pick a Track
 
 | You are | Start with | Then use |
@@ -31,6 +33,8 @@ Provider examples are concrete walkthroughs, not rankings or endorsements. Use t
 ## After the First Reply Works
 
 Do not configure everything at once. Pick one next surface:
+
+If a local `nanobot agent` session can already answer normally, you can also ask nanobot to help configure itself: have it read the relevant docs, inspect your current config, make one specific next change, and tell you when to run `/restart`.
 
 | Next goal | Read | First check |
 |---|---|---|

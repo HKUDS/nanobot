@@ -252,6 +252,16 @@ If that works, start an interactive CLI chat:
 nanobot agent
 ```
 
+After the interactive session can answer normally, nanobot can help with its own next setup step. Ask it to read the relevant docs, inspect your current `~/.nanobot/config.json`, and make one concrete change such as enabling WebUI, adding a provider preset, or configuring one chat channel. When nanobot says the config is updated, run `/restart` in the chat or restart the nanobot process manually so long-running processes reload `config.json`.
+
+Example prompt:
+
+```text
+Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
+Then update ~/.nanobot/config.json to add an OpenRouter model preset named "primary".
+Tell me exactly what changed and whether I need to run /restart.
+```
+
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## 6. Choose Your Next Step

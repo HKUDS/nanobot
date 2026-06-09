@@ -345,6 +345,8 @@ python -m nanobot agent -m "Hello!"
 
 Use `python3 -m nanobot agent -m "Hello!"` or `py -m nanobot agent -m "Hello!"` if that is the Python command that worked in step 2.
 
+Once this works, nanobot can help with its own next setup step. Run `nanobot agent`, ask it to read these docs and update your current config for one specific goal, then run `/restart` when nanobot tells you the config is ready. For example, ask it to enable the browser UI, add one provider preset, or configure one chat app.
+
 ## 8. If Something Fails
 
 Do not change many things at once. Check the exact error:
@@ -425,3 +427,5 @@ When you ask for help, include:
 - a config snippet with API keys and tokens removed.
 
 Never paste real API keys, bot tokens, OAuth tokens, or private chat IDs into a public issue or chat.
+
+If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/nanobot/issues>.

@@ -262,3 +262,5 @@ When opening an issue or asking for help, include:
 - whether `nanobot agent -m "Hello!"` works.
 
 Never paste real API keys, bot tokens, OAuth tokens, or private chat IDs into public issues.
+
+If you find a docs mistake, outdated command, or confusing step, please open an issue: <https://github.com/HKUDS/nanobot/issues>.
