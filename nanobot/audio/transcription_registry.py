@@ -65,6 +65,11 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         aliases=("mimo", "xiaomi"),
     ),
     TranscriptionProviderSpec(
+        name="stepfun",
+        default_model="stepaudio-2.5-asr",
+        adapter="nanobot.providers.transcription:StepFunTranscriptionProvider",
+    ),
+    TranscriptionProviderSpec(
         name="assemblyai",
         default_model="universal-3-pro,universal-2",
         adapter="nanobot.providers.transcription:AssemblyAITranscriptionProvider",
