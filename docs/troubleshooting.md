@@ -65,6 +65,9 @@ Use the same Python command for install checks and module fallback. On macOS/Lin
 | Symptom | Check |
 |---|---|
 | `python: command not found` | Try `python3 --version` on macOS/Linux or `py --version` on Windows. Then replace `python` in docs commands with the command that worked. |
+| `curl: command not found` | The macOS/Linux one-command installer could not download the script. Install curl, or use manual install: `python -m pip install nanobot-ai`, replacing `python` with `python3` if needed. |
+| `irm` is not recognized | PowerShell could not run the download helper. Use manual install: `python -m pip install nanobot-ai`, or `py -m pip install nanobot-ai` on Windows. |
+| Could not download `raw.githubusercontent.com` | Your network, proxy, or firewall blocked the installer script download. Use manual install from PyPI, or configure your proxy and rerun the command. |
 | `nanobot: command not found` | Use the module form, for example `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`. Reinstall with the same Python command, or add that Python's scripts directory to `PATH`. |
 | `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`, `python3 -m pip show nanobot-ai`, or `py -m pip show nanobot-ai`, matching the command that installed nanobot. |
 | `pip is not available` | The installer tries `python -m ensurepip --upgrade` first. If that fails, install pip for that Python, or use a Python installer/distribution that includes pip. |

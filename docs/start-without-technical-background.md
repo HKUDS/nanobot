@@ -106,6 +106,8 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
 ```
 
+If the command says `curl` or `irm` is not found, or it cannot download from GitHub, use the manual install command below.
+
 If you prefer to install manually, run:
 
 ```bash
