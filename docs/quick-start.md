@@ -3,6 +3,8 @@
 This page gets one local nanobot reply working. After that, you can add the
 WebUI, chat apps, local models, web search, MCP, deployment, or custom plugins.
 
+If you have never used a terminal or edited a config file before, use [`start-without-technical-background.md`](./start-without-technical-background.md) first. This page assumes you are comfortable pasting commands and editing JSON snippets.
+
 ## Before You Start
 
 You need:

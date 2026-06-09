@@ -350,7 +350,8 @@ The WebUI is served by the WebSocket channel on port `8765` by default. The gate
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
-- Start from zero: [Install and Quick Start](./docs/quick-start.md)
+- Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
+- Start from zero with developer basics: [Install and Quick Start](./docs/quick-start.md)
 - Understand the runtime model: [Concepts](./docs/concepts.md)
 - Read the source-level map: [Architecture](./docs/architecture.md)
 - Choose a provider/model: [Providers and Models](./docs/providers.md)
