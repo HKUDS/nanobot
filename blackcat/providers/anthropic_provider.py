@@ -10,9 +10,6 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import json_repair
-
-from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from blackcat.providers.base import (
     LLMProvider,
     LLMResponse,

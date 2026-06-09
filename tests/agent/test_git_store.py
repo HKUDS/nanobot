@@ -1,6 +1,5 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
-from pathlib import Path
 
 import pytest
 

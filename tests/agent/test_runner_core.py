@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from blackcat.agent.tools.registry import ToolRegistry
 from blackcat.config.schema import AgentDefaults
 from blackcat.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 

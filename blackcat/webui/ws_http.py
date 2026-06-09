@@ -26,7 +26,11 @@ from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payl
 from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from blackcat.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
+)
+from blackcat.webui.http_utils import (
     host_for_url as _host_for_url,
+)
+from blackcat.webui.http_utils import (
     http_error as _http_error,
 )
 from blackcat.webui.http_utils import (

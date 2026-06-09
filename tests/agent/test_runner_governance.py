@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from blackcat.config.schema import AgentDefaults
-from blackcat.providers.base import LLMResponse, ToolCallRequest
+from blackcat.providers.base import LLMResponse
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 

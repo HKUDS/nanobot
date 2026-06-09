@@ -7,12 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from blackcat.providers.azure_openai_provider import AzureOpenAIProvider
-from blackcat.providers.base import LLMResponse
 from blackcat.providers.azure_openai_provider import (
     AzureOpenAIProvider,
     _AzureTokenProvider,
 )
+from blackcat.providers.base import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Init & validation

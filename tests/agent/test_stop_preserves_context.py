@@ -12,14 +12,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from blackcat.agent.loop import AgentLoop
 from blackcat.bus.queue import MessageBus
-from blackcat.providers.base import LLMProvider
 
 
 def _make_provider():

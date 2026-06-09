@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from blackcat.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from blackcat.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext, CompositeHook
 
 

@@ -8,13 +8,13 @@
 - Stale detection with content-equality fallback
 """
 
-import time
+
+import os
 
 import pytest
 
 from blackcat.agent.tools import file_state
 from blackcat.agent.tools.filesystem import EditFileTool, ReadFileTool, _find_match
-import os
 
 
 @pytest.fixture(autouse=True)

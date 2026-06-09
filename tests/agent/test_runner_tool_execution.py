@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from blackcat.agent.runner import AgentRunner, AgentRunSpec
 from blackcat.agent.tools.base import Tool
 from blackcat.agent.tools.registry import ToolRegistry
 from blackcat.config.schema import AgentDefaults
 from blackcat.providers.base import LLMResponse, ToolCallRequest
-from blackcat.agent.runner import AgentRunner, AgentRunSpec
 from blackcat.providers.openai_compat_provider import OpenAICompatProvider
 from blackcat.providers.openai_responses.parsing import parse_response_output
 
@@ -182,7 +182,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
 
 @pytest.mark.asyncio
 async def test_runner_blocks_repeated_external_fetches():
-    from blackcat.agent.runner import AgentRunner, AgentRunSpec
+    pass
 async def test_runner_rejects_near_miss_tool_name_without_executing():
     provider = MagicMock()
     call_count = {"n": 0}

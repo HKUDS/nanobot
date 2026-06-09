@@ -1,8 +1,6 @@
 """Tests for Feishu/Lark domain configuration."""
 from unittest.mock import MagicMock
 
-import pytest
-
 from blackcat.bus.queue import MessageBus
 from blackcat.channels.feishu import FeishuChannel, FeishuConfig
 

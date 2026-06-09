@@ -9,7 +9,6 @@ from typing import Any, AsyncGenerator
 import httpx
 from loguru import logger
 
-from blackcat.providers.base import LLMResponse, ToolCallRequest
 from blackcat.providers.base import LLMResponse, ToolCallRequest, parse_tool_arguments
 
 FINISH_REASON_MAP = {

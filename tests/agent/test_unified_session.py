@@ -420,7 +420,7 @@ class TestStopCommandWithUnifiedSession:
         from blackcat.agent.loop import UNIFIED_SESSION_KEY
 
         loop = _make_loop(tmp_path, unified_session=True)
-        
+
         # Create a message from telegram channel
         msg = _make_msg(channel="telegram", chat_id="123456")
 

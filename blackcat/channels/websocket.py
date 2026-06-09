@@ -36,9 +36,6 @@ from blackcat.utils.media_decode import (
 from blackcat.webui.cli_apps_api import normalize_cli_app_mentions
 from blackcat.webui.gateway_services import GatewayServices
 from blackcat.webui.http_utils import (
-    is_localhost as _is_localhost,
-)
-from blackcat.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
 )
 from blackcat.webui.http_utils import (
@@ -48,10 +45,8 @@ from blackcat.webui.http_utils import (
     query_first as _query_first,
 )
 from blackcat.webui.mcp_presets_api import normalize_mcp_preset_mentions
-from blackcat.webui.transcript import append_transcript_object
-from blackcat.webui.websocket_logging import websockets_server_logger
-from blackcat.webui.transcript import append_transcript_object, build_user_transcript_event
 from blackcat.webui.transcription_ws import webui_transcription_event
+from blackcat.webui.websocket_logging import websockets_server_logger
 
 
 class WebSocketConfig(Base):

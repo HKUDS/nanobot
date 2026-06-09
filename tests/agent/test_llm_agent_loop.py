@@ -232,7 +232,6 @@ async def test_process_direct_preserves_session(agent):
 @pytest.mark.asyncio
 async def test_process_message_returns_outbound(agent):
     """Handler.process should return an OutboundMessage or send via bus."""
-    from blackcat.config.schema import Config
 
     msg = InboundMessage(
         channel="test",

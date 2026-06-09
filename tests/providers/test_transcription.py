@@ -20,7 +20,6 @@ from blackcat.audio.transcription_registry import (
     transcription_provider_names,
 )
 from blackcat.config.schema import Config
-from blackcat.config.schema import Config
 from blackcat.providers.transcription import (
     AssemblyAITranscriptionProvider,
     GroqTranscriptionProvider,

@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
 from pydantic import BaseModel, Field
 
 from blackcat.cli import onboard as onboard_wizard
@@ -856,7 +855,6 @@ class TestMainMenuUpdate:
             _SETTINGS_GETTER,
             _SETTINGS_SECTIONS,
             _SETTINGS_SETTER,
-            run_onboard,
         )
 
         assert "Channel Common" in _SETTINGS_SECTIONS
@@ -1040,7 +1038,6 @@ class TestConfigurePydanticModelEmptyString:
         """Entering '' for an optional str field should set it to None."""
         from pydantic import BaseModel
 
-        from blackcat.cli.onboard import _is_str_or_none
 
         class M(BaseModel):
             api_key: str | None = None

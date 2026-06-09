@@ -10,9 +10,9 @@ from loguru import logger as default_logger
 
 from blackcat.webui.gateway_tokens import GatewayTokenStore
 from blackcat.webui.media_gateway import WebUIMediaGateway
+from blackcat.webui.transcript import WebUITranscriptRecorder
 from blackcat.webui.workspaces import WebUIWorkspaceController
 from blackcat.webui.ws_http import GatewayHTTPHandler
-from blackcat.webui.transcript import WebUITranscriptRecorder
 
 
 @dataclass(frozen=True)

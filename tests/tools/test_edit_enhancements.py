@@ -4,7 +4,7 @@ notebook JSON editing, and create-file semantics."""
 import pytest
 
 from blackcat.agent.tools import file_state
-from blackcat.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+from blackcat.agent.tools.filesystem import EditFileTool, ReadFileTool
 
 # ---------------------------------------------------------------------------
 # Helpers

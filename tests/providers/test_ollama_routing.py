@@ -5,7 +5,7 @@ with the right base URL, model name, and API key. Also covers Ollama
 cloud/local routing and edge cases.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
