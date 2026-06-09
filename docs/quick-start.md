@@ -34,7 +34,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Test One Message](#4-test-one-message).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -202,7 +202,15 @@ If you prefer not to store secrets in `config.json`, reference an environment va
 }
 ```
 
-## 4. Test One Message
+## 4. Check the Setup
+
+```bash
+nanobot status
+```
+
+This should show the config path, workspace path, active model or preset, and provider summary. It does not send a message to the model, so use it as a quick config check before the first real request.
+
+## 5. Test One Message
 
 Run a one-shot CLI message:
 
@@ -227,7 +235,7 @@ nanobot agent
 
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
-## 5. Choose Your Next Step
+## 6. Choose Your Next Step
 
 | Want to... | Go to |
 |---|---|

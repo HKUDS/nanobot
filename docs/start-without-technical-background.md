@@ -248,6 +248,14 @@ Save the file.
 
 ## 7. Send the First Message
 
+First check that nanobot can read the saved setup:
+
+```bash
+nanobot status
+```
+
+This should show the config file path, workspace path, and the active model or preset. If `nanobot` is not found, use `python -m nanobot status`.
+
 Run:
 
 ```bash

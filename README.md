@@ -303,6 +303,7 @@ Direct `agents.defaults.provider` and `agents.defaults.model` still work for exi
 **3. Test one message**
 
 ```bash
+nanobot status
 nanobot agent -m "Hello!"
 ```
 
