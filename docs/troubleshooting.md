@@ -60,11 +60,17 @@ If `nanobot status` looks right but `nanobot agent -m "Hello!"` fails, the insta
 
 ## Installation Problems
 
+Use the same Python command for install checks and module fallback. On macOS/Linux that may be `python3`; on Windows it may be `python` or `py`.
+
 | Symptom | Check |
 |---|---|
-| `nanobot: command not found` | Use `python -m nanobot ...`, reinstall with `python -m pip install -U nanobot-ai`, or add the Python scripts directory to `PATH`. |
-| `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`. |
-| Editable source install does not update | From the repo root, run `python -m pip install -e .` again and check `nanobot --version`. |
+| `python: command not found` | Try `python3 --version` on macOS/Linux or `py --version` on Windows. Then replace `python` in docs commands with the command that worked. |
+| `nanobot: command not found` | Use the module form, for example `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`. Reinstall with the same Python command, or add that Python's scripts directory to `PATH`. |
+| `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`, `python3 -m pip show nanobot-ai`, or `py -m pip show nanobot-ai`, matching the command that installed nanobot. |
+| `pip is not available` | The installer tries `python -m ensurepip --upgrade` first. If that fails, install pip for that Python, or use a Python installer/distribution that includes pip. |
+| `externally-managed-environment` | Your system Python blocks global pip installs. The one-command installer retries with `--user`; if that still fails, create a virtual environment or install with `uv`/`pipx`. |
+| Installer chose the wrong Python | Set `PYTHON` before running the installer, such as `PYTHON=python3 sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"` or `$env:PYTHON="py"` before the PowerShell command. |
+| Editable source install does not update | From the repo root, run `python -m pip install -e .` again with the Python command used for development, then check `python -m nanobot --version` or `nanobot --version`. |
 | WebUI build tools missing | They are only needed for WebUI development. Packaged installs already include the WebUI bundle. |
 
 ## Config Problems
