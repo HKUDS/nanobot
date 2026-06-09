@@ -13,6 +13,24 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
+## Quick Jump
+
+| Need | Section |
+|---|---|
+| Keep secrets out of `config.json` | [Environment Variables for Secrets](#environment-variables-for-secrets) |
+| Trace model calls | [Langfuse Observability](#langfuse-observability) |
+| Configure credentials and endpoints | [Providers](#providers) |
+| Name and switch model choices | [Model Presets](#model-presets) |
+| Add fallback chains | [Model Fallbacks](#model-fallbacks) |
+| Configure voice transcription | [Transcription Settings](#transcription-settings) |
+| Tune channel defaults | [Channel Settings](#channel-settings) |
+| Configure web search and fetch | [Web Tools](#web-tools) |
+| Enable image generation | [Image Generation](#image-generation) |
+| Add MCP servers | [MCP](#mcp-model-context-protocol) |
+| Review shell, workspace, and SSRF controls | [Security](#security) |
+| Control access and pairing | [Pairing](#pairing) |
+| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
+
 ## Environment Variables for Secrets
 
 Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:
