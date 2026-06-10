@@ -1016,6 +1016,28 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
     assert second["event"] == "stream_end"
     assert second["chat_id"] == "chat-1"
     assert second["stream_id"] == "sid"
+    assert "text" not in second
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_includes_inline_final_text() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send_delta(
+        "chat-1",
+        "merged plain text",
+        {"_stream_delta": True, "_stream_end": True, "_stream_id": "sid"},
+    )
+
+    mock_ws.send.assert_awaited_once()
+    final = json.loads(mock_ws.send.await_args.args[0])
+    assert final["event"] == "stream_end"
+    assert final["chat_id"] == "chat-1"
+    assert final["stream_id"] == "sid"
+    assert final["text"] == "merged plain text"
 
 
 @pytest.mark.asyncio
