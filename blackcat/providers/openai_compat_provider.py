@@ -94,10 +94,10 @@ def _model_slug(model_name: str) -> str:
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that reject ``max_tokens`` (GPT-5 family, o3/o4)."""
+    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
     slug = _model_slug(model_name)
     return "gpt-5" in slug or any(
-        slug == p or slug.startswith((p + "-", p + ".")) for p in ("o3", "o4")
+        slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
     )
 
 
