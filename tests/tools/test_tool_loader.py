@@ -244,6 +244,7 @@ def test_exec_tool_create():
     mock_config.exec.enable = True
     mock_config.exec.timeout = 120
     mock_config.exec.sandbox = ""
+    mock_config.exec.path_prepend = "/venv/bin"
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
@@ -252,6 +253,7 @@ def test_exec_tool_create():
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = ExecTool.create(ctx)
     assert isinstance(tool, ExecTool)
+    assert tool.path_prepend == "/venv/bin"
 
 
 def test_web_tools_config_cls():
@@ -360,7 +362,7 @@ def test_config_round_trip():
     config_dict = {
         "tools": {
             "web": {"enable": True, "search": {"provider": "brave", "api_key": "test"}},
-            "exec": {"enable": False, "timeout": 120},
+            "exec": {"enable": False, "timeout": 120, "pathPrepend": "/venv/bin"},
             "my": {"allowSet": True},
             "imageGeneration": {"enabled": True, "provider": "openrouter"},
         }
@@ -370,8 +372,10 @@ def test_config_round_trip():
 
     assert dumped["tools"]["my"]["allowSet"] is True
     assert dumped["tools"]["imageGeneration"]["enabled"] is True
+    assert dumped["tools"]["exec"]["pathPrepend"] == "/venv/bin"
     assert config.tools.exec.enable is False
     assert config.tools.exec.timeout == 120
+    assert config.tools.exec.path_prepend == "/venv/bin"
     assert config.tools.web.search.provider == "brave"
 
 
@@ -382,6 +386,7 @@ def test_config_defaults():
     config = Config.model_validate({})
     assert config.tools.exec.enable is True
     assert config.tools.exec.timeout == 60
+    assert config.tools.exec.path_prepend == ""
     assert config.tools.web.enable is True
     assert config.tools.web.search.provider == "duckduckgo"
     assert config.tools.my.enable is True
@@ -403,6 +408,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
     mock_config.exec.enable = True
     mock_config.exec.timeout = 60
     mock_config.exec.sandbox = ""
+    mock_config.exec.path_prepend = ""
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []

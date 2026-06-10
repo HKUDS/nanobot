@@ -55,6 +55,7 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
     enable: bool = True
     timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
+    path_prepend: str = ""
     path_append: str = ""
     sandbox: str = ""
     allowed_env_keys: list[str] = Field(default_factory=list)
@@ -150,6 +151,7 @@ class ExecTool(Tool):
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
+            path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
@@ -166,6 +168,7 @@ class ExecTool(Tool):
         webui_allow_local_service_access: bool = True,
         allow_local_preview_access: bool | None = None,
         sandbox: str = "",
+        path_prepend: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
         session_manager: Any | None = None,
@@ -197,6 +200,7 @@ class ExecTool(Tool):
         if allow_local_preview_access is not None:
             webui_allow_local_service_access = allow_local_preview_access
         self.webui_allow_local_service_access = webui_allow_local_service_access
+        self.path_prepend = path_prepend
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
@@ -411,12 +415,11 @@ class ExecTool(Tool):
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
-        if self.path_append:
+        if self.path_prepend or self.path_append:
             if _IS_WINDOWS:
-                env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+                env["PATH"] = self._compose_path(env.get("PATH", ""))
             else:
-                env["NANOBOT_PATH_APPEND"] = self.path_append
-                command = f'export PATH="$PATH{os.pathsep}$NANOBOT_PATH_APPEND"; {command}'
+                command = self._wrap_path_export(command, env)
 
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
@@ -430,6 +433,28 @@ class ExecTool(Tool):
             shell_program=shell_program,
             login=True if login is None else login,
         )
+
+    def _compose_path(self, current_path: str) -> str:
+        parts = []
+        if self.path_prepend:
+            parts.append(self.path_prepend)
+        if current_path:
+            parts.append(current_path)
+        if self.path_append:
+            parts.append(self.path_append)
+        return os.pathsep.join(parts)
+
+    def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
+        segments = []
+        if self.path_prepend:
+            env["NANOBOT_PATH_PREPEND"] = self.path_prepend
+            segments.append("$NANOBOT_PATH_PREPEND")
+        segments.append("$PATH")
+        if self.path_append:
+            env["NANOBOT_PATH_APPEND"] = self.path_append
+            segments.append("$NANOBOT_PATH_APPEND")
+        path_expr = os.pathsep.join(segments)
+        return f'export PATH="{path_expr}"; {command}'
 
     @staticmethod
     async def _spawn(
