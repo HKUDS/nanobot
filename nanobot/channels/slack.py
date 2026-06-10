@@ -47,6 +47,10 @@ class SlackConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
+    # When group_policy is "allowlist", also require the bot to be @mentioned
+    # before responding (so it only replies to mentions in approved channels,
+    # instead of every message). No effect for "mention"/"open" policies.
+    group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
@@ -648,15 +652,22 @@ class SlackChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return True
 
+    def _is_mention(self, event_type: str, text: str) -> bool:
+        if event_type == "app_mention":
+            return True
+        return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
+
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
         if self.config.group_policy == "open":
             return True
         if self.config.group_policy == "mention":
-            if event_type == "app_mention":
-                return True
-            return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
+            return self._is_mention(event_type, text)
         if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
+            if chat_id not in self.config.group_allow_from:
+                return False
+            if self.config.group_require_mention:
+                return self._is_mention(event_type, text)
+            return True
         return False
 
     def is_allowed(self, sender_id: str) -> bool:
