@@ -1195,6 +1195,63 @@ def _run_gateway(
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
+    async def _customer_bot_download_media(message: dict) -> list[str]:
+        """Download photo/document/video from a customer bot message. Returns local file paths."""
+        import os as _os
+        import urllib.request as _req
+        import json as _j
+        token = _os.environ.get("FOOLISH_CUSTOMER_BOT_TOKEN", "")
+        if not token:
+            return []
+        # Pick the best file_id from the message
+        file_id: str | None = None
+        ext = ".bin"
+        if message.get("photo"):
+            # photos is an array of PhotoSize; take the last (highest resolution)
+            photo = message["photo"][-1]
+            file_id = photo.get("file_id")
+            ext = ".jpg"
+        elif message.get("document"):
+            doc = message["document"]
+            file_id = doc.get("file_id")
+            mime = doc.get("mime_type", "")
+            ext = "." + mime.split("/")[-1] if mime and "/" in mime else ".bin"
+        elif message.get("video"):
+            file_id = message["video"].get("file_id")
+            ext = ".mp4"
+        if not file_id:
+            return []
+        try:
+            # Resolve file_path via getFile
+            get_file_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+            loop = asyncio.get_event_loop()
+            res = await loop.run_in_executor(
+                None, lambda: _req.urlopen(get_file_url, timeout=10)
+            )
+            data = _j.loads(res.read())
+            file_path = data.get("result", {}).get("file_path")
+            if not file_path:
+                return []
+            download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+            # Save to media dir
+            from nanobot.config.paths import get_media_dir
+            media_dir = get_media_dir("foolish_customer_bot")
+            unique_id = file_id[-16:]
+            local_path = str(media_dir / f"{unique_id}{ext}")
+            await loop.run_in_executor(
+                None,
+                lambda: open(local_path, "wb").write(_req.urlopen(download_url, timeout=30).read()),
+            )
+            return [local_path]
+        except Exception as e:
+            logger.warning("_customer_bot_download_media failed: {}", e)
+            return []
+
+    async def _vision_describe_images(media_paths: list[str]) -> str:
+        """Describe images via shared vision chain (HF Qwen3-VL → OpenRouter → Anthropic)."""
+        from nanobot.providers.vision_chain import describe_images
+        return await describe_images(media_paths)
+
     async def _customer_bot_send(chat_id: str, text: str) -> None:
         """Send a message to a customer via @the_foolish_butcher_bot."""
         import os as _os
@@ -1288,8 +1345,10 @@ def _run_gateway(
         if not message:
             return
         chat_id = str(message["chat"]["id"])
-        text = message.get("text", "")
+        text = message.get("text", "") or message.get("caption", "")
         customer_name = message["chat"].get("first_name", "")
+        # Detect media (photos, documents, videos)
+        has_media = bool(message.get("photo") or message.get("document") or message.get("video"))
 
         # --- /start order_XXXXX  →  link customer to order ---
         if text.startswith("/start"):
@@ -1344,9 +1403,26 @@ def _run_gateway(
         # The Frank persona and tone are defined in the always-loaded skill
         # `foolish-customer-bot`. Pass only the raw customer message so Frank
         # responds AS Frank TO the customer, not back to Alessandro.
+        # Download any media the customer sent so Frank can see it.
+        media_paths: list[str] = []
+        if has_media:
+            media_paths = await _customer_bot_download_media(message)
+
+        # Describe images via vision chain (HF → OpenRouter → Anthropic) so Frank
+        # gets a text description regardless of his underlying text-only model.
+        image_description = ""
+        if media_paths:
+            image_description = await _vision_describe_images(media_paths)
+
+        media_hint = ""
+        if image_description:
+            media_hint = f"\n[Immagine inviata dal cliente — descrizione automatica: {image_description}]"
+        elif media_paths:
+            media_hint = f"\n[Il cliente ha allegato {len(media_paths)} file — descrizione non disponibile]"
+
         customer_context = (
             f"[canale: foolish_customer_bot | cliente: {customer_name} | chat_id: {chat_id}]\n"
-            f"{text}"
+            f"{text}{media_hint}"
         )
         session_key = f"foolish_customer:{chat_id}"
         try:
@@ -1375,6 +1451,7 @@ def _run_gateway(
                 "proposed": proposed,
                 "customer_message": text,
                 "customer_name": customer_name,
+                "media_paths": media_paths,
             }, _f, ensure_ascii=False, indent=2)
 
         short_id = chat_id[-4:] if len(chat_id) >= 4 else chat_id
@@ -1385,13 +1462,14 @@ def _run_gateway(
                     chat_id=alessandros_chat,
                     content=(
                         f"💬 Foolish Bot — {customer_name} (#{short_id})\n\n"
-                        f"Messaggio:\n{text}\n\n"
+                        f"Messaggio:\n{text or '[nessun testo]'}\n\n"
                         f"💡 Proposta Frank:\n{proposed}\n\n"
                         f"Rispondi:\n"
                         f"• \"fb ok\" → invio la proposta\n"
                         f"• \"fb [testo]\" → invio il testo che scrivi\n"
                         f"• \"fb ignora\" → non rispondo"
                     ),
+                    media=media_paths if media_paths else None,
                 )
             ))
 
@@ -1733,6 +1811,44 @@ def _run_gateway(
                     )
                 except Exception as _exc:
                     logger.exception("foolish-storefront-cron hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+            elif method == "POST" and path == "/hooks/foolish-push-subscribed":
+                try:
+                    header_end = data.find(b"\r\n\r\n")
+                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
+                    payload = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+                    email = payload.get("email", "sconosciuto")
+
+                    telegram_cfg = config.channels.telegram
+                    tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
+                    chat_id = str(tg_allow[0]) if tg_allow else ""
+
+                    if chat_id:
+                        msg_text = (
+                            f"🔔 Nuovo cliente ha attivato le notifiche push!\n"
+                            f"Email: {email}\n\n"
+                            f"Ho inviato il welcome push automatico."
+                        )
+                        asyncio.create_task(_deliver_to_channel(
+                            OutboundMessage(channel="telegram", chat_id=chat_id, content=msg_text),
+                        ))
+                        logger.info("foolish-push-subscribed hook: notified telegram for {}", email)
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("foolish-push-subscribed hook error")
                     body = _json.dumps({"error": str(_exc)})
                     resp = (
                         f"HTTP/1.0 500 Internal Server Error\r\n"
