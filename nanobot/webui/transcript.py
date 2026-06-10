@@ -158,9 +158,9 @@ def _compact_transcript_lines(lines: list[dict[str, Any]], target_bytes: int) ->
     return compacted_lines
 
 
-def _write_transcript_lines(path: Path, lines: list[dict[str, Any]]) -> None:
+def _write_transcript_path_lines(path: Path, lines: list[dict[str, Any]]) -> None:
     """Overwrite transcript file with specified lines atomically."""
-    tmp_path = path.with_suffix(".tmp")
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     tmp_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -169,19 +169,10 @@ def _write_transcript_lines(path: Path, lines: list[dict[str, Any]]) -> None:
                 f.write(raw + "\n")
             f.flush()
             os.fsync(f.fileno())
-        if path.is_file():
-            try:
-                path.unlink()
-            except OSError:
-                pass
-        tmp_path.rename(path)
-    except Exception as e:
-        if tmp_path.is_file():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-        raise e
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def read_transcript_lines(session_key: str) -> list[dict[str, Any]]:
@@ -196,7 +187,7 @@ def read_transcript_lines(session_key: str) -> list[dict[str, Any]]:
             return []
         try:
             compacted = _compact_transcript_lines(lines, _MAX_TRANSCRIPT_FILE_BYTES // 2)
-            _write_transcript_lines(path, compacted)
+            _write_transcript_path_lines(path, compacted)
             return compacted
         except Exception as e:
             logger.warning("Failed to compact transcript {}: {}", path, e)
@@ -225,7 +216,7 @@ def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
                 lines = _read_all_transcript_lines(path)
                 if lines:
                     compacted = _compact_transcript_lines(lines, _MAX_TRANSCRIPT_FILE_BYTES // 2)
-                    _write_transcript_lines(path, compacted)
+                    _write_transcript_path_lines(path, compacted)
         except Exception as e:
             logger.warning("Failed to compact transcript {} after turn_end: {}", path, e)
 
