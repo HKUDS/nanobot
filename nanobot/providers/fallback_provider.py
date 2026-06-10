@@ -42,6 +42,7 @@ _FALLBACK_ERROR_TOKENS = (
     "timeout",
     "timed out",
     "connection",
+    "empty",  # API returned empty choices (e.g. DeepSeek peak hours), transient
     "insufficient_quota",
     "insufficient quota",
     "quota_exceeded",
