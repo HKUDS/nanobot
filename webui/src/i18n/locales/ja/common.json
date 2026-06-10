@@ -57,6 +57,9 @@
     "apps": "アプリ",
     "skills": {
       "title": "スキル"
+    },
+    "files": {
+      "title": "ファイル"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
       "apps": "アプリ",
-      "skills": "スキル"
+      "skills": "スキル",
+      "files": "ファイル"
     },
     "sections": {
       "interface": "インターフェース",
@@ -500,6 +504,28 @@
       "rawInstructions": "元の SKILL.md",
       "rawInstructionsEmpty": "元の説明はありません。",
       "detailDescription": "{{name}} の詳細。"
+    },
+    "files": {
+      "description": "agent ワークスペースディレクトリ内のファイルを閲覧します。",
+      "workspace": "ワークスペース",
+      "loading": "読み込み中...",
+      "loadError": "ディレクトリの読み込みに失敗しました。",
+      "empty": "このディレクトリは空です。",
+      "refresh": "更新",
+      "upload": "ファイルをアップロード",
+      "previewTitle": "{{name}}",
+      "previewError": "ファイルの読み込みに失敗しました。",
+      "truncated": "ディレクトリリストは切り詰められました。",
+      "uploadError": "ファイルのアップロードに失敗しました。",
+      "downloadError": "ファイルのダウンロードに失敗しました。",
+      "deleteError": "削除に失敗しました。",
+      "deleteTitle": "{{name}} を削除しますか？",
+      "deleteDirHint": "ディレクトリは空である必要があります。",
+      "deleteFileHint": "この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "delete": "削除",
+      "editing": "編集中",
+      "saveError": "ファイルの保存に失敗しました。"
     },
     "voice": {
       "selectProvider": "プロバイダーを選択",

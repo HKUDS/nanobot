@@ -140,6 +140,84 @@ export interface SkillDetail extends SkillSummary {
 
 export interface SkillsPayload { skills: SkillSummary[]; }
 
+export interface FileEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+  mtime: number;
+}
+
+export interface FilesListPayload {
+  path: string;
+  display_path: string;
+  workspace_path: string;
+  entries: FileEntry[];
+  has_more: boolean;
+  error?: string;
+  status?: number;
+}
+
+export interface FileDeletePayload {
+  ok: boolean;
+  deleted: string;
+  error?: string;
+  status?: number;
+}
+
+export interface FileSavePayload {
+  ok: boolean;
+  path: string;
+  size: number;
+  error?: string;
+  status?: number;
+}
+
+export interface FileUploadPayload {
+  ok: boolean;
+  path: string;
+  size: number;
+  error?: string;
+  status?: number;
+}
+
+export interface UploadInitPayload {
+  ok: boolean;
+  upload_id: string;
+  total_chunks: number;
+  error?: string;
+  status?: number;
+}
+
+export interface UploadChunkPayload {
+  ok: boolean;
+  upload_id: string;
+  chunk_index: number;
+  received: number;
+  total: number;
+  error?: string;
+  status?: number;
+}
+
+export interface UploadFinalizePayload {
+  ok: boolean;
+  path: string;
+  size: number;
+  error?: string;
+  status?: number;
+}
+
+export interface FileContentPayload {
+  path: string;
+  display_path: string;
+  language: string;
+  mime: string | null;
+  content: string;
+  size: number;
+  truncated: boolean;
+  error?: string;
+  status?: number;
+}
+
 /** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
 export interface AgentUIBlob {
   kind: string;

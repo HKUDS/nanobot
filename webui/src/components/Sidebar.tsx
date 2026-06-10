@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   Archive,
   Brain,
+  FolderOpen,
   Menu,
   Search,
   Settings,
@@ -36,8 +37,9 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenApps: () => void;
   onOpenSkills: () => void;
+  onOpenFiles: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | null;
+  activeUtility?: "apps" | "skills" | "files" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -165,6 +167,13 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenSkills}
           active={props.activeUtility === "skills"}
           icon={<Brain className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.files.title")}
+          onClick={props.onOpenFiles}
+          active={props.activeUtility === "files"}
+          icon={<FolderOpen className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton

@@ -70,7 +70,7 @@ const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "skills" | "files";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -86,6 +86,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "browser",
   "apps",
   "skills",
+  "files",
   "runtime",
   "advanced",
 ];
@@ -99,7 +100,7 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "skills") return section;
+  if (section === "apps" || section === "skills" || section === "files") return section;
   return "settings";
 }
 
@@ -130,6 +131,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
+  }
+  if (path === "/files") {
+    return { view: "files", activeKey, settingsSection: "files" };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -1161,6 +1165,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenFiles = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "files", activeKey, settingsSection: "files" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
@@ -1322,6 +1332,12 @@ function Shell({
       });
       return;
     }
+    if (view === "files") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.files", { defaultValue: "Files" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1344,8 +1360,9 @@ function Shell({
     onOpenSettings,
     onOpenApps,
     onOpenSkills,
+    onOpenFiles,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "skills" ? view : null,
+    activeUtility: view === "apps" || view === "skills" || view === "files" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,

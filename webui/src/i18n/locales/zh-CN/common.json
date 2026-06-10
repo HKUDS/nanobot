@@ -57,6 +57,9 @@
     "apps": "应用",
     "skills": {
       "title": "技能"
+    },
+    "files": {
+      "title": "文件"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "runtime": "系统",
       "advanced": "安全",
       "apps": "应用",
-      "skills": "技能"
+      "skills": "技能",
+      "files": "文件"
     },
     "sections": {
       "interface": "界面",
@@ -500,6 +504,28 @@
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "没有原始说明。",
       "detailDescription": "{{name}} 的详情。"
+    },
+    "files": {
+      "description": "浏览 agent 工作区目录中的文件。",
+      "workspace": "工作区",
+      "loading": "加载中...",
+      "loadError": "加载目录失败。",
+      "empty": "此目录为空。",
+      "refresh": "刷新",
+      "upload": "上传文件",
+      "previewTitle": "{{name}}",
+      "previewError": "加载文件失败。",
+      "truncated": "目录列表已截断。",
+      "uploadError": "上传文件失败。",
+      "downloadError": "下载文件失败。",
+      "deleteError": "删除失败。",
+      "deleteTitle": "删除 {{name}}？",
+      "deleteDirHint": "目录必须为空。",
+      "deleteFileHint": "此操作无法撤销。",
+      "cancel": "取消",
+      "delete": "删除",
+      "editing": "编辑中",
+      "saveError": "保存文件失败。"
     },
     "voice": {
       "selectProvider": "选择提供商",
