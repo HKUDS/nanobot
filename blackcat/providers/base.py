@@ -14,7 +14,7 @@ from typing import Any
 import json_repair
 from loguru import logger
 
-from blackcat.utils.media import image_placeholder_text
+from blackcat.utils.helpers import image_placeholder_text
 
 
 @dataclass
@@ -631,7 +631,6 @@ class LLMProvider(ABC):
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
         retry_mode: str = "standard",
         on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
@@ -652,12 +651,6 @@ class LLMProvider(ABC):
             if on_content_delta:
                 await on_content_delta(text)
 
-        async def _recover_stream() -> None:
-            nonlocal has_streamed_content
-            if on_stream_recover:
-                await on_stream_recover()
-            has_streamed_content = False
-
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
             max_tokens=max_tokens, temperature=temperature,
@@ -666,8 +659,6 @@ class LLMProvider(ABC):
             on_thinking_delta=on_thinking_delta,
             on_tool_call_delta=on_tool_call_delta,
         )
-        if on_stream_recover and getattr(self, "supports_stream_recover_callback", False):
-            kw["on_stream_recover"] = _recover_stream
         return await self._run_with_retry(
             self._safe_chat_stream,
             kw,
@@ -675,7 +666,6 @@ class LLMProvider(ABC):
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
             should_retry_guard=lambda: not has_streamed_content,
-            on_stream_recover=_recover_stream if on_stream_recover else None,
         )
 
     async def chat_with_retry(
@@ -823,7 +813,6 @@ class LLMProvider(ABC):
         retry_mode: str,
         on_retry_wait: Callable[[str], Awaitable[None]] | None,
         should_retry_guard: Callable[[], bool] | None = None,
-        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
@@ -840,22 +829,15 @@ class LLMProvider(ABC):
             if should_retry_guard is not None and not should_retry_guard():
                 is_timeout = (response.error_kind or "").lower() == "timeout"
                 if is_timeout:
-                    if on_stream_recover:
-                        logger.warning(
-                            "LLM stream stalled after content was emitted; "
-                            "starting a new stream segment and retrying"
-                        )
-                        await on_stream_recover()
-                    else:
-                        logger.warning(
-                            "LLM stream stalled after content was emitted; "
-                            "suppressing delta callbacks and retrying"
-                        )
-                        kw.setdefault("on_content_delta", None)
-                        kw["on_content_delta"] = None
-                        kw["on_thinking_delta"] = None
-                        kw["on_tool_call_delta"] = None
-                        should_retry_guard = None
+                    logger.warning(
+                        "LLM stream stalled after content was emitted; "
+                        "suppressing delta callbacks and retrying"
+                    )
+                    kw.setdefault("on_content_delta", None)
+                    kw["on_content_delta"] = None
+                    kw["on_thinking_delta"] = None
+                    kw["on_tool_call_delta"] = None
+                    should_retry_guard = None
                 else:
                     logger.warning(
                         "LLM stream failed after content was emitted; skipping retry"
