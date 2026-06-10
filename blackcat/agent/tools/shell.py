@@ -447,12 +447,12 @@ class ExecTool(Tool):
     def _wrap_path_export(self, command: str, env: dict[str, str]) -> str:
         segments = []
         if self.path_prepend:
-            env["BLACKCAT_PATH_PREPEND"] = self.path_prepend
-            segments.append("$BLACKCAT_PATH_PREPEND")
+            env["NANOBOT_PATH_PREPEND"] = self.path_prepend
+            segments.append("$NANOBOT_PATH_PREPEND")
         segments.append("$PATH")
         if self.path_append:
-            env["BLACKCAT_PATH_APPEND"] = self.path_append
-            segments.append("$BLACKCAT_PATH_APPEND")
+            env["NANOBOT_PATH_APPEND"] = self.path_append
+            segments.append("$NANOBOT_PATH_APPEND")
         path_expr = os.pathsep.join(segments)
         return f'export PATH="{path_expr}"; {command}'
 

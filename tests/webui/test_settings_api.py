@@ -244,6 +244,24 @@ def test_settings_payload_includes_network_safety_fields(
     assert payload["advanced"]["ssrf_whitelist_count"] == 1
 
 
+def test_settings_payload_includes_exec_path_flags(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.exec.path_prepend = "/venv/bin"
+    config.tools.exec.path_append = "/usr/sbin"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+
+    payload = settings_payload()
+
+    assert payload["advanced"]["exec_path_prepend_set"] is True
+    assert payload["advanced"]["exec_path_append_set"] is True
+
+
 def test_settings_payload_includes_effective_transcription_config(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
