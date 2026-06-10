@@ -47,6 +47,8 @@ class _FsTool(Tool):
         extra_allowed_dirs: list[Path] | None = None,
         extra_read_allowed_dirs: list[Path] | None = None,
         extra_write_allowed_dirs: list[Path] | None = None,
+        extra_read_allowed_files: list[Path] | None = None,
+        extra_write_allowed_files: list[Path] | None = None,
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
@@ -60,6 +62,8 @@ class _FsTool(Tool):
             *(extra_read_allowed_dirs or []),
         ]
         self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
+        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
+        self._extra_write_allowed_files = list(extra_write_allowed_files or [])
         self._extra_allowed_dirs = self._extra_read_allowed_dirs
         self._restrict_to_workspace = (
             bool(restrict_to_workspace)
@@ -117,6 +121,7 @@ class _FsTool(Tool):
         self,
         path: str,
         extra_allowed_dirs: list[Path] | None,
+        extra_allowed_files: list[Path] | None,
         *,
         include_media_dir: bool,
     ) -> Path:
@@ -130,6 +135,7 @@ class _FsTool(Tool):
             access.project_path,
             self._effective_allowed_root(access.allowed_root),
             extra_allowed_dirs,
+            extra_allowed_files,
             include_media_dir=include_media_dir,
         )
 
@@ -137,6 +143,7 @@ class _FsTool(Tool):
         return self._resolve_with_extra(
             path,
             self._extra_read_allowed_dirs,
+            self._extra_read_allowed_files,
             include_media_dir=True,
         )
 
@@ -144,6 +151,7 @@ class _FsTool(Tool):
         return self._resolve_with_extra(
             path,
             self._extra_write_allowed_dirs,
+            self._extra_write_allowed_files,
             include_media_dir=False,
         )
 

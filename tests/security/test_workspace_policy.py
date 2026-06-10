@@ -67,3 +67,27 @@ def test_resolve_allowed_path_allows_extra_root(tmp_path: Path) -> None:
     )
 
     assert resolved == image.resolve()
+
+
+def test_resolve_allowed_path_allows_extra_file_only_exactly(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    allowed = outside / "allowed.txt"
+
+    resolved = resolve_allowed_path(
+        allowed,
+        workspace=workspace,
+        allowed_root=workspace,
+        extra_allowed_files=[allowed],
+    )
+
+    assert resolved == allowed.resolve()
+    with pytest.raises(WorkspaceBoundaryError, match="outside allowed directory"):
+        resolve_allowed_path(
+            allowed / "child.txt",
+            workspace=workspace,
+            allowed_root=workspace,
+            extra_allowed_files=[allowed],
+        )

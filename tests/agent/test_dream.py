@@ -206,6 +206,38 @@ class TestDreamTools:
         assert store.history_file.read_text(encoding="utf-8") == "before\n"
         assert store._dream_cursor_file.read_text(encoding="utf-8") == "1"
 
+    @pytest.mark.asyncio
+    async def test_dream_cannot_create_children_under_canonical_files(self, store):
+        tools = store.build_dream_tools()
+
+        memory_child = store.memory_file / "evil.txt"
+        user_child = store.user_file / "evil.txt"
+        memory_result = await tools.execute(
+            "apply_patch",
+            {
+                "edits": [
+                    {
+                        "path": "memory/MEMORY.md/evil.txt",
+                        "action": "add",
+                        "new_text": "owned",
+                    }
+                ]
+            },
+        )
+        user_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "USER.md/evil.txt",
+                "old_text": "",
+                "new_text": "owned",
+            },
+        )
+
+        assert "outside allowed directory" in memory_result
+        assert "outside allowed directory" in user_result
+        assert not memory_child.exists()
+        assert not user_child.exists()
+
 
 class TestEphemeralDirect:
     """Tests for the ephemeral flag that skips history.jsonl writes for Dream."""
@@ -229,9 +261,7 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
         provider.chat_with_retry = AsyncMock(
-            return_value=MagicMock(
-                content="done", finish_reason="stop", tool_calls=[], usage={},
-            )
+            return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage={})
         )
 
         with (
@@ -263,9 +293,13 @@ class TestEphemeralDirect:
             mock_archive.assert_not_called()
 
     async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
-        """Without ephemeral, the normal path is untouched — no crash."""
+        """Without ephemeral, the normal path returns the model response."""
         loop, store = _make_loop
-        await loop.process_direct("test", session_key="cli:normal")
+        response = await loop.process_direct("test", session_key="cli:normal")
+
+        assert response is not None
+        assert response.content == "done"
+        loop.provider.chat_with_retry.assert_awaited()
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""

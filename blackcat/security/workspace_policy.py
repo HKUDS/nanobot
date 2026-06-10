@@ -44,6 +44,22 @@ def is_path_allowed(path: str | Path, roots: Iterable[str | Path]) -> bool:
     return any(is_path_within(path, root) for root in roots)
 
 
+def is_path_exactly_allowed(path: str | Path, files: Iterable[str | Path]) -> bool:
+    """Return True when *path* resolves exactly to one of the allowed files."""
+    try:
+        resolved_path = Path(path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    for file in files:
+        try:
+            resolved_file = Path(file).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+        if resolved_path == resolved_file:
+            return True
+    return False
+
+
 def require_path_within(
     path: str | Path,
     root: str | Path,
@@ -67,17 +83,23 @@ def resolve_allowed_path(
     workspace: str | Path | None = None,
     allowed_root: str | Path | None = None,
     extra_allowed_roots: Iterable[str | Path] | None = None,
+    extra_allowed_files: Iterable[str | Path] | None = None,
     strict: bool = False,
 ) -> Path:
     """Resolve a path and enforce containment in allowed roots when configured."""
     resolved = resolve_path(path, workspace, strict=False)
-    if allowed_root is None:
+    files = list(extra_allowed_files or [])
+    if allowed_root is None and not files:
         return resolve_path(path, workspace, strict=strict) if strict else resolved
 
-    roots = [allowed_root, *(extra_allowed_roots or [])]
-    if not is_path_allowed(resolved, roots):
+    roots = []
+    if allowed_root is not None:
+        roots.append(allowed_root)
+    roots.extend(extra_allowed_roots or [])
+    if not is_path_allowed(resolved, roots) and not is_path_exactly_allowed(resolved, files):
+        boundary = Path(allowed_root).expanduser() if allowed_root is not None else "allowed files"
         raise WorkspaceBoundaryError(
-            f"Path {path} is outside allowed directory {Path(allowed_root).expanduser()}"
+            f"Path {path} is outside allowed directory {boundary}"
             + WORKSPACE_BOUNDARY_NOTE
         )
     if strict:

@@ -504,7 +504,7 @@ class MemoryStore:
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
-        editable_roots = [self.soul_file, self.user_file, skills_dir]
+        editable_files = [self.memory_file, self.soul_file, self.user_file]
 
         tools.register(ReadFileTool(
             workspace=workspace,
@@ -514,14 +514,14 @@ class MemoryStore:
         ))
         tools.register(EditFileTool(
             workspace=workspace,
-            allowed_dir=self.memory_file,
-            extra_write_allowed_dirs=editable_roots,
+            allowed_dir=skills_dir,
+            extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
-            allowed_dir=self.memory_file,
-            extra_write_allowed_dirs=editable_roots,
+            allowed_dir=skills_dir,
+            extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(WriteFileTool(

@@ -386,6 +386,30 @@ class TestWorkspaceRestriction:
         assert (writable / "ok.txt").read_text(encoding="utf-8") == "allowed"
 
     @pytest.mark.asyncio
+    async def test_extra_write_allowed_files_allow_only_exact_file(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        allowed_file = outside / "allowed.txt"
+        child_path = allowed_file / "child.txt"
+
+        tool = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_write_allowed_files=[allowed_file],
+        )
+
+        exact = await tool.execute(path=str(allowed_file), content="allowed")
+        child = await tool.execute(path=str(child_path), content="blocked")
+
+        assert "Successfully wrote" in exact
+        assert allowed_file.read_text(encoding="utf-8") == "allowed"
+        assert "Error" in child
+        assert "outside" in child.lower()
+        assert not child_path.exists()
+
+    @pytest.mark.asyncio
     async def test_read_still_blocked_for_unrelated_dir(self, tmp_path):
         workspace = tmp_path / "ws"
         workspace.mkdir()
