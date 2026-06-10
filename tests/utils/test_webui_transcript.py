@@ -10,6 +10,7 @@ from blackcat.webui.transcript import (
     fork_transcript_before_user_index,
     read_transcript_lines,
     replay_transcript_to_ui_messages,
+    webui_transcript_segments_dir,
     write_session_messages_as_transcript,
 )
 
@@ -21,6 +22,142 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
     lines = read_transcript_lines(key)
     assert len(lines) == 1
     assert lines[0]["text"] == "hello"
+
+
+def _force_small_transcript_budget(monkeypatch, *, limit: int = 520, target: int = 260) -> None:
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_FILE_BYTES", limit)
+    monkeypatch.setattr("nanobot.webui.transcript._TARGET_ACTIVE_TRANSCRIPT_BYTES", target)
+
+
+def _append_numbered_turn(key: str, chat_id: str, idx: int) -> None:
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": chat_id, "text": f"question {idx} " + ("x" * 24)},
+    )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": chat_id, "text": f"answer {idx} " + ("y" * 24)},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": chat_id})
+
+
+def _write_segmented_turns(tmp_path, monkeypatch, key: str, chat_id: str, count: int) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    _force_small_transcript_budget(monkeypatch)
+    for idx in range(1, count + 1):
+        _append_numbered_turn(key, chat_id, idx)
+
+
+def _message_contents(payload: dict) -> list[str]:
+    return [str(message.get("content") or "") for message in payload["messages"]]
+
+
+def _numbered_turn_texts(start: int, end: int) -> list[str]:
+    return [
+        text
+        for idx in range(start, end + 1)
+        for text in (f"question {idx} " + ("x" * 24), f"answer {idx} " + ("y" * 24))
+    ]
+
+
+def test_segmented_transcript_rotation_preserves_full_history(tmp_path, monkeypatch) -> None:
+    key = "websocket:segmented"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "segmented", 6)
+
+    segment_dir = webui_transcript_segments_dir(key)
+    assert segment_dir.is_dir()
+    assert (segment_dir / "manifest.json").is_file()
+
+    lines = read_transcript_lines(key)
+    contents = [str(line.get("text") or "") for line in lines if line.get("event") in {"user", "message"}]
+    assert contents == _numbered_turn_texts(1, 6)
+
+
+def test_segmented_transcript_paginates_latest_and_older_without_overlap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    key = "websocket:paged"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "paged", 6)
+
+    latest = build_webui_thread_response(key, limit=4, direction="latest")
+    assert latest is not None
+    assert latest["page"]["has_more_before"] is True
+    assert latest["page"]["user_message_offset"] == 4
+    assert _message_contents(latest) == _numbered_turn_texts(5, 6)
+
+    older = build_webui_thread_response(
+        key,
+        limit=4,
+        before=latest["page"]["before_cursor"],
+    )
+    assert older is not None
+    assert older["page"]["user_message_offset"] == 2
+    assert _message_contents(older) == _numbered_turn_texts(3, 4)
+
+
+def test_page_cursor_survives_active_rotation_after_latest_page(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    key = "websocket:stable-cursor"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "stable-cursor", 7)
+
+    latest = build_webui_thread_response(key, limit=4, direction="latest")
+    assert latest is not None
+    cursor = latest["page"]["before_cursor"]
+    assert cursor
+    assert _message_contents(latest) == _numbered_turn_texts(6, 7)
+
+    for idx in range(8, 13):
+        _append_numbered_turn(key, "stable-cursor", idx)
+
+    older = build_webui_thread_response(key, limit=4, before=cursor)
+
+    assert older is not None
+    assert _message_contents(older) == _numbered_turn_texts(4, 5)
+
+
+def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monkeypatch) -> None:
+    key = "websocket:manifest"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "manifest", 4)
+
+    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    manifest.write_text("{not json", encoding="utf-8")
+
+    lines = read_transcript_lines(key)
+
+    assert len([line for line in lines if line.get("event") == "user"]) == 4
+    assert manifest.read_text(encoding="utf-8").lstrip().startswith("{")
+
+
+def test_delete_webui_transcript_removes_segments(tmp_path, monkeypatch) -> None:
+    from nanobot.webui.thread_disk import webui_thread_file_path
+    from nanobot.webui.transcript import delete_webui_transcript, webui_transcript_path
+
+    key = "websocket:delete-segments"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "delete-segments", 4)
+    legacy_path = webui_thread_file_path(key)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"messages":[]}', encoding="utf-8")
+
+    assert webui_transcript_segments_dir(key).is_dir()
+    assert delete_webui_transcript(key) is True
+    assert not legacy_path.exists()
+    assert not webui_transcript_path(key).exists()
+    assert not webui_transcript_segments_dir(key).exists()
+
+
+def test_fork_transcript_reads_across_segments(tmp_path, monkeypatch) -> None:
+    source = "websocket:seg-source"
+    _write_segmented_turns(tmp_path, monkeypatch, source, "seg-source", 5)
+
+    ok = fork_transcript_before_user_index(source, "websocket:seg-fork", 3)
+
+    assert ok is True
+    forked = build_webui_thread_response("websocket:seg-fork")
+    assert forked is not None
+    assert _message_contents(forked) == _numbered_turn_texts(1, 3)
 
 
 def test_fork_transcript_before_user_index_copies_only_prefix(tmp_path, monkeypatch) -> None:

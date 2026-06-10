@@ -84,6 +84,21 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("passes pagination params when fetching a WebUI thread page", async () => {
+    await fetchWebuiThread("tok", "websocket:chat-1", {
+      limit: 120,
+      before: "abc+/=",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
     await fetchFilePreview("tok", "websocket:chat-1", "/tmp/project/hook.py:12");
 

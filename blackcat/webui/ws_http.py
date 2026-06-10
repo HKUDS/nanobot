@@ -375,6 +375,18 @@ class GatewayHTTPHandler:
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
             if isinstance(raw_messages, list):
                 session_messages = [m for m in raw_messages if isinstance(m, dict)]
+        query = _parse_query(request.path)
+        raw_limit = _query_first(query, "limit")
+        limit: int | None = None
+        if raw_limit is not None and raw_limit.strip():
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                return _http_error(400, "invalid limit")
+        direction = _query_first(query, "direction")
+        if direction is not None and direction not in {"latest"}:
+            return _http_error(400, "invalid direction")
+        before = _query_first(query, "before")
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -384,6 +396,9 @@ class GatewayHTTPHandler:
                 workspace_path=scope.project_path,
             ),
             session_messages=session_messages,
+            limit=limit,
+            direction=direction,
+            before=before,
         )
         if data is None:
             return _http_error(404, "webui thread not found")

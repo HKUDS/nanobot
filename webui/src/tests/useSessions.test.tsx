@@ -414,6 +414,65 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
+  it("loads older transcript pages before the current history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "new question", createdAt: 2 },
+          { id: "a2", role: "assistant", content: "new answer", createdAt: 3 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 2,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
+      limit: 160,
+      direction: "latest",
+    });
+    expect(result.current.hasMoreBefore).toBe(true);
+    expect(result.current.userMessageOffset).toBe(1);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:paged", {
+      limit: 120,
+      before: "cursor-2",
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "old question",
+      "old answer",
+      "new question",
+      "new answer",
+    ]);
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.userMessageOffset).toBe(0);
+  });
+
   it("keeps the session in the list when delete fails", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {

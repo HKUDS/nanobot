@@ -143,7 +143,7 @@ describe("ThreadViewport", () => {
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 2400 },
       clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, value: 0 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
     });
 
     act(() => {
@@ -167,13 +167,13 @@ describe("ThreadViewport", () => {
     expect(screen.queryByText("message 139")).not.toBeInTheDocument();
     expect(screen.getByText("message 140")).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   });
 
-  it("loads earlier history in fixed increments without rendering the whole transcript", () => {
+  it("automatically expands earlier local history near the top", () => {
     const longMessages = makeLongMessages(300);
 
-    render(
+    const { container } = render(
       <ThreadViewport
         messages={longMessages}
         isStreaming={false}
@@ -181,7 +181,16 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
 
     const firstVisible =
       300 - INITIAL_HISTORY_WINDOW - HISTORY_WINDOW_INCREMENT;
@@ -191,6 +200,33 @@ describe("ThreadViewport", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
+  });
+
+  it("automatically requests older transcript pages near the top", () => {
+    const onLoadOlder = vi.fn();
+
+    const { container } = render(
+      <ThreadViewport
+        messages={makeLongMessages(20)}
+        isStreaming={false}
+        composer={<div />}
+        hasMoreBefore
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {

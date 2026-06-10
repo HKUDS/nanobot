@@ -1,6 +1,5 @@
 import { Fragment, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { normalizeActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
@@ -10,9 +9,7 @@ interface ThreadMessagesProps {
   messages: UIMessage[];
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
-  hiddenMessageCount?: number;
   hiddenUserMessageCount?: number;
-  onLoadEarlier?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   forkBoundaryMessageCount?: number | null;
@@ -66,9 +63,7 @@ export function assistantCopyFlags(units: DisplayUnit[]): boolean[] {
 export function ThreadMessages({
   messages,
   isStreaming = false,
-  hiddenMessageCount = 0,
   hiddenUserMessageCount = 0,
-  onLoadEarlier,
   cliApps = [],
   mcpPresets = [],
   forkBoundaryMessageCount = null,
@@ -90,20 +85,6 @@ export function ThreadMessages({
 
   return (
     <div className="flex w-full flex-col">
-      {hiddenMessageCount > 0 && onLoadEarlier ? (
-        <div className="mb-4 flex justify-center">
-          <button
-            type="button"
-            onClick={onLoadEarlier}
-            className="rounded-full border border-border/60 bg-background/85 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/55 hover:text-foreground"
-          >
-            {t("thread.loadEarlier", {
-              count: hiddenMessageCount,
-              defaultValue: "Load earlier messages",
-            })}
-          </button>
-        </div>
-      ) : null}
       {units.map((unit, index) => {
         const prev = units[index - 1];
         const marginTop =

@@ -726,16 +726,24 @@ describe("ThreadShell", () => {
   it("forks assistant replies using the global user message index rather than the visible window index", async () => {
     const client = makeClient();
     const onForkChat = vi.fn().mockResolvedValue("chat-fork");
-    const rows = Array.from({ length: 165 }, (_, index) => [
-      { role: "user" as const, content: `question ${index}` },
-      { role: "assistant" as const, content: `answer ${index}` },
-    ]).flat();
+    const rows = [
+      { role: "user" as const, content: "question 100" },
+      { role: "assistant" as const, content: "answer 100" },
+    ];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes("websocket%3Along-chat/webui-thread")) {
-          return httpJson(transcriptFromSimpleMessages(rows));
+          return httpJson({
+            ...transcriptFromSimpleMessages(rows),
+            page: {
+              before_cursor: "before-question-100",
+              has_more_before: true,
+              loaded_message_count: 2,
+              user_message_offset: 100,
+            },
+          });
         }
         return {
           ok: false,

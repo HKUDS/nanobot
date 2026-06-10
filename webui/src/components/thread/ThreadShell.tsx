@@ -250,6 +250,10 @@ export function ThreadShell({
   const {
     messages: historical,
     loading,
+    loadingOlder,
+    loadOlder,
+    hasMoreBefore,
+    userMessageOffset,
     hasPendingToolCalls,
     refresh: refreshHistory,
     version: historyVersion,
@@ -415,6 +419,14 @@ export function ThreadShell({
       }
       if (cached && cached.length > 0) {
         const normalizedCached = projectWebuiThreadMessages(cached);
+        if (
+          normalizedHistory.length > normalizedCached.length
+          && !isStaleThreadSnapshot(prev, normalizedHistory)
+        ) {
+          messageCacheRef.current.set(chatId, normalizedHistory);
+          appliedHistoryVersionRef.current.set(chatId, historyVersion);
+          return normalizedHistory;
+        }
         if (isStaleThreadSnapshot(prev, normalizedCached)) return keepLiveMessages(prev);
         return normalizedCached;
       }
@@ -752,6 +764,10 @@ export function ThreadShell({
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           forkBoundaryMessageCount={forkBoundaryMessageCount}
+          hasMoreBefore={hasMoreBefore}
+          loadingOlder={loadingOlder}
+          userMessageOffset={userMessageOffset}
+          onLoadOlder={loadOlder}
           onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
           onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
         />
