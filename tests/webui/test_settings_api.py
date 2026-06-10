@@ -300,6 +300,24 @@ def test_settings_payload_exposes_openrouter_transcription_provider(
     assert providers["openrouter"]["configured"] is True
 
 
+def test_settings_payload_exposes_siliconflow_transcription_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.siliconflow.api_key = "sf-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    providers = {provider["name"]: provider for provider in payload["transcription"]["providers"]}
+    assert providers["siliconflow"]["label"] == "SiliconFlow"
+    assert providers["siliconflow"]["configured"] is True
+    assert providers["siliconflow"]["default_api_base"] == "https://api.siliconflow.cn/v1"
+
+
 def test_settings_payload_exposes_xiaomi_mimo_transcription_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
