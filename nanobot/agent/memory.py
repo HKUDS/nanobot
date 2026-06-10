@@ -990,7 +990,7 @@ class Consolidator:
             last_active = session.updated_at
             summary: str | None = ""
             if archive_msgs:
-                summary = await self.archive(archive_msgs, session_key=session_key)
+                summary = await self.archive(tail, session_key=session_key)
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {

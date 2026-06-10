@@ -89,10 +89,10 @@ def _make_fake_compact(
         s = summary
         if archive_msgs:
             if on_archive:
-                result = on_archive(archive_msgs)
+                result = on_archive(tail)
                 s = result if isinstance(result, str) else summary
             if track_archived is not None:
-                track_archived.extend(archive_msgs)
+                track_archived.extend(tail)
 
         if s and s != "(nothing)":
             session.metadata["_last_summary"] = {
@@ -284,8 +284,8 @@ class TestAutoCompact:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_archives_prefix_and_keeps_recent_suffix(self, tmp_path):
-        """_archive should summarize the old prefix and keep a recent legal suffix."""
+    async def test_auto_compact_archives_full_tail_and_keeps_recent_suffix(self, tmp_path):
+        """_archive should summarize the full unconsolidated tail and keep a suffix."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6)
@@ -298,11 +298,34 @@ class TestAutoCompact:
 
         await loop.auto_compact._archive("cli:test")
 
-        assert len(archived_messages) == 4
+        assert len(archived_messages) == 12
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
         assert session_after.messages[0]["content"] == "msg user 2"
         assert session_after.messages[-1]["content"] == "msg assistant 5"
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_compact_idle_session_archives_full_unconsolidated_tail(self, tmp_path):
+        """compact_idle_session should archive kept messages as part of the summary input."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(12):
+            session.add_message("user", f"msg {i}")
+        loop.sessions.save(session)
+
+        loop.consolidator.archive = AsyncMock(return_value="Summary.")
+
+        await loop.consolidator.compact_idle_session("cli:test", max_suffix=8)
+
+        loop.consolidator.archive.assert_awaited_once()
+        archived = loop.consolidator.archive.await_args.args[0]
+        assert [m["content"] for m in archived] == [f"msg {i}" for i in range(12)]
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 8
+        assert [m["content"] for m in session_after.messages] == [
+            f"msg {i}" for i in range(4, 12)
+        ]
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -356,7 +379,7 @@ class TestAutoCompact:
 
         await loop.auto_compact._archive("cli:test")
 
-        assert len(archived_messages) == 2
+        assert len(archived_messages) == 10
         await loop.close_mcp()
 
 
@@ -400,7 +423,7 @@ class TestAutoCompactIdleDetection:
         await loop._process_message(msg)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(archived_messages) == 4
+        assert len(archived_messages) == 12
         assert not any(m["content"] == "old user 0" for m in session_after.messages)
         assert any(m["content"] == "new msg" for m in session_after.messages)
         await loop.close_mcp()
@@ -752,7 +775,7 @@ class TestProactiveAutoCompact:
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert len(archived_messages) == 2
+        assert len(archived_messages) == 10
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry[0] == "User chatted about old things."
