@@ -24,6 +24,14 @@ FINALIZATION_RETRY_PROMPT = (
     "Please provide your response to the user based on the conversation above."
 )
 
+BUDGET_EXHAUSTED_FINALIZATION_PROMPT = (
+    "The tool-call budget for this turn is exhausted. Based only on the "
+    "conversation and tool results above, provide a concise final response to "
+    "the user. Do not call or request tools. Do not claim the task is complete "
+    "unless the evidence above clearly shows it is complete. State what was "
+    "done, what remains, and the best next step if anything is incomplete."
+)
+
 LENGTH_RECOVERY_PROMPT = (
     "Output limit reached. Continue exactly where you left off "
     "— no recap, no apology. Break remaining work into smaller steps if needed."
@@ -63,6 +71,11 @@ def is_blank_text(content: str | None) -> bool:
 def build_finalization_retry_message() -> dict[str, str]:
     """A short no-tools-allowed prompt for final answer recovery."""
     return {"role": "user", "content": FINALIZATION_RETRY_PROMPT}
+
+
+def build_budget_exhausted_finalization_message() -> dict[str, str]:
+    """Prompt the model for a no-tools final response after budget exhaustion."""
+    return {"role": "user", "content": BUDGET_EXHAUSTED_FINALIZATION_PROMPT}
 
 
 def build_length_recovery_message() -> dict[str, str]:

@@ -64,7 +64,8 @@ async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
     )
 
     assert stop_reason == "max_iterations"
-    assert loop.provider.chat_with_retry.await_count == 2
+    assert loop.provider.chat_with_retry.await_count == 3
+    assert loop.provider.chat_with_retry.await_args_list[-1].kwargs["tools"] is None
     assert final_content == (
         "I reached the maximum number of tool call iterations (2) "
         "without completing the task. You can try breaking the task into smaller steps."
