@@ -149,10 +149,20 @@ class FallbackProvider(LLMProvider):
                 return response
 
             if has_streamed is not None and has_streamed[0]:
-                logger.warning(
-                    "Primary model error but content already streamed; skipping failover"
-                )
-                return response
+                is_timeout = (response.error_kind or "").lower() == "timeout"
+                if is_timeout:
+                    logger.warning(
+                        "Primary model '{}' stream stalled after content was emitted; "
+                        "attempting failover anyway",
+                        primary_model,
+                    )
+                    has_streamed[0] = False
+                    kwargs["on_content_delta"] = None
+                else:
+                    logger.warning(
+                        "Primary model error but content already streamed; skipping failover"
+                    )
+                    return response
 
             if not self._should_fallback(response):
                 logger.warning(
