@@ -70,6 +70,8 @@ class ContextBuilder:
         session_summary: str | None = None,
         workspace: Path | None = None,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -96,7 +98,11 @@ class ContextBuilder:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
         if include_memory_recent_history:
-            entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+            entries = self.memory.read_recent_history_for_prompt(
+                since_cursor=self.memory.get_last_dream_cursor(),
+                session_key=session_key,
+                unified_session=unified_session,
+            )
             if entries:
                 capped = entries[-self._MAX_RECENT_HISTORY:]
                 history_text = "\n".join(
@@ -196,6 +202,8 @@ class ContextBuilder:
         inbound_message: Any | None = None,
         skip_runtime_lines: bool = False,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -232,6 +240,8 @@ class ContextBuilder:
                     session_summary=session_summary,
                     workspace=root,
                     include_memory_recent_history=include_memory_recent_history,
+                    session_key=session_key,
+                    unified_session=unified_session,
                 ),
             },
             *history,
