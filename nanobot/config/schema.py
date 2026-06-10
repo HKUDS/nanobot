@@ -12,7 +12,9 @@ from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.browser_tool import BrowserToolConfig
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.computer_use import ComputerUseToolConfig
     from nanobot.agent.tools.filesystem import FileToolsConfig
     from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
     from nanobot.agent.tools.self import MyToolConfig
@@ -399,6 +401,16 @@ class ToolsConfig(Base):
     """
 
     web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
+    browser: BrowserToolConfig = Field(
+        default_factory=lambda: _lazy_default(
+            "nanobot.agent.tools.browser_tool", "BrowserToolConfig"
+        )
+    )
+    computer_use: ComputerUseToolConfig = Field(
+        default_factory=lambda: _lazy_default(
+            "nanobot.agent.tools.computer_use", "ComputerUseToolConfig"
+        )
+    )
     exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
     file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.filesystem", "FileToolsConfig"))
     cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.cli_apps", "CliAppsToolConfig"))
@@ -670,7 +682,9 @@ def _resolve_tool_config_refs() -> None:
     """
     import sys
 
+    from nanobot.agent.tools.browser_tool import BrowserToolConfig
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig
+    from nanobot.agent.tools.computer_use import ComputerUseToolConfig
     from nanobot.agent.tools.filesystem import FileToolsConfig
     from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
     from nanobot.agent.tools.self import MyToolConfig
@@ -680,6 +694,8 @@ def _resolve_tool_config_refs() -> None:
     # Re-export into this module's namespace
     mod = sys.modules[__name__]
     mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
+    mod.BrowserToolConfig = BrowserToolConfig  # type: ignore[attr-defined]
+    mod.ComputerUseToolConfig = ComputerUseToolConfig  # type: ignore[attr-defined]
     mod.FileToolsConfig = FileToolsConfig  # type: ignore[attr-defined]
     mod.CliAppsToolConfig = CliAppsToolConfig  # type: ignore[attr-defined]
     mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]

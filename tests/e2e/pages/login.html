@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Login</title></head>
+<body>
+<h1>Sign in</h1>
+<form onsubmit="return go(event)">
+  <p><input id="user" aria-label="Username" placeholder="Username"></p>
+  <p><input id="pass" type="password" aria-label="Password" placeholder="Password"></p>
+  <button type="submit">Log in</button>
+</form>
+<div id="err"></div>
+<script>
+function go(e){
+  e.preventDefault();
+  var u = document.getElementById('user').value;
+  var p = document.getElementById('pass').value;
+  if (u === 'admin' && p === 'secret') {
+    location.href = 'dashboard.html?user=' + encodeURIComponent(u);
+  } else {
+    document.getElementById('err').textContent = 'Invalid credentials';
+  }
+  return false;
+}
+</script>
+</body></html>

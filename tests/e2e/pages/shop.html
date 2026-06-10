@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Shop</title></head>
+<body>
+<h1>Gadget Shop</h1>
+<div id="badge">Cart items: <span id="count">0</span></div>
+<ul>
+  <li>Wireless Mouse - $25
+    <button aria-label="Add Wireless Mouse to cart" onclick="add('Wireless Mouse',25)">Add to cart</button></li>
+  <li>Mechanical Keyboard - $45
+    <button aria-label="Add Mechanical Keyboard to cart" onclick="add('Mechanical Keyboard',45)">Add to cart</button></li>
+  <li>4K Monitor - $200
+    <button aria-label="Add 4K Monitor to cart" onclick="add('4K Monitor',200)">Add to cart</button></li>
+</ul>
+<p><a href="cart.html" id="tocart">View cart</a></p>
+<script>
+function add(name, price){
+  var cart = JSON.parse(localStorage.getItem('cart') || '[]');
+  cart.push({n: name, p: price});
+  localStorage.setItem('cart', JSON.stringify(cart));
+  document.getElementById('count').textContent = cart.length;
+}
+</script>
+</body></html>
