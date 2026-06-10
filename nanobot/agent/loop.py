@@ -927,6 +927,16 @@ class AgentLoop:
         pending: asyncio.Queue | None = None
         try:
             async with lock, gate:
+                # Read-only sessions: reply with a hint and skip LLM.
+                session = self.sessions.get_or_create(session_key)
+                if session.metadata.get("read_only"):
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content="ℹ️ This session is read-only.",
+                        metadata=msg.metadata or {},
+                    ))
+                    return
+
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.
                 pending = asyncio.Queue(maxsize=20)
