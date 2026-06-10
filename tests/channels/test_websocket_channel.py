@@ -1721,6 +1721,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["web"]["fetch"]["use_jina_reader"] is True
         search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
         assert search_providers["duckduckgo"]["credential"] == "none"
+        assert search_providers["exa"]["credential"] == "api_key"
+        assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
@@ -2616,15 +2618,16 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
-def test_sessions_list_includes_active_run_started_at() -> None:
+def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
     from blackcat.session import webui_turns as wth
+    from blackcat.webui import ws_http as ws_http_module
 
     bus = MagicMock()
     session_manager = MagicMock()
-    session_manager.list_sessions.return_value = [
+    sessions = [
         {
             "key": "websocket:chat-1",
             "created_at": "2026-05-19T10:00:00Z",
@@ -2639,6 +2642,7 @@ def test_sessions_list_includes_active_run_started_at() -> None:
             "updated_at": "2026-05-19T10:01:00Z",
         },
     ]
+    monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -2722,9 +2726,9 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.webui.transcript import append_transcript_object
 
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:paged-route"
     for idx in range(1, 4):
         append_transcript_object(

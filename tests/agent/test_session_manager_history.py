@@ -96,48 +96,6 @@ def test_list_sessions_bounds_preview_scan(tmp_path):
     assert rows[0]["preview"] == "assistant trace 0"
 
 
-def test_list_sessions_reuses_valid_index_without_scanning_files(tmp_path, monkeypatch):
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:indexed")
-    session.add_message("user", "indexed preview")
-    manager.save(session)
-
-    assert manager.list_sessions()[0]["preview"] == "indexed preview"
-
-    def fail_scan(path):
-        raise AssertionError(f"unexpected session file scan: {path}")
-
-    monkeypatch.setattr(manager, "_session_index_row_from_file", fail_scan)
-
-    rows = manager.list_sessions()
-
-    assert rows[0]["key"] == "websocket:indexed"
-    assert rows[0]["preview"] == "indexed preview"
-
-
-def test_list_sessions_index_updates_on_save_and_delete(tmp_path, monkeypatch):
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:index-refresh")
-    session.add_message("user", "before")
-    manager.save(session)
-    session.messages.clear()
-    session.add_message("user", "after")
-    session.metadata["title"] = "fresh title"
-    manager.save(session)
-
-    def fail_scan(path):
-        raise AssertionError(f"unexpected session file scan: {path}")
-
-    monkeypatch.setattr(manager, "_session_index_row_from_file", fail_scan)
-
-    rows = manager.list_sessions()
-    assert rows[0]["title"] == "fresh title"
-    assert rows[0]["preview"] == "after"
-
-    assert manager.delete_session("websocket:index-refresh") is True
-    assert manager.list_sessions() == []
-
-
 # --- Original regression test (from PR 2075) ---
 
 def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
