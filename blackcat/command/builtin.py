@@ -212,7 +212,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot))
+        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
