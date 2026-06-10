@@ -93,6 +93,14 @@ def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
 
 
+def _requires_max_completion_tokens(model_name: str) -> bool:
+    """Return True for models that reject ``max_tokens`` (GPT-5 family, o3/o4)."""
+    slug = _model_slug(model_name)
+    return "gpt-5" in slug or any(
+        slug == p or slug.startswith((p + "-", p + ".")) for p in ("o3", "o4")
+    )
+
+
 def _model_thinking_style(model_name: str) -> str:
     return _MODEL_THINKING_STYLES.get(_model_slug(model_name), "")
 
@@ -630,7 +638,9 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
-        if spec and getattr(spec, "supports_max_completion_tokens", False):
+        if (
+            spec and getattr(spec, "supports_max_completion_tokens", False)
+        ) or _requires_max_completion_tokens(model_name):
             kwargs["max_completion_tokens"] = max(1, max_tokens)
         else:
             kwargs["max_tokens"] = max(1, max_tokens)
