@@ -511,8 +511,7 @@ class TestCompactIdleSession:
         real_consolidator,
         mock_provider,
     ):
-        """Assistant-only tails retain a non-contiguous slice, so archive the
-        actual dropped messages rather than a computed prefix."""
+        """Archive receives the full tail for richer summary context."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -539,8 +538,8 @@ class TestCompactIdleSession:
 
         archived_call = mock_provider.chat_with_retry.call_args
         user_content = archived_call.kwargs["messages"][1]["content"]
-        assert "user-14" not in user_content
-        assert "assistant-00" not in user_content
+        assert "user-14" in user_content
+        assert "assistant-00" in user_content
         assert "assistant-09" in user_content
 
     @pytest.mark.asyncio
