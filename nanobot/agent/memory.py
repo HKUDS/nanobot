@@ -716,10 +716,20 @@ class Consolidator:
             return None
         return first_visible_idx
 
+    @staticmethod
+    def _last_summary_text(session: Session) -> str | None:
+        meta = session.metadata.get("_last_summary")
+        if isinstance(meta, dict):
+            text = meta.get("text")
+            return text if isinstance(text, str) and text.strip() else None
+        return meta if isinstance(meta, str) and meta.strip() else None
+
     async def _consolidate_replay_overflow(
         self,
         session: Session,
         replay_max_messages: int | None,
+        *,
+        prior_summary: str | None = None,
     ) -> str | None:
         """Archive messages that would be hidden by the replay message window."""
         end_idx = self._replay_overflow_boundary(session, replay_max_messages)
@@ -734,7 +744,11 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self.archive(chunk, session_key=session.key)
+        summary = await self.archive(
+            chunk,
+            session_key=session.key,
+            prior_summary=prior_summary,
+        )
         session.last_consolidated = end_idx
         self.sessions.save(session)
         return summary
@@ -755,8 +769,7 @@ class Consolidator:
         history = self._full_unconsolidated_history(session, include_timestamps=True)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
-        meta = session.metadata.get("_last_summary")
-        summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
+        summary = self._last_summary_text(session)
         probe_messages = self._build_messages(
             history=history,
             current_message="[token-probe]",
@@ -799,6 +812,7 @@ class Consolidator:
         messages: list[dict],
         *,
         session_key: str | None = None,
+        prior_summary: str | None = None,
     ) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -808,6 +822,13 @@ class Consolidator:
             return None
         try:
             formatted = MemoryStore._format_messages(messages)
+            if prior_summary and prior_summary.strip():
+                formatted = (
+                    "[Previously archived summary]\n"
+                    f"{prior_summary.strip()}\n\n"
+                    "[New conversation messages]\n"
+                    f"{formatted}"
+                )
             formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
                 model=self.model,
@@ -863,10 +884,14 @@ class Consolidator:
 
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)
+            rolling_summary = self._last_summary_text(session)
             last_summary = await self._consolidate_replay_overflow(
                 session,
                 replay_max_messages,
+                prior_summary=rolling_summary,
             )
+            if last_summary and last_summary != "(nothing)":
+                rolling_summary = last_summary
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
@@ -918,13 +943,19 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk, session_key=session.key)
+                summary = await self.archive(
+                    chunk,
+                    session_key=session.key,
+                    prior_summary=rolling_summary,
+                )
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
                 # would just emit duplicate [RAW] entries.
                 if summary:
                     last_summary = summary
+                    if summary != "(nothing)":
+                        rolling_summary = summary
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
                 if not summary:
@@ -990,7 +1021,11 @@ class Consolidator:
             last_active = session.updated_at
             summary: str | None = ""
             if archive_msgs:
-                summary = await self.archive(archive_msgs, session_key=session_key)
+                summary = await self.archive(
+                    archive_msgs,
+                    session_key=session_key,
+                    prior_summary=self._last_summary_text(session),
+                )
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {
