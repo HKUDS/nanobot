@@ -4,7 +4,7 @@ import shlex
 
 import pytest
 
-from nanobot.agent.tools.sandbox import wrap_command
+from nanobot.agent.tools.sandbox import bwrap_userns_failure_hint, wrap_command
 
 
 def _parse(cmd: str) -> list[str]:
@@ -119,3 +119,28 @@ class TestUnknownBackend:
         ws = str(tmp_path / "project")
         with pytest.raises(ValueError):
             wrap_command("", "ls", ws, ws)
+
+
+class TestBwrapDiagnostics:
+    def test_userns_failure_hint_mentions_ubuntu_2404(self, monkeypatch):
+        values = {
+            "kernel.apparmor_restrict_unprivileged_userns": "1",
+            "kernel.unprivileged_userns_clone": "1",
+            "user.max_user_namespaces": "6191547",
+        }
+        monkeypatch.setattr(
+            "nanobot.agent.tools.sandbox._read_sysctl",
+            lambda name: values.get(name),
+        )
+
+        hint = bwrap_userns_failure_hint(
+            "bwrap: creating new namespace failed: Operation not permitted"
+        )
+
+        assert hint is not None
+        assert "Ubuntu 24.04" in hint
+        assert "kernel.apparmor_restrict_unprivileged_userns=1" in hint
+        assert "docs/configuration.md#bubblewrap-on-ubuntu-2404" in hint
+
+    def test_userns_failure_hint_ignores_unrelated_stderr(self):
+        assert bwrap_userns_failure_hint("command not found: python") is None

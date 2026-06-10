@@ -26,7 +26,7 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.sandbox import wrap_command
+from nanobot.agent.tools.sandbox import bwrap_userns_failure_hint, wrap_command
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -292,6 +292,10 @@ class ExecTool(Tool):
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
+                    if self.sandbox == "bwrap":
+                        hint = bwrap_userns_failure_hint(stderr_text)
+                        if hint:
+                            stderr_text = f"{stderr_text.rstrip()}\n\n{hint}\n"
                     output_parts.append(f"STDERR:\n{stderr_text}")
 
             output_parts.append(f"\nExit code: {process.returncode}")
