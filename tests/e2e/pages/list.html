@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Long list</title></head>
+<body>
+<h1>Pick a row</h1>
+<div id="picked">none</div>
+<ul id="list"></ul>
+<script>
+var ul = document.getElementById('list');
+for (var i = 1; i <= 60; i++) {
+  (function(n){
+    var li = document.createElement('li');
+    li.textContent = 'Row ' + n + ' ';
+    var b = document.createElement('button');
+    b.textContent = 'Pick';
+    b.setAttribute('aria-label', 'Pick Row ' + n);
+    b.addEventListener('click', function(){
+      document.getElementById('picked').textContent = String(n);
+    });
+    li.appendChild(b);
+    ul.appendChild(li);
+  })(i);
+}
+</script>
+</body></html>

@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Dashboard</title></head>
+<body>
+<h1 id="welcome"></h1>
+<p>You are signed in.</p>
+<script>
+var u = new URLSearchParams(location.search).get('user') || '';
+document.getElementById('welcome').textContent = 'Welcome ' + u;
+</script>
+</body></html>

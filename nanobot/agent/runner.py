@@ -62,6 +62,7 @@ _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
+_TOOL_SCREENSHOT_CAPTION = "Screenshot(s) from the tool call(s) above."
 _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
@@ -366,7 +367,9 @@ class AgentRunner:
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
+                pending_tool_images: list[dict[str, Any]] = []
                 for tool_call, result in zip(response.tool_calls, results):
+                    text_result, image_blocks = self._split_tool_result_media(result)
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -375,11 +378,12 @@ class AgentRunner:
                             spec,
                             tool_call.id,
                             tool_call.name,
-                            result,
+                            text_result,
                         ),
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                    pending_tool_images.extend(image_blocks)
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -410,6 +414,24 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_count = 0
+                # Deliver any tool-produced screenshots to the model as a
+                # follow-up user message (tool-role messages cannot carry images
+                # on most providers). Reuses the injection merge so it coalesces
+                # cleanly with any pending user injections drained below. Note:
+                # if the turn is interrupted exactly here, the screenshot is not
+                # persisted in the checkpoint and the model will simply
+                # re-screenshot on resume.
+                if pending_tool_images:
+                    self._append_injected_messages(
+                        messages,
+                        [{
+                            "role": "user",
+                            "content": [
+                                *pending_tool_images,
+                                {"type": "text", "text": _TOOL_SCREENSHOT_CAPTION},
+                            ],
+                        }],
+                    )
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
@@ -1105,6 +1127,37 @@ class AgentRunner:
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
+
+    @staticmethod
+    def _split_tool_result_media(result: Any) -> tuple[Any, list[dict[str, Any]]]:
+        """Split a tool result into ``(text_content, image_blocks)``.
+
+        Tools that need the model to *see* an image (e.g. a screenshot from the
+        computer-use tool) return a list of content blocks that includes
+        ``image_url`` blocks. The image blocks are pulled out so they can be
+        delivered as a follow-up ``user`` message — ``tool``-role messages
+        cannot carry images on most providers (OpenAI-compatible, Azure, etc.),
+        whereas an ``image_url`` block in a user turn is the universal,
+        production-tested path across every vision provider.
+
+        The remaining content is returned as the tool result so the tool
+        message stays text-only. Non-list results (the common case) pass
+        through unchanged, so there is no behaviour change for existing tools.
+        """
+        if not isinstance(result, list):
+            return result, []
+        image_blocks: list[dict[str, Any]] = []
+        text_segments: list[str] = []
+        for block in result:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                image_blocks.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                text_segments.append(str(block.get("text", "")))
+            else:
+                text_segments.append(str(block))
+        if not image_blocks:
+            return result, []
+        return "\n".join(s for s in text_segments if s), image_blocks
 
     def _normalize_tool_result(
         self,
