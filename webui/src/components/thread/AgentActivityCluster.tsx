@@ -245,19 +245,32 @@ export function AgentActivityCluster({
   const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && messages.every(messageHasOnlyFileActivity);
+  const hasNonReasoningActivity = toolCalls > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const durationMs = activityDurationMs(messages, isTurnStreaming, now, turnLatencyMs);
   const activityDuration = formatActivityDuration(durationMs);
-  const thoughtLabel = isTurnStreaming
-    ? t("message.activityThinkingFor", {
-        duration: activityDuration,
-        defaultValue: "Thinking for {{duration}}",
-      })
-    : durationMs <= 0
-      ? t("message.activityThought", { defaultValue: "Thought" })
-    : t("message.activityThoughtFor", {
-        duration: activityDuration,
-        defaultValue: "Thought for {{duration}}",
-      });
+  const thoughtLabel = hasNonReasoningActivity
+    ? isTurnStreaming
+      ? t("message.activityWorkingFor", {
+          duration: activityDuration,
+          defaultValue: "Working for {{duration}}",
+        })
+      : durationMs <= 0
+        ? t("message.activityWorked", { defaultValue: "Worked" })
+      : t("message.activityWorkedFor", {
+          duration: activityDuration,
+          defaultValue: "Worked for {{duration}}",
+        })
+    : isTurnStreaming
+      ? t("message.activityThinkingFor", {
+          duration: activityDuration,
+          defaultValue: "Thinking for {{duration}}",
+        })
+      : durationMs <= 0
+        ? t("message.activityThought", { defaultValue: "Thought" })
+      : t("message.activityThoughtFor", {
+          duration: activityDuration,
+          defaultValue: "Thought for {{duration}}",
+        });
 
   const fileActivitySummary = fileCount > 0
     ? hasPendingFileEdit && !singleFilePath

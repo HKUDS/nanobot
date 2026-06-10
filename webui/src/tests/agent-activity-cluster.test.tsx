@@ -359,6 +359,20 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
   });
 
+  it("labels mixed tool activity as work instead of thought", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages()}
+        isTurnStreaming={false}
+        hasBodyBelow
+        turnLatencyMs={12_400}
+      />,
+    );
+
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
+    expect(screen.queryByText("Thought for 12s")).not.toBeInTheDocument();
+  });
+
   it("omits the duration when completed history has no reliable timing", () => {
     render(
       <AgentActivityCluster
