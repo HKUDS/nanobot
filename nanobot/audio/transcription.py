@@ -20,8 +20,8 @@ from nanobot.audio.transcription_registry import (
     get_transcription_provider,
     resolve_transcription_provider,
 )
-from nanobot.providers.registry import find_by_name
 from nanobot.config.paths import get_media_dir
+from nanobot.providers.registry import find_by_name
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
 TranscriptionProviderName = str
