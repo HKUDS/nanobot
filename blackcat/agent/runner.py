@@ -754,11 +754,15 @@ class AgentRunner:
                 context.streamed_reasoning = True
                 await hook.emit_reasoning(delta)
 
+            async def _stream_recover() -> None:
+                await hook.on_stream_end(context, resuming=True)
+
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
                 on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
+                on_stream_recover=_stream_recover,
             )
         elif wants_progress_streaming:
             stream_buf = ""

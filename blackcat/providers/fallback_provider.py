@@ -71,6 +71,8 @@ class FallbackProvider(LLMProvider):
       wasting requests on a known-bad endpoint.
     """
 
+    supports_stream_recover_callback = True
+
     def __init__(
         self,
         primary: LLMProvider,
@@ -116,6 +118,7 @@ class FallbackProvider(LLMProvider):
         )
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+        on_stream_recover = kwargs.pop("on_stream_recover", None)
         if not self._has_fallbacks:
             return await self._primary.chat_stream(**kwargs)
 
@@ -130,7 +133,10 @@ class FallbackProvider(LLMProvider):
 
         kwargs["on_content_delta"] = _tracking_delta
         return await self._try_with_fallback(
-            lambda p, kw: p.chat_stream(**kw), kwargs, has_streamed=has_streamed
+            lambda p, kw: p.chat_stream(**kw),
+            kwargs,
+            has_streamed=has_streamed,
+            on_stream_recover=on_stream_recover,
         )
 
     async def _try_with_fallback(
@@ -138,6 +144,7 @@ class FallbackProvider(LLMProvider):
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         kwargs: dict[str, Any],
         has_streamed: list[bool] | None,
+        on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
 
@@ -157,7 +164,10 @@ class FallbackProvider(LLMProvider):
                         primary_model,
                     )
                     has_streamed[0] = False
-                    kwargs["on_content_delta"] = None
+                    if on_stream_recover:
+                        await on_stream_recover()
+                    else:
+                        kwargs["on_content_delta"] = None
                 else:
                     logger.warning(
                         "Primary model error but content already streamed; skipping failover"
@@ -187,7 +197,20 @@ class FallbackProvider(LLMProvider):
         for idx, fallback in enumerate(self._fallback_presets):
             fallback_model = fallback.model
             if has_streamed is not None and has_streamed[0]:
-                break
+                is_timeout = (
+                    last_response is not None
+                    and (last_response.error_kind or "").lower() == "timeout"
+                )
+                if is_timeout and on_stream_recover:
+                    logger.warning(
+                        "Fallback model '{}' stream stalled after content was emitted; "
+                        "starting a new stream segment and trying next fallback",
+                        self._fallback_presets[idx - 1].model if idx > 0 else primary_model,
+                    )
+                    has_streamed[0] = False
+                    await on_stream_recover()
+                else:
+                    break
             if idx == 0 and primary_skipped:
                 logger.info(
                     "Primary model '{}' circuit open, trying fallback '{}'",
