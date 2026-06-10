@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -39,6 +40,14 @@ def test_stepfun_api_base_overrides_url() -> None:
     provider = StepFunTranscriptionProvider(
         api_key="sk-test",
         api_base="https://api.stepfun.com/step_plan/v1/audio/asr/sse",
+    )
+    assert provider.api_url == "https://api.stepfun.com/step_plan/v1/audio/asr/sse"
+
+
+def test_stepfun_api_base_appends_asr_path() -> None:
+    provider = StepFunTranscriptionProvider(
+        api_key="sk-test",
+        api_base="https://api.stepfun.com/step_plan/v1",
     )
     assert provider.api_url == "https://api.stepfun.com/step_plan/v1/audio/asr/sse"
 
@@ -229,18 +238,18 @@ async def test_sse_empty_text_done_returns_empty(audio_file: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_401_returns_empty_after_retries(audio_file: Path) -> None:
-    """401 is not in the retryable set but HTTPStatusError still triggers
-    the retry loop; all attempts exhaust and return ""."""
+async def test_401_returns_empty_without_retry(audio_file: Path) -> None:
+    """401 is not retryable; bad credentials should fail immediately."""
     stream_cm = _make_stream_cm(401, [])
+    sleep = AsyncMock()
 
     provider = StepFunTranscriptionProvider(api_key="sk-test")
-    with patch("httpx.AsyncClient.stream", stream_cm), patch(
-        "asyncio.sleep", AsyncMock()
-    ):
+    with patch("httpx.AsyncClient.stream", stream_cm), patch("asyncio.sleep", sleep):
         result = await provider.transcribe(audio_file)
 
     assert result == ""
+    assert stream_cm.call_count == 1
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.asyncio
