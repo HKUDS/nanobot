@@ -827,10 +827,22 @@ class LLMProvider(ABC):
                 return response
             last_response = response
             if should_retry_guard is not None and not should_retry_guard():
-                logger.warning(
-                    "LLM stream failed after content was emitted; skipping retry"
-                )
-                return response
+                is_timeout = (response.error_kind or "").lower() == "timeout"
+                if is_timeout:
+                    logger.warning(
+                        "LLM stream stalled after content was emitted; "
+                        "suppressing delta callbacks and retrying"
+                    )
+                    kw.setdefault("on_content_delta", None)
+                    kw["on_content_delta"] = None
+                    kw["on_thinking_delta"] = None
+                    kw["on_tool_call_delta"] = None
+                    should_retry_guard = None
+                else:
+                    logger.warning(
+                        "LLM stream failed after content was emitted; skipping retry"
+                    )
+                    return response
             error_key = ((response.content or "").strip().lower() or None)
             if error_key and error_key == last_error_key:
                 identical_error_count += 1
