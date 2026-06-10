@@ -20,6 +20,7 @@ from loguru import logger
 
 _CHAT_COMPLETIONS_PATH = "chat/completions"
 _TRANSCRIPTIONS_PATH = "audio/transcriptions"
+_STEPFUN_ASR_PATH = "audio/asr/sse"
 _ASSEMBLYAI_DEFAULT_API_BASE = "https://api.assemblyai.com/v2"
 _ASSEMBLYAI_POLL_ATTEMPTS = 60
 _ASSEMBLYAI_POLL_INTERVAL_S = 2.0
@@ -70,6 +71,13 @@ def _resolve_chat_completions_url(api_base: str | None, default_url: str) -> str
 def _resolve_api_path(api_base: str | None, default_base: str, path: str) -> str:
     base = (api_base or default_base).rstrip("/")
     return f"{base}/{path.lstrip('/')}"
+
+
+def _resolve_stepfun_asr_url(api_base: str | None) -> str:
+    base = (api_base or "https://api.stepfun.com/v1").rstrip("/")
+    if base.endswith(_STEPFUN_ASR_PATH):
+        return base
+    return f"{base}/{_STEPFUN_ASR_PATH}"
 
 
 def _audio_mime_type(path: Path) -> str:
@@ -401,14 +409,15 @@ async def _post_stepfun_asr_with_retry(
                         _MAX_RETRIES + 1,
                     )
                     return ""
-            except httpx.HTTPStatusError:
-                if attempt < _MAX_RETRIES:
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
                     await asyncio.sleep(_BACKOFF_S[attempt])
                     continue
-                logger.exception(
-                    "{} transcription failed after {} attempts",
+                logger.error(
+                    "{} transcription HTTP {}{}",
                     provider_label,
-                    _MAX_RETRIES + 1,
+                    e.response.status_code,
+                    f" {e.response.reason_phrase}" if e.response.reason_phrase else "",
                 )
                 return ""
             except (httpx.RequestError, Exception):
@@ -792,10 +801,8 @@ class StepFunTranscriptionProvider:
         model: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("STEPFUN_API_KEY")
-        # api_base is used verbatim; users can point to the Plan endpoint
-        # (https://api.stepfun.com/step_plan/v1/audio/asr/sse) or any
-        # compatible proxy.
-        self.api_url = api_base or self._DEFAULT_URL
+        # api_base accepts either a StepFun base URL or the full SSE endpoint.
+        self.api_url = _resolve_stepfun_asr_url(api_base)
         self.language = language or None
         self.model = model or "stepaudio-2.5-asr"
         logger.debug("StepFun transcription endpoint: {}", self.api_url)
