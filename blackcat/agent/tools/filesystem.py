@@ -47,7 +47,6 @@ class _FsTool(Tool):
         extra_allowed_dirs: list[Path] | None = None,
         extra_read_allowed_dirs: list[Path] | None = None,
         extra_write_allowed_dirs: list[Path] | None = None,
-        extra_read_allowed_files: list[Path] | None = None,
         extra_write_allowed_files: list[Path] | None = None,
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
@@ -62,9 +61,7 @@ class _FsTool(Tool):
             *(extra_read_allowed_dirs or []),
         ]
         self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
-        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
         self._extra_write_allowed_files = list(extra_write_allowed_files or [])
-        self._extra_allowed_dirs = self._extra_read_allowed_dirs
         self._restrict_to_workspace = (
             bool(restrict_to_workspace)
             if restrict_to_workspace is not None
@@ -143,7 +140,7 @@ class _FsTool(Tool):
         return self._resolve_with_extra(
             path,
             self._extra_read_allowed_dirs,
-            self._extra_read_allowed_files,
+            None,
             include_media_dir=True,
         )
 
