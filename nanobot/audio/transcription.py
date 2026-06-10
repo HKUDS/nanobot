@@ -8,6 +8,7 @@ HTTP details; those live in ``nanobot.providers.transcription``.
 
 from __future__ import annotations
 
+import os
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,7 @@ from nanobot.audio.transcription_registry import (
     get_transcription_provider,
     resolve_transcription_provider,
 )
+from nanobot.providers.registry import find_by_name
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.media_decode import FileSizeExceeded, save_base64_data_url
 
@@ -74,6 +76,33 @@ def _provider_config(config: Any, provider: str) -> Any:
     return getattr(getattr(config, "providers", None), provider, None)
 
 
+def _provider_default_api_base(provider: str) -> str | None:
+    spec = find_by_name(provider)
+    return spec.default_api_base if spec else None
+
+
+def _resolve_transcription_api_key(provider: str, provider_cfg: Any) -> str:
+    api_key = getattr(provider_cfg, "api_key", None) if provider_cfg else None
+    if api_key:
+        return api_key
+
+    spec = find_by_name(provider)
+    if provider == "siliconflow":
+        env_key = os.environ.get("SILICONFLOW_API_KEY")
+        if env_key:
+            return env_key
+
+    env_key = spec.env_key if spec else ""
+    return os.environ.get(env_key) if env_key else ""
+
+
+def _resolve_transcription_api_base(provider: str, provider_cfg: Any) -> str:
+    api_base = getattr(provider_cfg, "api_base", None) if provider_cfg else None
+    if api_base:
+        return api_base
+    return _provider_default_api_base(provider) or ""
+
+
 def _extract_data_url_mime(url: str) -> str | None:
     header, _, _ = url.partition(",")
     if not header.startswith("data:") or ";base64" not in header:
@@ -102,8 +131,8 @@ def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
         provider=provider,
         model=(getattr(top, "model", None) or default_model).strip(),
         language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
-        api_key=getattr(provider_cfg, "api_key", None) or "",
-        api_base=getattr(provider_cfg, "api_base", None) or "",
+        api_key=_resolve_transcription_api_key(provider, provider_cfg),
+        api_base=_resolve_transcription_api_base(provider, provider_cfg),
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
         max_upload_mb=int(getattr(top, "max_upload_mb", 25)),
     )

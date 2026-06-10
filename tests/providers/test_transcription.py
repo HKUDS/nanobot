@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -114,6 +115,48 @@ def test_resolver_supports_openrouter_transcription_provider() -> None:
     assert resolved.api_base == "https://openrouter.ai/api/v1"
 
 
+def test_resolver_supports_siliconflow_transcription_provider() -> None:
+    config = Config()
+    config.transcription.provider = "siliconflow"
+    config.transcription.model = "TeleAI/TeleSpeechASR"
+    config.transcription.language = "zh"
+    config.providers.siliconflow.api_key = "sf-test"
+    config.providers.siliconflow.api_base = "https://api.siliconflow.cn/v1"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "siliconflow"
+    assert resolved.model == "TeleAI/TeleSpeechASR"
+    assert resolved.language == "zh"
+    assert resolved.api_key == "sf-test"
+    assert resolved.api_base == "https://api.siliconflow.cn/v1"
+
+
+def test_resolver_defaults_siliconflow_transcription_api_base() -> None:
+    config = Config()
+    config.transcription.provider = "siliconflow"
+    config.providers.siliconflow.api_key = "sf-test"
+
+    resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "siliconflow"
+    assert resolved.model == "FunAudioLLM/SenseVoiceSmall"
+    assert resolved.api_key == "sf-test"
+    assert resolved.api_base == "https://api.siliconflow.cn/v1"
+
+
+def test_resolver_supports_siliconflow_transcription_api_key_env() -> None:
+    config = Config()
+    config.transcription.provider = "siliconflow"
+
+    with patch.dict(os.environ, {"SILICONFLOW_API_KEY": "sf-env-key"}, clear=True):
+        resolved = resolve_transcription_config(config)
+
+    assert resolved.provider == "siliconflow"
+    assert resolved.api_key == "sf-env-key"
+    assert resolved.api_base == "https://api.siliconflow.cn/v1"
+
+
 def test_resolver_supports_xiaomi_mimo_transcription_provider() -> None:
     config = Config()
     config.transcription.provider = "xiaomi_mimo"
@@ -146,6 +189,13 @@ def test_resolver_accepts_legacy_xiaomi_transcription_alias() -> None:
 
 
 def test_transcription_registry_lists_providers_and_aliases() -> None:
+    siliconflow = get_transcription_provider("siliconflow")
+    assert siliconflow is not None
+    assert siliconflow.adapter == "nanobot.providers.transcription:OpenAITranscriptionProvider"
+    assert siliconflow.load_adapter() is OpenAITranscriptionProvider
+    assert siliconflow.default_model == "FunAudioLLM/SenseVoiceSmall"
+    assert resolve_transcription_provider("silicon").name == "siliconflow"
+
     assert "assemblyai" in transcription_provider_names()
     assert get_transcription_provider("assemblyai").default_model == "universal-3-pro,universal-2"
     assert resolve_transcription_provider("mimo").name == "xiaomi_mimo"
