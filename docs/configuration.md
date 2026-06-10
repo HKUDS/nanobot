@@ -1089,7 +1089,7 @@ Each fallback candidate can be either:
 
 String entries are preset names, not raw model names. If you want to use a model that is not already a preset, use the inline object form.
 
-Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
+Failover normally runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Stream-stall timeouts are the recovery exception: if the provider already emitted partial answer text and then stalls, nanobot closes the current stream segment and retries/fails over in a new segment. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
 
 If fallback candidates use smaller `contextWindowTokens` values, blackcat builds context using the smallest window in the active chain so every candidate can receive the same prompt.
 
