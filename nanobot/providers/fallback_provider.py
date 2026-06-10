@@ -58,14 +58,17 @@ _FALLBACK_ERROR_TOKENS = (
 class FallbackProvider(LLMProvider):
     """Wrap a primary provider and transparently failover to fallback models.
 
-    When the primary model returns an error and no content has been streamed yet,
-    the wrapper tries each fallback model in order.  Each fallback model may
-    reside on a different provider — a factory callable creates the underlying
-    provider on-the-fly.
+    When the primary model returns a fallbackable error before content has been
+    streamed, the wrapper tries each fallback model in order. Streamed timeout
+    errors are the recovery exception: the caller may close the current stream
+    segment, then the wrapper continues failover with later deltas in a new
+    segment. Each fallback model may reside on a different provider — a factory
+    callable creates the underlying provider on-the-fly.
 
     Key design:
     - Failover is request-scoped (the wrapper itself is stateless between turns).
-    - Skipped when content was already streamed to avoid duplicate output.
+    - Skipped when content was already streamed to avoid duplicate output,
+      except timeout recovery can resume in a new stream segment.
     - Recursive failover is prevented by the factory returning plain providers.
     - Primary provider is circuit-broken after repeated failures to avoid
       wasting requests on a known-bad endpoint.
