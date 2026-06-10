@@ -63,6 +63,23 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
 
+    async def test_summarize_appends_session_key_to_history(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User fixed a bug in the auth module.",
+            finish_reason="stop",
+        )
+        messages = [{"role": "user", "content": "fix the auth bug"}]
+
+        await consolidator.archive(messages, session_key="telegram:chat-1")
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert entries[0]["session_key"] == "telegram:chat-1"
+
     async def test_summarize_raw_dumps_on_llm_failure(self, consolidator, mock_provider, store):
         """On LLM failure, raw-dump messages to HISTORY.md."""
         mock_provider.chat_with_retry.side_effect = Exception("API error")
@@ -72,6 +89,20 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
+
+    async def test_raw_dump_fallback_appends_session_key(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        mock_provider.chat_with_retry.side_effect = Exception("API error")
+        messages = [{"role": "user", "content": "hello"}]
+
+        await consolidator.archive(messages, session_key="slack:chat-2")
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert entries[0]["session_key"] == "slack:chat-2"
 
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
@@ -371,6 +402,27 @@ class TestCompactIdleSession:
         assert "last_active" in meta
 
     @pytest.mark.asyncio
+    async def test_idle_compact_writes_session_key_to_history(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary of old conversation.", finish_reason="stop"
+        )
+        session = real_consolidator.sessions.get_or_create("cli:test")
+        for i in range(10):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        real_consolidator.sessions.save(session)
+
+        await real_consolidator.compact_idle_session("cli:test", max_suffix=4)
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert entries[0]["session_key"] == "cli:test"
+
+    @pytest.mark.asyncio
     async def test_empty_session_refreshes_timestamp(self, real_consolidator):
         """Empty session with old updated_at → refreshed after call, returns ''."""
         from datetime import datetime, timedelta
@@ -639,6 +691,12 @@ class TestRawArchiveTruncation:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "hello" in entries[0]["content"]
+
+    def test_raw_archive_preserves_session_key(self, store):
+        messages = [{"role": "user", "content": "hello"}]
+        store.raw_archive(messages, session_key="websocket:chat-1")
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert entries[0]["session_key"] == "websocket:chat-1"
 
     def test_raw_archive_custom_max_chars(self, store):
         """max_chars parameter should override default limit."""
