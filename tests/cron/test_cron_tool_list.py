@@ -400,6 +400,27 @@ def test_add_job_captures_metadata_and_session_key(tmp_path) -> None:
     assert jobs[0].payload.session_key == "slack:C99:111.222"
 
 
+def test_add_job_invalid_cron_expr_returns_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
+
+    result = tool._add_job(None, "test", None, "not a cron", None, None)
+
+    assert result.startswith("Error:")
+    assert "invalid cron expression" in result
+    assert tool._cron.list_jobs() == []
+
+
+def test_add_job_empty_cron_expr_returns_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
+
+    # Pass cron_expr=None falls through to "either every_seconds, cron_expr, or at is required"
+    result = tool._add_job(None, "test", None, None, None, None)
+
+    assert "Error:" in result
+
+
 def test_list_excludes_disabled_jobs(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     job = tool._cron.add_job(

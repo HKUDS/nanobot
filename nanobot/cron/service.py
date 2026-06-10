@@ -59,16 +59,42 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 
 def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     """Validate schedule fields that would otherwise create non-runnable jobs."""
-    if schedule.tz and schedule.kind != "cron":
-        raise ValueError("tz can only be used with cron schedules")
+    if schedule.kind == "every":
+        if not schedule.every_ms or schedule.every_ms <= 0:
+            raise ValueError("every_ms must be a positive integer")
+        if schedule.tz:
+            raise ValueError("tz can only be used with cron schedules")
+        return
 
-    if schedule.kind == "cron" and schedule.tz:
+    if schedule.kind == "at":
+        if not schedule.at_ms:
+            raise ValueError("at_ms is required for one-time jobs")
+        if schedule.tz:
+            raise ValueError("tz can only be used with cron schedules")
+        return
+
+    if schedule.kind == "cron":
+        if not schedule.expr:
+            raise ValueError("cron_expr is required for cron jobs")
         try:
-            from zoneinfo import ZoneInfo
+            from croniter import croniter
 
-            ZoneInfo(schedule.tz)
-        except Exception:
-            raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+            if not croniter.is_valid(schedule.expr):
+                raise ValueError(f"invalid cron expression: {schedule.expr!r}")
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"invalid cron expression: {schedule.expr!r}") from exc
+        if schedule.tz:
+            try:
+                from zoneinfo import ZoneInfo
+
+                ZoneInfo(schedule.tz)
+            except Exception:
+                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
+        return
+
+    raise ValueError(f"unsupported schedule kind: {schedule.kind}")
 
 
 class CronService:

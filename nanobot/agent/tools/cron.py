@@ -206,17 +206,20 @@ class CronTool(Tool, ContextAware):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
 
-        job = self._cron.add_job(
-            name=name or message[:30],
-            schedule=schedule,
-            message=message,
-            deliver=deliver,
-            channel=channel,
-            to=chat_id,
-            delete_after_run=delete_after,
-            channel_meta=self._metadata.get(),
-            session_key=self._session_key.get() or None,
-        )
+        try:
+            job = self._cron.add_job(
+                name=name or message[:30],
+                schedule=schedule,
+                message=message,
+                deliver=deliver,
+                channel=channel,
+                to=chat_id,
+                delete_after_run=delete_after,
+                channel_meta=self._metadata.get(),
+                session_key=self._session_key.get() or None,
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
         return f"Created job '{job.name}' (id: {job.id})"
 
     def _format_timing(self, schedule: CronSchedule) -> str:
