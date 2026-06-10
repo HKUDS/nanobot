@@ -4,6 +4,11 @@ import pytest
 
 from blackcat.agent.memory import MemoryStore
 from blackcat.providers.base import LLMResponse
+from blackcat.security.workspace_access import (
+    bind_workspace_scope,
+    default_workspace_scope,
+    reset_workspace_scope,
+)
 from blackcat.utils.prompt_templates import render_template
 
 
@@ -172,6 +177,41 @@ class TestDreamTools:
 
         assert "Successfully wrote" in result
         assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+
+    @pytest.mark.asyncio
+    async def test_dream_tools_keep_internal_write_scope_under_full_access(self, store):
+        tools = store.build_dream_tools()
+        scope = default_workspace_scope(store.workspace, restrict_to_workspace=False)
+        outside = store.workspace.parent / f"{store.workspace.name}-outside"
+        outside.mkdir()
+        outside_target = outside / "escape.txt"
+        skill_target = store.workspace / "skills" / "scoped" / "SKILL.md"
+
+        token = bind_workspace_scope(scope)
+        try:
+            outside_result = await tools.execute(
+                "write_file",
+                {"path": str(outside_target), "content": "owned"},
+            )
+            skill_result = await tools.execute(
+                "apply_patch",
+                {
+                    "edits": [
+                        {
+                            "path": "skills/scoped/SKILL.md",
+                            "action": "add",
+                            "new_text": "---\nname: scoped\n---\n",
+                        }
+                    ]
+                },
+            )
+        finally:
+            reset_workspace_scope(token)
+
+        assert "outside allowed directory" in outside_result
+        assert not outside_target.exists()
+        assert "Patch applied" in skill_result
+        assert skill_target.read_text(encoding="utf-8").startswith("---\nname: scoped")
 
     @pytest.mark.asyncio
     async def test_dream_cannot_modify_memory_internal_files(self, store):
