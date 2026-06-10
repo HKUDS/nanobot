@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from nanobot import __version__
+from blackcat import __version__
 
 logger = logging.getLogger(__name__)
 

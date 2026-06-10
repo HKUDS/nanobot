@@ -34,7 +34,7 @@ from blackcat.webui.workspaces import (
     write_webui_default_access_mode,
 )
 
-from nanobot import __version__
+from blackcat import __version__
 
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
