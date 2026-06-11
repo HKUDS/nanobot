@@ -1,6 +1,7 @@
 import {
   Archive,
-Brain,
+  Blocks,
+  Brain,
   Menu,
   Search,
   Settings,

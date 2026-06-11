@@ -58,10 +58,6 @@ import {
 } from "@/components/thread/WorkspaceControls";
 import { Button } from "@/components/ui/button";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
   MAX_IMAGES_PER_MESSAGE,

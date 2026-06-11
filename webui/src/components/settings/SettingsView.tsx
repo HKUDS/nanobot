@@ -6014,3 +6014,15 @@ function NumberInput({
     </div>
   );
 }
+
+export function BlackcatBrandLogo({ size = "md", testId }: { size?: "sm" | "md" | "lg"; testId?: string }) {
+  const sizeClass = size === "sm" ? "w-8 h-8" : size === "lg" ? "w-16 h-16" : "w-10 h-10";
+  return (
+    <div
+      data-testid={testId ?? "blackcat-brand-logo"}
+      className={`${sizeClass} flex items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-600 p-1 shadow-lg`}
+    >
+      <span className="text-lg font-bold text-white">🐈</span>
+    </div>
+  );
+}
