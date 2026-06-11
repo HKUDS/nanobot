@@ -290,6 +290,91 @@ def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
     assert msgs[1]["latencyMs"] == 42
 
 
+def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:cron-tail"
+    turn_id = "cron:job:run"
+    for ev in (
+        {
+            "event": "message",
+            "chat_id": "cron-tail",
+            "text": 'message({"content":"Cron test"})',
+            "kind": "tool_hint",
+            "tool_events": [{
+                "phase": "start",
+                "call_id": "call-message",
+                "name": "message",
+                "arguments": {"content": "Cron test"},
+            }],
+            "turn_id": turn_id,
+            "turn_phase": "activity",
+            "turn_seq": 5,
+        },
+        {
+            "event": "message",
+            "chat_id": "cron-tail",
+            "text": "Cron test",
+            "source": {"kind": "cron", "label": "one-min-test"},
+            "turn_id": turn_id,
+            "turn_phase": "answer",
+            "turn_seq": 6,
+        },
+        {
+            "event": "message",
+            "chat_id": "cron-tail",
+            "text": "",
+            "kind": "progress",
+            "tool_events": [{
+                "phase": "end",
+                "call_id": "call-message",
+                "name": "message",
+                "arguments": {"content": "Cron test"},
+                "result": "ok",
+            }],
+            "turn_id": turn_id,
+            "turn_phase": "activity",
+            "turn_seq": 7,
+        },
+        {
+            "event": "turn_end",
+            "chat_id": "cron-tail",
+            "turn_id": turn_id,
+            "turn_phase": "complete",
+            "turn_seq": 8,
+        },
+    ):
+        append_transcript_object(key, ev)
+
+    out = build_webui_thread_response(key)
+
+    assert out is not None
+    assert out["has_pending_tool_calls"] is False
+    assert out["messages"][-1]["kind"] == "trace"
+    assert out["messages"][-2]["content"] == "Cron test"
+
+
+def test_thread_response_marks_unfinished_tool_tail_pending(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:active-tail"
+    append_transcript_object(
+        key,
+        {
+            "event": "message",
+            "chat_id": "active-tail",
+            "text": 'exec({"command":"date"})',
+            "kind": "tool_hint",
+        },
+    )
+
+    out = build_webui_thread_response(key)
+
+    assert out is not None
+    assert out["has_pending_tool_calls"] is True
+
+
 def test_replay_preserves_turn_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t-turn"

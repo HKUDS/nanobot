@@ -416,6 +416,40 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(true);
   });
 
+  it("uses the server pending flag for completed tails that still end with trace rows", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      has_pending_tool_calls: false,
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content: "Cron test",
+          turnId: "cron:run",
+          createdAt: 1,
+        },
+        {
+          id: "t1",
+          role: "tool",
+          kind: "trace",
+          content: "message({})",
+          traces: ["message({})"],
+          turnId: "cron:run",
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-cron-done"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
+    expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
   it("does not flag transcript as pending when last row is not a trace", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

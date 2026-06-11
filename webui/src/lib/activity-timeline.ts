@@ -52,6 +52,38 @@ export function isAgentActivityMember(message: UIMessage): boolean {
   return isReasoningOnlyAssistant(message) || message.kind === "trace";
 }
 
+export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
+  if (messages.length === 0) return false;
+  const last = messages[messages.length - 1];
+  if (!isAgentActivityMember(last)) return false;
+
+  let trailingStart = messages.length - 1;
+  while (
+    trailingStart > 0
+    && isAgentActivityMember(messages[trailingStart - 1])
+  ) {
+    trailingStart -= 1;
+  }
+
+  const trailing = messages.slice(trailingStart);
+  if (trailing.some((message) => message.isStreaming || message.reasoningStreaming)) {
+    return true;
+  }
+
+  const previous = messages[trailingStart - 1];
+  if (!previous || previous.role !== "assistant" || isAgentActivityMember(previous)) {
+    return true;
+  }
+
+  const trailingTurnIds = new Set(
+    trailing
+      .map((message) => message.turnId)
+      .filter((turnId): turnId is string => typeof turnId === "string" && turnId.length > 0),
+  );
+  if (!previous.turnId) return trailingTurnIds.size > 0;
+  return trailingTurnIds.size > 0 && !trailingTurnIds.has(previous.turnId);
+}
+
 export function normalizeActivityTimeline(
   messages: UIMessage[],
   options: NormalizeActivityTimelineOptions = {},

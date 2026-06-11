@@ -1823,6 +1823,29 @@ def fork_boundary_message_count(lines: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def has_pending_tool_calls(lines: list[dict[str, Any]]) -> bool:
+    """Return True when the selected transcript tail looks like an unfinished turn."""
+    for rec in reversed(lines):
+        ev = rec.get("event")
+        if ev == "turn_end":
+            return False
+        if ev == "user":
+            return False
+        if ev == "message":
+            return rec.get("kind") in {"tool_hint", "progress", "reasoning"}
+        if ev in {
+            "delta",
+            "stream_end",
+            "reasoning_delta",
+            "reasoning_end",
+            "file_edit",
+        }:
+            return True
+        if ev in {WEBUI_FORK_MARKER_EVENT}:
+            continue
+    return False
+
+
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -1855,6 +1878,7 @@ def build_webui_thread_response(
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
         "messages": msgs,
+        "has_pending_tool_calls": has_pending_tool_calls(lines),
     }
     if page is not None:
         page["loaded_message_count"] = len(msgs)
