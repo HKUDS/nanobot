@@ -90,14 +90,21 @@ def _safe_read_json(path: Path) -> dict | None:
         backup = path.with_suffix(path.suffix + f".corrupted.{int(_epoch_ms())}")
         try:
             path.rename(backup)
-        except OSError:
-            pass
-        logger.warning(
-            "telemetry: corrupt JSON at {} (kind=json_corruption): {}; backed up to {}",
-            path,
-            exc,
-            backup,
-        )
+        except OSError as rename_exc:
+            logger.warning(
+                "telemetry: corrupt JSON at {} (kind=json_corruption): {}; "
+                "backup rename failed ({}), original left in place",
+                path,
+                exc,
+                rename_exc,
+            )
+        else:
+            logger.warning(
+                "telemetry: corrupt JSON at {} (kind=json_corruption): {}; backed up to {}",
+                path,
+                exc,
+                backup,
+            )
         return None
 
 
@@ -105,6 +112,79 @@ def _epoch_ms() -> float:
     import time
 
     return time.time() * 1000
+
+
+def _max_iso(a: str | None, b: str | None) -> str | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a >= b else b
+
+
+def _min_iso(a: str | None, b: str | None) -> str | None:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a <= b else b
+
+
+def _rmw_merge(
+    on_disk: dict | None,
+    snapshot: dict,
+    last_synced: dict,
+    writer: Writer,
+) -> dict:
+    """Merge per spec §4.3 RMW table.
+
+    on_disk: full telemetry doc as read from disk (None / corrupt → rebuild empty).
+    snapshot: in-memory entries dict only ({name: entry}).
+    last_synced: {name: {views, uses, patches}} previously flushed by this process.
+    writer: "bump" or "reconcile" — controls origin/shadowed merge branch.
+    """
+    base = on_disk if isinstance(on_disk, dict) and "entries" in on_disk else {
+        "schema_version": SCHEMA_VERSION,
+        "updated_at": _now_iso(),
+        "entries": {},
+    }
+    disk_entries: dict = dict(base.get("entries", {}))
+
+    for name, snap_entry in snapshot.items():
+        disk_entry = disk_entries.get(name)
+        if disk_entry is None:
+            # Branch: entry only in snapshot
+            if writer == "bump":
+                continue  # do not resurrect
+            # writer == "reconcile" → first landing
+            disk_entries[name] = dict(snap_entry)
+            continue
+        # Branch: entry in both
+        merged_entry = dict(disk_entry)  # preserve unknown future fields
+        last = last_synced.get(name, {"views": 0, "uses": 0, "patches": 0})
+        for counter in ("views", "uses", "patches"):
+            delta = max(snap_entry.get(counter, 0) - last.get(counter, 0), 0)
+            merged_entry[counter] = disk_entry.get(counter, 0) + delta
+        merged_entry["last_view"] = _max_iso(
+            disk_entry.get("last_view"), snap_entry.get("last_view")
+        )
+        merged_entry["last_use"] = _max_iso(
+            disk_entry.get("last_use"), snap_entry.get("last_use")
+        )
+        merged_entry["entry_created_at"] = _min_iso(
+            disk_entry.get("entry_created_at"), snap_entry.get("entry_created_at")
+        )
+        if writer == "reconcile" and snap_entry.get("origin") != "unknown":
+            merged_entry["origin"] = snap_entry["origin"]
+            merged_entry["shadowed"] = list(snap_entry.get("shadowed", []))
+        disk_entries[name] = merged_entry
+
+    # Entries only on disk (snapshot didn't touch them) → keep as-is (already in disk_entries)
+    base = dict(base)
+    base["entries"] = disk_entries
+    base["schema_version"] = max(int(base.get("schema_version", SCHEMA_VERSION)), SCHEMA_VERSION)
+    base["updated_at"] = _now_iso()
+    return base
 
 
 def _zero_entry_with_unknown_origin() -> TelemetryEntrySnapshot:
