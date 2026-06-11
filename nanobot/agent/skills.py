@@ -67,6 +67,8 @@ class SkillsLoader:
         for skill_dir in base.iterdir():
             if not skill_dir.is_dir():
                 continue
+            if base == self.workspace_skills and skill_dir.name == "agent":
+                continue
             skill_file = skill_dir / "SKILL.md"
             if not skill_file.exists():
                 continue
@@ -75,6 +77,16 @@ class SkillsLoader:
                 continue
             entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
+
+    def _entries_from_agent_dir(self) -> list[dict[str, str]]:
+        """Scan ``<workspace>/skills/agent/`` as the agent-source slot.
+
+        Entries still report ``source="workspace"`` per spec §3.1 (legacy
+        2-value field untouched for WebUI/CLI back-compat). The 3-value
+        ``origin`` is computed by consumers via ``_infer_origin_from_path``.
+        """
+        agent_dir = self.workspace_skills / "agent"
+        return self._skill_entries_from_dir(agent_dir, "workspace")
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -87,6 +99,9 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
+        # B2 minimal: agent layer concatenated with workspace before builtin-skip-names
+        # is computed. B3 refines with user > agent > builtin priority + collision warn.
+        skills.extend(self._entries_from_agent_dir())
         workspace_names = {entry["name"] for entry in skills}
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(

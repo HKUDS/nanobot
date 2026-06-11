@@ -415,3 +415,32 @@ def test_infer_origin_builtin(tmp_path: Path) -> None:
     loader = SkillsLoader(tmp_path)
     p = BUILTIN_SKILLS_DIR / "foo" / "SKILL.md"
     assert loader._infer_origin_from_path(p) == "builtin"
+
+
+def test_agent_subdir_not_treated_as_top_level_skill(tmp_path: Path) -> None:
+    # User has <workspace>/skills/agent/foo/SKILL.md
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "agent" / "foo").mkdir(parents=True)
+    (skills_dir / "agent" / "foo" / "SKILL.md").write_text("---\nname: foo\n---\nbody")
+    (skills_dir / "real-user-skill").mkdir()
+    (skills_dir / "real-user-skill" / "SKILL.md").write_text("---\nname: rus\n---\nbody")
+
+    loader = SkillsLoader(tmp_path)
+    names = {e["name"] for e in loader.list_skills(filter_unavailable=False)}
+    # "agent" itself MUST NOT appear as a skill name
+    assert "agent" not in names
+    # The agent-source skill MUST appear under its real name
+    assert "foo" in names
+    assert "real-user-skill" in names
+
+
+def test_entries_from_agent_dir_returns_real_skill_entries(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills" / "agent"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "auto-sum").mkdir()
+    (skills_dir / "auto-sum" / "SKILL.md").write_text("---\nname: auto-sum\n---\nbody")
+    loader = SkillsLoader(tmp_path)
+    entries = loader._entries_from_agent_dir()
+    assert any(e["name"] == "auto-sum" for e in entries)
+    # Source field stays "workspace" per spec §3.1
+    assert all(e["source"] == "workspace" for e in entries)
