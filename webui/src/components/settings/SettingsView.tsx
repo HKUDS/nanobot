@@ -235,7 +235,7 @@ interface CustomMcpForm {
   toolTimeout: string;
 }
 
-const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
+const LOCAL_PREFS_STORAGE_KEY = "blackcat-webui.settings-preferences";
 
 const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   density: "comfortable",
@@ -351,7 +351,7 @@ const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   presetLabel: "Default",
   contextWindowTokens: 65_536,
   timezone: "UTC",
-  botName: "nanobot",
+  botName: "blackcat",
   botIcon: "",
   toolHintMaxLength: 40,
 };
@@ -3404,7 +3404,7 @@ function AppsCatalogSettings({
 
       {requiresRestartPending ? (
         <div className="flex flex-col gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-          <span>{tx("settings.mcp.restartRequired", "Restart nanobot to connect updated MCP tools.")}</span>
+          <span>{tx("settings.mcp.restartRequired", "Restart blackcat to connect updated MCP tools.")}</span>
           {onRestart ? (
             <Button
               type="button"
@@ -4434,7 +4434,7 @@ function RuntimeSettings({
             pendingRestart={requiresRestartPending}
             dirtyMessage={
               isNativeHost
-                ? tx("settings.status.hostRestartAfterSaving", "Save changes and nanobot will restart its engine.")
+                ? tx("settings.status.hostRestartAfterSaving", "Save changes and blackcat will restart its engine.")
                 : tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
             }
             pendingMessage={
