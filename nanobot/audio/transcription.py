@@ -9,12 +9,60 @@ HTTP details; those live in ``nanobot.providers.transcription``.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
+import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+# WhatsApp (and some other channels) deliver voice notes as .ogg/.opus, which
+# transcription backends — especially AssemblyAI — sometimes reject or return
+# empty text for. Normalizing to 16 kHz mono WAV with ffmpeg before upload
+# fixes intermittent "Transcription failed" on otherwise-valid audio.
+# (Custom defensive layer; upstream remains the source of truth otherwise.)
+_CONVERT_EXTENSIONS = {".ogg", ".opus", ".oga", ".m4a", ".amr", ".3gp", ".aac", ".webm"}
+
+
+def ensure_wav16k(file_path: str | Path) -> tuple[Path, Path | None]:
+    """Return a 16 kHz mono WAV version of the audio for transcription.
+
+    Returns a ``(path_to_use, tmp_path_or_None)`` tuple. ``tmp_path`` is set
+    only when a temporary converted file was created and should be cleaned up
+    by the caller. If ffmpeg is unavailable or conversion fails, the original
+    path is returned unchanged (safe fallback, preserves prior behavior).
+    """
+    src = Path(file_path)
+    if src.suffix.lower() not in _CONVERT_EXTENSIONS:
+        return src, None
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        logger.warning("ffmpeg not found; sending original audio without conversion")
+        return src, None
+    try:
+        fd, tmp_name = tempfile.mkstemp(suffix=".wav", prefix="nb_transcribe_")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        result = subprocess.run(
+            [ffmpeg, "-y", "-i", str(src), "-ar", "16000", "-ac", "1", str(tmp)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+        if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+            logger.warning(
+                "ffmpeg conversion failed (rc={}); using original audio",
+                result.returncode,
+            )
+            tmp.unlink(missing_ok=True)
+            return src, None
+        return tmp, tmp
+    except Exception as e:
+        logger.warning("Audio conversion error ({}); using original audio", e)
+        return src, None
 
 from nanobot.audio.transcription_registry import (
     get_transcription_provider,
@@ -204,4 +252,11 @@ async def transcribe_audio_file(
         language=config.language,
         model=config.model,
     )
-    return await provider.transcribe(file_path)
+    # Defensive: normalize WhatsApp .ogg/.opus voice notes to 16 kHz mono WAV
+    # before handing off to the provider (fixes empty AssemblyAI results).
+    use_path, tmp_path = ensure_wav16k(file_path)
+    try:
+        return await provider.transcribe(use_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
