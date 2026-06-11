@@ -671,6 +671,30 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
 
 
+def test_make_provider_treats_dynamic_custom_provider_as_direct():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "my-company-api", "model": "gpt-4o-mini"}},
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.com/v1",
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+        provider = make_provider(config)
+        asyncio.run(provider._ensure_client())
+
+    assert provider.get_default_model() == "gpt-4o-mini"
+    assert provider._spec.name == "my_company_api"
+    assert provider._spec.is_direct is True
+    kwargs = mock_async_openai.call_args.kwargs
+    assert kwargs["api_key"] == "no-key"
+    assert kwargs["base_url"] == "https://example.com/v1"
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""

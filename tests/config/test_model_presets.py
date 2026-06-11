@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 
 from blackcat.config.schema import Config
@@ -46,6 +48,35 @@ def test_provider_api_type_is_openai_only() -> None:
                 }
             }
         })
+
+    with pytest.raises(ValueError, match="only supported"):
+        Config.model_validate({
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.test/v1",
+                    "apiType": "responses",
+                }
+            }
+        })
+
+
+def test_custom_provider_fallback_uses_model_extra_without_pydantic_warnings() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "unmatched-model",
+            }
+        },
+        "providers": {
+            "my-company-api": {
+                "apiBase": "https://example.test/v1",
+            }
+        },
+    })
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert config.get_provider_name() == "my-company-api"
 
 
 def test_legacy_defaults_config_without_presets_still_resolves() -> None:
