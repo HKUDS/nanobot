@@ -695,6 +695,106 @@ def test_make_provider_treats_dynamic_custom_provider_as_direct():
     assert kwargs["base_url"] == "https://example.com/v1"
 
 
+def test_make_provider_strips_dynamic_custom_route_prefix_from_request_model():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "my-company-api/gpt-4o-mini"}},
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.com/v1",
+                }
+            },
+        }
+    )
+
+    provider = make_provider(config)
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model=None,
+        max_tokens=16,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+    body = provider._build_responses_body(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model=None,
+        max_tokens=16,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert config.get_provider_name() == "my-company-api"
+    assert kwargs["model"] == "gpt-4o-mini"
+    assert body["model"] == "gpt-4o-mini"
+
+
+def test_make_provider_preserves_namespaced_model_for_forced_dynamic_provider():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "my-company-api",
+                    "model": "openai/gpt-4o-mini",
+                }
+            },
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.com/v1",
+                }
+            },
+        }
+    )
+
+    provider = make_provider(config)
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model=None,
+        max_tokens=16,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "openai/gpt-4o-mini"
+
+
+def test_make_provider_strips_dynamic_custom_route_prefix_once():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "auto",
+                    "model": "my-company-api/openai/gpt-4o-mini",
+                }
+            },
+            "providers": {
+                "my-company-api": {
+                    "apiBase": "https://example.com/v1",
+                }
+            },
+        }
+    )
+
+    provider = make_provider(config)
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model=None,
+        max_tokens=16,
+        temperature=0.1,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "openai/gpt-4o-mini"
+
+
 def test_make_provider_rejects_dynamic_custom_provider_without_api_base():
     config = Config.model_validate(
         {
