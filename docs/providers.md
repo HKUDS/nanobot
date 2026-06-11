@@ -121,6 +121,27 @@ Use the model ID exactly as OpenRouter lists it.
 
 Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter model ID unless the provider is OpenRouter.
 
+If you use an Anthropic-compatible proxy, keep the provider as `anthropic` and override `apiBase`:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "apiBase": "https://anthropic-proxy.example.com"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5"
+    }
+  }
+}
+```
+
+Arbitrary custom provider names are OpenAI-compatible only; they do not use the Anthropic Messages API request format.
+
 ### OpenAI Direct
 
 ```json
@@ -214,6 +235,8 @@ If you have more than one custom OpenAI-compatible endpoint, give each endpoint 
 ```
 
 Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
+
+This named custom provider path is not for Anthropic-compatible endpoints. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` and set the preset provider to `anthropic`.
 
 ### Ollama
 
