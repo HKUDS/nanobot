@@ -6,11 +6,13 @@ import json
 import os
 import sys
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
+import filelock
 from loguru import logger
 
 BumpKind = Literal["view", "use", "patch"]
@@ -45,6 +47,11 @@ SCHEMA_VERSION = 1
 TELEMETRY_FILENAME = ".telemetry.json"
 LOCK_FILENAME = ".telemetry.json.lock"
 TMP_GLOB = ".telemetry.json.tmp*"
+
+COUNTER_KEYS: tuple[str, ...] = ("views", "uses", "patches")
+FILELOCK_TIMEOUT_S = 0.2
+FILELOCK_RETRIES = 3
+WARN_COALESCE_EVERY = 100
 
 
 def _now_iso() -> str:
@@ -109,8 +116,6 @@ def _safe_read_json(path: Path) -> dict | None:
 
 
 def _epoch_ms() -> float:
-    import time
-
     return time.time() * 1000
 
 
@@ -154,17 +159,25 @@ def _rmw_merge(
         disk_entry = disk_entries.get(name)
         if disk_entry is None:
             # Branch: entry only in snapshot
-            if writer == "bump":
-                continue  # do not resurrect
-            # writer == "reconcile" → first landing
+            if writer == "bump" and name in last_synced:
+                # We previously synced this entry; it's gone from disk →
+                # reconcile killed it. Do not resurrect.
+                continue
+            # writer == "reconcile" OR first landing of a never-synced entry
             disk_entries[name] = dict(snap_entry)
             continue
         # Branch: entry in both
         merged_entry = dict(disk_entry)  # preserve unknown future fields
         last = last_synced.get(name, {"views": 0, "uses": 0, "patches": 0})
-        for counter in ("views", "uses", "patches"):
-            delta = max(snap_entry.get(counter, 0) - last.get(counter, 0), 0)
-            merged_entry[counter] = disk_entry.get(counter, 0) + delta
+        for counter in COUNTER_KEYS:
+            raw_delta = snap_entry.get(counter, 0) - last.get(counter, 0)
+            if raw_delta < 0:
+                logger.warning(
+                    "telemetry: invariant violation last_synced > snapshot "
+                    "(kind=telemetry_invariant_violation, name={}, counter={}, snap={}, last={})",
+                    name, counter, snap_entry.get(counter, 0), last.get(counter, 0),
+                )
+            merged_entry[counter] = disk_entry.get(counter, 0) + max(raw_delta, 0)
         merged_entry["last_view"] = _max_iso(
             disk_entry.get("last_view"), snap_entry.get("last_view")
         )
@@ -212,6 +225,7 @@ class SkillTelemetry:
         self._entries: dict[str, TelemetryEntrySnapshot] = {}
         self._last_synced_counts: dict[str, dict[str, int]] = {}
         self._dirty = False
+        self._failure_counts: dict[str, int] = {}
         # .tmp residue cleanup happens before any reconcile
         for stale in self._skills_dir.glob(TMP_GLOB):
             try:
@@ -242,3 +256,58 @@ class SkillTelemetry:
             if last_ts_key is not None:
                 entry[last_ts_key] = now
             self._dirty = True
+
+    def flush(self, writer: Writer = "bump") -> None:
+        # ----- Single-flight gate -----
+        if not self._flush_lock.acquire(blocking=False):
+            return  # another flush already in flight → no-op
+        try:
+            # ----- Phase 1: snapshot under self._lock -----
+            with self._lock:
+                if not self._dirty:
+                    return
+                snapshot = deepcopy(self._entries)
+                last_synced_snapshot = deepcopy(self._last_synced_counts)
+            # ----- Phase 2: filelock + RMW + atomic write -----
+            try:
+                success = self._write_phase(snapshot, last_synced_snapshot, writer)
+            except Exception:
+                self._note_failure("atomic_write_io_error")
+                return
+            if not success:
+                self._note_failure("filelock_timeout")
+                return
+            # ----- Phase 3: advance _last_synced_counts under self._lock -----
+            with self._lock:
+                for name, entry in snapshot.items():
+                    slot = self._last_synced_counts.setdefault(
+                        name, {"views": 0, "uses": 0, "patches": 0}
+                    )
+                    for k in COUNTER_KEYS:
+                        slot[k] = entry[k]
+                if self._entries == snapshot:
+                    self._dirty = False
+        finally:
+            self._flush_lock.release()
+
+    def _write_phase(self, snapshot, last_synced_snapshot, writer: Writer) -> bool:
+        lock = filelock.FileLock(str(self._lock_path), timeout=FILELOCK_TIMEOUT_S)
+        for _attempt in range(FILELOCK_RETRIES):
+            try:
+                with lock:
+                    on_disk = _safe_read_json(self._path)
+                    merged = _rmw_merge(on_disk, snapshot, last_synced_snapshot, writer)
+                    _atomic_write(self._path, merged)
+                return True
+            except filelock.Timeout:
+                continue
+        return False
+
+    def _note_failure(self, kind: str) -> None:
+        bucket = self._failure_counts.setdefault(kind, 0) + 1
+        self._failure_counts[kind] = bucket
+        if bucket % WARN_COALESCE_EVERY == 0:
+            logger.warning(
+                "telemetry failure coalesced (kind={}, coalesced_count={})",
+                kind, bucket,
+            )

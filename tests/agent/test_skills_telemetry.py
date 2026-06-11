@@ -159,7 +159,10 @@ def test_rmw_bump_only_skips_orphan_entry_not_on_disk() -> None:
             "last_view": "2026-06-11T00:00:00Z", "last_use": None,
         }
     }
-    merged = _rmw_merge(on_disk, snapshot, {}, writer="bump")
+    # last_synced has a record for foo → "we previously synced 3 views;
+    # disk lost it → reconcile killed it."
+    last_synced = {"foo": {"views": 3, "uses": 0, "patches": 0}}
+    merged = _rmw_merge(on_disk, snapshot, last_synced, writer="bump")
     assert merged["entries"] == {}  # bump cannot resurrect entry reconcile killed
 
 
@@ -220,3 +223,69 @@ def test_rmw_preserves_unknown_top_level_fields() -> None:
                         writer="bump")
     assert merged["future_top"] == {"hello": "world"}
     assert merged["entries"]["foo"]["cooldown_until"] == "2026-12-01T00:00:00Z"
+
+
+def test_flush_writes_disk_and_advances_last_synced(tmp_path: Path) -> None:
+    import json
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("foo", "view")
+    telem.bump("foo", "view")
+    telem.flush()
+    data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["views"] == 2
+    assert telem._last_synced_counts["foo"]["views"] == 2
+    assert telem._dirty is False
+
+
+def test_flush_noop_when_not_dirty(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.flush()  # no bump → no-op
+    assert not (tmp_path / "ws" / "skills" / ".telemetry.json").exists()
+
+
+def test_flush_rmw_preserves_concurrent_process_writes(tmp_path: Path) -> None:
+    import json
+    # Process A: bump 5 views, flush, then bump 3 more
+    # Meanwhile simulate "process B" by editing disk directly between flushes
+    telem = SkillTelemetry(tmp_path / "ws")
+    for _ in range(5):
+        telem.bump("shared", "view")
+    telem.flush()
+    # External process bumps disk by 7 (simulating another nanobot writing)
+    path = tmp_path / "ws" / "skills" / ".telemetry.json"
+    on_disk = json.loads(path.read_text())
+    on_disk["entries"]["shared"]["views"] += 7
+    path.write_text(json.dumps(on_disk))
+    # Process A bumps 3 more, flush → should be 5+7+3 = 15
+    for _ in range(3):
+        telem.bump("shared", "view")
+    telem.flush()
+    final = json.loads(path.read_text())
+    assert final["entries"]["shared"]["views"] == 15
+
+
+def test_flush_single_flight_second_call_is_noop(tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    from nanobot.agent import skills_telemetry as st
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("foo", "view")
+    call_count = {"n": 0}
+    orig = st._atomic_write
+    started = threading.Event()
+    block = threading.Event()
+
+    def slow_write(path, payload):
+        call_count["n"] += 1
+        started.set()
+        block.wait(timeout=2.0)
+        orig(path, payload)
+
+    monkeypatch.setattr(st, "_atomic_write", slow_write)
+    t = threading.Thread(target=telem.flush)
+    t.start()
+    started.wait(timeout=2.0)
+    telem.flush()  # second concurrent flush — must be no-op
+    block.set()
+    t.join(timeout=2.0)
+    assert call_count["n"] == 1
