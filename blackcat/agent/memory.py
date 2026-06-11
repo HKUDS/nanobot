@@ -9,7 +9,7 @@ import threading
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, ClassVar, Iterator
 
 from loguru import logger
 
