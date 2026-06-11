@@ -53,6 +53,11 @@ COUNTER_KEYS: tuple[str, ...] = ("views", "uses", "patches")
 FILELOCK_TIMEOUT_S = 0.2
 FILELOCK_RETRIES = 3
 WARN_COALESCE_EVERY = 100
+# Brief pause between the at-exit flush's two attempts; gives in-flight
+# concurrent flushes time to release `_flush_lock` / the cross-process
+# filelock before the retry. Kept short so atexit doesn't perceptibly
+# delay interpreter shutdown.
+_ATEXIT_RETRY_DELAY_S = 0.05
 
 
 def _now_iso() -> str:
@@ -246,14 +251,49 @@ class SkillTelemetry:
                 pass
 
     def register_atexit(self) -> None:
-        """Register flush() to run on interpreter shutdown.
+        """Register the at-exit flush hook on interpreter shutdown.
 
         Call once during AgentLoop construction so dirty in-memory counters
         are persisted on graceful exit. Safe to call multiple times — atexit
         accepts duplicate registrations and runs each, which is harmless
-        because flush() under single-flight + clean-state is idempotent.
+        because the hook is idempotent under single-flight + clean-state.
+
+        Registers `_atexit_flush` (not `flush` directly) so we get the
+        single-retry-on-skip + `atexit_flush_skipped` WARN escalation; see
+        `_atexit_flush` docstring for the contract.
         """
-        atexit.register(self.flush)
+        atexit.register(self._atexit_flush)
+
+    def _atexit_flush(self) -> None:
+        """At-exit flush with one retry + skip WARN.
+
+        At-exit hooks run during interpreter shutdown when other threads
+        may still be holding `_flush_lock` (single-flight) or the cross-
+        process filelock. A single `flush()` call returning without
+        clearing `_dirty` means counters are stranded in memory and will
+        not survive the shutdown — retry once after a brief pause to
+        maximize the chance of capturing the dirty state on graceful
+        exit. If the retry also leaves `_dirty=True`, emit a single
+        `atexit_flush_skipped` WARN so operators know counters were lost
+        and can correlate with `_failure_counts`.
+
+        Idempotent under clean state (when `_dirty` is already False the
+        first `flush()` returns immediately and so does the dirty check).
+        """
+        self.flush()
+        with self._lock:
+            if not self._dirty:
+                return
+        time.sleep(_ATEXIT_RETRY_DELAY_S)
+        self.flush()
+        with self._lock:
+            still_dirty = self._dirty
+        if still_dirty:
+            logger.warning(
+                "telemetry atexit flush skipped after retry "
+                "(kind=atexit_flush_skipped, failure_counts={})",
+                dict(self._failure_counts),
+            )
 
     def snapshot(self) -> TelemetrySnapshot:
         with self._lock:

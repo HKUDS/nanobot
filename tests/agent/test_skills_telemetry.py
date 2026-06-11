@@ -648,4 +648,86 @@ def test_atexit_register_flush(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(st.atexit, "register", lambda fn: registered.append(fn))
     telem = SkillTelemetry(tmp_path / "ws")
     telem.register_atexit()
-    assert telem.flush in registered
+    # M1 follow-up: registers the wrapper, not `flush` directly, so we get
+    # one-retry-on-skip + atexit_flush_skipped WARN.
+    assert telem._atexit_flush in registered
+    assert telem.flush not in registered
+
+
+def test_atexit_flush_no_warn_when_clean(tmp_path: Path, loguru_caplog) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem._atexit_flush()
+    # Nothing dirty → no atexit_flush_skipped warning, no sleep retry needed.
+    assert "atexit_flush_skipped" not in loguru_caplog.text
+
+
+def test_atexit_flush_retries_once_when_dirty_after_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """First flush leaves _dirty=True (filelock contention), retry succeeds."""
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("alpha", "view")  # _dirty=True now
+
+    flush_calls = {"n": 0}
+    real_flush = telem.flush
+
+    def flaky_flush(writer: str = "bump") -> None:
+        flush_calls["n"] += 1
+        if flush_calls["n"] == 1:
+            # Simulate skip: don't actually write, leave _dirty=True
+            return
+        real_flush(writer)
+
+    monkeypatch.setattr(telem, "flush", flaky_flush)
+    # Sleep should be invoked between attempts
+    sleep_calls: list[float] = []
+    import nanobot.agent.skills_telemetry as st
+    monkeypatch.setattr(st.time, "sleep", lambda s: sleep_calls.append(s))
+
+    telem._atexit_flush()
+
+    assert flush_calls["n"] == 2, "must retry once when first flush leaves _dirty=True"
+    assert sleep_calls == [st._ATEXIT_RETRY_DELAY_S]
+
+
+def test_atexit_flush_warns_after_retry_failure(
+    tmp_path: Path, monkeypatch, loguru_caplog
+) -> None:
+    """Both attempts leave _dirty=True → emit atexit_flush_skipped WARN once."""
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("alpha", "view")  # _dirty=True
+
+    # Make every flush a no-op so _dirty never clears
+    monkeypatch.setattr(telem, "flush", lambda writer="bump": None)
+    # Pre-seed a failure count so we can verify it appears in the WARN payload
+    telem._failure_counts["filelock_timeout"] = 4
+
+    import nanobot.agent.skills_telemetry as st
+    monkeypatch.setattr(st.time, "sleep", lambda s: None)
+
+    telem._atexit_flush()
+
+    msgs = [r.message for r in loguru_caplog.records if r.levelname == "WARNING"]
+    skipped = [m for m in msgs if "atexit_flush_skipped" in m]
+    assert len(skipped) == 1, f"expected exactly 1 skip WARN, got {skipped}"
+    assert "filelock_timeout" in skipped[0]
+    assert "4" in skipped[0]
+
+
+def test_atexit_flush_no_warn_when_first_attempt_succeeds(
+    tmp_path: Path, monkeypatch, loguru_caplog
+) -> None:
+    """First flush clears _dirty → no retry, no WARN."""
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("alpha", "view")  # _dirty=True
+
+    # Real flush — should succeed and clear _dirty
+    sleep_calls: list[float] = []
+    import nanobot.agent.skills_telemetry as st
+    monkeypatch.setattr(st.time, "sleep", lambda s: sleep_calls.append(s))
+
+    telem._atexit_flush()
+
+    assert sleep_calls == [], "must not sleep when first attempt clears _dirty"
+    msgs = [r.message for r in loguru_caplog.records if r.levelname == "WARNING"]
+    assert not any("atexit_flush_skipped" in m for m in msgs)
