@@ -247,3 +247,25 @@ def load_provider_snapshot(
         resolve_config_env_vars(load_config(config_path)),
         preset_name=preset_name,
     )
+
+
+def get_auxiliary_client(config: Config) -> LLMProvider:
+    """Return an LLMProvider for Curator/aux-model use (spec §6).
+
+    Resolution order:
+      1. If ``agents.defaults.auxiliary.modelPreset`` is set, build a provider
+         from that preset. (Existence has been validated at config load.)
+      2. Otherwise fall back to the agent's main preset
+         (``agents.defaults.modelPreset``).
+
+    The aux provider is constructed independently from the main agent's
+    provider chain — it must never share the main provider's prompt-cache
+    state. Callers (Curator, deliberation tools) are responsible for caching
+    the returned instance for the lifetime of their own session.
+    """
+    aux_preset_name = config.agents.defaults.auxiliary.model_preset
+    if aux_preset_name is not None:
+        preset = config.model_presets[aux_preset_name]
+    else:
+        preset = config.resolve_preset(None)
+    return make_provider(config, preset=preset)
