@@ -454,3 +454,43 @@ def test_reconcile_corrects_unknown_origin_lazy_entry(tmp_path: Path) -> None:
     data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
     assert data["entries"]["foo"]["origin"] == "agent"
     assert data["entries"]["foo"]["views"] == 1  # counter preserved
+
+
+def test_reconcile_freezes_disabled_lazy_unknown_entry(tmp_path: Path) -> None:
+    """Disabled skill with lazy-init 'unknown' origin must be preserved as-is.
+
+    Spec §4.4: disabled entries are frozen — neither deleted nor patched.
+    This pins the corner case where a skill was bumped before any reconcile
+    knew its origin (so origin='unknown'), then got disabled.
+    """
+    telem = SkillTelemetry(tmp_path / "ws")
+    # Lazy-init: bump before any reconcile -> origin="unknown"
+    telem.bump("ghost", "view")
+    assert telem._entries["ghost"]["origin"] == "unknown"
+    # Now reconcile with ghost in disabled set, NOT in known_skills
+    telem.reconcile(known_skills=[], disabled_skills={"ghost"})
+    # Frozen: still present, origin still "unknown", counter intact
+    assert "ghost" in telem._entries
+    assert telem._entries["ghost"]["origin"] == "unknown"
+    assert telem._entries["ghost"]["views"] == 1
+
+
+def test_restart_does_not_double_counters(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    # Session 1: bump 5, flush, "exit"
+    s1 = SkillTelemetry(workspace)
+    s1.reconcile([_make_entry("foo")])
+    for _ in range(5):
+        s1.bump("foo", "view")
+    s1.flush()
+    del s1
+
+    # Session 2: restart on same workspace, NO bumps, flush
+    s2 = SkillTelemetry(workspace)
+    # Critical: __init__ must NOT hydrate _entries from disk
+    assert s2._entries == {}
+    assert s2._last_synced_counts == {}
+    # Even a stray flush call (e.g. atexit) must not change disk counter
+    s2.flush()
+    data = json.loads((workspace / "skills" / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["views"] == 5  # unchanged, not 10

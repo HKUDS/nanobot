@@ -318,7 +318,10 @@ class SkillTelemetry:
                     # Existing — only patch origin/shadowed (never counters/timestamps)
                     existing["origin"] = entry["effective_origin"]
                     existing["shadowed"] = list(entry["shadowed_origins"])
-            # 3. In-memory pass: fix any "unknown" lazy-init entries we now know
+            # 3. Defense-in-depth: ensure no known entry retains "unknown" origin.
+            #    Step 2 already coerces existing entries' origin unconditionally,
+            #    so this is a no-op today; keep it as a guardrail in case Step 2
+            #    ever becomes conditional (e.g. preserve-on-shadow-change).
             for entry in known_skills:
                 cur = self._entries.get(entry["name"])
                 if cur is not None and cur["origin"] == "unknown":
