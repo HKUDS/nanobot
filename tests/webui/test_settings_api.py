@@ -22,6 +22,31 @@ from blackcat.webui.settings_api import (
     update_transcription_settings,
 )
 
+DYNAMIC_PROVIDER_NAME = "my-company-api"
+DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
+
+
+def _dynamic_provider_config(
+    *,
+    api_base: str = DYNAMIC_PROVIDER_API_BASE,
+    defaults: bool = False,
+) -> Config:
+    raw_config = {
+        "providers": {
+            DYNAMIC_PROVIDER_NAME: {
+                "apiBase": api_base,
+            }
+        }
+    }
+    if defaults:
+        raw_config["agents"] = {
+            "defaults": {
+                "provider": DYNAMIC_PROVIDER_NAME,
+                "model": "gpt-4o-mini",
+            }
+        }
+    return Config.model_validate(raw_config)
+
 
 def test_create_model_configuration_writes_label_and_selects(
     tmp_path,
@@ -70,30 +95,21 @@ def test_create_model_configuration_accepts_dynamic_custom_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                }
-            }
-        }
-    )
-    save_config(config, config_path)
+    save_config(_dynamic_provider_config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = create_model_configuration(
         {
             "label": ["Tenant model"],
-            "provider": ["my-company-api"],
+            "provider": [DYNAMIC_PROVIDER_NAME],
             "model": ["gpt-4o-mini"],
         }
     )
 
     assert payload["agent"]["model_preset"] == "tenant-model"
-    assert payload["agent"]["provider"] == "my-company-api"
+    assert payload["agent"]["provider"] == DYNAMIC_PROVIDER_NAME
     saved = load_config(config_path)
-    assert saved.model_presets["tenant-model"].provider == "my-company-api"
+    assert saved.model_presets["tenant-model"].provider == DYNAMIC_PROVIDER_NAME
     assert saved.model_presets["tenant-model"].model == "gpt-4o-mini"
 
 
@@ -162,31 +178,22 @@ def test_update_provider_settings_updates_dynamic_custom_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://old.example/v1",
-                }
-            }
-        }
-    )
-    save_config(config, config_path)
+    save_config(_dynamic_provider_config(api_base="https://old.example/v1"), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = update_provider_settings(
         {
-            "provider": ["my-company-api"],
+            "provider": [DYNAMIC_PROVIDER_NAME],
             "apiBase": ["https://new.example/v1"],
             "apiKey": ["sk-test"],
         }
     )
 
     providers = {row["name"]: row for row in payload["providers"]}
-    assert providers["my-company-api"]["api_base"] == "https://new.example/v1"
-    assert providers["my-company-api"]["api_key_hint"] == "••••"
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == "https://new.example/v1"
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_key_hint"] == "••••"
     saved = load_config(config_path)
-    dynamic_provider = saved.providers.model_extra["my-company-api"]
+    dynamic_provider = saved.providers.model_extra[DYNAMIC_PROVIDER_NAME]
     assert dynamic_provider.api_base == "https://new.example/v1"
     assert dynamic_provider.api_key == "sk-test"
 
@@ -295,32 +302,17 @@ def test_settings_payload_includes_dynamic_custom_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "my-company-api",
-                    "model": "gpt-4o-mini",
-                }
-            },
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                }
-            },
-        }
-    )
-    save_config(config, config_path)
+    save_config(_dynamic_provider_config(defaults=True), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
     providers = {row["name"]: row for row in payload["providers"]}
 
-    assert payload["agent"]["provider"] == "my-company-api"
-    assert payload["agent"]["resolved_provider"] == "my-company-api"
-    assert providers["my-company-api"]["configured"] is True
-    assert providers["my-company-api"]["api_key_required"] is False
-    assert providers["my-company-api"]["api_base"] == "https://example.test/v1"
+    assert payload["agent"]["provider"] == DYNAMIC_PROVIDER_NAME
+    assert payload["agent"]["resolved_provider"] == DYNAMIC_PROVIDER_NAME
+    assert providers[DYNAMIC_PROVIDER_NAME]["configured"] is True
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_key_required"] is False
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == DYNAMIC_PROVIDER_API_BASE
 
 
 def test_settings_payload_includes_network_safety_fields(
@@ -783,20 +775,11 @@ def test_provider_models_payload_fetches_dynamic_custom_provider_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                }
-            }
-        }
-    )
-    save_config(config, config_path)
+    save_config(_dynamic_provider_config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     def fake_get(url: str, **kwargs):
-        assert url == "https://example.test/v1/models"
+        assert url == f"{DYNAMIC_PROVIDER_API_BASE}/models"
         assert "Authorization" not in kwargs["headers"]
         return httpx.Response(
             200,
@@ -806,9 +789,9 @@ def test_provider_models_payload_fetches_dynamic_custom_provider_models(
 
     monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
 
-    payload = provider_models_payload({"provider": ["my-company-api"]})
+    payload = provider_models_payload({"provider": [DYNAMIC_PROVIDER_NAME]})
 
-    assert payload["provider"] == "my-company-api"
+    assert payload["provider"] == DYNAMIC_PROVIDER_NAME
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "custom"
     assert payload["models"][0]["id"] == "custom-gpt"

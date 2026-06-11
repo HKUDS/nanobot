@@ -334,11 +334,11 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
 
 
 def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
-    items: list[tuple[str, ProviderConfig]] = []
-    for name, provider_config in (config.providers.model_extra or {}).items():
-        if isinstance(provider_config, ProviderConfig):
-            items.append((name, provider_config))
-    return items
+    return [
+        (name, provider_config)
+        for name, provider_config in (config.providers.model_extra or {}).items()
+        if isinstance(provider_config, ProviderConfig)
+    ]
 
 
 def _resolve_settings_provider(
