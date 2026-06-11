@@ -476,9 +476,250 @@ async def test_drain_pending_timeout(tmp_path):
         results = await injection_callback()
         assert results == []
 
-    # Cleanup
     hang_task.cancel()
     try:
         await hang_task
     except asyncio.CancelledError:
         pass
+
+
+@pytest.mark.asyncio
+async def test_spawn_with_model_preset_uses_different_model(tmp_path):
+    """Specifying model_preset should cause the subagent to use that preset's model/provider."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ModelPresetConfig
+    from nanobot.providers.factory import ProviderSnapshot
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "default-model"
+
+    preset_cfg = ModelPresetConfig(
+        model="preset-model",
+        provider="auto",
+        max_tokens=4096,
+        temperature=0.5,
+    )
+    preset_provider = MagicMock()
+    preset_provider.generation = SimpleNamespace(
+        temperature=0.5, max_tokens=4096, reasoning_effort=None,
+    )
+    snapshot = ProviderSnapshot(
+        provider=preset_provider,
+        model="preset-model",
+        context_window_tokens=32768,
+        signature=("test",),
+    )
+
+    def fake_loader(name):
+        assert name == "fast"
+        return snapshot
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={"fast": preset_cfg},
+        preset_snapshot_loader=fake_loader,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["model"] = spec.model
+        seen["temperature"] = spec.temperature
+        seen["max_tokens"] = spec.max_tokens
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    with patch.object(AgentRunner, "run", AsyncMock(side_effect=fake_run)):
+        await mgr.spawn(task="do task", model_preset="fast")
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["model"] == "preset-model"
+    assert seen["temperature"] == 0.5
+    assert seen["max_tokens"] == 4096
+
+
+@pytest.mark.asyncio
+async def test_spawn_rejects_unknown_preset(tmp_path):
+    """spawn() should reject a model_preset not in the allowed list."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={"fast": MagicMock()},
+    )
+
+    result = await mgr.spawn(task="do task", model_preset="unknown")
+    assert "not in allowed spawn_presets" in result
+    assert "unknown" in result
+
+
+@pytest.mark.asyncio
+async def test_spawn_without_preset_uses_default_model(tmp_path):
+    """Without model_preset, spawn should use the parent's model (existing behavior)."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "default-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["model"] = spec.model
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task")
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["model"] == "default-model"
+
+
+@pytest.mark.asyncio
+async def test_spawn_presets_empty_rejects_any_preset(tmp_path):
+    """When spawn_presets is empty, any model_preset should be rejected."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={},
+    )
+
+    result = await mgr.spawn(task="do task", model_preset="anything")
+    assert "not in allowed spawn_presets" in result
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_description_lists_presets(tmp_path):
+    """SpawnTool.description should list available presets when configured."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ModelPresetConfig
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={
+            "fast": ModelPresetConfig(model="fast-model"),
+            "smart": ModelPresetConfig(model="smart-model"),
+        },
+    )
+
+    tool = SpawnTool(mgr)
+    desc = tool.description
+    assert "fast" in desc
+    assert "smart" in desc
+    assert "Available model presets" in desc
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_description_no_presets(tmp_path):
+    """SpawnTool.description should not mention presets when none are configured."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    tool = SpawnTool(mgr)
+    desc = tool.description
+    assert "Available model presets" not in desc
+
+
+@pytest.mark.asyncio
+async def test_spawn_with_preset_temperature_override(tmp_path):
+    """An explicit temperature should override the preset's default temperature."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ModelPresetConfig
+    from nanobot.providers.factory import ProviderSnapshot
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "default-model"
+
+    preset_cfg = ModelPresetConfig(model="preset-model", temperature=0.5)
+    preset_provider = MagicMock()
+    preset_provider.generation = SimpleNamespace(
+        temperature=0.5, max_tokens=8192, reasoning_effort=None,
+    )
+    snapshot = ProviderSnapshot(
+        provider=preset_provider,
+        model="preset-model",
+        context_window_tokens=65536,
+        signature=("test",),
+    )
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={"fast": preset_cfg},
+        preset_snapshot_loader=lambda name: snapshot,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["temperature"] = spec.temperature
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    with patch.object(AgentRunner, "run", AsyncMock(side_effect=fake_run)):
+        await mgr.spawn(task="do task", model_preset="fast", temperature=0.9)
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["temperature"] == 0.9
