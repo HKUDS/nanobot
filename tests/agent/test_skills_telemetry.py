@@ -1,11 +1,11 @@
 import json
-import logging
 from pathlib import Path
 
+import filelock
 import pytest
-from loguru import logger as _loguru_logger
 
 from nanobot.agent.skills_telemetry import (
+    WARN_COALESCE_EVERY,
     BumpKind,  # noqa: F401
     SkillEntry,
     SkillTelemetry,
@@ -13,6 +13,23 @@ from nanobot.agent.skills_telemetry import (
     TelemetrySnapshot,
     Writer,  # noqa: F401
 )
+
+
+class AlwaysTimeout:
+    """Drop-in `filelock.FileLock` replacement that always times out.
+
+    Used by tests that need to verify behavior when the cross-process
+    filelock cannot be acquired.
+    """
+
+    def __init__(self, *a, **kw):
+        pass
+
+    def __enter__(self):
+        raise filelock.Timeout("lock")
+
+    def __exit__(self, *a):
+        return False
 
 
 def _seed_disk(workspace: Path, entries: dict[str, dict]) -> Path:
@@ -33,28 +50,6 @@ def _seed_disk(workspace: Path, entries: dict[str, dict]) -> Path:
     path = skills_dir / ".telemetry.json"
     path.write_text(json.dumps(payload))
     return path
-
-
-@pytest.fixture
-def loguru_caplog(caplog):
-    """Bridge loguru -> stdlib logging so pytest's caplog can capture records.
-
-    Project uses loguru (`from loguru import logger`), but caplog only sees
-    records routed through stdlib logging. Without this shim, WARNING records
-    emitted via loguru are invisible to caplog.records.
-    """
-    class PropagateHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            logging.getLogger(record.name).handle(record)
-
-    handler_id = _loguru_logger.add(
-        PropagateHandler(), format="{message}", level="WARNING"
-    )
-    caplog.set_level(logging.WARNING)
-    try:
-        yield caplog
-    finally:
-        _loguru_logger.remove(handler_id)
 
 
 def _zero_seed_entry(origin: str = "user") -> dict:
@@ -351,22 +346,9 @@ def test_flush_single_flight_second_call_is_noop(tmp_path: Path, monkeypatch) ->
 def test_flush_filelock_timeout_preserves_dirty_and_last_synced(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import filelock
-
     from nanobot.agent import skills_telemetry as st
     telem = SkillTelemetry(tmp_path / "ws")
     telem.bump("foo", "view")
-
-    class AlwaysTimeout:
-        def __init__(self, *a, **kw):
-            pass
-
-        def __enter__(self):
-            raise filelock.Timeout("lock")
-
-        def __exit__(self, *a):
-            return False
-
     monkeypatch.setattr(st.filelock, "FileLock", AlwaysTimeout)
     telem.flush()
     # disk file never created; in-memory state preserved
@@ -380,27 +362,95 @@ def test_warn_throttle_emits_once_per_100_failures(
 ) -> None:
     # Uses loguru_caplog (not bare caplog) because telemetry uses loguru;
     # see fixture docstring for the stdlib bridge rationale.
-    import filelock
-
     from nanobot.agent import skills_telemetry as st
     telem = SkillTelemetry(tmp_path / "ws")
-
-    class AlwaysTimeout:
-        def __init__(self, *a, **kw):
-            pass
-
-        def __enter__(self):
-            raise filelock.Timeout("lock")
-
-        def __exit__(self, *a):
-            return False
-
     monkeypatch.setattr(st.filelock, "FileLock", AlwaysTimeout)
-    for _ in range(250):
+    # Drive enough failures to cross WARN_COALESCE_EVERY twice but stop short
+    # of the third multiple, so the assertion is keyed off the constant.
+    n_failures = WARN_COALESCE_EVERY * 2 + WARN_COALESCE_EVERY // 2
+    expected_warns = n_failures // WARN_COALESCE_EVERY
+    for _ in range(n_failures):
         telem.bump("foo", "view")
         telem.flush()
     filelock_warns = [
         r for r in loguru_caplog.records if "filelock_timeout" in r.getMessage()
     ]
-    # Coalesced every 100 → 2 warnings for 100/200 thresholds; 250 itself doesn't trigger
-    assert len(filelock_warns) == 2
+    # Coalesced every WARN_COALESCE_EVERY failures; the trailing remainder
+    # (less than one full window) does not trigger an emission.
+    assert len(filelock_warns) == expected_warns
+
+
+# ---------------------------------------------------------------------------
+# A7: reconcile() arrival / orphan / origin update + frozen disabled skills
+# ---------------------------------------------------------------------------
+
+
+def _make_entry(name: str, origin: str = "user", path: str = "/x/SKILL.md") -> SkillEntry:
+    return {
+        "name": name,
+        "effective_origin": origin,
+        "shadowed_origins": [],
+        "path": path,
+    }
+
+
+def test_reconcile_creates_zero_entry_for_new_skill(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    snap = telem.snapshot()
+    e = snap["entries"]["foo"]
+    assert e["origin"] == "user"
+    assert e["views"] == 0
+    assert e["uses"] == 0
+    assert e["entry_created_at"] is not None
+
+
+def test_reconcile_removes_orphan_entry(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    telem.bump("foo", "view")
+    telem.flush()
+    # remove foo from known list → orphan
+    telem.reconcile([])
+    telem.flush()
+    data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
+    assert "foo" not in data["entries"]
+    assert "foo" not in telem._last_synced_counts
+
+
+def test_reconcile_freezes_disabled_skill_entry(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    for _ in range(7):
+        telem.bump("foo", "view")
+    telem.flush()
+    # disabled set means foo is neither in known_skills nor an orphan (frozen)
+    telem.reconcile(known_skills=[], disabled_skills={"foo"})
+    telem.flush()
+    data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["views"] == 7
+
+
+def test_reconcile_does_not_touch_counters_for_existing_entry(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    telem.bump("foo", "view")
+    telem.bump("foo", "use")
+    telem.flush()
+    # Second reconcile with new effective origin — counters must be untouched
+    telem.reconcile([_make_entry("foo", origin="agent")])
+    telem.flush()
+    data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["views"] == 1
+    assert data["entries"]["foo"]["uses"] == 1
+    assert data["entries"]["foo"]["origin"] == "agent"
+
+
+def test_reconcile_corrects_unknown_origin_lazy_entry(tmp_path: Path) -> None:
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.bump("foo", "view")  # lazy init with origin="unknown"
+    telem.reconcile([_make_entry("foo", origin="agent")])
+    telem.flush()
+    data = json.loads((tmp_path / "ws" / "skills" / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["origin"] == "agent"
+    assert data["entries"]["foo"]["views"] == 1  # counter preserved

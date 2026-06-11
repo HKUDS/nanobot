@@ -193,7 +193,17 @@ def _rmw_merge(
             merged_entry["shadowed"] = list(snap_entry.get("shadowed", []))
         disk_entries[name] = merged_entry
 
-    # Entries only on disk (snapshot didn't touch them) → keep as-is (already in disk_entries)
+    # Entries only on disk (snapshot didn't touch them):
+    # * writer="bump"      → keep as-is; concurrent processes may own them.
+    # * writer="reconcile" → DELETE. reconcile() preserves disabled-skill
+    #   entries inside `self._entries` (so they reach `snapshot`); anything
+    #   surviving on disk but missing from a reconcile snapshot is an orphan
+    #   whose skill file no longer exists from this writer's view.
+    #   See spec §4.4 "磁盘已不存在 → 删除该 entry" + invariant 3.
+    if writer == "reconcile":
+        for name in list(disk_entries.keys()):
+            if name not in snapshot:
+                del disk_entries[name]
     base = dict(base)
     base["entries"] = disk_entries
     base["schema_version"] = max(int(base.get("schema_version", SCHEMA_VERSION)), SCHEMA_VERSION)
@@ -257,6 +267,65 @@ class SkillTelemetry:
             if last_ts_key is not None:
                 entry[last_ts_key] = now
             self._dirty = True
+
+    def reconcile(
+        self,
+        known_skills: list[SkillEntry],
+        disabled_skills: set[str] | None = None,
+    ) -> None:
+        """Reconcile in-memory entries against the current known-skills set.
+
+        Per spec §4.4:
+        * Orphans (entries no longer in `known_skills` and not in `disabled_skills`)
+          are removed from `_entries` and `_last_synced_counts`.
+        * New entries get zero counters with a real `origin` and a fresh
+          `entry_created_at`.
+        * Existing entries only have `origin` / `shadowed` patched — counters and
+          timestamps are never touched here.
+        * Disabled skills are FROZEN: neither deleted nor updated.
+        * Lazy-init "unknown" origin entries are corrected to the real origin
+          when the skill becomes known again.
+
+        The accompanying `flush(writer="reconcile")` happens in the same
+        single-flight + filelock window so reconcile changes are durable
+        atomically (spec §4.4 line 477).
+        """
+        disabled = disabled_skills or set()
+        known_names = {e["name"] for e in known_skills}
+        with self._lock:
+            # 1. Orphan removal: name not in known AND not disabled
+            for name in list(self._entries.keys()):
+                if name not in known_names and name not in disabled:
+                    self._entries.pop(name)
+                    self._last_synced_counts.pop(name, None)
+            # 2. Arrival + origin/shadowed update for known
+            for entry in known_skills:
+                name = entry["name"]
+                existing = self._entries.get(name)
+                if existing is None:
+                    # New entry: zero counters with real origin
+                    self._entries[name] = {
+                        "origin": entry["effective_origin"],
+                        "shadowed": list(entry["shadowed_origins"]),
+                        "views": 0,
+                        "uses": 0,
+                        "patches": 0,
+                        "entry_created_at": _now_iso(),
+                        "last_view": None,
+                        "last_use": None,
+                    }
+                else:
+                    # Existing — only patch origin/shadowed (never counters/timestamps)
+                    existing["origin"] = entry["effective_origin"]
+                    existing["shadowed"] = list(entry["shadowed_origins"])
+            # 3. In-memory pass: fix any "unknown" lazy-init entries we now know
+            for entry in known_skills:
+                cur = self._entries.get(entry["name"])
+                if cur is not None and cur["origin"] == "unknown":
+                    cur["origin"] = entry["effective_origin"]
+            self._dirty = True
+        # 4. Same-window flush so reconcile changes are durable atomically
+        self.flush(writer="reconcile")
 
     def flush(self, writer: Writer = "bump") -> None:
         """Persist in-memory bumps to disk via the 3-phase flush pipeline.
