@@ -118,6 +118,18 @@ class ModelPresetConfig(Base):
         )
 
 
+class AuxiliaryConfig(Base):
+    """Auxiliary provider configuration used by Curator/deliberation paths.
+
+    Spec §6. Points at an existing entry under `modelPresets`. Set to None
+    (the default) to fall back to the agent's main preset. When set but the
+    referenced preset is absent, root-level validation (`Config`) raises a
+    ConfigError at load time — never silently fall back in that case.
+    """
+
+    model_preset: str | None = Field(default=None, alias="modelPreset")
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
