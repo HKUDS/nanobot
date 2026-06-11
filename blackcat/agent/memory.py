@@ -321,6 +321,7 @@ class MemoryStore:
     })
     _INTERNAL_HISTORY_SESSION_PREFIXES: ClassVar[tuple[str, ...]] = (
         "dream:",
+        "cron:",
     )
 
     @classmethod
