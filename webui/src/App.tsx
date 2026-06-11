@@ -36,6 +36,7 @@ import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   ChatSummary,
   RuntimeSurface,
+  SessionAutomationJob,
   SettingsPayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -546,6 +547,8 @@ function Shell({
   const [pendingDelete, setPendingDelete] = useState<{
     key: string;
     label: string;
+    automations?: SessionAutomationJob[];
+    confirmAutomations?: boolean;
   } | null>(null);
   const [pendingRename, setPendingRename] = useState<{
     key: string;
@@ -1275,24 +1278,28 @@ function Shell({
     const fallbackKey = deletingActive
       ? (sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null)
       : activeKey;
-    setPendingDelete(null);
-    if (deletingActive) {
-      navigate({
-        view: "chat",
-        activeKey: fallbackKey,
-        settingsSection: "overview",
-      }, { replace: true });
-    }
     try {
-      await deleteChat(key);
-    } catch (e) {
+      const result = await deleteChat(
+        key,
+        pendingDelete.confirmAutomations ? { deleteAutomations: true } : undefined,
+      );
+      if (result.blocked_by_automations) {
+        setPendingDelete({
+          ...pendingDelete,
+          automations: result.automations ?? [],
+          confirmAutomations: true,
+        });
+        return;
+      }
+      setPendingDelete(null);
       if (deletingActive) {
         navigate({
           view: "chat",
-          activeKey: key,
+          activeKey: fallbackKey,
           settingsSection: "overview",
         }, { replace: true });
       }
+    } catch (e) {
       console.error("Failed to delete session", e);
     }
   }, [pendingDelete, deleteChat, activeKey, navigate, sessions]);
@@ -1559,6 +1566,7 @@ function Shell({
         <DeleteConfirm
           open={!!pendingDelete}
           title={pendingDelete?.label ?? ""}
+          automations={pendingDelete?.confirmAutomations ? pendingDelete.automations : undefined}
           onCancel={() => setPendingDelete(null)}
           onConfirm={onConfirmDelete}
         />

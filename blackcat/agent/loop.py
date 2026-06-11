@@ -18,9 +18,9 @@ from loguru import logger
 from blackcat.agent import context as agent_context
 from blackcat.agent import model_presets as preset_helpers
 from blackcat.agent.autocompact import AutoCompact
-from blackcat.agent.consolidate import Consolidator
 from blackcat.agent.context import ContextBuilder
 from blackcat.agent.hook import AgentHook, CompositeHook
+from blackcat.agent.memory import Consolidator
 from blackcat.agent.progress_hook import AgentProgressHook
 from blackcat.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from blackcat.agent.subagent import SubagentManager
@@ -39,6 +39,11 @@ from blackcat.bus.runtime_events import (
 )
 from blackcat.command import CommandContext, CommandRouter, register_builtin_commands
 from blackcat.config.schema import AgentDefaults, ModelPresetConfig
+from blackcat.cron.automation import (
+    automation_run_id,
+    automation_trigger,
+    defer_until_session_idle,
+)
 from blackcat.providers.base import LLMProvider
 from blackcat.providers.factory import ProviderSnapshot
 from blackcat.security.workspace_access import (
@@ -53,11 +58,12 @@ from blackcat.session.goal_state import (
     sustained_goal_active,
 )
 from blackcat.session.manager import Session, SessionManager
+from blackcat.session.routing import persist_routing_context
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
-from blackcat.utils.formatting import truncate_text as truncate_text_fn
+from blackcat.utils.helpers import image_placeholder_text
+from blackcat.utils.helpers import truncate_text as truncate_text_fn
 from blackcat.utils.image_generation_intent import image_generation_prompt
 from blackcat.utils.llm_runtime import LLMRuntime
-from blackcat.utils.media import image_placeholder_text
 from blackcat.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     SUSTAINED_GOAL_CONTINUE_PROMPT,
@@ -300,8 +306,12 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
-        # BLACKCAT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("BLACKCAT_MAX_CONCURRENT_REQUESTS", "3"))
+        # Scheduled automations wait for the current visible turn to finish.
+        # They must not be injected into the active model call as follow-up text.
+        self._deferred_automation_queues: dict[str, list[InboundMessage]] = {}
+        self._automation_waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
+        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
@@ -565,6 +575,55 @@ class AgentLoop:
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)
 
+    async def submit_automation_turn(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Submit a scheduled automation as an internal session turn and wait for it."""
+        run_id = automation_run_id(msg.metadata)
+        if not run_id:
+            raise ValueError("automation turn metadata must include a run_id")
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[OutboundMessage | None] = loop.create_future()
+        if run_id in self._automation_waiters:
+            raise RuntimeError(f"automation run {run_id!r} is already pending")
+        self._automation_waiters[run_id] = future
+        try:
+            if self._running:
+                await self.bus.publish_inbound(msg)
+            else:
+                await self._dispatch(msg)
+            return await future
+        finally:
+            self._automation_waiters.pop(run_id, None)
+
+    def _complete_automation_turn(
+        self,
+        msg: InboundMessage,
+        *,
+        response: OutboundMessage | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        run_id = automation_run_id(msg.metadata)
+        if not run_id:
+            return
+        future = self._automation_waiters.get(run_id)
+        if future is None or future.done():
+            return
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(response)
+
+    def _defer_automation_turn(self, session_key: str, msg: InboundMessage) -> None:
+        self._deferred_automation_queues.setdefault(session_key, []).append(msg)
+
+    async def _publish_next_deferred_automation(self, session_key: str) -> None:
+        queue = self._deferred_automation_queues.get(session_key)
+        if not queue:
+            return
+        msg = queue.pop(0)
+        if not queue:
+            self._deferred_automation_queues.pop(session_key, None)
+        await self.bus.publish_inbound(msg)
+
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -583,13 +642,24 @@ class AgentLoop:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
+            if trigger := automation_trigger(msg.metadata):
+                persist_content = trigger.get("persist_content")
+                if isinstance(persist_content, str) and persist_content.strip():
+                    text = persist_content
+                extra.update({
+                    "_automation_trigger": True,
+                    "automation_id": trigger.get("job_id"),
+                    "automation_name": trigger.get("job_name"),
+                    "automation_run_id": trigger.get("run_id"),
+                    "automation_prompt_ref": trigger.get("prompt_ref"),
+                })
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
             return True
         return False
 
-    async def _build_initial_messages(
+    def _build_initial_messages(
         self,
         msg: InboundMessage,
         session: Session,
@@ -599,7 +669,7 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return await self.context.build_messages(
+        return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
             media=msg.media if msg.media else None,
@@ -810,8 +880,8 @@ class AgentLoop:
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
-                # Sustained goals may legitimately exceed BLACKCAT_LLM_TIMEOUT_S; idle stall
-                # is still capped by BLACKCAT_STREAM_IDLE_TIMEOUT_S in streaming providers.
+                # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
+                # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
                     session.key if session is not None else session_key,
@@ -881,6 +951,22 @@ class AgentLoop:
                 await self._dispatch_command_inline(
                     msg, effective_key, raw,
                     self.commands.dispatch_priority,
+                )
+                continue
+            if (
+                defer_until_session_idle(msg.metadata)
+                and effective_key in self._pending_queues
+            ):
+                pending_msg = msg
+                if effective_key != msg.session_key:
+                    pending_msg = dataclasses.replace(
+                        msg,
+                        session_key_override=effective_key,
+                    )
+                self._defer_automation_turn(effective_key, pending_msg)
+                logger.info(
+                    "Deferred automation turn for active session {}",
+                    effective_key,
                 )
                 continue
             # If this session already has an active pending queue (i.e. a task
@@ -996,7 +1082,12 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
+                    self._complete_automation_turn(msg, response=response)
                 except asyncio.CancelledError:
+                    self._complete_automation_turn(
+                        msg,
+                        error=asyncio.CancelledError(),
+                    )
                     logger.info("Task cancelled for session {}", session_key)
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
@@ -1022,7 +1113,7 @@ class AgentLoop:
                             exc_info=True,
                         )
                     raise
-                except Exception:
+                except Exception as exc:
                     logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
@@ -1035,6 +1126,7 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
+                    self._complete_automation_turn(msg, error=exc)
                 finally:
                     # Drain any messages still in the pending queue and re-publish
                     # them to the bus so they are processed as fresh inbound messages
@@ -1065,12 +1157,14 @@ class AgentLoop:
                             msg, session_key, "idle"
                         )
                         self._runtime_events().clear_turn(session_key)
+                    await self._publish_next_deferred_automation(session_key)
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
                     msg, session_key, "idle"
                 )
                 self._runtime_events().clear_turn(session_key)
+                await self._publish_next_deferred_automation(session_key)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -1141,7 +1235,7 @@ class AgentLoop:
         current_role = "assistant" if is_subagent else "user"
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = await self.context.build_messages(
+        messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
             channel=channel,
@@ -1342,6 +1436,8 @@ class AgentLoop:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
         await self._runtime_events().session_turn_started(msg, ctx.session_key)
         self.workspace_scopes.persist_message_scope(ctx.session, msg)
+        if persist_routing_context(ctx.session, msg):
+            self.sessions.save(ctx.session)
 
         if self._restore_runtime_checkpoint(ctx.session):
             self.sessions.save(ctx.session)
@@ -1418,7 +1514,7 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = await self._build_initial_messages(
+        ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,

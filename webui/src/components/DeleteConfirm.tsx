@@ -10,10 +10,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { SessionAutomationJob } from "@/lib/types";
 
 interface DeleteConfirmProps {
   open: boolean;
   title: string;
+  automations?: SessionAutomationJob[];
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -21,14 +23,18 @@ interface DeleteConfirmProps {
 export function DeleteConfirm({
   open,
   title,
+  automations = [],
   onCancel,
   onConfirm,
 }: DeleteConfirmProps) {
   const { t } = useTranslation();
+  const hasAutomations = automations.length > 0;
+  const visibleAutomations = automations.slice(0, 4);
+  const hiddenCount = Math.max(0, automations.length - visibleAutomations.length);
   return (
     <AlertDialog open={open} onOpenChange={(o) => (!o ? onCancel() : undefined)}>
       <AlertDialogContent
-        className="w-[min(calc(100vw-2rem),22.75rem)] gap-0 rounded-[28px] border border-white/70 bg-card/95 p-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.20)] backdrop-blur-xl data-[state=open]:zoom-in-95 sm:rounded-[28px]"
+        className="w-[min(calc(100vw-2rem),24rem)] gap-0 rounded-[28px] border border-white/70 bg-card/95 p-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.20)] backdrop-blur-xl data-[state=open]:zoom-in-95 sm:rounded-[28px]"
       >
         <AlertDialogHeader className="items-center space-y-0 text-center">
           <div className="mb-5 grid h-16 w-16 place-items-center rounded-full bg-destructive/10 text-destructive">
@@ -40,8 +46,31 @@ export function DeleteConfirm({
             {t("deleteConfirm.title", { title })}
           </AlertDialogTitle>
           <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-[14px] leading-6 text-muted-foreground">
-            {t("deleteConfirm.description")}
+            {hasAutomations
+              ? t("deleteConfirm.automationsDescription", {
+                  count: automations.length,
+                  defaultValue:
+                    "This chat has scheduled automations. Deleting it will also delete them.",
+                })
+              : t("deleteConfirm.description")}
           </AlertDialogDescription>
+          {hasAutomations ? (
+            <div className="mt-4 max-h-32 w-full overflow-y-auto rounded-2xl bg-muted/55 px-3 py-2 text-left">
+              {visibleAutomations.map((job) => (
+                <div key={job.id} className="truncate text-[13px] leading-6 text-foreground">
+                  {job.name || job.id}
+                </div>
+              ))}
+              {hiddenCount > 0 ? (
+                <div className="text-[13px] leading-6 text-muted-foreground">
+                  {t("deleteConfirm.moreAutomations", {
+                    count: hiddenCount,
+                    defaultValue: "+ {{count}} more",
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter className="mt-7 grid grid-cols-2 gap-3 space-x-0">
           <AlertDialogCancel
@@ -54,7 +83,11 @@ export function DeleteConfirm({
             onClick={onConfirm}
             className="h-11 rounded-full bg-destructive px-5 text-[15px] font-semibold text-destructive-foreground shadow-[0_10px_25px_rgba(239,68,68,0.28)] hover:bg-destructive/90"
           >
-            {t("deleteConfirm.confirm")}
+            {hasAutomations
+              ? t("deleteConfirm.confirmWithAutomations", {
+                  defaultValue: "Delete all",
+                })
+              : t("deleteConfirm.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

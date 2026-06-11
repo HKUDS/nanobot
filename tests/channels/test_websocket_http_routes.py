@@ -188,6 +188,13 @@ async def test_session_automations_route_filters_by_webui_session(
             to=to,
             session_key=f"websocket:{to}",
         )
+    cron.add_job(
+        name="Legacy same target",
+        schedule=hourly,
+        message="Legacy job should not be treated as bound",
+        channel="websocket",
+        to="abc",
+    )
     cron.register_system_job(
         CronJob(
             id="heartbeat",
@@ -654,6 +661,91 @@ async def test_session_delete_removes_file(
         assert resp.json()["deleted"] is True
         assert not path.exists()
         assert not webui_path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_blocks_when_bound_automation_exists(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    cron.add_job(
+        name="Daily check",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the repo",
+        session_key="websocket:doomed",
+    )
+    channel = _ch(bus, session_manager=sm, cron_service=cron, port=29915)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29915/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        path = sm._get_session_path("websocket:doomed")
+        resp = await _http_get(
+            "http://127.0.0.1:29915/api/sessions/websocket:doomed/delete",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["deleted"] is False
+        assert body["blocked_by_automations"] is True
+        assert [job["name"] for job in body["automations"]] == ["Daily check"]
+        assert path.exists()
+        assert cron.list_bound_agent_jobs_for_session("websocket:doomed")
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_can_cascade_bound_automations(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    cron.add_job(
+        name="Daily check",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the repo",
+        session_key="websocket:doomed",
+    )
+    cron.add_job(
+        name="Legacy same target",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Legacy job remains",
+        channel="websocket",
+        to="doomed",
+    )
+    channel = _ch(bus, session_manager=sm, cron_service=cron, port=29916)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29916/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        path = sm._get_session_path("websocket:doomed")
+        resp = await _http_get(
+            "http://127.0.0.1:29916/api/sessions/websocket:doomed/delete?delete_automations=true",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+        assert not path.exists()
+        assert cron.list_bound_agent_jobs_for_session("websocket:doomed") == []
+        assert [job.name for job in cron.list_jobs(include_disabled=True)] == [
+            "Legacy same target"
+        ]
     finally:
         await channel.stop()
         await server_task

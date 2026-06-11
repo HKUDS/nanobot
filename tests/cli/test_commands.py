@@ -8,13 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from blackcat.bus.events import OutboundMessage
+from blackcat.bus.events import InboundMessage, OutboundMessage
 from blackcat.cli.commands import _proactive_delivery_metadata, app
 from blackcat.config.schema import Config
 from blackcat.cron.types import CronJob, CronPayload
 from blackcat.providers.factory import ProviderSnapshot, make_provider
 from blackcat.providers.openai_codex_provider import _strip_model_prefix
 from blackcat.providers.registry import find_by_name
+from blackcat.session.routing import SESSION_ROUTING_METADATA_KEY
 
 runner = CliRunner()
 
@@ -1352,7 +1353,6 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
                 "webui_turn_id": old_turn_id,
                 "workspace_scope": {"mode": "default"},
             },
-            session_key="websocket:chat-1",
         ),
     )
 
@@ -1371,6 +1371,175 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         "kind": "cron",
         "label": "drink water",
     }
+
+
+def test_gateway_bound_cron_runs_as_session_turn(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    provider = _fake_provider()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {"run_records": []}
+
+    monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: provider)
+    monkeypatch.setattr(
+        "blackcat.providers.factory.build_provider_snapshot",
+        lambda _config: _test_provider_snapshot(provider, _config),
+    )
+    monkeypatch.setattr(
+        "blackcat.providers.factory.load_provider_snapshot",
+        lambda _config_path=None: _test_provider_snapshot(provider, config),
+    )
+    monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: bus)
+
+    route_metadata = {
+        "websocket:chat-1": {
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "restricted",
+            },
+            SESSION_ROUTING_METADATA_KEY: {
+                "channel": "websocket",
+                "chat_id": "chat-1",
+                "metadata": {},
+            },
+        },
+        "discord:456:thread:777": {
+            SESSION_ROUTING_METADATA_KEY: {
+                "channel": "discord",
+                "chat_id": "777",
+                "metadata": {
+                    "context_chat_id": "456",
+                    "parent_channel_id": "456",
+                    "thread_id": "777",
+                },
+            },
+        },
+    }
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            pass
+
+        def read_session_file(self, key: str) -> dict[str, object] | None:
+            return {"metadata": route_metadata.get(key, {})}
+
+    monkeypatch.setattr("blackcat.session.manager.SessionManager", _FakeSessionManager)
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def write_run_record(self, run_id: str, record: dict[str, object]) -> None:
+            seen["run_records"].append((run_id, record))
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
+            self.tools = {}
+            seen["agent"] = self
+
+        async def submit_automation_turn(self, msg: InboundMessage):
+            seen["automation_msg"] = msg
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Checked the repo.",
+            )
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _StopAfterCronSetup:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise _StopGatewayError("stop")
+
+    async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
+        raise AssertionError("bound cron must not use legacy response evaluator")
+
+    monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _StopAfterCronSetup)
+    monkeypatch.setattr("blackcat.cli.commands.evaluate_response", _unexpected_evaluator)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    assert isinstance(result.exception, _StopGatewayError)
+
+    cron = seen["cron"]
+    job = CronJob(
+        id="repo-check",
+        name="Repo check",
+        payload=CronPayload(
+            message="Check repository health.",
+            session_key="websocket:chat-1",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(job))
+
+    assert response == "Checked the repo."
+    msg = seen["automation_msg"]
+    assert isinstance(msg, InboundMessage)
+    assert msg.channel == "websocket"
+    assert msg.chat_id == "chat-1"
+    assert msg.sender_id == "cron"
+    assert msg.session_key_override == "websocket:chat-1"
+    assert "Automation: Check repository health." in msg.content
+    assert msg.metadata["webui"] is True
+    assert msg.metadata["workspace_scope"]["project_path"] == str(tmp_path)
+    assert msg.metadata["_webui_message_source"] == {"kind": "cron", "label": "Repo check"}
+    trigger = msg.metadata["_automation_trigger"]
+    assert trigger["job_id"] == "repo-check"
+    assert trigger["job_name"] == "Repo check"
+    assert trigger["persist_content"] == (
+        "Scheduled automation triggered: Repo check\n\nCheck repository health."
+    )
+    assert msg.metadata["_defer_until_session_idle"] is True
+    statuses = [record["status"] for _run_id, record in seen["run_records"]]
+    assert statuses == ["queued", "ok"]
+    assert seen["run_records"][0][0] == seen["run_records"][1][0]
+
+    discord_job = CronJob(
+        id="thread-check",
+        name="Thread check",
+        payload=CronPayload(
+            message="Check the Discord thread.",
+            session_key="discord:456:thread:777",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(discord_job))
+
+    assert response == "Checked the repo."
+    msg = seen["automation_msg"]
+    assert isinstance(msg, InboundMessage)
+    assert msg.channel == "discord"
+    assert msg.chat_id == "777"
+    assert msg.session_key_override == "discord:456:thread:777"
+    assert msg.metadata["context_chat_id"] == "456"
+    assert msg.metadata["parent_channel_id"] == "456"
+    assert msg.metadata["thread_id"] == "777"
 
 
 def test_gateway_cron_job_suppresses_intermediate_progress(

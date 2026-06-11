@@ -155,6 +155,17 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("passes the automation cascade flag when deleting a session", async () => {
+    await deleteSession("tok", "websocket:chat-1", { deleteAutomations: true });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/delete?delete_automations=true",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("serializes settings updates as a narrow query string", async () => {
     await updateSettings("tok", {
       modelPreset: "default",

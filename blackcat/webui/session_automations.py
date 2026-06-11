@@ -8,7 +8,25 @@ from blackcat.cron.types import CronJob
 
 
 class _CronServiceLike(Protocol):
-    def list_jobs(self, *, include_disabled: bool = False) -> list[CronJob]: ...
+    def list_bound_agent_jobs_for_session(
+        self,
+        session_key: str,
+        *,
+        include_disabled: bool = True,
+    ) -> list[CronJob]: ...
+
+
+def bound_session_automation_jobs(
+    cron_service: _CronServiceLike | None,
+    session_key: str,
+) -> list[CronJob]:
+    """Return agent-turn automation jobs explicitly bound to *session_key*."""
+    if cron_service is None:
+        return []
+    return cron_service.list_bound_agent_jobs_for_session(
+        session_key,
+        include_disabled=True,
+    )
 
 
 def session_automations_payload(
@@ -16,22 +34,11 @@ def session_automations_payload(
     session_key: str,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
-    jobs: list[CronJob] = []
-    if cron_service is not None:
-        all_jobs = cron_service.list_jobs(include_disabled=True)
-        jobs = [job for job in all_jobs if _job_matches_session(job, session_key)]
-    return {"jobs": [_serialize_job(job) for job in jobs]}
+    return {"jobs": serialize_automation_jobs(bound_session_automation_jobs(cron_service, session_key))}
 
 
-def _job_matches_session(job: CronJob, session_key: str) -> bool:
-    payload = job.payload
-    if payload.kind != "agent_turn":
-        return False
-    if payload.session_key:
-        return payload.session_key == session_key
-    if payload.channel and payload.to:
-        return f"{payload.channel}:{payload.to}" == session_key
-    return False
+def serialize_automation_jobs(jobs: list[CronJob]) -> list[dict[str, Any]]:
+    return [_serialize_job(job) for job in jobs]
 
 
 def _serialize_job(job: CronJob) -> dict[str, Any]:

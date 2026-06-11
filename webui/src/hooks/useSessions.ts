@@ -9,7 +9,12 @@ import {
   listSessions,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
-import type { ChatSummary, UIMessage, WorkspaceScopePayload } from "@/lib/types";
+import type {
+  ChatSummary,
+  SessionDeleteResult,
+  UIMessage,
+  WorkspaceScopePayload,
+} from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 const INITIAL_HISTORY_PAGE_LIMIT = 160;
@@ -31,7 +36,10 @@ export function useSessions(): {
   refresh: () => Promise<void>;
   createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
-  deleteChat: (key: string) => Promise<void>;
+  deleteChat: (
+    key: string,
+    options?: { deleteAutomations?: boolean },
+  ) => Promise<SessionDeleteResult>;
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>([]);
@@ -124,10 +132,12 @@ export function useSessions(): {
   }, [client]);
 
   const deleteChat = useCallback(
-    async (key: string) => {
-      await apiDeleteSession(tokenRef.current, key);
+    async (key: string, options?: { deleteAutomations?: boolean }) => {
+      const result = await apiDeleteSession(tokenRef.current, key, options);
+      if (!result.deleted) return result;
       optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
+      return result;
     },
     [],
   );

@@ -84,6 +84,7 @@ class CronService:
     ):
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
+        self._run_records_dir = store_path.parent / "runs"
         self._lock = FileLock(str(self._action_path.parent) + ".lock")
         self.on_job = on_job
         self._store: CronStore | None = None
@@ -325,6 +326,23 @@ class CronService:
             tmp_path.unlink(missing_ok=True)
             raise
 
+    @staticmethod
+    def _safe_run_record_name(run_id: str) -> str:
+        return "".join(c if c.isalnum() or c in "._-" else "_" for c in run_id)
+
+    def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
+        """Write an internal audit record for one cron execution."""
+        name = self._safe_run_record_name(run_id)
+        if not name:
+            name = str(uuid.uuid4())
+        path = self._run_records_dir / f"{name}.json"
+        payload = {
+            **record,
+            "run_id": run_id,
+            "updated_at_ms": _now_ms(),
+        }
+        self._atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False))
+
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True
@@ -472,6 +490,20 @@ class CronService:
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
+
+    def list_bound_agent_jobs_for_session(
+        self,
+        session_key: str,
+        *,
+        include_disabled: bool = True,
+    ) -> list[CronJob]:
+        """Return user-created bound automation jobs owned by *session_key*."""
+        return [
+            job
+            for job in self.list_jobs(include_disabled=include_disabled)
+            if job.payload.kind == "agent_turn"
+            and job.payload.session_key == session_key
+        ]
 
     def add_job(
         self,

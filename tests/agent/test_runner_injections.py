@@ -617,6 +617,54 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_automation_turn_deferred_while_session_active(tmp_path):
+    """Automation turns wait for the active session instead of becoming injections."""
+    from nanobot.bus.events import InboundMessage
+    from nanobot.cron.automation import (
+        AUTOMATION_DEFER_UNTIL_IDLE_META,
+        AUTOMATION_TRIGGER_META,
+    )
+
+    loop = _make_loop(tmp_path)
+    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+    session_key = "websocket:chat-1"
+    pending = asyncio.Queue(maxsize=20)
+    loop._pending_queues[session_key] = pending
+
+    run_task = asyncio.create_task(loop.run())
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={
+            AUTOMATION_TRIGGER_META: {"run_id": "run-1"},
+            AUTOMATION_DEFER_UNTIL_IDLE_META: True,
+        },
+        session_key_override=session_key,
+    )
+    await loop.bus.publish_inbound(msg)
+
+    for _ in range(20):
+        if loop._deferred_automation_queues.get(session_key):
+            break
+        await asyncio.sleep(0.05)
+
+    loop.stop()
+    await asyncio.wait_for(run_task, timeout=2)
+
+    assert pending.empty()
+    assert loop._dispatch.await_count == 0
+    assert loop._deferred_automation_queues[session_key] == [msg]
+
+    await loop._publish_next_deferred_automation(session_key)
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+    assert queued is msg
+    assert session_key not in loop._deferred_automation_queues
+
+
+@pytest.mark.asyncio
 async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_path):
     """Pending queue should leave overflow messages queued for later drains."""
     from blackcat.agent.loop import AgentLoop

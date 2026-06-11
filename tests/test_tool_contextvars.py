@@ -99,14 +99,18 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     release = asyncio.Event()
 
     async def task_one() -> str:
-        tool.set_context(RequestContext(channel="feishu", chat_id="chat-a"))
+        tool.set_context(
+            RequestContext(channel="feishu", chat_id="chat-a", session_key="feishu:chat-a")
+        )
         entered.set()
         await release.wait()
         return await tool.execute(action="add", message="first", every_seconds=60)
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context(RequestContext(channel="email", chat_id="chat-b"))
+        tool.set_context(
+            RequestContext(channel="email", chat_id="chat-b", session_key="email:chat-b")
+        )
         release.set()
         return await tool.execute(action="add", message="second", every_seconds=60)
 
@@ -116,8 +120,7 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     assert result_two.startswith("Created job")
 
     jobs = tool._cron.list_jobs()
-    assert {job.payload.channel for job in jobs} == {"feishu", "email"}
-    assert {job.payload.to for job in jobs} == {"chat-a", "chat-b"}
+    assert {job.payload.session_key for job in jobs} == {"feishu:chat-a", "email:chat-b"}
 
 
 # --- Basic single-task regression tests ---
@@ -228,15 +231,16 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
 async def test_cron_tool_basic_set_context_and_execute(tmp_path) -> None:
     """Single task: set_context then add job should use correct target."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
-    tool.set_context(RequestContext(channel="wechat", chat_id="user-789"))
+    tool.set_context(
+        RequestContext(channel="wechat", chat_id="user-789", session_key="wechat:user-789")
+    )
 
     result = await tool.execute(action="add", message="standup", every_seconds=300)
     assert result.startswith("Created job")
 
     jobs = tool._cron.list_jobs()
     assert len(jobs) == 1
-    assert jobs[0].payload.channel == "wechat"
-    assert jobs[0].payload.to == "user-789"
+    assert jobs[0].payload.session_key == "wechat:user-789"
 
 
 @pytest.mark.asyncio
@@ -245,4 +249,4 @@ async def test_cron_tool_no_context_returns_error(tmp_path) -> None:
     tool = CronTool(CronService(tmp_path / "jobs.json"))
 
     result = await tool.execute(action="add", message="test", every_seconds=60)
-    assert result == "Error: no session context (channel/chat_id)"
+    assert result == "Error: scheduled automations must be created from a chat session"

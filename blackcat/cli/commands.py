@@ -1,10 +1,12 @@
 """CLI commands for blackcat."""
 
 import asyncio
+import hashlib
 import os
 import select
 import signal
 import sys
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
@@ -975,12 +977,19 @@ def _run_gateway(
     from blackcat.bus.queue import MessageBus
     from blackcat.bus.runtime_events import RuntimeEventBus
     from blackcat.channels.manager import ChannelManager
+    from blackcat.cron.automation import (
+        AUTOMATION_DEFER_UNTIL_IDLE_META,
+        AUTOMATION_TRIGGER_META,
+    )
     from blackcat.cron.service import CronService
     from blackcat.cron.types import CronJob
     from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
     from blackcat.providers.image_generation import image_gen_provider_configs
+    from blackcat.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
     from blackcat.session.manager import SessionManager
+    from blackcat.session.routing import read_routing_context
     from blackcat.session.webui_turns import WebuiTurnCoordinator
+    from blackcat.utils.prompt_templates import render_template
     from blackcat.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -1025,7 +1034,7 @@ def _run_gateway(
     ).subscribe(runtime_events)
 
     from blackcat.agent.loop import UNIFIED_SESSION_KEY
-    from blackcat.bus.events import OutboundMessage
+    from blackcat.bus.events import InboundMessage, OutboundMessage
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
         return (
@@ -1033,6 +1042,152 @@ def _run_gateway(
             if config.agents.defaults.unified_session
             else f"{channel}:{chat_id}"
         )
+
+    def _session_metadata(session_key: str) -> dict[str, Any]:
+        data = session_manager.read_session_file(session_key)
+        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+        return dict(metadata) if isinstance(metadata, dict) else {}
+
+    def _bound_session_delivery_context(
+        session_key: str,
+        *,
+        turn_seed: str,
+        source_label: str | None,
+    ) -> tuple[str, str, dict[str, Any]]:
+        if ":" not in session_key:
+            raise ValueError(f"bound cron session_key is invalid: {session_key!r}")
+        channel, rest = session_key.split(":", 1)
+        if not channel or not rest:
+            raise ValueError(f"bound cron session_key is invalid: {session_key!r}")
+
+        session_metadata = _session_metadata(session_key)
+        routed = read_routing_context(session_metadata)
+        if routed is not None:
+            channel, rest, metadata = routed
+        else:
+            metadata: dict[str, Any] = {}
+
+        if channel == "websocket":
+            metadata["webui"] = True
+            scope = session_metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
+            if isinstance(scope, dict):
+                metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(scope)
+            metadata.update(
+                _proactive_delivery_metadata(
+                    "websocket",
+                    metadata,
+                    turn_seed=turn_seed,
+                    source_label=source_label,
+                )
+            )
+            return channel, rest, metadata
+
+        if channel == "slack" and ":" in rest:
+            chat_id, thread_ts = rest.split(":", 1)
+            if thread_ts:
+                metadata["slack"] = {"thread_ts": thread_ts}
+            return channel, chat_id, metadata
+
+        return channel, rest, metadata
+
+    def _automation_prompt_ref(prompt: str) -> dict[str, Any]:
+        return {
+            "id": "cron.agent_turn.reminder",
+            "version": 1,
+            "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        }
+
+    async def _run_bound_cron_job(job: CronJob) -> str | None:
+        session_key = job.payload.session_key
+        if not session_key:
+            raise ValueError(f"cron job {job.id} is missing payload.session_key")
+
+        prompt = render_template(
+            "agent/cron_reminder.md",
+            strip=True,
+            message=job.payload.message,
+        )
+        prompt_ref = _automation_prompt_ref(prompt)
+        run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
+        channel, chat_id, metadata = _bound_session_delivery_context(
+            session_key,
+            turn_seed=f"cron:{job.id}",
+            source_label=job.name,
+        )
+        metadata[AUTOMATION_TRIGGER_META] = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "run_id": run_id,
+            "prompt_ref": prompt_ref,
+            "persist_content": (
+                f"Scheduled automation triggered: {job.name}\n\n{job.payload.message}"
+            ),
+        }
+        metadata[AUTOMATION_DEFER_UNTIL_IDLE_META] = True
+
+        cron.write_run_record(
+            run_id,
+            {
+                "job_id": job.id,
+                "job_name": job.name,
+                "session_key": session_key,
+                "status": "queued",
+                "prompt_ref": prompt_ref,
+                "prompt_vars": {"message": job.payload.message},
+                "rendered_prompt": prompt,
+            },
+        )
+
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+        try:
+            resp = await agent.submit_automation_turn(
+                InboundMessage(
+                    channel=channel,
+                    sender_id="cron",
+                    chat_id=chat_id,
+                    content=prompt,
+                    metadata=metadata,
+                    session_key_override=session_key,
+                )
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            error_text = str(exc) or exc.__class__.__name__
+            cron.write_run_record(
+                run_id,
+                {
+                    "job_id": job.id,
+                    "job_name": job.name,
+                    "session_key": session_key,
+                    "status": "error",
+                    "error": error_text,
+                    "prompt_ref": prompt_ref,
+                    "prompt_vars": {"message": job.payload.message},
+                    "rendered_prompt": prompt,
+                },
+            )
+            raise
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+        response = resp.content if resp else ""
+        cron.write_run_record(
+            run_id,
+            {
+                "job_id": job.id,
+                "job_name": job.name,
+                "session_key": session_key,
+                "status": "ok",
+                "prompt_ref": prompt_ref,
+                "prompt_vars": {"message": job.payload.message},
+                "rendered_prompt": prompt,
+                "response": response,
+            },
+        )
+        return response
 
     async def _deliver_to_channel(
         msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
@@ -1193,6 +1348,9 @@ def _run_gateway(
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
+
+        if job.payload.kind == "agent_turn" and job.payload.session_key:
+            return await _run_bound_cron_job(job)
 
         reminder_note = (
             "The scheduled time has arrived. Deliver this reminder to the user now, "

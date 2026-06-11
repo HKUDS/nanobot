@@ -103,7 +103,7 @@ describe("useSessions", () => {
         preview: "Beta",
       },
     ]);
-    vi.mocked(api.deleteSession).mockResolvedValue(true);
+    vi.mocked(api.deleteSession).mockResolvedValue({ deleted: true });
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(fakeClient()),
@@ -115,8 +115,40 @@ describe("useSessions", () => {
       await result.current.deleteChat("websocket:chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a");
+    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a", undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
+  });
+
+  it("keeps a session when delete is blocked by bound automations", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Alpha",
+      },
+    ]);
+    vi.mocked(api.deleteSession).mockResolvedValue({
+      deleted: false,
+      blocked_by_automations: true,
+      automations: [],
+    });
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    let deleteResult: Awaited<ReturnType<typeof result.current.deleteChat>> | undefined;
+    await act(async () => {
+      deleteResult = await result.current.deleteChat("websocket:chat-a");
+    });
+
+    expect(deleteResult?.blocked_by_automations).toBe(true);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
 
   it("refreshes sessions when the websocket reports a session update", async () => {
