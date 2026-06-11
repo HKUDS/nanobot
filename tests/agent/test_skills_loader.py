@@ -590,3 +590,36 @@ def test_build_skills_summary_no_bump_when_telemetry_none(tmp_path: Path) -> Non
     loader = SkillsLoader(tmp_path, builtin_skills_dir=builtin, telemetry=None)
     # Must not raise — physically impossible to bump.
     loader.build_skills_summary()
+
+
+def test_load_skills_for_context_bumps_use_per_loaded_skill(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import SkillTelemetry
+    (tmp_path / "skills" / "foo").mkdir(parents=True)
+    (tmp_path / "skills" / "foo" / "SKILL.md").write_text(
+        "---\nname: foo\n---\nfoo-body"
+    )
+    (tmp_path / "skills" / "bar").mkdir()
+    (tmp_path / "skills" / "bar" / "SKILL.md").write_text(
+        "---\nname: bar\n---\nbar-body"
+    )
+    builtin = tmp_path / "_b"
+    builtin.mkdir()
+    telem = SkillTelemetry(tmp_path)
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=builtin, telemetry=telem)
+    out = loader.load_skills_for_context(["foo", "bar"])
+    assert "foo-body" in out and "bar-body" in out
+    snap = telem.snapshot()
+    assert snap["entries"]["foo"]["uses"] == 1
+    assert snap["entries"]["bar"]["uses"] == 1
+
+
+def test_load_skills_for_context_does_not_bump_missing_skill(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import SkillTelemetry
+    builtin = tmp_path / "_b"
+    builtin.mkdir()
+    telem = SkillTelemetry(tmp_path)
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=builtin, telemetry=telem)
+    loader.load_skills_for_context(["does-not-exist"])
+    snap = telem.snapshot()
+    # Per spec §7 row (e): bump only after load success → no entry for missing skill
+    assert "does-not-exist" not in snap["entries"]

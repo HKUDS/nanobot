@@ -241,11 +241,15 @@ class SkillsLoader:
         Returns:
             Formatted skills content.
         """
-        parts = [
-            f"### Skill: {name}\n\n{self._strip_frontmatter(markdown)}"
-            for name in skill_names
-            if (markdown := self.load_skill(name))
-        ]
+        parts: list[str] = []
+        for name in skill_names:
+            markdown = self.load_skill(name)
+            if markdown is None:
+                continue
+            parts.append(f"### Skill: {name}\n\n{self._strip_frontmatter(markdown)}")
+            # M1: bump use counter only after successful load (spec §7 row e)
+            if self.telemetry is not None:
+                self.telemetry.bump(name, "use")
         return "\n\n---\n\n".join(parts)
 
     def build_skills_summary(self, exclude: set[str] | None = None) -> str:
