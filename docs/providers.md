@@ -150,7 +150,7 @@ Anthropic direct uses the native Anthropic provider. Do not use an OpenRouter mo
 
 ### Custom OpenAI-Compatible Endpoint
 
-The `custom` provider fits OpenAI-compatible endpoints that are not represented by a named provider.
+The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.
 
 ```json
 {
@@ -177,6 +177,43 @@ The `custom` provider fits OpenAI-compatible endpoints that are not represented 
 ```
 
 `custom` does not infer a default base URL. Set `apiBase`.
+
+If you have more than one custom OpenAI-compatible endpoint, give each endpoint its own provider key under `providers` and use that same key in the model preset. The key can be a name that makes sense in your environment, such as `companyProxy`, `tenant-a`, or `dev-local`.
+
+```json
+{
+  "providers": {
+    "companyProxy": {
+      "apiKey": "${COMPANY_PROXY_API_KEY}",
+      "apiBase": "https://llm-proxy.example.com/v1"
+    },
+    "tenant-a": {
+      "apiBase": "https://tenant-a.example.com/v1"
+    }
+  },
+  "modelPresets": {
+    "company": {
+      "provider": "companyProxy",
+      "model": "gpt-4o-mini",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    },
+    "tenantA": {
+      "provider": "tenant-a",
+      "model": "served-model-name",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "company"
+    }
+  }
+}
+```
+
+Custom provider keys are treated as direct OpenAI-compatible providers. `apiBase` is required because nanobot cannot know the endpoint URL. `apiKey` is optional for local servers or private proxies that do not require one. Do not set `apiType` on custom provider keys; `apiType` is only for `providers.openai`.
 
 ### Ollama
 

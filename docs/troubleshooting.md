@@ -102,7 +102,7 @@ Common config mistakes:
 | Symptom | Check |
 |---|---|
 | JSON parse error | Validate commas, braces, and quotes. Most docs examples are partial snippets to merge. |
-| Unknown or missing provider | Use provider registry names such as `openrouter`, `anthropic`, `openai`, `ollama`, `vllm`, `lm_studio`. |
+| Unknown or missing provider | Use provider registry names such as `openrouter`, `anthropic`, `openai`, `ollama`, `vllm`, `lm_studio`, or define a custom OpenAI-compatible provider key under `providers` and reference that exact key from the active preset. |
 | snake_case vs camelCase confusion | Both are accepted, but docs use camelCase because nanobot writes config with aliases such as `apiKey`, `modelPresets`, `intervalS`. |
 | Environment variable error | `${VAR_NAME}` references are resolved at startup. Set the variable before running nanobot. |
 | Edited config but behavior did not change | Restart `nanobot gateway`; long-running processes read config at startup. |
