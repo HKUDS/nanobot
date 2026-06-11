@@ -595,3 +595,57 @@ def test_atomic_write_fsyncs_parent_dir(tmp_path: Path, monkeypatch) -> None:
     st._atomic_write(tmp_path / "data.json", {"k": "v"})
     # Expect exactly 2 fsyncs: one for tmp fd, one for parent dir fd
     assert len(calls) == 2
+
+
+def test_corrupt_file_is_backed_up_and_rebuilt(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "ws" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".telemetry.json").write_text("{ not json")
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    telem.bump("foo", "view")
+    telem.flush()
+    final = json.loads((skills_dir / ".telemetry.json").read_text())
+    assert final["entries"]["foo"]["views"] == 1
+    backups = list(skills_dir.glob(".telemetry.json.corrupted.*"))
+    assert len(backups) == 1
+
+
+def test_schema_version_2_unknown_fields_preserved(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "ws" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".telemetry.json").write_text(json.dumps({
+        "schema_version": 2,
+        "updated_at": "x",
+        "entries": {
+            "foo": {
+                "origin": "user",
+                "shadowed": [],
+                "views": 1,
+                "uses": 0,
+                "patches": 0,
+                "entry_created_at": "x",
+                "last_view": None,
+                "last_use": None,
+                "cooldown_until": "2026-12-01T00:00:00Z",
+            }
+        },
+        "future_top": "preserve_me",
+    }))
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.reconcile([_make_entry("foo")])
+    telem.bump("foo", "view")
+    telem.flush()
+    data = json.loads((skills_dir / ".telemetry.json").read_text())
+    assert data["entries"]["foo"]["cooldown_until"] == "2026-12-01T00:00:00Z"
+    assert data["future_top"] == "preserve_me"
+
+
+def test_atexit_register_flush(tmp_path: Path, monkeypatch) -> None:
+    from nanobot.agent import skills_telemetry as st
+
+    registered: list = []
+    monkeypatch.setattr(st.atexit, "register", lambda fn: registered.append(fn))
+    telem = SkillTelemetry(tmp_path / "ws")
+    telem.register_atexit()
+    assert telem.flush in registered

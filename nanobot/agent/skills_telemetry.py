@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import sys
@@ -243,6 +244,16 @@ class SkillTelemetry:
                 stale.unlink()
             except OSError:
                 pass
+
+    def register_atexit(self) -> None:
+        """Register flush() to run on interpreter shutdown.
+
+        Call once during AgentLoop construction so dirty in-memory counters
+        are persisted on graceful exit. Safe to call multiple times — atexit
+        accepts duplicate registrations and runs each, which is harmless
+        because flush() under single-flight + clean-state is idempotent.
+        """
+        atexit.register(self.flush)
 
     def snapshot(self) -> TelemetrySnapshot:
         with self._lock:
