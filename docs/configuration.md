@@ -194,7 +194,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 ## Providers
 
 > [!TIP]
-> - **Voice transcription**: Voice messages and WebUI/desktop microphone input use the shared top-level `transcription` settings. The default `transcription.provider` value is `"groq"`; set it to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
+> - **Voice transcription**: Voice messages and WebUI microphone input use the shared top-level `transcription` settings. The default `transcription.provider` value is `"groq"`; set it to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: `providers.minimaxAnthropic` is the config block for `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
@@ -1274,7 +1274,7 @@ If fallback candidates use smaller `contextWindowTokens` values, nanobot builds 
 
 ## Transcription Settings
 
-Audio transcription is a shared capability used by chat-channel voice messages and by WebUI/desktop microphone input. Chat-channel voice messages are transcribed automatically before they enter the agent. WebUI and desktop microphone input is transcribed into the composer first, so you can edit the text before sending.
+Audio transcription is a shared capability used by chat-channel voice messages and by WebUI microphone input. Chat-channel voice messages are transcribed automatically before they enter the agent. WebUI microphone input is transcribed into the composer first, so you can edit the text before sending.
 
 Configure transcription under the top-level `transcription` section:
 
@@ -1293,12 +1293,12 @@ Configure transcription under the top-level `transcription` section:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI/desktop microphone input. |
+| `enabled` | `true` | Enables audio transcription for both chat-channel voice messages and WebUI microphone input. |
 | `provider` | `"groq"` | Transcription backend: `"groq"`, `"openai"`, `"openrouter"`, `"xiaomi_mimo"`, `"stepfun"`, or `"assemblyai"`. |
 | `model` | provider default | Optional transcription model override. Defaults to `whisper-large-v3` for Groq, `whisper-1` for OpenAI, `openai/whisper-1` for OpenRouter, `mimo-v2.5-asr` for Xiaomi MiMo ASR, `stepaudio-2.5-asr` for StepFun ASR, and `universal-3-pro,universal-2` for AssemblyAI. OpenRouter accepts only speech-to-text models on its transcription endpoint, such as `nvidia/parakeet-tdt-0.6b-v3`, `openai/whisper-1`, or `openai/gpt-4o-transcribe`; chat LLMs are rejected there. AssemblyAI accepts a comma-separated model fallback list. |
 | `language` | `null` | Optional ISO-639 language hint, e.g. `"en"`, `"zh"`, `"ko"`, or `"ja"`. |
-| `maxDurationSec` | `120` | Maximum WebUI/desktop recording duration. |
-| `maxUploadMb` | `25` | Maximum WebUI/desktop audio upload size. |
+| `maxDurationSec` | `120` | Maximum WebUI recording duration. |
+| `maxUploadMb` | `25` | Maximum WebUI audio upload size. |
 
 Provider and language resolution is intentionally ordered for backwards compatibility:
 
@@ -1306,7 +1306,7 @@ Provider and language resolution is intentionally ordered for backwards compatib
 2. Legacy `channels.transcriptionProvider` / `channels.transcriptionLanguage`
 3. Built-in defaults (`provider: "groq"`, no language hint)
 
-The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI/desktop microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
+The legacy `channels.*` transcription fields existed before transcription became a shared capability across chat channels and WebUI microphone input. They are still read so older `config.json` files keep working, but they are no longer the preferred configuration surface. If both old and new fields are present, the top-level `transcription` values are the source of truth.
 
 Transcription credentials are intentionally not stored in `transcription`. Put the API key and optional endpoint in the matching provider config:
 
