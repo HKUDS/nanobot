@@ -589,6 +589,8 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         history: list[dict[str, Any]] | None = None,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> str:
         """
         Build the complete system prompt for non-Anthropic providers.
@@ -679,6 +681,8 @@ You are within blackcat harness/structure.
         inbound_message: Any | None = None,
         skip_runtime_lines: bool = False,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call (blackcat-compatible)."""
         system_prompt = await self.build_system_prompt(

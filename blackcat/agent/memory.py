@@ -312,9 +312,48 @@ class MemoryStore:
             return cursor + 1
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
+    _INTERNAL_HISTORY_SESSION_KEYS: ClassVar[frozenset[str]] = frozenset({
+        "echo",
+        "consolidation",
+        "curation",
+    })
+    _INTERNAL_HISTORY_SESSION_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "dream:",
+    )
+
+    @classmethod
+    def _is_internal_history_session(cls, session_key: str | None) -> bool:
+        if not session_key:
+            return False
+        return (
+            session_key in cls._INTERNAL_HISTORY_SESSION_KEYS
+            or session_key.startswith(cls._INTERNAL_HISTORY_SESSION_PREFIXES)
+        )
+
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]
+
+    def read_recent_history_for_prompt(
+        self,
+        since_cursor: int,
+        *,
+        session_key: str | None,
+        unified_session: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return unprocessed history entries safe to inject into a turn prompt."""
+        entries = self.read_unprocessed_history(since_cursor=since_cursor)
+        if session_key is None:
+            return entries
+        if not unified_session:
+            return [e for e in entries if e.get("session_key") == session_key]
+
+        return [
+            entry
+            for entry in entries
+            if (entry_session := entry.get("session_key")) == session_key
+            or not self._is_internal_history_session(entry_session)
+        ]
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""

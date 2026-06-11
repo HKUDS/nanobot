@@ -20,6 +20,12 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
     "Please try again or narrow the task."
 )
 
+BUDGET_EXHAUSTED_FINALIZATION_PROMPT = (
+    "You have reached the maximum allowed tool rounds. "
+    "Please provide a final response based on the information you have gathered so far. "
+    "Do NOT call any more tools."
+)
+
 LENGTH_RECOVERY_PROMPT = (
     "Output limit reached. Continue exactly where you left off "
     "— no recap, no apology. Break remaining work into smaller steps if needed."
@@ -64,6 +70,12 @@ def is_blank_text(content: str | None) -> bool:
 def build_finalization_retry_message() -> dict[str, str]:
     """A short no-tools-allowed prompt for final answer recovery."""
     return {"role": "user", "content": FINALIZATION_RETRY_PROMPT}
+
+
+def build_budget_exhausted_finalization_message() -> dict[str, str]:
+    """Prompt the model for a no-tools final response after budget exhaustion."""
+    return {"role": "user", "content": BUDGET_EXHAUSTED_FINALIZATION_PROMPT}
+
 
 def build_length_recovery_message() -> dict[str, str]:
     """Prompt the model to continue after hitting output token limit."""

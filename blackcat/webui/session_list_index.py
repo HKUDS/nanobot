@@ -14,7 +14,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.session.manager import (
+from blackcat.session.manager import (
     _SESSION_LIST_PREVIEW_MAX_CHARS,
     _SESSION_LIST_PREVIEW_MAX_RECORDS,
     Session,

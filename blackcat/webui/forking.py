@@ -7,9 +7,9 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from nanobot.session.manager import SessionManager
-from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
-from nanobot.webui.transcript import (
+from blackcat.session.manager import SessionManager
+from blackcat.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
+from blackcat.webui.transcript import (
     append_fork_marker,
     delete_webui_transcript,
     fork_transcript_before_user_index,

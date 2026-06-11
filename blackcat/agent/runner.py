@@ -41,6 +41,7 @@ from blackcat.utils.progress_events import (
 from blackcat.utils.prompt_templates import render_template
 from blackcat.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+    build_budget_exhausted_finalization_message,
     build_finalization_retry_message,
     build_goal_continue_message,
     build_length_recovery_message,
@@ -111,6 +112,7 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: str | None = None
+    finalize_on_max_iterations: bool = True
 
 
 @dataclass(slots=True)
@@ -633,28 +635,37 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            if spec.max_iterations_message:
-                final_content = spec.max_iterations_message.format(
-                    max_iterations=spec.max_iterations,
-                )
-            else:
-                final_content = render_template(
-                    "agent/max_iterations_message.md",
-                    strip=True,
-                    max_iterations=spec.max_iterations,
-                )
-            self._append_final_message(messages, final_content)
             # Drain any remaining injections so they are appended to the
             # conversation history instead of being re-published as
             # independent inbound messages by _dispatch's finally block.
-            # We ignore should_continue here because the for-loop has already
-            # exhausted all iterations.
+            # We include them before the no-tools finalization pass so the
+            # final response can account for every known follow-up.
             drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
                 spec, messages, None, injection_cycles,
                 phase="after max_iterations",
             )
             if drained_after_max_iterations:
                 had_injections = True
+            final_content = None
+            if spec.finalize_on_max_iterations:
+                final_content = await self._try_finalize_after_max_iterations(
+                    spec,
+                    hook,
+                    messages,
+                    usage,
+                )
+            if final_content is None:
+                if spec.max_iterations_message:
+                    final_content = spec.max_iterations_message.format(
+                        max_iterations=spec.max_iterations,
+                    )
+                else:
+                    final_content = render_template(
+                        "agent/max_iterations_message.md",
+                        strip=True,
+                        max_iterations=spec.max_iterations,
+                    )
+            self._append_final_message(messages, final_content)
 
         return AgentRunResult(
             final_content=final_content,
@@ -845,6 +856,75 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         return retry_messages
+
+    async def _try_finalize_after_max_iterations(
+        self,
+        spec: AgentRunSpec,
+        hook: AgentHook,
+        messages: list[dict[str, Any]],
+        usage: dict[str, int],
+    ) -> str | None:
+        retry_messages = self._budget_exhausted_finalization_messages(messages)
+        try:
+            response = await self._request_no_tools(spec, retry_messages)
+        except Exception:
+            logger.exception(
+                "Budget-exhausted finalization failed for {}; using fallback",
+                spec.session_key or "default",
+            )
+            return None
+
+        raw_usage = self._usage_or_estimate(spec, retry_messages, response)
+        self._accumulate_usage(usage, raw_usage)
+        if response.finish_reason == "error" or response.has_tool_calls:
+            logger.warning(
+                "Budget-exhausted finalization returned finish_reason='{}' "
+                "with {} tool call(s) for {}; using fallback",
+                response.finish_reason,
+                len(response.tool_calls),
+                spec.session_key or "default",
+            )
+            return None
+
+        context = AgentHookContext(
+            iteration=spec.max_iterations,
+            messages=messages,
+            response=response,
+            usage=dict(raw_usage),
+            session_key=spec.session_key,
+        )
+        clean = hook.finalize_content(context, response.content)
+        if is_blank_text(clean):
+            return None
+        return clean
+
+    async def _request_no_tools(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+    ) -> LLMResponse:
+        kwargs = self._build_request_kwargs(spec, messages, tools=None)
+        return await self.provider.chat_with_retry(**kwargs)
+
+    @staticmethod
+    def _budget_exhausted_finalization_messages(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        retry_messages = list(messages)
+        retry_messages.append(build_budget_exhausted_finalization_message())
+        return retry_messages
+
+    @staticmethod
+    def _max_iterations_fallback(spec: AgentRunSpec) -> str:
+        if spec.max_iterations_message:
+            return spec.max_iterations_message.format(
+                max_iterations=spec.max_iterations,
+            )
+        return render_template(
+            "agent/max_iterations_message.md",
+            strip=True,
+            max_iterations=spec.max_iterations,
+        )
 
     def _usage_or_estimate(
         self,
