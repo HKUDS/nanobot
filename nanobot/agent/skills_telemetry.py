@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sys
 import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
+
+from loguru import logger
 
 BumpKind = Literal["view", "use", "patch"]
 Writer = Literal["bump", "reconcile"]
@@ -46,8 +51,60 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-_KIND_TO_COUNTER = {"view": "views", "use": "uses", "patch": "patches"}
-_KIND_TO_LAST_TS = {"view": "last_view", "use": "last_use", "patch": None}
+_KIND_TO_COUNTER: dict[BumpKind, Literal["views", "uses", "patches"]] = {
+    "view": "views",
+    "use": "uses",
+    "patch": "patches",
+}
+_KIND_TO_LAST_TS: dict[BumpKind, Literal["last_view", "last_use"]] = {
+    "view": "last_view",
+    "use": "last_use",
+}
+
+
+def _atomic_write(path: Path, payload: dict) -> None:
+    """tmp + fsync(tmp) + os.replace + fsync(parent_dir) on POSIX."""
+    tmp = path.with_name(path.name + ".tmp")
+    data = json.dumps(payload, indent=2, sort_keys=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        os.write(fd, data.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    if sys.platform != "win32":
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+
+
+def _safe_read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        backup = path.with_suffix(path.suffix + f".corrupted.{int(_epoch_ms())}")
+        try:
+            path.rename(backup)
+        except OSError:
+            pass
+        logger.warning(
+            "telemetry: corrupt JSON at {} (kind=json_corruption): {}; backed up to {}",
+            path,
+            exc,
+            backup,
+        )
+        return None
+
+
+def _epoch_ms() -> float:
+    import time
+
+    return time.time() * 1000
 
 
 def _zero_entry_with_unknown_origin() -> TelemetryEntrySnapshot:
@@ -94,11 +151,14 @@ class SkillTelemetry:
         if kind not in _KIND_TO_COUNTER:
             raise ValueError(f"unknown bump kind: {kind!r}")
         counter_key = _KIND_TO_COUNTER[kind]
-        last_ts_key = _KIND_TO_LAST_TS[kind]
+        last_ts_key = _KIND_TO_LAST_TS.get(kind)
         now = _now_iso()
         with self._lock:
-            entry = self._entries.setdefault(name, _zero_entry_with_unknown_origin())
-            entry[counter_key] = entry[counter_key] + 1  # type: ignore[literal-required]
+            entry = self._entries.get(name)
+            if entry is None:
+                entry = _zero_entry_with_unknown_origin()
+                self._entries[name] = entry
+            entry[counter_key] = entry[counter_key] + 1
             if last_ts_key is not None:
-                entry[last_ts_key] = now  # type: ignore[literal-required]
+                entry[last_ts_key] = now
             self._dirty = True

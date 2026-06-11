@@ -63,3 +63,45 @@ def test_bump_dirty_flag_set(tmp_path: Path) -> None:
     assert telem._dirty is False
     telem.bump("foo", "view")
     assert telem._dirty is True
+
+
+def test_atomic_write_creates_file_and_no_tmp_residue(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import _atomic_write
+    target = tmp_path / "data.json"
+    _atomic_write(target, {"foo": 1})
+    assert target.read_text() == '{"foo": 1}' or '"foo": 1' in target.read_text()
+    leftover = list(tmp_path.glob("data.json.tmp*"))
+    assert leftover == []
+
+
+def test_atomic_write_overwrites_existing(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import _atomic_write
+    target = tmp_path / "data.json"
+    target.write_text('{"old": true}')
+    _atomic_write(target, {"new": True})
+    import json
+    assert json.loads(target.read_text()) == {"new": True}
+
+
+def test_safe_read_json_returns_default_on_missing(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import _safe_read_json
+    result = _safe_read_json(tmp_path / "missing.json")
+    assert result is None
+
+
+def test_safe_read_json_handles_corrupt_file(tmp_path: Path) -> None:
+    from loguru import logger
+
+    from nanobot.agent.skills_telemetry import _safe_read_json
+    messages = []
+    sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{not json")
+        result = _safe_read_json(corrupt)
+    finally:
+        logger.remove(sink_id)
+    assert result is None
+    backup = next(tmp_path.glob("corrupt.json.corrupted.*"), None)
+    assert backup is not None, "corrupted file must be backed up"
+    assert any("json_corruption" in m for m in messages)
