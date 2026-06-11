@@ -62,8 +62,8 @@ from blackcat.webui.http_utils import (
 )
 from blackcat.webui.media_gateway import WebUIMediaGateway
 from blackcat.webui.session_automations import (
-    bound_session_automation_jobs,
     serialize_automation_jobs,
+    session_automation_jobs,
     session_automations_payload,
 )
 from blackcat.webui.session_list_index import list_webui_sessions
@@ -452,17 +452,17 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         query = _parse_query(request.path)
         delete_automations = (_query_first(query, "delete_automations") or "").lower()
-        bound_jobs = bound_session_automation_jobs(self.cron_service, decoded_key)
-        if bound_jobs and delete_automations not in {"1", "true", "yes"}:
+        automation_jobs = session_automation_jobs(self.cron_service, decoded_key)
+        if automation_jobs and delete_automations not in {"1", "true", "yes"}:
             return _http_json_response(
                 {
                     "deleted": False,
                     "blocked_by_automations": True,
-                    "automations": serialize_automation_jobs(bound_jobs),
+                    "automations": serialize_automation_jobs(automation_jobs),
                 }
             )
-        if bound_jobs and self.cron_service is not None:
-            for job in bound_jobs:
+        if automation_jobs and self.cron_service is not None:
+            for job in automation_jobs:
                 self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
