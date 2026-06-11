@@ -5,10 +5,13 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.agent.skills_telemetry import SkillTelemetry
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -28,11 +31,19 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        *,
+        telemetry: "SkillTelemetry | None" = None,
+    ) -> None:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self.telemetry = telemetry
         self._collision_warned = False
         self._detect_collisions_once()
 

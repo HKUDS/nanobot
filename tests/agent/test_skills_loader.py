@@ -540,3 +540,20 @@ def test_list_skills_with_shadows_does_not_call_get_skill_meta(
     monkeypatch.setattr(loader, "_get_skill_meta", lambda n: calls.append(n) or {})
     loader.list_skills_with_shadows()
     assert calls == []  # MUST NOT touch frontmatter
+
+
+def test_telemetry_param_is_keyword_only(tmp_path: Path) -> None:
+    from nanobot.agent.skills_telemetry import SkillTelemetry
+
+    telem = SkillTelemetry(tmp_path / "ws")
+    # Keyword form must work
+    loader = SkillsLoader(tmp_path / "ws", telemetry=telem)
+    assert loader.telemetry is telem
+    # Positional form must raise TypeError (telemetry is keyword-only)
+    with pytest.raises(TypeError):
+        SkillsLoader(tmp_path / "ws", None, None, telem)  # type: ignore[misc]
+
+
+def test_telemetry_default_is_none(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path)
+    assert loader.telemetry is None
