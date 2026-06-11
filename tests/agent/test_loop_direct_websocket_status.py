@@ -120,3 +120,66 @@ async def test_process_direct_applies_per_run_hooks(tmp_path) -> None:
     assert response is not None
     assert response.content == "done"
     assert events == [("before", None), ("after", "done")]
+
+
+@pytest.mark.asyncio
+async def test_process_direct_creates_and_cleans_up_pending_queue(tmp_path) -> None:
+    """process_direct should register a pending_queue during execution and remove it after."""
+    loop = _make_loop(tmp_path)
+    session_key = "cron:test-queue"
+
+    assert session_key not in loop._pending_queues
+
+    await loop.process_direct("hello", session_key=session_key)
+
+    assert session_key not in loop._pending_queues
+
+
+@pytest.mark.asyncio
+async def test_process_direct_passes_pending_queue_to_process_message(tmp_path) -> None:
+    """process_direct should pass a non-None pending_queue to _process_message."""
+    loop = _make_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()
+    captured_kwargs = {}
+
+    async def _process_message(msg, **kwargs):
+        captured_kwargs.update(kwargs)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=msg.content)
+
+    loop._process_message = _process_message
+
+    await loop.process_direct("hello", session_key="cron:test-pq")
+
+    assert "pending_queue" in captured_kwargs
+    assert captured_kwargs["pending_queue"] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_direct_republishes_leftover_queue_messages(tmp_path) -> None:
+    """Messages left in the pending queue after process_direct should be re-published to the bus."""
+    loop = _make_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()
+    session_key = "cron:test-leftover"
+
+    async def _process_message(msg, **kwargs):
+        # Simulate a subagent result arriving in the pending queue
+        # during execution but not consumed by the runner.
+        pq = kwargs.get("pending_queue")
+        if pq is not None:
+            from nanobot.bus.events import InboundMessage
+            pq.put_nowait(InboundMessage(
+                channel="system", sender_id="subagent", chat_id="cli:c",
+                content="subagent result",
+            ))
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=msg.content)
+
+    loop._process_message = _process_message
+
+    await loop.process_direct("hello", session_key=session_key)
+
+    # The leftover message should have been re-published to the bus
+    msgs = []
+    while loop.bus.inbound_size:
+        msgs.append(await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5))
+    contents = [m.content for m in msgs]
+    assert "subagent result" in contents
