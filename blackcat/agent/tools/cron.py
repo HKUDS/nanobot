@@ -1,10 +1,13 @@
 """Cron tool for scheduling reminders and tasks."""
 
+from __future__ import annotations
+
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
 from blackcat.agent.tools.base import Tool, tool_parameters
+from blackcat.agent.tools.context import ContextAware, RequestContext
 from blackcat.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -52,7 +55,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
 
 
 @tool_parameters(_CRON_PARAMETERS)
-class CronTool(Tool):
+class CronTool(Tool, ContextAware):
     """Tool to schedule reminders and recurring tasks."""
 
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
@@ -64,15 +67,20 @@ class CronTool(Tool):
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(
-        self, channel: str, chat_id: str,
-        metadata: dict | None = None, session_key: str | None = None,
-    ) -> None:
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.cron_service is not None
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
+
+    def set_context(self, ctx: RequestContext) -> None:
         """Set the current session context for delivery."""
-        self._channel.set(channel)
-        self._chat_id.set(chat_id)
-        self._metadata.set(metadata or {})
-        self._session_key.set(session_key or f"{channel}:{chat_id}")
+        self._channel.set(ctx.channel)
+        self._chat_id.set(ctx.chat_id)
+        self._metadata.set(ctx.metadata)
+        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -162,7 +170,7 @@ class CronTool(Tool):
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, tool_name, metadata)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, tool_name, metadata, deliver)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -219,8 +227,9 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
-        tool_name: str | None,
-        metadata: dict | None,
+        tool_name: str | None = None,
+        metadata: dict | None = None,
+        deliver: bool = True,
     ) -> str:
         if not message and not tool_name:
             return "Error: action='add' requires a non-empty 'message' (or 'tool_name'). Retry including message='...' in your request."
@@ -248,7 +257,7 @@ class CronTool(Tool):
             name=name or (message[:30] if message else (tool_name or "untitled")),
             schedule=schedule,
             message=job_message,
-            deliver=True,
+            deliver=deliver,
             channel=channel,
             to=chat_id,
             channel_meta=self._metadata.get() or None,

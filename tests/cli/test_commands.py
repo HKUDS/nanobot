@@ -9,14 +9,42 @@ import pytest
 from typer.testing import CliRunner
 
 from blackcat.bus.events import OutboundMessage
-from blackcat.cli.commands import _make_provider, app
+from blackcat.cli.commands import _proactive_delivery_metadata, app
 from blackcat.config.schema import Config
 from blackcat.cron.types import CronJob, CronPayload
-from blackcat.providers.factory import ProviderSnapshot
+from blackcat.providers.factory import ProviderSnapshot, make_provider
 from blackcat.providers.openai_codex_provider import _strip_model_prefix
 from blackcat.providers.registry import find_by_name
 
 runner = CliRunner()
+
+
+def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
+    metadata = {
+        "webui": True,
+        "webui_turn_id": "turn-that-created-the-reminder",
+        "workspace_scope": {"mode": "default"},
+    }
+
+    out = _proactive_delivery_metadata(
+        "websocket",
+        metadata,
+        turn_seed="cron:drink-water",
+        source_label="drink water",
+    )
+
+    assert out["webui"] is True
+    assert out["workspace_scope"] == {"mode": "default"}
+    assert out["webui_turn_id"].startswith("cron:drink-water:")
+    assert out["webui_turn_id"] != metadata["webui_turn_id"]
+    assert out["_webui_message_source"] == {"kind": "cron", "label": "drink water"}
+
+
+def _fake_provider():
+    """Return a minimal fake provider that satisfies AgentLoop.__init__."""
+    p = MagicMock()
+    p.generation.max_tokens = 4096
+    return p
 
 
 class _StopGatewayError(RuntimeError):
@@ -220,6 +248,89 @@ def test_config_dump_excludes_oauth_provider_blocks():
     assert "githubCopilot" not in providers
 
 
+def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "codex.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "codex.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "openai-codex"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_logout_paths_resolve_to_expected_files():
+    from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+    from oauth_cli_kit.storage import FileTokenStorage
+
+    from blackcat.providers.github_copilot_provider import get_storage
+
+    codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    codex_path = codex_storage.get_token_path()
+    assert codex_path.name == "codex.json"
+    assert codex_path.parent.name == "auth"
+
+    gh_storage = get_storage()
+    gh_path = gh_storage.get_token_path()
+    assert gh_path.name == "github-copilot.json"
+    assert gh_path.parent.name == "auth"
+
+
+def test_provider_login_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "login", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
+
+
 def test_config_matches_explicit_ollama_prefix_without_api_key():
     config = Config()
     config.agents.defaults.model = "ollama/llama3.2"
@@ -280,11 +391,69 @@ def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api
     assert config.get_api_base() == "http://localhost:1234/v1"
 
 
+def test_config_accepts_atomic_chat_without_api_key_and_uses_default_localhost_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "atomic_chat",
+                    "model": "local-model",
+                }
+            },
+            "providers": {
+                "atomicChat": {
+                    "apiKey": None,
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "atomic_chat"
+    assert config.get_api_key() is None
+    assert config.get_api_base() == "http://localhost:1337/v1"
+
+
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
     assert find_by_name("github-copilot") is not None
     assert find_by_name("github-copilot").name == "github_copilot"
+    assert find_by_name("longcat") is not None
+    assert find_by_name("longcat").name == "longcat"
+    assert find_by_name("atomic-chat") is not None
+    assert find_by_name("atomic-chat").name == "atomic_chat"
+
+
+def test_config_explicit_longcat_provider_resolves_provider_name():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "longcat",
+                    "model": "LongCat-Flash-Chat",
+                }
+            },
+            "providers": {
+                "longcat": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "longcat"
+    assert config.get_api_base() == "https://api.longcat.chat/openai/v1"
+
+
+def test_config_auto_detects_longcat_from_model_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "longcat/LongCat-Flash-Chat"}},
+            "providers": {"longcat": {"apiKey": "test-key"}},
+        }
+    )
+
+    assert config.get_provider_name() == "longcat"
 
 
 def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():
@@ -318,6 +487,28 @@ def test_config_auto_detects_xiaomi_mimo_from_model_keyword():
 
     assert config.get_provider_name() == "xiaomi_mimo"
     assert config.get_api_base() == "https://api.xiaomimimo.com/v1"
+
+
+def test_config_explicit_minimax_anthropic_provider_uses_default_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "minimax_anthropic",
+                    "model": "MiniMax-M2.7-highspeed",
+                }
+            },
+            "providers": {
+                "minimaxAnthropic": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "minimax_anthropic"
+    assert config.get_api_key() == "test-key"
+    assert config.get_api_base() == "https://api.minimax.io/anthropic"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():
@@ -371,8 +562,8 @@ def test_openai_compat_provider_passes_model_through():
 
 
 def test_make_provider_uses_github_copilot_backend():
-    from blackcat.cli.commands import _make_provider
     from blackcat.config.schema import Config
+    from blackcat.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -386,7 +577,7 @@ def test_make_provider_uses_github_copilot_backend():
     )
 
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = _make_provider(config)
+        provider = make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
@@ -423,6 +614,7 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
+        await provider._ensure_client()
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
@@ -462,7 +654,8 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     )
 
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
-        _make_provider(config)
+        provider = make_provider(config)
+        asyncio.run(provider._ensure_client())
 
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "test-key"
@@ -480,24 +673,24 @@ def mock_agent_runtime(tmp_path):
     with patch("blackcat.config.loader.load_config", return_value=config) as mock_load_config, \
          patch("blackcat.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
          patch("blackcat.cli.commands.sync_workspace_templates") as mock_sync_templates, \
-         patch("blackcat.cli.commands._make_provider", return_value=object()), \
+         patch("blackcat.providers.factory.make_provider", return_value=_fake_provider()), \
          patch("blackcat.cli.commands._print_agent_response") as mock_print_response, \
          patch("blackcat.bus.queue.MessageBus"), \
          patch("blackcat.cron.service.CronService"), \
-         patch("blackcat.agent.loop.AgentLoop") as mock_agent_loop_cls:
+         patch("blackcat.cli.commands.AgentLoop.from_config") as mock_from_config:
         agent_loop = MagicMock()
         agent_loop.channels_config = None
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
         agent_loop.close_mcp = AsyncMock(return_value=None)
-        mock_agent_loop_cls.return_value = agent_loop
+        mock_from_config.return_value = agent_loop
 
         yield {
             "config": config,
             "load_config": mock_load_config,
             "sync_templates": mock_sync_templates,
-            "agent_loop_cls": mock_agent_loop_cls,
+            "from_config": mock_from_config,
             "agent_loop": agent_loop,
             "print_response": mock_print_response,
         }
@@ -522,9 +715,8 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     assert mock_agent_runtime["sync_templates"].call_args.args == (
         mock_agent_runtime["config"].workspace_path,
     )
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == (
-        mock_agent_runtime["config"].workspace_path
-    )
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
@@ -555,11 +747,14 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("blackcat.cron.service.CronService", lambda _store: object())
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -569,7 +764,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -590,7 +785,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
@@ -598,6 +793,9 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -608,7 +806,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             return None
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -636,15 +834,18 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("blackcat.utils.paths.get_cron_dir", lambda: legacy_dir)
+    monkeypatch.setattr("blackcat.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -655,7 +856,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -689,15 +890,18 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("blackcat.utils.paths.get_cron_dir", lambda: legacy_dir)
+    monkeypatch.setattr("blackcat.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             pass
 
@@ -708,7 +912,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr(
         "blackcat.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -729,7 +933,8 @@ def test_agent_overrides_workspace_path(mock_agent_runtime):
     assert result.exit_code == 0
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == workspace_path
 
 
 def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime, tmp_path: Path):
@@ -746,7 +951,8 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+    passed_config = mock_agent_runtime["from_config"].call_args.args[0]
+    assert passed_config.workspace_path == workspace_path
 
 
 def test_agent_hints_about_deprecated_memory_window(mock_agent_runtime, tmp_path):
@@ -764,6 +970,33 @@ def test_heartbeat_retains_recent_messages_by_default():
     config = Config()
 
     assert config.gateway.heartbeat.keep_recent_messages == 8
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        ("", False),
+        ("# Title\n\n## Active Tasks\n", False),
+        ("<!--\nmulti-line\ncomment\n-->\n", False),  # block comment, not tasks
+        ("<!-- single line -->\n", False),
+        ("## Active Tasks\n\n- water the plants\n", True),
+        ("## Active Tasks\n\n### Garden\n\n- water the plants\n", True),
+        ("## Notes\n\nsome random note\n", False),
+        ("stray text before any heading\n## Active Tasks\n\n- task\n", True),
+        ("stray text before any heading\n", False),
+    ],
+)
+def test_heartbeat_has_active_tasks(content, expected):
+    from blackcat.cli.commands import _heartbeat_has_active_tasks
+
+    assert _heartbeat_has_active_tasks(content) is expected
+
+
+def test_heartbeat_skips_bundled_template():
+    from blackcat.cli.commands import _heartbeat_has_active_tasks
+    from blackcat.utils.helpers import load_bundled_template
+
+    assert _heartbeat_has_active_tasks(load_bundled_template("HEARTBEAT.md")) is False
 
 
 def _write_instance_config(tmp_path: Path) -> Path:
@@ -798,7 +1031,7 @@ def _patch_cli_command_runtime(
     cron_service=None,
     get_cron_dir=None,
 ) -> None:
-    provider_factory = make_provider or (lambda _config: object())
+    provider_factory = make_provider or (lambda _config: _fake_provider())
 
     monkeypatch.setattr(
         "blackcat.config.loader.set_config_path",
@@ -811,7 +1044,7 @@ def _patch_cli_command_runtime(
         sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
-        "blackcat.cli.commands._make_provider",
+        "blackcat.providers.factory.make_provider",
         provider_factory,
     )
     monkeypatch.setattr(
@@ -830,7 +1063,7 @@ def _patch_cli_command_runtime(
     if cron_service is not None:
         monkeypatch.setattr("blackcat.cron.service.CronService", cron_service)
     if get_cron_dir is not None:
-        monkeypatch.setattr("blackcat.utils.paths.get_cron_dir", get_cron_dir)
+        monkeypatch.setattr("blackcat.config.paths.get_cron_dir", get_cron_dir)
 
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
@@ -842,6 +1075,9 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
             self.on_cleanup: list[object] = []
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(workspace=config.workspace_path, **extra)
         def __init__(self, **kwargs) -> None:
             seen["workspace"] = kwargs["workspace"]
 
@@ -868,7 +1104,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.api.server.create_app", _fake_create_app)
     monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
@@ -952,7 +1188,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    provider = object()
+    provider = _fake_provider()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
@@ -960,7 +1196,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: provider)
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: provider)
     monkeypatch.setattr(
         "blackcat.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(provider, _config),
@@ -998,9 +1234,14 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             seen["cron"] = self
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
+            self.provider = kwargs.get("provider", object())
             self.tools = {}
+            seen["agent"] = self
 
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(
@@ -1035,10 +1276,10 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         return True
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "blackcat.utils.evaluator.evaluate_response",
+        "blackcat.cli.commands.evaluate_response",
         _capture_evaluate_response,
     )
 
@@ -1048,6 +1289,11 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     cron = seen["cron"]
     assert isinstance(cron, _FakeCron)
     assert cron.on_job is not None
+
+    runtime_provider = object()
+    agent = seen["agent"]
+    agent.provider = runtime_provider
+    agent.model = "runtime-model"
 
     job = CronJob(
         id="cron-1",
@@ -1064,8 +1310,8 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     assert response == "Time to stretch."
     assert seen["response"] == "Time to stretch."
-    assert seen["provider"] is provider
-    assert seen["model"] == "test-model"
+    assert seen["provider"] is runtime_provider
+    assert seen["model"] == "runtime-model"
     assert seen["task_context"] == (
         "The scheduled time has arrived. Deliver this reminder to the user now, "
         "as a brief and natural message in their language. Speak directly to them — "
@@ -1091,6 +1337,41 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         }
     ]
 
+    bus.publish_outbound.reset_mock()
+    old_turn_id = "turn-that-created-the-reminder"
+    websocket_job = CronJob(
+        id="drink-water",
+        name="drink water",
+        payload=CronPayload(
+            message="Remind me to drink water.",
+            deliver=True,
+            channel="websocket",
+            to="chat-1",
+            channel_meta={
+                "webui": True,
+                "webui_turn_id": old_turn_id,
+                "workspace_scope": {"mode": "default"},
+            },
+            session_key="websocket:chat-1",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(websocket_job))
+
+    assert response == "Time to stretch."
+    bus.publish_outbound.assert_awaited_once()
+    delivered = bus.publish_outbound.await_args.args[0]
+    assert delivered.channel == "websocket"
+    assert delivered.chat_id == "chat-1"
+    assert delivered.metadata["webui"] is True
+    assert delivered.metadata["workspace_scope"] == {"mode": "default"}
+    assert delivered.metadata["webui_turn_id"].startswith("cron:drink-water:")
+    assert delivered.metadata["webui_turn_id"] != old_turn_id
+    assert delivered.metadata["_webui_message_source"] == {
+        "kind": "cron",
+        "label": "drink water",
+    }
+
 
 def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch, tmp_path: Path
@@ -1111,7 +1392,7 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
     monkeypatch.setattr(
         "blackcat.providers.factory.build_provider_snapshot",
         lambda _config: _test_provider_snapshot(object(), _config),
@@ -1129,8 +1410,12 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
             seen["cron"] = self
 
     class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
+            self.provider = object()
             self.tools = {}
 
         async def process_direct(self, *_args, on_progress=None, **_kwargs):
@@ -1158,10 +1443,10 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
         return False
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
-        "blackcat.utils.evaluator.evaluate_response",
+        "blackcat.cli.commands.evaluate_response",
         _always_reject,
     )
 
@@ -1278,7 +1563,7 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     workspace_cron = config.workspace_path / "cron" / "jobs.json"
 
-    with patch("blackcat.utils.paths.get_cron_dir", return_value=legacy_dir):
+    with patch("blackcat.config.paths.get_cron_dir", return_value=legacy_dir):
         _migrate_cron_store(config)
 
     assert workspace_cron.exists()
@@ -1300,7 +1585,7 @@ def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> 
     workspace_cron.parent.mkdir(parents=True)
     workspace_cron.write_text('{"new": true}')
 
-    with patch("blackcat.utils.paths.get_cron_dir", return_value=legacy_dir):
+    with patch("blackcat.config.paths.get_cron_dir", return_value=legacy_dir):
         _migrate_cron_store(config)
 
     assert workspace_cron.read_text() == '{"new": true}'
@@ -1340,6 +1625,94 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert "port 18792" in result.stdout
 
 
+def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
+    from blackcat.cli.commands import _configure_desktop_gateway
+
+    config = Config()
+    config.channels.__pydantic_extra__ = {
+        "telegram": {"enabled": True, "token": "x"},
+        "websocket": {"enabled": False, "port": 8765},
+    }
+
+    _configure_desktop_gateway(
+        config,
+        webui_port=29888,
+        webui_socket="/tmp/blackcat-test.sock",
+        token_issue_secret="secret",
+    )
+
+    extras = config.channels.__pydantic_extra__ or {}
+    assert config.gateway.host == "127.0.0.1"
+    assert config.gateway.port == 29888
+    assert config.gateway.heartbeat.enabled is False
+    assert extras["telegram"]["enabled"] is False
+    assert extras["websocket"]["enabled"] is True
+    assert extras["websocket"]["host"] == "127.0.0.1"
+    assert extras["websocket"]["port"] == 29888
+    assert extras["websocket"]["unix_socket_path"] == "/tmp/blackcat-test.sock"
+    assert extras["websocket"]["token_issue_secret"] == "secret"
+    assert extras["websocket"]["websocket_requires_token"] is True
+
+
+def test_load_or_create_desktop_config_bootstraps_without_api_key(tmp_path: Path) -> None:
+    from blackcat.cli.commands import _load_or_create_desktop_config
+
+    config_path = tmp_path / "config.json"
+    loaded = _load_or_create_desktop_config(
+        str(config_path),
+        str(tmp_path / "workspace"),
+    )
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert loaded.agents.defaults.model_preset is None
+    assert config_path.exists()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_repairs_existing_unconfigured_default(
+    tmp_path: Path,
+) -> None:
+    from blackcat.cli.commands import _load_or_create_desktop_config
+    from blackcat.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
+
+
+def test_load_or_create_desktop_config_unwinds_persisted_bootstrap(
+    tmp_path: Path,
+) -> None:
+    from blackcat.cli.commands import _load_or_create_desktop_config
+    from blackcat.config.loader import save_config
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.provider = "openai_codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    save_config(config, config_path)
+
+    loaded = _load_or_create_desktop_config(str(config_path), None)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.agents.defaults.provider == "openai_codex"
+    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
+    assert saved["agents"]["defaults"]["provider"] == ""
+    assert saved["agents"]["defaults"]["model"] == ""
+
+
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1348,23 +1721,21 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     config.gateway.port = 18791
     captured: dict[str, object] = {}
 
-    class _FakeDream:
-        model = None
-        max_batch_size = 0
-        max_iterations = 0
-
-        async def run(self) -> None:
-            return None
-
     class _FakeSessionManager:
         def flush_all(self) -> int:
             return 0
 
     class _FakeAgentLoop:
-        def __init__(self, *args, **_kwargs) -> None:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+        def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
-            self.dream = _FakeDream()
+            self.provider = object()
             self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
 
         async def run(self) -> None:
             await asyncio.Event().wait()
@@ -1399,16 +1770,6 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return {"jobs": 0}
 
         def register_system_job(self, _job) -> None:
-            return None
-
-    class _FakeHeartbeatService:
-        def __init__(self, **_kwargs) -> None:
-            return None
-
-        async def start(self) -> None:
-            return None
-
-        def stop(self) -> None:
             return None
 
     class _FakeServer:
@@ -1454,10 +1815,9 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("blackcat.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCronService)
-    monkeypatch.setattr("blackcat.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])

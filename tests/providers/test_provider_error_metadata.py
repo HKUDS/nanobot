@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from blackcat.providers.anthropic_provider import AnthropicProvider
+from blackcat.providers.base import LLMProvider, LLMResponse
 from blackcat.providers.openai_compat_provider import OpenAICompatProvider
 
 
@@ -79,3 +82,14 @@ def test_anthropic_handle_error_marks_connection_kind() -> None:
 
     assert response.finish_reason == "error"
     assert response.error_kind == "connection"
+
+
+@pytest.mark.parametrize("expected, kwargs", [
+    (True, {"error_status_code": 402}),  # HTTP 402
+    (True, {"error_type": "insufficient_quota"}),  # billing token
+    (True, {"content": "429 You exceeded your current quota"}),  # text marker
+    (False, {"error_status_code": 429, "error_type": "rate_limit_exceeded"}),  # plain rate limit
+])
+def test_is_arrearage_response(expected: bool, kwargs: dict) -> None:
+    response = LLMResponse(finish_reason="error", **{"content": "boom", **kwargs})
+    assert LLMProvider.is_arrearage_response(response) is expected

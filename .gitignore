@@ -1,10 +1,24 @@
 # Project-specific
 .worktrees/
+.worktree/
 .assets
 .docs
 .env
 .web
 .orion
+blackcat-desktop/
+desktop/
+
+# Desktop app generated artifacts
+desktop/build/
+desktop/dist/
+desktop/node_modules/
+desktop/package-lock.json
+desktop/resources/blackcat-engine/
+
+# Claude / AI assistant artifacts
+docs/superpowers/
+docs/plans/
 
 # webui (monorepo frontend)
 webui/node_modules/
@@ -102,3 +116,5 @@ logs/
 tmp/
 temp/
 *.tmp
+exp/
+.playwright-mcp/

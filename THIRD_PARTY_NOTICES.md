@@ -1,7 +1,7 @@
 # Third-Party Notices
 
 The following third-party components are redistributed as part of the packaged
-nanobot Python distribution (`pip install nanobot-ai`).
+blackcat Python distribution (`pip install blackcat-ai`).
 blackcat is a fork of nanobot with its own specifics.
 
 ---

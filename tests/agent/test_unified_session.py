@@ -38,8 +38,7 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
 
     with patch("blackcat.agent.loop.SessionManager"), \
-         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr, \
-         patch("blackcat.agent.loop.Dream"):
+         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus,
@@ -301,7 +300,8 @@ class TestConsolidationUnaffectedByUnifiedSession:
     @pytest.mark.asyncio
     async def test_consolidation_skips_empty_session_for_unified_key(self):
         """Empty unified:default session → consolidation exits immediately, archive not called."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from blackcat.agent.consolidate import Consolidator
+        from blackcat.agent.memory import MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -333,7 +333,8 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_behaviour_identical_for_any_key(self):
         """archive call count is the same for 'telegram:123' and 'unified:default'
         under identical token conditions."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from blackcat.agent.consolidate import Consolidator
+        from blackcat.agent.memory import MemoryStore
 
         archive_calls: dict[str, int] = {}
 
@@ -367,7 +368,8 @@ class TestConsolidationUnaffectedByUnifiedSession:
     async def test_consolidation_triggers_when_over_budget_unified_key(self):
         """When tokens exceed budget, consolidation attempts to find a boundary —
         behaviour is identical to any other session key."""
-        from blackcat.agent.memory import Consolidator, MemoryStore
+        from blackcat.agent.consolidate import Consolidator
+        from blackcat.agent.memory import MemoryStore
 
         store = MagicMock(spec=MemoryStore)
         mock_provider = MagicMock()
@@ -386,9 +388,10 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = [{"role": "user", "content": "msg"}]
+        sessions.get_or_create.return_value = session
 
         # Simulate over-budget: estimated > budget
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
+        consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(950, "tiktoken"))
         # No valid boundary found → returns gracefully without archiving
         consolidator.pick_consolidation_boundary = MagicMock(return_value=None)
         consolidator.archive = AsyncMock()
@@ -396,7 +399,9 @@ class TestConsolidationUnaffectedByUnifiedSession:
         await consolidator.maybe_consolidate_by_tokens(session)
 
         # estimate was called (consolidation was attempted)
-        consolidator.estimate_session_prompt_tokens.assert_called_once_with(session, session_summary=None)
+        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+        )
         # but archive was not called (no valid boundary)
         consolidator.archive.assert_not_called()
 
@@ -467,6 +472,32 @@ class TestStopCommandWithUnifiedSession:
         result = await cmd_stop(ctx)
 
         # Verify task was cancelled
+        assert task.cancelled() or task.done()
+        assert "Stopped 1 task" in result.content
+
+    @pytest.mark.asyncio
+    async def test_stop_command_uses_effective_key_without_session_override(self, tmp_path: Path):
+        """Priority /stop must cancel the unified session even before dispatch rewrites the message."""
+        from blackcat.agent.loop import UNIFIED_SESSION_KEY
+        from blackcat.command.builtin import cmd_stop
+
+        loop = _make_loop(tmp_path, unified_session=True)
+
+        async def long_running():
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(long_running())
+        loop._active_tasks[UNIFIED_SESSION_KEY] = [task]
+        msg = InboundMessage(
+            channel="telegram",
+            chat_id="123456",
+            sender_id="user1",
+            content="/stop",
+        )
+        ctx = CommandContext(msg=msg, session=None, key=UNIFIED_SESSION_KEY, raw="/stop", loop=loop)
+
+        result = await cmd_stop(ctx)
+
         assert task.cancelled() or task.done()
         assert "Stopped 1 task" in result.content
 

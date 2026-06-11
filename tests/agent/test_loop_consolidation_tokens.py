@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import blackcat.utils.tokens as tokens_module
 from blackcat.agent.loop import AgentLoop
 from blackcat.bus.queue import MessageBus
 from blackcat.providers.base import LLMResponse
@@ -50,9 +51,7 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
         {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
     ]
     loop.sessions.save(session)
-    # estimate_session_prompt_tokens is now async
-    loop.consolidator.estimate_session_prompt_tokens = AsyncMock(return_value=(1000, "test"))  # type: ignore[method-assign]
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda _message: 500)
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _message: 500)
 
     await loop.process_direct("hello", session_key="cli:test")
 
@@ -75,13 +74,11 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
     loop.sessions.save(session)
 
     token_map = {"u1": 120, "a1": 120, "u2": 120, "a2": 120, "u3": 120}
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda message: token_map[message["content"]])
-    loop.consolidator.estimate_session_prompt_tokens = AsyncMock(side_effect=[(1000, "test"), (400, "test")])  # type: ignore[method-assign]
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda message: token_map[message["content"]])
 
     await loop.consolidator.maybe_consolidate_by_tokens(session)
 
-    assert loop.consolidator.archive.called
-    archived_chunk = loop.consolidator.archive.call_args.args[0]
+    archived_chunk = loop.consolidator.archive.await_args.args[0]
     assert [message["content"] for message in archived_chunk] == ["u1", "a1", "u2", "a2"]
     assert session.last_consolidated == 4
 
@@ -90,7 +87,7 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
 async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> None:
     """Verify maybe_consolidate_by_tokens keeps looping until under threshold."""
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
-    loop.consolidator.archive = AsyncMock(return_value="summary")  # type: ignore[method-assign]
+    loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -105,7 +102,7 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
     loop.sessions.save(session)
 
     call_count = [0]
-    async def mock_estimate(_session, session_summary=None):
+    async def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -114,20 +111,20 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
         return (80, "test")
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda _m: 100)
+    loop.consolidator._estimate_tokens = lambda _m: 100  # type: ignore[assignment]
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _m: 100)
 
     await loop.consolidator.maybe_consolidate_by_tokens(session)
 
-    # Consolidation runs until target met or no safe boundary found
-    assert loop.consolidator.archive.await_count >= 1
-    assert session.last_consolidated >= 4
+    assert loop.consolidator.archive.await_count == 2
+    assert session.last_consolidated == 6
 
 
 @pytest.mark.asyncio
 async def test_consolidation_continues_below_trigger_until_half_target(tmp_path, monkeypatch) -> None:
     """Once triggered, consolidation should continue until it drops below half threshold."""
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
-    loop.consolidator.archive = AsyncMock(return_value="summary")  # type: ignore[method-assign]
+    loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -143,7 +140,7 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
     call_count = [0]
 
-    async def mock_estimate(_session, session_summary=None):
+    async def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -152,13 +149,13 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
         return (80, "test")
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda _m: 100)
+    loop.consolidator._estimate_tokens = lambda _m: 100  # type: ignore[assignment]
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _m: 100)
 
     await loop.consolidator.maybe_consolidate_by_tokens(session)
 
-    # Consolidation runs until target met or no safe boundary found
-    assert loop.consolidator.archive.await_count >= 1
-    assert session.last_consolidated >= 4
+    assert loop.consolidator.archive.await_count == 2
+    assert session.last_consolidated == 6
 
 
 @pytest.mark.asyncio
@@ -176,14 +173,15 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
 
     call_count = [0]
 
-    async def mock_estimate(_session, session_summary=None):
+    async def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
         return (80, "test")
 
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda _m: 150)
+    loop.consolidator._estimate_tokens = lambda _m: 150  # type: ignore[assignment]
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _m: 150)
 
     await loop.consolidator.maybe_consolidate_by_tokens(session)
 
@@ -195,7 +193,8 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
     reloaded, pending = loop.auto_compact.prepare_session(reloaded, "cli:test")
     assert pending is not None
     assert "User discussed project status." in pending
-    assert "_last_summary" not in reloaded.metadata
+    # _last_summary persists for restart survival.
+    assert "_last_summary" in reloaded.metadata
 
 
 @pytest.mark.asyncio
@@ -210,8 +209,10 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    # maybe_consolidate_by_tokens no longer accepts session_summary parameter
-    assert loop.consolidator.maybe_consolidate_by_tokens.await_count == 1
+    loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
+        session,
+        replay_max_messages=loop._max_messages,
+    )
 
 
 @pytest.mark.asyncio
@@ -221,8 +222,11 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
 
-    async def track_consolidate(messages, session_summary=None):
+    archived_session_keys: list[str | None] = []
+
+    async def track_consolidate(messages, *, session_key=None):
         order.append("consolidate")
+        archived_session_keys.append(session_key)
         return True
     loop.consolidator.archive = track_consolidate  # type: ignore[method-assign]
 
@@ -240,16 +244,19 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
         {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
     ]
     loop.sessions.save(session)
-    monkeypatch.setattr("blackcat.utils.tokens.estimate_message_tokens", lambda _m: 500)
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _m: 500)
 
     call_count = [0]
-    async def mock_estimate(_session, session_summary=None):
+    async def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         return (1000 if call_count[0] <= 1 else 80, "test")
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
+    loop.consolidator._estimate_tokens = lambda _m: 500  # type: ignore[assignment]
+    monkeypatch.setattr(tokens_module, "estimate_message_tokens", lambda _m: 500)
 
     await loop.process_direct("hello", session_key="cli:test")
 
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+    assert archived_session_keys == ["cli:test"]

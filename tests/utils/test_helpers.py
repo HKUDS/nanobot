@@ -1,12 +1,7 @@
 """Tests for utility helper functions."""
 
 
-from blackcat.utils.helpers import (
-    parse_session_key,
-    safe_filename,
-    truncate_string,
-)
-from blackcat.utils.paths import ensure_dir
+from blackcat.utils.helpers import ensure_dir, parse_session_key, safe_filename, truncate_string
 
 # ── ensure_dir ─────────────────────────────────────────────────────
 

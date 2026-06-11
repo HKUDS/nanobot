@@ -1,5 +1,6 @@
 """Tests for LensClient - HTTP client for VS Code extension."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +18,7 @@ class TestLensClientInit:
         client = LensClient(config)
 
         assert client.config == config
-        assert client.workspace_paths == {"test": "/tmp/test"}
+        assert Path(client.workspace_paths["test"]) == Path("/tmp/test")
         assert client._clients == {}
 
     def test_workspace_paths_normalizes_configs(self):
@@ -32,8 +33,8 @@ class TestLensClientInit:
         client = LensClient(config)
 
         paths = client.workspace_paths
-        assert paths["simple"] == "/tmp/simple"
-        assert paths["with-config"] == "/tmp/with-config"
+        assert Path(paths["simple"]) == Path("/tmp/simple")
+        assert Path(paths["with-config"]) == Path("/tmp/with-config")
 
     def test_get_diagnostics_source_default(self):
         """Should return default diagnostics_source."""

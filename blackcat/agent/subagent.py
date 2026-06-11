@@ -6,27 +6,26 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
 from blackcat.agent.hook import AgentHook, AgentHookContext
 from blackcat.agent.runner import AgentRunner, AgentRunSpec
-from blackcat.agent.skills import BUILTIN_SKILLS_DIR
-from blackcat.agent.tools.filesystem import (
-    EditFileTool,
-    ListDirTool,
-    ReadFileTool,
-    WriteFileTool,
-)
+from blackcat.agent.tools.context import ToolContext
+from blackcat.agent.tools.file_state import FileStates
+from blackcat.agent.tools.loader import ToolLoader
 from blackcat.agent.tools.registry import ToolRegistry
-from blackcat.agent.tools.search import GlobTool, GrepTool
-from blackcat.agent.tools.shell import ExecTool
-from blackcat.agent.tools.web import WebFetchTool, WebSearchTool
 from blackcat.bus.events import InboundMessage
 from blackcat.bus.queue import MessageBus
-from blackcat.config.schema import AgentDefaults, ExecToolConfig, WebToolsConfig
+from blackcat.config.schema import AgentDefaults, ToolsConfig
 from blackcat.providers.base import LLMProvider
+from blackcat.security.workspace_access import (
+    WorkspaceScope,
+    bind_workspace_scope,
+    reset_workspace_scope,
+    workspace_sandbox_status,
+)
 from blackcat.utils.prompt_templates import render_template
 
 
@@ -82,30 +81,66 @@ class SubagentManager:
         bus: MessageBus,
         max_tool_result_chars: int,
         model: str | None = None,
-        web_config: "WebToolsConfig | None" = None,
-        exec_config: "ExecToolConfig | None" = None,
+        tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
+        llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
+        defaults = AgentDefaults()
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.web_config = web_config or WebToolsConfig()
+        self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
-        self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
-            else AgentDefaults().max_tool_iterations
+            else defaults.max_tool_iterations
+        )
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
         )
         self.runner = AgentRunner(provider)
+        self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+
+    def _subagent_tools_config(self) -> ToolsConfig:
+        """Build a ToolsConfig scoped for subagent use."""
+        return ToolsConfig(
+            exec=self.tools_config.exec,
+            web=self.tools_config.web,
+            restrict_to_workspace=self.restrict_to_workspace,
+        )
+
+    def _build_tools(
+        self,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+    ) -> ToolRegistry:
+        """Build an isolated subagent tool registry via ToolLoader."""
+        root = self.workspace if workspace is None else workspace
+        registry = ToolRegistry()
+        cfg = tools_config if tools_config is not None else self._subagent_tools_config()
+        ctx = ToolContext(
+            config=cfg,
+            workspace=str(root.resolve()),
+            file_state_store=FileStates(),
+            workspace_sandbox=workspace_sandbox_status(
+                restrict_to_workspace=cfg.restrict_to_workspace,
+                workspace=root,
+            ),
+        )
+        ToolLoader().load(ctx, registry, scope="subagent")
+        return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
@@ -119,6 +154,9 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -134,7 +172,16 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status)
+            self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                status,
+                origin_message_id,
+                temperature,
+                workspace_scope,
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -160,6 +207,9 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         status: SubagentStatus,
+        origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -169,58 +219,45 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
-            extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            if self.exec_config.enable:
-                tools.register(ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    sandbox=self.exec_config.sandbox,
-                    path_append=self.exec_config.path_append,
-                    allowed_env_keys=self.exec_config.allowed_env_keys,
-                ))
-            if self.web_config.enable:
-                tools.register(
-                    WebSearchTool(
-                        config=self.web_config.search,
-                        proxy=self.web_config.proxy,
-                        user_agent=self.web_config.user_agent,
-                    )
-                )
-                tools.register(
-                    WebFetchTool(
-                        config=self.web_config.fetch,
-                        proxy=self.web_config.proxy,
-                        user_agent=self.web_config.user_agent,
-                    )
-                )
-            system_prompt = self._build_subagent_prompt()
+            root = workspace_scope.project_path if workspace_scope is not None else self.workspace
+            cfg = None
+            if workspace_scope is not None:
+                cfg = self._subagent_tools_config()
+                cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
+            tools = self._build_tools(workspace=root, tools_config=cfg)
+            system_prompt = self._build_subagent_prompt(workspace=root)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
-            result = await self.runner.run(AgentRunSpec(
-                initial_messages=messages,
-                tools=tools,
-                model=self.model,
-                max_iterations=self.max_iterations,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id, status),
-                max_iterations_message="Task completed but no final response was generated.",
-                error_message=None,
-                fail_on_tool_error=True,
-                checkpoint_callback=_on_checkpoint,
-            ))
+            sess_key = origin.get("session_key")
+            llm_timeout = (
+                self._llm_wall_timeout_for_session(sess_key)
+                if self._llm_wall_timeout_for_session
+                else None
+            )
+            token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            try:
+                result = await self.runner.run(AgentRunSpec(
+                    initial_messages=messages,
+                    tools=tools,
+                    model=self.model,
+                    temperature=temperature,
+                    max_iterations=self.max_iterations,
+                    max_tool_result_chars=self.max_tool_result_chars,
+                    hook=_SubagentHook(task_id, status),
+                    max_iterations_message="Task completed but no final response was generated.",
+                    error_message=None,
+                    fail_on_tool_error=True,
+                    checkpoint_callback=_on_checkpoint,
+                    session_key=sess_key,
+                    workspace=root,
+                    llm_timeout_s=llm_timeout,
+                ))
+            finally:
+                if token is not None:
+                    reset_workspace_scope(token)
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
@@ -229,24 +266,24 @@ class SubagentManager:
                 await self._announce_result(
                     task_id, label, task,
                     self._format_partial_progress(result),
-                    origin, "error",
+                    origin, "error", origin_message_id,
                 )
             elif result.stop_reason == "error":
                 await self._announce_result(
                     task_id, label, task,
                     result.error or "Error: subagent execution failed.",
-                    origin, "error",
+                    origin, "error", origin_message_id,
                 )
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok")
+                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
-            logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error")
+            logger.exception("Subagent [{}] failed", task_id)
+            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
 
     async def _announce_result(
         self,
@@ -256,6 +293,7 @@ class SubagentManager:
         result: str,
         origin: dict[str, str],
         status: str,
+        origin_message_id: str | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -274,16 +312,19 @@ class SubagentManager:
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
+        metadata: dict[str, Any] = {
+            "injected_event": "subagent_result",
+            "subagent_task_id": task_id,
+        }
+        if origin_message_id:
+            metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
-            metadata={
-                "injected_event": "subagent_result",
-                "subagent_task_id": task_id,
-            },
+            metadata=metadata,
         )
 
         await self.bus.publish_inbound(msg)
@@ -310,20 +351,21 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from blackcat.agent.context import ContextBuilder
         from blackcat.agent.skills import SkillsLoader
 
-        time_ctx = ContextBuilder._build_runtime_context(None, channel=None, chat_id=None)
+        time_ctx = ContextBuilder._build_runtime_context(None, None)
+        root = workspace or self.workspace
         skills_summary = SkillsLoader(
-            self.workspace,
+            root,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
-            workspace=str(self.workspace),
+            workspace=str(root),
             skills_summary=skills_summary or "",
         )
 

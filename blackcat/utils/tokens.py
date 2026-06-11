@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 from typing import Any
 
 import tiktoken
@@ -96,15 +97,10 @@ def estimate_prompt_tokens_chain(
     """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
-        try:
-            result = provider_counter(messages, tools, model)
-            if isinstance(result, tuple) and len(result) >= 2:
-                tokens, source = result[0], result[1]
-                if isinstance(tokens, (int, float)) and tokens > 0:
-                    return int(tokens), str(source or "provider_counter")
-        except Exception:
-            pass
-
+        with suppress(Exception):
+            tokens, source = provider_counter(messages, tools, model)
+            if isinstance(tokens, (int, float)) and tokens > 0:
+                return int(tokens), str(source or "provider_counter")
     estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
         return int(estimated), "tiktoken"

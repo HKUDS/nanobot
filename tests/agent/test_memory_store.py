@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from blackcat.memory.memory import _HISTORY_ENTRY_HARD_CAP, MemoryStore
+from blackcat.agent.memory import _HISTORY_ENTRY_HARD_CAP, MemoryStore
 
 
 @pytest.fixture
@@ -85,18 +85,12 @@ class TestHistoryWithCursor:
         assert data["content"] == ""
 
     def test_append_history_drops_malformed_leak_prefix(self, store):
-        """Channel-marker / malformed opening leaks should not survive.
-
-        Note: strip_think currently only removes think/thought blocks, not channel markers.
-        This test documents the expected behavior for future implementation.
-        """
+        """Channel-marker / malformed opening leaks should not survive."""
         cursor = store.append_history("<channel|>")
         content = store.read_file(store.history_file)
         data = json.loads(content)
         assert data["cursor"] == cursor
-        # Current behavior: <channel|> is not stripped by strip_think
-        # assert data["content"] == ""  # Expected after future implementation
-        assert data["content"] == "<channel|>"  # Current behavior
+        assert data["content"] == ""
 
     def test_read_unprocessed_history(self, store):
         store.append_history("event 1")
@@ -134,6 +128,33 @@ class TestHistoryWithCursor:
         # Last entry has no cursor — should safely return 1, not KeyError
         cursor = store.append_history("new event")
         assert cursor == 1
+
+    def test_append_history_allocates_unique_cursors_under_concurrent_writes(self, store):
+        """Regression: concurrent appends must not allocate duplicate cursors."""
+        import threading
+
+        writers = 16
+        start = threading.Barrier(writers)
+        cursors: list[int] = []
+        lock = threading.Lock()
+
+        def worker(i):
+            start.wait()
+            c = store.append_history(f"event {i}")
+            with lock:
+                cursors.append(c)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(writers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(cursors) == writers
+        assert len(set(cursors)) == writers, f"duplicate cursors: {sorted(cursors)}"
+        assert sorted(cursors) == list(range(1, writers + 1))
+        persisted = store.read_unprocessed_history(since_cursor=0)
+        assert sorted(e["cursor"] for e in persisted) == list(range(1, writers + 1))
 
     def test_compact_history_drops_oldest(self, tmp_path):
         store = MemoryStore(tmp_path, max_history_entries=2)
@@ -246,6 +267,26 @@ class TestDreamCursor:
         store.set_last_dream_cursor(3)
         store2 = MemoryStore(store.workspace)
         assert store2.get_last_dream_cursor() == 3
+
+    def test_git_restore_rolls_back_dream_cursor(self, tmp_path):
+        store = MemoryStore(tmp_path)
+        store.write_memory("before")
+        store.set_last_dream_cursor(1)
+        assert store.git.init() is True
+
+        store.write_memory("after")
+        store.set_last_dream_cursor(2)
+        dream_sha = store.git.auto_commit("dream: update")
+        assert dream_sha is not None
+
+        store.write_memory("newer")
+        store.set_last_dream_cursor(3)
+
+        restore_sha = store.git.revert(dream_sha)
+
+        assert restore_sha is not None
+        assert store.read_memory() == "before"
+        assert store.get_last_dream_cursor() == 1
 
 
 class TestLegacyHistoryMigration:

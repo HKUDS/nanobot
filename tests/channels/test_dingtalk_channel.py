@@ -22,12 +22,21 @@ from blackcat.channels.dingtalk import BlackcatDingTalkHandler, DingTalkChannel,
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, json_body: dict | None = None) -> None:
+    def __init__(
+        self,
+        status_code: int = 200,
+        json_body: dict | None = None,
+        *,
+        content: bytes = b"",
+        headers: dict[str, str] | None = None,
+        url: str = "https://example.com/file",
+    ) -> None:
         self.status_code = status_code
         self._json_body = json_body or {}
-        self.text = "{}"
-        self.content = b""
-        self.headers = {"content-type": "application/json"}
+        self.text = content.decode("utf-8", errors="replace") if content else "{}"
+        self.content = content
+        self.headers = headers or {"content-type": "application/json"}
+        self.url = httpx.URL(url)
 
     def json(self) -> dict:
         return self._json_body
@@ -44,11 +53,13 @@ class _FakeHttp:
         return _FakeResponse()
 
     async def post(self, url: str, json=None, headers=None, **kwargs):
-        self.calls.append({"method": "POST", "url": url, "json": json, "headers": headers})
+        self.calls.append(
+            {"method": "POST", "url": url, "json": json, "headers": headers, "kwargs": kwargs}
+        )
         return self._next_response()
 
     async def get(self, url: str, **kwargs):
-        self.calls.append({"method": "GET", "url": url})
+        self.calls.append({"method": "GET", "url": url, "kwargs": kwargs})
         return self._next_response()
 
 
@@ -85,6 +96,55 @@ async def test_group_message_keeps_sender_id_and_routes_chat_id() -> None:
     assert msg.sender_id == "user1"
     assert msg.chat_id == "group:conv123"
     assert msg.metadata["conversation_type"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_group_user_isolation_false_uses_shared_session() -> None:
+    """By default group messages share the same session_key."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=False
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    for user_id in ("user1", "user2"):
+        await channel._on_message(
+            "hello",
+            sender_id=user_id,
+            sender_name=user_id,
+            conversation_type="2",
+            conversation_id="conv123",
+        )
+
+    msg1 = await bus.consume_inbound()
+    msg2 = await bus.consume_inbound()
+    assert msg1.session_key == msg2.session_key == "dingtalk:group:conv123"
+    assert msg1.chat_id == msg2.chat_id == "group:conv123"
+
+
+@pytest.mark.asyncio
+async def test_group_user_isolation_true_separates_sessions() -> None:
+    """When group_user_isolation is True, each user gets their own session_key."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=True
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    for user_id in ("user1", "user2"):
+        await channel._on_message(
+            "hello",
+            sender_id=user_id,
+            sender_name=user_id,
+            conversation_type="2",
+            conversation_id="conv123",
+        )
+
+    msg1 = await bus.consume_inbound()
+    msg2 = await bus.consume_inbound()
+    assert msg1.session_key == "dingtalk:group:conv123:user1"
+    assert msg2.session_key == "dingtalk:group:conv123:user2"
+    assert msg1.chat_id == msg2.chat_id == "group:conv123"
 
 
 @pytest.mark.asyncio
@@ -223,8 +283,8 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
 
     # Redirect media dir to tmp_path
     monkeypatch.setattr(
-        "blackcat.utils.paths.get_media_dir",
-        lambda channel=None: tmp_path / channel if channel else tmp_path,
+        "blackcat.config.paths.get_media_dir",
+        lambda channel_name=None: tmp_path / channel_name if channel_name else tmp_path,
     )
 
     result = await channel._download_dingtalk_file("code123", "test.xlsx", "user1")
@@ -238,6 +298,245 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     assert "messageFiles/download" in channel._http.calls[0]["url"]
     assert channel._http.calls[0]["json"]["downloadCode"] == "code123"
     assert channel._http.calls[1]["method"] == "GET"
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_rejects_private_http_target_before_fetch() -> None:
+    """Remote media fetches must not reach loopback/private addresses."""
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                200,
+                content=b"internal secret",
+                headers={"content-type": "text/plain"},
+                url="http://127.0.0.1/admin.txt",
+            )
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("http://127.0.0.1/admin.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+    assert channel._http.calls == []
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_rejects_private_redirect_result() -> None:
+    """A public-looking media URL must not be accepted after redirecting private."""
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                200,
+                content=b"metadata bytes",
+                headers={"content-type": "text/plain"},
+                url="http://127.0.0.1/metadata",
+            )
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/safe.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+    assert len(channel._http.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_rejects_oversized_remote_response(monkeypatch) -> None:
+    """DingTalk media downloads should enforce a byte cap before upload."""
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_MAX_REMOTE_MEDIA_BYTES", 8, raising=False)
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                200,
+                content=b"123456789",
+                headers={"content-type": "text/plain"},
+                url="https://example.com/large.txt",
+            )
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/large.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_does_not_follow_remote_redirects_by_default() -> None:
+    """Redirects are refused by default instead of followed into internal networks."""
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                302,
+                headers={"location": "http://127.0.0.1/metadata"},
+                url="https://example.com/redirect.txt",
+            )
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+    assert channel._http.calls[0]["kwargs"]["follow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_follows_safe_redirect_when_explicitly_enabled() -> None:
+    """Operators can opt in to public redirects without enabling private redirects."""
+    channel = DingTalkChannel(
+        DingTalkConfig(
+            client_id="app",
+            client_secret="secret",
+            allow_from=["*"],
+            allow_remote_media_redirects=True,
+        ),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                302,
+                headers={"location": "https://example.com/final.txt"},
+                url="https://example.com/redirect.txt",
+            ),
+            _FakeResponse(
+                200,
+                content=b"redirected media",
+                headers={"content-type": "text/plain"},
+                url="https://example.com/final.txt",
+            ),
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
+
+    assert (data, filename, content_type) == (b"redirected media", "redirect.txt", "text/plain")
+    assert [call["url"] for call in channel._http.calls] == [
+        "https://example.com/redirect.txt",
+        "https://example.com/final.txt",
+    ]
+    assert all(call["kwargs"]["follow_redirects"] is False for call in channel._http.calls)
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -> None:
+    """Redirect opt-in should not allow arbitrary cross-host redirects by default."""
+    channel = DingTalkChannel(
+        DingTalkConfig(
+            client_id="app",
+            client_secret="secret",
+            allow_from=["*"],
+            allow_remote_media_redirects=True,
+        ),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                302,
+                headers={"location": "https://example.org/final.txt"},
+                url="https://example.com/redirect.txt",
+            ),
+            _FakeResponse(
+                200,
+                content=b"cross-host media",
+                headers={"content-type": "text/plain"},
+                url="https://example.org/final.txt",
+            ),
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+    assert [call["url"] for call in channel._http.calls] == ["https://example.com/redirect.txt"]
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_allows_cross_host_redirect_when_allowlisted() -> None:
+    """Operators can explicitly allow a known CDN/download host for redirects."""
+    channel = DingTalkChannel(
+        DingTalkConfig(
+            client_id="app",
+            client_secret="secret",
+            allow_from=["*"],
+            allow_remote_media_redirects=True,
+            remote_media_redirect_allowed_hosts=["example.org"],
+        ),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                302,
+                headers={"location": "https://example.org/final.txt"},
+                url="https://example.com/redirect.txt",
+            ),
+            _FakeResponse(
+                200,
+                content=b"cross-host media",
+                headers={"content-type": "text/plain"},
+                url="https://example.org/final.txt",
+            ),
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
+
+    assert (data, filename, content_type) == (b"cross-host media", "redirect.txt", "text/plain")
+    assert [call["url"] for call in channel._http.calls] == [
+        "https://example.com/redirect.txt",
+        "https://example.org/final.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_media_bytes_blocks_private_redirect_even_when_redirects_enabled() -> None:
+    """Redirect opt-in must still validate each hop before fetching it."""
+    channel = DingTalkChannel(
+        DingTalkConfig(
+            client_id="app",
+            client_secret="secret",
+            allow_from=["*"],
+            allow_remote_media_redirects=True,
+        ),
+        MessageBus(),
+    )
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(
+                302,
+                headers={"location": "http://127.0.0.1/metadata"},
+                url="https://example.com/redirect.txt",
+            ),
+            _FakeResponse(
+                200,
+                content=b"internal secret",
+                headers={"content-type": "text/plain"},
+                url="http://127.0.0.1/metadata",
+            ),
+        ]
+    )
+
+    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
+
+    assert (data, filename, content_type) == (None, None, None)
+    assert [call["url"] for call in channel._http.calls] == ["https://example.com/redirect.txt"]
 
 
 def test_normalize_upload_payload_zips_html_attachment() -> None:

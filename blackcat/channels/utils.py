@@ -50,7 +50,7 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
-def markdown_to_telegram_html(text: str) -> str:
+def markdown_to_telegram_html(text: str) -> str: # FIXME: Deadcode
     """
     Convert markdown to Telegram-safe HTML.
 
@@ -168,11 +168,12 @@ def _render_table_box(table_lines: list[str]) -> str:
         out.append(dr(row))
     return '\n'.join(out)
 
+
 # ============================================================================
 # File Extension Mapping
 # ============================================================================
 
-MIME_TO_EXT = {
+MIME_TO_EXT: dict[str, str] = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/gif": ".gif",
@@ -185,7 +186,7 @@ MIME_TO_EXT = {
     "application/pdf": ".pdf",
 }
 
-MEDIA_TYPE_TO_EXT = {
+MEDIA_TYPE_TO_EXT: dict[str, str] = {
     "image": ".jpg",
     "voice": ".ogg",
     "audio": ".mp3",
@@ -202,7 +203,7 @@ def get_file_extension(media_type: str, mime_type: str | None = None) -> str:
 
 
 # ============================================================================
-# Reply Context
+# Reply Context & Message Splitting
 # ============================================================================
 
 
@@ -237,8 +238,7 @@ def split_message(text: str, limit: int) -> list[str]:
 
 
 def format_reply_context(author: str | None, content: str, max_length: int = 200) -> str | None:
-    """
-    Format a reply/reference message as context.
+    """Format a reply/reference message as context.
 
     Args:
         author: Username or identifier of the original author.
@@ -255,9 +255,9 @@ def format_reply_context(author: str | None, content: str, max_length: int = 200
     if not content:
         return None
 
-    # Truncate long messages
     if len(content) > max_length:
         content = content[:max_length].rsplit(" ", 1)[0] + "..."
 
     author = author or "someone"
     return f"[replying to {author}: {content}]"
+

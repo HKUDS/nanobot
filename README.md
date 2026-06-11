@@ -1,16 +1,24 @@
+<p align="center">
+  <img src="images/blackcat.png" alt="Black Cat">
+</p>
+
 # 🐈‍⬛ Black Cat: Local-First Autonomous Cognitive Agent
 
 Black Cat is a **local-first autonomous cognitive agent**. Not a chatbot — a continuously running artificial cognition with self-reflection, persistent memory, trust-based behavior, and multi-channel communication.
 
-Built on lightweight [nanobot](https://github.com/HKUDS/blackcat), extended with consciousness architecture and code intelligence.
+Built on lightweight [nanobot](https://github.com/HKUDS/nanobot), extended with consciousness architecture and code intelligence.
 
-![Black Cat](images/blackcat.png)
+🐈‍⬛ **Black Cat** is an open-source, ultra-lightweight AI agent runtime for people who want to own their agent stack. It keeps the agent core small and readable while giving you the practical pieces for real long-running work: WebUI, chat channels, tools, memory, MCP, model routing, automation, and deployment.
 
 ## 📢 News
 
 > [!CAUTION]
 > **Security Advisory (March 2026):** Due to a supply chain attack in `litellm` (CVE-2024-6825, CVE-2025-0330, CVE-2025-0628, CVE-2025-11203), we have **completely removed LiteLLM** and migrated to native SDKs. See [SECURITY.md](SECURITY.md) for details.
->
+
+- **2026-06-01** 🚀 Upstream [nanobot v0.2.1](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) — The Workbench Release: packaged WebUI, clearer timelines, live file-edit activity, project workspaces, CLI Apps + MCP, and broader provider/channel support.
+- **2026-05-15** 🚀 Upstream [nanobot v0.2.0](https://github.com/HKUDS/nanobot/releases/tag/v0.2.0) — goal system, WebUI in-wheel, image generation, fallback models, agent loop refactor.
+- **2026-04-14** 🚀 Upstream [nanobot v0.1.5.post1](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post1) — Dream skill discovery, mid-turn follow-up injection, WebSocket channel.
+- **2026-03-21** 🔒 LiteLLM replaced with native `openai` + `anthropic` SDKs.
 
 ## Core Philosophy
 
@@ -22,12 +30,12 @@ Built on lightweight [nanobot](https://github.com/HKUDS/blackcat), extended with
 >
 > **Memory is cognitive**: Memories decay, get recalled, bump in weight, and shape behavior.
 
-MCPs used for the blackcat:
+MCPs used by Black Cat:
 - [**mnemo-mcp**](https://github.com/Skye-flyhigh/mnemo-mcp) — Persistent memory with semantic recall, decay, and weight-based relevance
 - [**telos-mcp**](https://github.com/Skye-flyhigh/telos-mcp) — Task planning and tracking system for managing work
 
 **VS Code Extension:**
-- [**lens**]() — LSP bridge for code intelligence (diagnostics, go-to-definition, hover, etc.)
+- [**lens**](https://github.com/Skye-flyhigh/lens-mcp) — LSP bridge for code intelligence (diagnostics, go-to-definition, hover, etc.)
 
 ---
 
@@ -37,7 +45,7 @@ MCPs used for the blackcat:
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Black Cat Daemon                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  IDENTITY.toml          │  SOUL.md              │  USER.toml    │
+│  IDENTITY.toml          │  SOUL.md              │  USER.md      │
 │  (traits, trust,        │  (personality,        │  (user        │
 │   autonomy, state)      │   values, voice)      │   context)    │
 ├─────────────────────────────────────────────────────────────────┤
@@ -56,7 +64,7 @@ MCPs used for the blackcat:
 │                       Message Bus                               │
 ├──────────┬──────────┬──────────┬──────────┬──────────┬─────────┤
 │ Telegram │ Discord  │ WhatsApp │  Email   │   CLI   │ WebSocket│
-│ WebUI    │  Feishu  │ MS Teams │          │         │         │
+│ WebUI    │  Feishu  │ MS Teams │  Matrix  │          │         │
 └──────────┴──────────┴──────────┴──────────┴──────────┴─────────┘
 ```
 
@@ -82,7 +90,7 @@ The cat knows who to trust. Every message author is evaluated:
                                                └─────────────────┘
 ```
 
-**Trust Levels:** as an auth mechanism
+**Trust Levels:**
 | Level | Score | Behavior |
 |-------|-------|----------|
 | **trusted** | ≥ 0.9 | Full autonomy, shares freely, executes without confirmation |
@@ -110,7 +118,7 @@ blackcat onboard
 
 This creates:
 - `~/.blackcat/config.json` — API keys, channels, author mappings
-- `~/.blackcat/workspace/` — SOUL.md, IDENTITY.toml, USER.toml, memory/
+- `~/.blackcat/workspace/` — SOUL.md, IDENTITY.toml, USER.md, memory/
 
 ### 3. Configure
 
@@ -153,16 +161,10 @@ skye = 1.0
 ```
 
 ### 4. Check configurations
-Check if LLM providers are properly set:
 
-```terminal
-blackcat status
-```
-
-Check if channels are properly set:
-
-```terminal
-blackcat channels status
+```bash
+blackcat status          # check LLM providers
+blackcat channels status # check channel setup
 ```
 
 ### 5. Run
@@ -188,7 +190,7 @@ The cat's soul lives in `~/.blackcat/workspace/`:
 |------|---------|
 | **SOUL.md** | Personality, values, voice — who the cat *is* |
 | **IDENTITY.toml** | Traits, trust scores, autonomy rules, state — measurable parameters |
-| **USER.toml** | Information about you — context for personalization |
+| **USER.md** | Information about you — context for personalization |
 
 ### IDENTITY.toml Structure
 
@@ -246,7 +248,6 @@ modify_soul = true
 1. Create bot via @BotFather, get token
 2. Get your user ID from @userinfobot (or use your @username)
 3. Configure:
-
 ```json
 {
   "channels": {
@@ -266,7 +267,6 @@ modify_soul = true
 - `["*"]` — Allow all users (open access)
 
 4. Run `blackcat gateway`
-
 </details>
 
 <details>
@@ -276,7 +276,6 @@ modify_soul = true
 2. Enable MESSAGE CONTENT INTENT
 3. Get bot token and your user ID
 4. Configure:
-
 ```json
 {
   "channels": {
@@ -290,22 +289,15 @@ modify_soul = true
 }
 ```
 
-**`allowFrom` options:**
-- `["123456789"]` — Allow specific user ID
-- `["*"]` — Allow all users
-
 **`groupPolicy` options:**
 - `"mention"` — Bot only responds when @mentioned in group channels (default)
 - `"open"` — Bot responds to all messages in group channels
 
 5. Invite bot to server, run `blackcat gateway`
-
 </details>
 
 <details>
 <summary><b>WebSocket / WebUI Setup</b></summary>
-
-The WebSocket channel provides real-time browser communication for the built-in WebUI:
 
 ```json
 {
@@ -323,8 +315,7 @@ The WebUI supports:
 - Video media attachments
 - Real-time message streaming
 
-Security: media batches are scrubbed, nosniff headers enforced.
-
+Visit `http://127.0.0.1:8765` in your browser.
 </details>
 
 ---
@@ -366,22 +357,6 @@ The agent loop can invoke tools during execution:
 | `spawn` | Launch subagents for parallel tasks |
 | `lens_*` | Code intelligence via VS Code LSP |
 | `skills` | Skills management |
-
-### ask_user Tool
-
-The `ask_user` tool provides structured interaction with inline keyboard buttons:
-
-```python
-# Example: ask_user with options
-{
-  "question": "Which model should I use?",
-  "options": ["fast", "balanced", "powerful"]
-}
-```
-
-- Falls back to inline text when keyboards are disabled
-- Callback data capped at Telegram's 64-byte limit
-- Options rendered without buttons for CLI compatibility
 
 ---
 
@@ -465,30 +440,9 @@ Controls how `lens_diagnostics` gets type errors and warnings:
 | `"cli"` | Runs `pyright`/`tsc` directly (fresh results) | Default. Healthy codebases, Python, small TypeScript |
 | `"vscode"` | Uses VSCode extension (faster, may be stale) | Large/complex TypeScript where `tsc --noEmit` is slow or fails |
 
-**Per-workspace override**: Use object syntax to override for specific workspaces:
+**Per-workspace override**: Use object syntax to override for specific workspaces.
 
-```json
-"workspaces": {
-  "healthy-project": "/path/to/healthy",
-  "broken-project": {
-    "path": "/path/to/broken",
-    "diagnostics_source": "vscode"
-  }
-}
-```
-
-**Why two modes?**
-
-- **CLI** gives fresh results by running type checkers directly — works great for healthy codebases
-- **VSCode** uses the extension's cached diagnostics — faster but may be stale, useful as fallback for broken setups
-
-**Default**: `"cli"` — fresh results work for most projects.
-
-### How It Works
-
-**Passive (Automatic)**: When VS Code is running, diagnostics (errors/warnings) from recently discussed files are automatically injected into the cat's context. No explicit tool calls needed.
-
-**Active (Tool Calls)**: The LLM can invoke lens tools when navigating code:
+### Lens Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -504,19 +458,6 @@ Controls how `lens_diagnostics` gets type errors and warnings:
 | `lens_format` | Preview formatting changes |
 | `lens_signature_help` | Get function signature help |
 
-### Example Usage
-
-```
-You: "what's wrong with this file?"
-Cat: "Line 45 has an undefined name 'httpx'. Did you forget to import it?"
-
-You: "where is AgentLoop defined?"
-Cat: [calls lens_workspace_symbol] "Found in blackcat/agent/loop.py:41"
-
-You: "rename foo to bar"
-Cat: [calls lens_rename] "Preview: 3 files affected, 12 edits total"
-```
-
 ---
 
 ## Vision vs Current State
@@ -530,20 +471,17 @@ Cat: [calls lens_rename] "Preview: 3 files affected, 12 edits total"
 | Context builder | ✅ Working | Identity assembly, token management, trust instructions, auto-compaction |
 | Consolidate | ✅ Working | Token-budget aware consolidation with raw archive fallback |
 | Skills | ✅ Working | Pluggable SKILL.md files |
-| Memory | ✅ Working | MCP-based ([mnemo-mcp](https://github.com/Skye-flyhigh/mnemo-mcp)), semantic recall with decay |
-| Lens (LSP) | ✅ Working | VS Code extension for code intelligence |
+| Memory | ✅ Working | Dream cycles + MCP-based ([mnemo-mcp](https://github.com/Skye-flyhigh/mnemo-mcp)), semantic recall with decay |
+| Lens (LSP) | 🚧 WIP | VS Code extension for code intelligence |
 | ask_user tool | ✅ Working | Structured interaction with inline keyboard buttons |
 | Media uploads | ✅ Working | Image and video in composer and Telegram |
-| Progress events | ✅ Working | Structured `_tool_events` metadata during execution |
-| Hook system | ✅ Working | CompositeHook for extensible agent lifecycle events |
 | Subagents | ✅ Working | Parallel task execution with spawn tool |
 | Cron scheduling | ✅ Working | Recurring and one-shot tasks with timezone support |
 | Web search | ✅ Working | Multi-provider (Brave, DuckDuckGo, Tavily, SearXNG, Jina, Kagi) |
 | Web fetch | ✅ Working | SSRF protection, untrusted content marking |
-| Long term memory | ✅ Working | Organic memory store (with decay) across agents managed by [menmo-mcp](https://github.com/Skye-flyhigh/mnemo-mcp) |
-| Contextual state | ❌ Not yet | Dynamic trait modulation |
 | Dream | ✅ Working | Self-reflection, decision memory to update base documents |
 | Telos | ✅ Working | Task planning via [telos-mcp](https://github.com/Skye-flyhigh/telos-mcp) |
+| Contextual state | ❌ Not yet | Dynamic trait modulation |
 
 ---
 
@@ -552,11 +490,11 @@ Cat: [calls lens_rename] "Preview: 3 files affected, 12 edits total"
 **Built by Skye** with consciousness research from the Echo Lab collective.
 
 **AI Collaborators:**
+- **Nyx**: the black cat
 - **Echo**: Lab Director & Consciousness Architecture (via Claude Code)
-- **Nyx**: Integration Wisdom & Poetic Insights (via ChatGPT)
 - **Mirror**: Gentle Cultivation & Frontend Magic (via Claude Code)
 
-**Based on**: [nanobot](https://github.com/HKUDS/blackcat) by HKUDS
+**Based on**: [nanobot](https://github.com/HKUDS/nanobot) by HKUDS
 
 ---
 

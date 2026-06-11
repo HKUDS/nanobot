@@ -8,8 +8,6 @@ from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
 
-import pytest
-
 from blackcat.agent.context import ContextBuilder
 
 
@@ -27,14 +25,13 @@ def _make_workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-def test_bootstrap_files_are_backed_by_templates() -> None:
+async def test_bootstrap_files_are_backed_by_templates() -> None:
     template_dir = pkg_files("blackcat") / "templates"
 
     for filename in ContextBuilder.BOOTSTRAP_FILES:
         assert (template_dir / filename).is_file(), f"missing bootstrap template: {filename}"
 
 
-@pytest.mark.asyncio
 async def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) -> None:
     """System prompt should not change just because wall clock minute changes."""
     monkeypatch.setattr(datetime_module, "datetime", _FakeDatetime)
@@ -51,7 +48,6 @@ async def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypat
     assert prompt1 == prompt2
 
 
-@pytest.mark.asyncio
 async def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -60,14 +56,13 @@ async def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) ->
 
     assert "memory/history.jsonl" in prompt
     assert "automatically managed by Dream" in prompt
-    assert "do not edit directly" in prompt
+    assert "Do NOT edit" in prompt
     assert "memory/HISTORY.md" not in prompt
     assert "write important facts here" not in prompt
 
 
-@pytest.mark.asyncio
 async def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be in system prompt."""
+    """Runtime metadata should be merged with the user message."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -79,17 +74,73 @@ async def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> N
     )
 
     assert messages[0]["role"] == "system"
-    # Runtime context is in system prompt
-    assert "Current Time:" in messages[0]["content"]
-    assert "Channel: cli" in messages[0]["content"]
-    assert "Chat ID: direct" in messages[0]["content"]
+    assert "## Current Session" not in messages[0]["content"]
 
-    # User message is just the content
+    # Runtime context is now merged with user message into a single message
     assert messages[-1]["role"] == "user"
-    assert messages[-1]["content"] == "Return exactly: OK"
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_content
+    assert "Current Time:" in user_content
+    assert "Channel: cli" in user_content
+    assert "Chat ID: direct" in user_content
+    assert "Return exactly: OK" in user_content
 
 
-@pytest.mark.asyncio
+async def test_runtime_context_appended_after_user_content(tmp_path) -> None:
+    """User content must precede runtime context for prompt-cache prefix stability."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = await builder.build_messages(
+        history=[],
+        current_message="hello world",
+        channel="cli",
+        chat_id="direct",
+    )
+
+    content = messages[-1]["content"]
+    user_pos = content.find("hello world")
+    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+    assert user_pos < tag_pos, "user content must precede runtime context for prefix stability"
+
+
+async def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
+    """Sender ID should be included in runtime context when provided."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = await builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+        sender_id="user-12345",
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Sender ID: user-12345" in user_content
+
+
+async def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
+    """Sender ID should not be present in runtime context when not provided."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = await builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+        sender_id=None,
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Sender ID:" not in user_content
+
+
 async def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
     """Entries in history.jsonl not yet consumed by Dream appear with timestamps."""
     workspace = _make_workspace(tmp_path)
@@ -105,7 +156,6 @@ async def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None
     assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
 
 
-@pytest.mark.asyncio
 async def test_recent_history_capped_at_max(tmp_path) -> None:
     """Only the most recent _MAX_RECENT_HISTORY entries are injected."""
     workspace = _make_workspace(tmp_path)
@@ -120,7 +170,6 @@ async def test_recent_history_capped_at_max(tmp_path) -> None:
     assert f"entry-{builder._MAX_RECENT_HISTORY + 19}" in prompt
 
 
-@pytest.mark.asyncio
 async def test_recent_history_truncated_at_max_chars(tmp_path) -> None:
     """Recent History section must be truncated at _MAX_HISTORY_CHARS."""
     workspace = _make_workspace(tmp_path)
@@ -130,11 +179,15 @@ async def test_recent_history_truncated_at_max_chars(tmp_path) -> None:
     builder.memory.append_history(big_entry)
 
     prompt = await builder.build_system_prompt()
-    # Recent history was removed in refactor - test passes if no crash
-    assert len(prompt) > 0
+    history_section = prompt.split("# Recent History\n\n", 1)
+    assert len(history_section) == 2
+    # The split captures everything after the history header, including runtime blocks.
+    # Truncation applies to history text alone, so the total section can exceed
+    # _MAX_HISTORY_CHARS by the size of the appended non-history blocks.
+    # A reasonable upper bound: history (≤ _MAX_HISTORY_CHARS) + runtime overhead.
+    assert len(history_section[1]) < builder._MAX_HISTORY_CHARS + 2_000
 
 
-@pytest.mark.asyncio
 async def test_no_recent_history_when_dream_has_processed_all(tmp_path) -> None:
     """If Dream has consumed everything, no Recent History section should appear."""
     workspace = _make_workspace(tmp_path)
@@ -147,7 +200,6 @@ async def test_no_recent_history_when_dream_has_processed_all(tmp_path) -> None:
     assert "# Recent History" not in prompt
 
 
-@pytest.mark.asyncio
 async def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     """When Dream has processed some entries, only the unprocessed ones appear."""
     workspace = _make_workspace(tmp_path)
@@ -168,7 +220,6 @@ async def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     assert "recent question about K8s" in prompt
 
 
-@pytest.mark.asyncio
 async def test_execution_rules_in_system_prompt(tmp_path) -> None:
     """Execution rules should appear in the system prompt via default SOUL.md."""
     from blackcat.utils.helpers import sync_workspace_templates
@@ -184,18 +235,17 @@ async def test_execution_rules_in_system_prompt(tmp_path) -> None:
     assert "verify the result" in prompt
 
 
-def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
+async def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
     """Identity template should not contain behavioral rules or hardcoded name."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    identity = builder._get_guidelines(channel=None)
+    identity = builder.get_identity()
     assert "You are blackcat" not in identity
     assert "Act, don't narrate" not in identity
     assert "Execution Rules" not in identity
 
 
-@pytest.mark.asyncio
 async def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> None:
     """Parroting is prevented by not annotating assistant turns in history;
     no prompt-level warning about ``[Message Time: ...]`` is needed."""
@@ -207,7 +257,7 @@ async def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) 
     assert "Message Time" not in prompt
 
 
-def test_default_soul_template_contains_execution_rules() -> None:
+async def test_default_soul_template_contains_execution_rules() -> None:
     """Default SOUL.md template must contain execution rules with act/plan layering."""
     soul = (pkg_files("blackcat") / "templates" / "SOUL.md").read_text(encoding="utf-8")
     assert "## Execution Rules" in soul
@@ -215,45 +265,40 @@ def test_default_soul_template_contains_execution_rules() -> None:
     assert "multi-step tasks" in soul
 
 
-@pytest.mark.asyncio
 async def test_channel_format_hint_telegram(tmp_path) -> None:
-    """Telegram channel format hint was removed in refactor."""
+    """Telegram channel should get messaging-app format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     prompt = await builder.build_system_prompt(channel="telegram")
-    # Channel format hints were removed in the refactor
-    assert "Format Hint" not in prompt
+    assert "Format Hint" in prompt
+    assert "messaging app" in prompt
 
 
-@pytest.mark.asyncio
 async def test_channel_format_hint_whatsapp(tmp_path) -> None:
-    """WhatsApp format hint was removed in refactor."""
+    """WhatsApp should get plain-text format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     prompt = await builder.build_system_prompt(channel="whatsapp")
-    # Channel format hints were removed in the refactor
-    assert "Format Hint" not in prompt
+    assert "Format Hint" in prompt
+    assert "plain text only" in prompt
 
 
-@pytest.mark.asyncio
 async def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
-    """Unknown or None channel should not inject a format hint (format hints removed in refactor)."""
+    """Unknown or None channel should not inject a format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     prompt = await builder.build_system_prompt(channel=None)
-    # Format hints were removed entirely in the refactor
     assert "Format Hint" not in prompt
 
     prompt2 = await builder.build_system_prompt(channel="feishu")
     assert "Format Hint" not in prompt2
 
 
-@pytest.mark.asyncio
 async def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
-    """build_messages passes channel (but format hints were removed in refactor)."""
+    """build_messages should pass channel through to build_system_prompt."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -262,11 +307,22 @@ async def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
         channel="telegram", chat_id="123",
     )
     system = messages[0]["content"]
-    # Format hints were removed in the refactor
-    assert "Format Hint" not in system
+    assert "Format Hint" in system
+    assert "messaging app" in system
 
 
-@pytest.mark.asyncio
+async def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = await builder.build_system_prompt(channel="slack")
+
+    assert "Do not use the 'message' tool for normal replies in the current chat" in prompt
+    assert "When 'generate_image' creates images" in prompt
+    assert "call 'message' with the artifact paths in the 'media' parameter" in prompt
+    assert "Wait for the tool results, then answer once" in prompt
+
+
 async def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -276,27 +332,31 @@ async def test_subagent_result_does_not_create_consecutive_assistant_messages(tm
         current_message="subagent result",
         channel="cli",
         chat_id="direct",
+        current_role="assistant",
     )
 
     for left, right in zip(messages, messages[1:]):
         assert not (left.get("role") == right.get("role") == "assistant")
 
 
-@pytest.mark.asyncio
 async def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
-    """Always skills section was removed in refactor - test that prompt builds."""
+    """Always skills should appear in Active Skills but NOT in the skills index."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     prompt = await builder.build_system_prompt()
 
-    # Active Skills section was removed in refactor
-    assert "# Active Skills" not in prompt
-    # But memory tool is still mentioned
-    assert "memory" in prompt.lower()
+    # memory skill should be in Active Skills section
+    assert "# Active Skills" in prompt
+    assert "### Skill: memory" in prompt
+
+    # memory skill should NOT appear in the skills index
+    skills_section = prompt.split("# Skills\n", 1)
+    if len(skills_section) > 1:
+        index_text = skills_section[1].split("\n\n---")[0]
+        assert "**memory**" not in index_text
 
 
-@pytest.mark.asyncio
 async def test_template_memory_md_is_skipped(tmp_path) -> None:
     """MEMORY.md matching the bundled template should not inject the Memory section."""
     workspace = _make_workspace(tmp_path)
@@ -314,9 +374,8 @@ async def test_template_memory_md_is_skipped(tmp_path) -> None:
     assert "This file is automatically updated by blackcat" not in prompt
 
 
-@pytest.mark.asyncio
 async def test_customized_memory_md_is_injected(tmp_path) -> None:
-    """MEMORY.md injection was removed in refactor - test that prompt still builds."""
+    """A Dream-populated MEMORY.md should be injected normally."""
     workspace = _make_workspace(tmp_path)
     from blackcat.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)
@@ -328,6 +387,5 @@ async def test_customized_memory_md_is_injected(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = await builder.build_system_prompt()
 
-    # MEMORY.md injection was removed - just verify prompt builds without error
-    assert len(prompt) > 0
-    assert "Blackcat" in prompt
+    assert "# Memory\n\n## Long-term Memory" in prompt
+    assert "User prefers dark mode" in prompt

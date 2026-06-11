@@ -23,7 +23,6 @@ We aim to respond to security reports within 48 hours.
 ```bash
 # ✅ Good: Store in config file with restricted permissions
 chmod 600 ~/.blackcat/config.json
-chmod 600 ~/.blackcat/config.json
 
 # ❌ Bad: Hardcoding keys in code or committing them
 ```
@@ -81,7 +80,6 @@ On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
 - Config files and API keys (`~/.blackcat/config.json`) → **hidden** (masked by tmpfs)
-- Config files and API keys (`~/.blackcat/config.json`) → **hidden** (masked by tmpfs)
 
 Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
 
@@ -100,7 +98,6 @@ File operations have path traversal protection, but:
 
 - ✅ Enable `restrictToWorkspace` or the bwrap sandbox to confine file access
 - ✅ Run blackcat with a dedicated user account
-- ✅ Run blackcat with a dedicated user account
 - ✅ Use filesystem permissions to protect sensitive directories
 - ✅ Regularly audit file operations in logs
 - ❌ Don't give unrestricted access to sensitive files
@@ -115,7 +112,6 @@ File operations have path traversal protection, but:
 **WhatsApp Bridge:**
 - The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
 - Set `bridgeToken` in config to enable shared-secret authentication between Python and Node.js
-- Keep authentication data in `~/.blackcat/whatsapp-auth` secure (mode 0700)
 - Keep authentication data in `~/.blackcat/whatsapp-auth` secure (mode 0700)
 
 ### 6. Dependency Security
@@ -142,7 +138,6 @@ npm audit fix
 - **March 2026**: Removed `litellm` entirely due to supply chain attack (CVE-2024-6825, CVE-2025-0330, CVE-2025-0628, CVE-2025-11203). Migrated to native OpenAI and Anthropic SDKs. See [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details.
 - We've updated `ws` to `>=8.17.1` to fix DoS vulnerability
 - Run `pip-audit` or `npm audit` regularly
-- Subscribe to security advisories for blackcat and its dependencies
 - Subscribe to security advisories for blackcat and its dependencies
 
 ### 7. Production Deployment
@@ -276,8 +271,8 @@ Before deploying blackcat:
 **Last Updated**: 2026-04-05
 
 For the latest security updates and announcements, check:
-- GitHub Security Advisories: https://github.com/HKUDS/blackcat/security/advisories
-- Release Notes: https://github.com/HKUDS/blackcat/releases
+- GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories
+- Release Notes: https://github.com/HKUDS/nanobot/releases
 
 ## License
 

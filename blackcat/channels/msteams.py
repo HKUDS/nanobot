@@ -20,7 +20,7 @@ import re
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
@@ -32,14 +32,13 @@ except ImportError:  # pragma: no cover
     fcntl = None
 
 import httpx
-from loguru import logger
 from pydantic import Field
 
 from blackcat.bus.events import OutboundMessage
 from blackcat.bus.queue import MessageBus
 from blackcat.channels.base import BaseChannel
+from blackcat.config.paths import get_workspace_path
 from blackcat.config.schema import Base
-from blackcat.utils.paths import get_workspace_path
 
 MSTEAMS_AVAILABLE = (
     importlib.util.find_spec("jwt") is not None
@@ -53,8 +52,14 @@ if MSTEAMS_AVAILABLE:
     import jwt
 
 MSTEAMS_REF_TTL_DAYS = 30
-MSTEAMS_REF_TTL_S = MSTEAMS_REF_TTL_DAYS * 24 * 60 * 60
 MSTEAMS_WEBCHAT_HOST = "webchat.botframework.com"
+MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS = [
+    "smba.trafficmanager.net",
+    "smba.infra.gcc.teams.microsoft.com",
+    "smba.infra.gov.teams.microsoft.us",
+    "smba.infra.dod.teams.microsoft.us",
+    "*.botframework.com",
+]
 MSTEAMS_REF_META_FILENAME = "msteams_conversations_meta.json"
 MSTEAMS_REF_LOCK_FILENAME = "msteams_conversations.lock"
 MSTEAMS_REF_TOUCH_INTERVAL_S = 300
@@ -78,6 +83,9 @@ class MSTeamsConfig(Base):
     prune_web_chat_refs: bool = True
     prune_non_personal_refs: bool = True
     ref_touch_interval_s: int = Field(default=MSTEAMS_REF_TOUCH_INTERVAL_S, ge=0)
+    trusted_service_url_hosts: list[str] = Field(
+        default_factory=lambda: MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS.copy()
+    )
 
 
 @dataclass
@@ -134,16 +142,16 @@ class MSTeamsChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Teams webhook listener."""
         if not MSTEAMS_AVAILABLE:
-            logger.error("PyJWT not installed. Run: pip install blackcat-ai[msteams]")
+            self.logger.error("PyJWT not installed. Run: pip install blackcat-ai[msteams]")
             return
 
         if not self.config.app_id or not self.config.app_password:
-            logger.error("MSTeams app_id/app_password not configured")
+            self.logger.error("app_id/app_password not configured")
             return
 
         if not self.config.validate_inbound_auth:
-            logger.warning(
-                "MSTeams inbound auth validation was explicitly DISABLED in config. "
+            self.logger.warning(
+                "Inbound auth validation was explicitly DISABLED in config. "
                 "Anyone who knows the webhook URL can send messages as any user. "
                 "Only disable this for local development or controlled testing."
             )
@@ -166,7 +174,7 @@ class MSTeamsChannel(BaseChannel):
                     raw = self.rfile.read(length) if length > 0 else b"{}"
                     payload = json.loads(raw.decode("utf-8"))
                 except Exception as e:
-                    logger.warning("MSTeams invalid request body: {}", e)
+                    channel.logger.warning("Invalid request body: {}", e)
                     self.send_response(400)
                     self.end_headers()
                     return
@@ -180,7 +188,7 @@ class MSTeamsChannel(BaseChannel):
                         )
                         fut.result(timeout=15)
                     except Exception as e:
-                        logger.warning("MSTeams inbound auth validation failed: {}", e)
+                        channel.logger.warning("Inbound auth validation failed: {}", e)
                         self.send_response(401)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
@@ -193,7 +201,7 @@ class MSTeamsChannel(BaseChannel):
                     )
                     fut.result(timeout=15)
                 except Exception as e:
-                    logger.warning("MSTeams activity handling failed: {}", e)
+                    channel.logger.warning("Activity handling failed: {}", e)
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -211,8 +219,8 @@ class MSTeamsChannel(BaseChannel):
         )
         self._server_thread.start()
 
-        logger.info(
-            "MSTeams webhook listening on http://{}:{}{}",
+        self.logger.info(
+            "Webhook listening on http://{}:{}{}",
             self.config.host,
             self.config.port,
             self.config.path,
@@ -244,6 +252,11 @@ class MSTeamsChannel(BaseChannel):
         if not ref:
             raise RuntimeError(f"MSTeams conversation ref not found for chat_id={msg.chat_id}")
 
+        if not self._is_trusted_service_url(ref.service_url):
+            raise RuntimeError(
+                f"MSTeams conversation ref has untrusted service_url for chat_id={msg.chat_id}"
+            )
+
         token = await self._get_access_token()
         base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
@@ -261,10 +274,10 @@ class MSTeamsChannel(BaseChannel):
         try:
             resp = await self._http.post(base_url, headers=headers, json=payload)
             resp.raise_for_status()
-            logger.info("MSTeams message sent to {}", ref.conversation_id)
+            self.logger.info("Message sent to {}", ref.conversation_id)
             self._touch_conversation_ref(str(msg.chat_id), persist=True)
-        except Exception as e:
-            logger.error("MSTeams send failed: {}", e)
+        except Exception:
+            self.logger.exception("Send failed")
             raise
 
     async def _handle_activity(self, activity: dict[str, Any]) -> None:
@@ -286,23 +299,30 @@ class MSTeamsChannel(BaseChannel):
         if not sender_id or not conversation_id or not service_url:
             return
 
+        if not self._is_trusted_service_url(service_url):
+            self.logger.warning(
+                "Ignoring MSTeams activity with untrusted serviceUrl host: {}",
+                service_url,
+            )
+            return
+
         if recipient.get("id") and from_user.get("id") == recipient.get("id"):
             return
 
         # DM-only MVP: ignore group/channel traffic for now
         if conversation_type and conversation_type not in ("personal", ""):
-            logger.debug("MSTeams ignoring non-DM conversation {}", conversation_type)
+            self.logger.debug("Ignoring non-DM conversation {}", conversation_type)
             return
 
         text = self._sanitize_inbound_text(activity)
         if not text:
             text = self.config.mention_only_response.strip()
             if not text:
-                logger.debug("MSTeams ignoring empty message after Teams text sanitization")
+                self.logger.debug("Ignoring empty message after Teams text sanitization")
                 return
 
         if not self.is_allowed(sender_id):
-            logger.warning(
+            self.logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
                 sender_id, self.name,
@@ -554,7 +574,7 @@ class MSTeamsChannel(BaseChannel):
                 if isinstance(loaded, dict):
                     main_data = loaded
             except Exception as e:
-                logger.warning("Failed to load MSTeams conversation refs: {}", e)
+                self.logger.warning("Failed to load conversation refs: {}", e)
 
         if meta_exists:
             try:
@@ -562,7 +582,7 @@ class MSTeamsChannel(BaseChannel):
                 if isinstance(loaded_meta, dict):
                     meta_data = loaded_meta
             except Exception as e:
-                logger.warning("Failed to load MSTeams conversation refs metadata: {}", e)
+                self.logger.warning("Failed to load conversation refs metadata: {}", e)
 
         return main_data, meta_data, meta_exists
 
@@ -628,6 +648,29 @@ class MSTeamsChannel(BaseChannel):
             return host == MSTEAMS_WEBCHAT_HOST or host.endswith(f".{MSTEAMS_WEBCHAT_HOST}")
         return MSTEAMS_WEBCHAT_HOST in normalized.lower()
 
+    def _is_trusted_service_url(self, service_url: str) -> bool:
+        """Return True for HTTPS Bot Framework service URLs trusted for bearer replies."""
+        parsed = urlparse(service_url.strip())
+        if parsed.scheme.lower() != "https":
+            return False
+
+        host = (parsed.hostname or "").strip().lower().rstrip(".")
+        if not host:
+            return False
+
+        for pattern in self.config.trusted_service_url_hosts:
+            trusted_host = str(pattern or "").strip().lower().rstrip(".")
+            if not trusted_host:
+                continue
+            if trusted_host.startswith("*."):
+                suffix = trusted_host[1:]
+                if host.endswith(suffix) and host != suffix.lstrip("."):
+                    return True
+                continue
+            if host == trusted_host:
+                return True
+        return False
+
     def _prune_conversation_refs(self, *, now: float | None = None) -> bool:
         """Remove stale and unsupported conversation refs from memory."""
         if not self._conversation_refs:
@@ -639,6 +682,10 @@ class MSTeamsChannel(BaseChannel):
         keys_to_drop: list[str] = []
 
         for key, ref in self._conversation_refs.items():
+            if not self._is_trusted_service_url(ref.service_url):
+                keys_to_drop.append(key)
+                continue
+
             if self.config.prune_web_chat_refs and self._is_webchat_service_url(ref.service_url):
                 keys_to_drop.append(key)
                 continue
@@ -660,8 +707,8 @@ class MSTeamsChannel(BaseChannel):
 
         for key in keys_to_drop:
             self._conversation_refs.pop(key, None)
-        logger.info(
-            "MSTeams pruned {} stale/unsupported conversation refs (ttl={} days)",
+        self.logger.info(
+            "Pruned {} stale/unsupported conversation refs (ttl={} days)",
             len(keys_to_drop),
             ttl_days,
         )
@@ -712,10 +759,8 @@ class MSTeamsChannel(BaseChannel):
             os.replace(tmp_path, path)
         finally:
             if tmp_path and os.path.exists(tmp_path):
-                try:
+                with suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
     def _save_refs_locked(self, *, prune: bool = True) -> None:
         """Persist conversation references (caller must hold _refs_guard)."""
@@ -744,7 +789,7 @@ class MSTeamsChannel(BaseChannel):
                 self._write_json_atomically(self._refs_path, refs_data)
                 self._write_json_atomically(self._refs_meta_path, refs_meta)
         except Exception as e:
-            logger.warning("Failed to save MSTeams conversation refs: {}", e)
+            self.logger.warning("Failed to save conversation refs: {}", e)
 
     def _save_refs(self, *, prune: bool = True) -> None:
         """Persist conversation references."""

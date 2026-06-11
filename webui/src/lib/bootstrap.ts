@@ -1,16 +1,54 @@
+import { fetchWithTimeout } from "./http";
 import type { BootstrapResponse } from "./types";
+
+const SECRET_STORAGE_KEY = "blackcat-webui.bootstrap-secret";
+
+/** Read a previously saved bootstrap secret from localStorage. */
+export function loadSavedSecret(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(SECRET_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Persist the bootstrap secret so page reloads don't re-prompt. */
+export function saveSecret(secret: string): void {
+  try {
+    window.localStorage.setItem(SECRET_STORAGE_KEY, secret);
+  } catch {
+    // ignore storage errors (private mode, etc.)
+  }
+}
+
+/** Clear the saved bootstrap secret (sign out). */
+export function clearSavedSecret(): void {
+  try {
+    window.localStorage.removeItem(SECRET_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * Fetch a short-lived token + the WebSocket path from the gateway's
- * ``/webui/bootstrap`` endpoint. Localhost-only on the server side.
+ * ``/webui/bootstrap`` endpoint.
  */
 export async function fetchBootstrap(
   baseUrl: string = "",
+  secret: string = "",
+  timeoutMs?: number,
 ): Promise<BootstrapResponse> {
-  const res = await fetch(`${baseUrl}/webui/bootstrap`, {
+  const headers: Record<string, string> = {};
+  if (secret) {
+    headers["X-Blackcat-Auth"] = secret;
+  }
+  const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
-  });
+    headers,
+  }, timeoutMs);
   if (!res.ok) {
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
@@ -28,11 +66,25 @@ export async function fetchBootstrap(
  * matters because some WS servers dispatch handshakes based on the literal
  * path, not a normalised form.
  */
-export function deriveWsUrl(wsPath: string, token: string): string {
-  const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
+export function deriveWsUrl(
+  wsPath: string,
+  token: string,
+  wsUrl?: string | null,
+): string {
   const query = `?token=${encodeURIComponent(token)}`;
+  if (wsUrl && /^(wss?|blackcat-host):\/\//i.test(wsUrl)) {
+    const join = wsUrl.includes("?") ? "&" : "?";
+    return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
+  }
+  const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
   if (typeof window === "undefined") {
     return `ws://127.0.0.1:8765${path}${query}`;
+  }
+  if (window.location.port === "5173") {
+    const host = window.location.hostname.includes(":")
+      ? `[${window.location.hostname}]`
+      : window.location.hostname;
+    return `ws://${host}:8765${path}${query}`;
   }
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;

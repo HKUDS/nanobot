@@ -7,8 +7,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-from blackcat.blackcat import Blackcat, RunResult
-
 
 def _read_pyproject_version() -> str | None:
     """Read the source-tree version when package metadata is unavailable."""
@@ -24,10 +22,27 @@ def _resolve_version() -> str:
         return _pkg_version("blackcat-ai")
     except PackageNotFoundError:
         # Source checkouts often import blackcat without installed dist-info.
-        return _read_pyproject_version() or "0.1.5.post3"
+        return _read_pyproject_version() or "0.2.1"
 
 
 __version__ = _resolve_version()
 __logo__ = "🐈‍⬛"
+
+_LAZY_EXPORTS = {
+    "Blackcat": ".blackcat",
+    "RunResult": ".blackcat",
+}
+
+
+def __getattr__(name: str):
+    module_path = _LAZY_EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+    mod = import_module(module_path, __name__)
+    val = getattr(mod, name)
+    globals()[name] = val
+    return val
+
 
 __all__ = ["Blackcat", "RunResult"]

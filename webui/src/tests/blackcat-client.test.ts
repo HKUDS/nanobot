@@ -65,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+Reflect.deleteProperty(window, "blackcatHost");
   vi.useRealTimers();
 });
 
@@ -89,7 +90,7 @@ describe("BlackcatClient", () => {
     });
   });
 
-  it("resolves newChat() via the server-assigned chat_id", async () => {
+it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new BlackcatClient({
       url: "ws://test",
       reconnect: false,
@@ -101,6 +102,95 @@ describe("BlackcatClient", () => {
     expect(lastSocket().sent).toContain(JSON.stringify({ type: "new_chat" }));
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
+  });
+
+it("serializes workspace scope for new chats and messages", async () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const workspaceScope = {
+      project_path: "/tmp/project",
+      project_name: "project",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const promise = client.newChat(1_000, workspaceScope);
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
+    );
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    await expect(promise).resolves.toBe("fresh-id");
+
+    client.sendMessage("fresh-id", "hello", undefined, { workspaceScope });
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "fresh-id",
+        content: "hello",
+        workspace_scope: workspaceScope,
+        webui: true,
+      }),
+    );
+  });
+
+  it("sends transcription requests and resolves transcription results outside chat dispatch", async () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onChat("chat-a", handler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const promise = client.transcribeAudio("data:audio/webm;base64,AAAA", {
+      durationMs: 1234,
+      timeoutMs: 1_000,
+    });
+    const frame = JSON.parse(lastSocket().sent.at(-1) as string);
+    expect(frame).toMatchObject({
+      type: "transcribe_audio",
+      data_url: "data:audio/webm;base64,AAAA",
+      duration_ms: 1234,
+    });
+    expect(typeof frame.request_id).toBe("string");
+
+    lastSocket().fakeMessage({
+      event: "transcription_result",
+      request_id: frame.request_id,
+      text: "hello from voice",
+    });
+    await expect(promise).resolves.toBe("hello from voice");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects pending transcription requests on server errors and socket close", async () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const errored = client.transcribeAudio("data:audio/webm;base64,AAAA", { timeoutMs: 1_000 });
+    const errorFrame = JSON.parse(lastSocket().sent.at(-1) as string);
+    lastSocket().fakeMessage({
+      event: "transcription_error",
+      request_id: errorFrame.request_id,
+      detail: "not_configured",
+    });
+    await expect(errored).rejects.toThrow("not_configured");
+
+    const dropped = client.transcribeAudio("data:audio/webm;base64,BBBB", { timeoutMs: 1_000 });
+    lastSocket().close();
+    await expect(dropped).rejects.toThrow("socket closed");
   });
 
   it("queues sends while connecting and flushes on open", () => {
@@ -116,7 +206,142 @@ describe("BlackcatClient", () => {
     // Attach is sent first because sendMessage adds to knownChats, which
     // handleOpen re-attaches; then the queued message follows.
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello" }),
+      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello", webui: true }),
+    );
+  });
+
+  it("includes an explicit turn id on outbound WebUI messages", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    client.sendMessage("chat-x", "hello", undefined, { turnId: "turn-1" });
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "message",
+      chat_id: "chat-x",
+      content: "hello",
+      turn_id: "turn-1",
+      webui: true,
+    });
+  });
+
+  it("includes image generation options in outbound messages", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-img",
+      "draw a banner",
+      undefined,
+      { imageGeneration: { enabled: true, aspect_ratio: "16:9" } },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-img",
+        content: "draw a banner",
+        image_generation: { enabled: true, aspect_ratio: "16:9" },
+        webui: true,
+      }),
+    );
+  });
+
+  it("includes CLI app attachments in outbound messages", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-cli",
+      "@drawio please make this diagram",
+      undefined,
+      {
+        cliApps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-cli",
+        content: "@drawio please make this diagram",
+        cli_apps: [{
+          name: "drawio",
+          display_name: "Draw.io",
+          category: "diagrams",
+          entry_point: "cli-anything-drawio",
+          logo_url: null,
+          brand_color: "#F08705",
+        }],
+        webui: true,
+      }),
+    );
+  });
+
+  it("includes MCP preset attachments in outbound messages", () => {
+    const client = new BlackcatClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-mcp",
+      "@browserbase check this page",
+      undefined,
+      {
+        mcpPresets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
+      },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-mcp",
+        content: "@browserbase check this page",
+        mcp_presets: [{
+          name: "browserbase",
+          display_name: "Browserbase",
+          category: "browser",
+          transport: "streamableHttp",
+          status: "configured",
+          configured: true,
+          logo_url: "https://example.invalid/browserbase.svg",
+          brand_color: "#111827",
+        }],
+        webui: true,
+      }),
     );
   });
 
@@ -196,6 +421,7 @@ describe("BlackcatClient", () => {
       chat_id: "chat-x",
       content: "look",
       media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      webui: true,
     });
   });
 
@@ -214,6 +440,7 @@ describe("BlackcatClient", () => {
       type: "message",
       chat_id: "chat-x",
       content: "hello",
+      webui: true,
     });
   });
 

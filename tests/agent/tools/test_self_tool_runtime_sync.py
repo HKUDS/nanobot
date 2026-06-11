@@ -20,7 +20,7 @@ async def test_my_tool_max_iterations_syncs_subagent_limit() -> None:
 
     loop._sync_subagent_runtime_limits = _sync_subagent_runtime_limits
 
-    tool = MyTool(loop=loop)
+    tool = MyTool(runtime_state=loop)
 
     result = await tool.execute(action="set", key="max_iterations", value=80)
 

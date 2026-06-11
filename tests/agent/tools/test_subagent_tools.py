@@ -16,8 +16,9 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from blackcat.agent.subagent import SubagentManager, SubagentStatus
+    from blackcat.agent.tools.shell import ExecToolConfig
     from blackcat.bus.queue import MessageBus
-    from blackcat.config.schema import ExecToolConfig
+    from blackcat.config.schema import ToolsConfig
 
     bus = MessageBus()
     provider = MagicMock()
@@ -27,7 +28,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        exec_config=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"]),
+        tools_config=ToolsConfig(exec=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"])),
     )
     mgr._announce_result = AsyncMock()
 
@@ -91,6 +92,110 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     )
 
     mgr.runner.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
+    """A temperature passed to spawn() should reach the AgentRunSpec."""
+    from blackcat.agent.subagent import SubagentManager
+    from blackcat.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["temperature"] = spec.temperature
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", temperature=0.9)
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["temperature"] == 0.9
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
+    """SpawnTool should return an error string when the concurrency limit is reached."""
+    from blackcat.agent.subagent import SubagentManager
+    from blackcat.agent.tools.spawn import SpawnTool
+    from blackcat.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    # Block the first subagent so it stays "running"
+    release = asyncio.Event()
+
+    async def fake_run(spec):
+        await release.wait()
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    from blackcat.agent.tools.context import RequestContext
+
+    tool = SpawnTool(mgr)
+    tool.set_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1"))
+
+    # First spawn succeeds
+    result = await tool.execute(task="first task")
+    assert "started" in result
+
+    # Second spawn should be rejected (default limit is 1)
+    result = await tool.execute(task="second task")
+    assert "Cannot spawn subagent" in result
+    assert "concurrency limit reached" in result
+
+    # Release the first subagent
+    release.set()
+    # Allow cleanup
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+
+def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
+    """Direct SubagentManager construction should use the agent default concurrency limit."""
+    from blackcat.agent.subagent import SubagentManager
+    from blackcat.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    assert mgr.max_concurrent_subagents == AgentDefaults().max_concurrent_subagents
 
 
 def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
@@ -235,8 +340,8 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     # With sub-agents running and an empty queue, it should block
     drain_task = asyncio.create_task(injection_callback())
 
-    # Give it a moment to enter the blocking wait
-    await asyncio.sleep(0.05)
+    # Let the task enter the blocking queue wait.
+    await asyncio.sleep(0)
 
     # Should still be running (blocked on pending_queue.get())
     assert not drain_task.done(), "drain should block while sub-agents are running"
@@ -365,6 +470,12 @@ async def test_drain_pending_timeout(tmp_path):
     # Patch the timeout to be very short for testing
     with patch("blackcat.agent.loop.asyncio.wait_for") as mock_wait:
         mock_wait.side_effect = asyncio.TimeoutError
+    # Patch the timeout path without leaking the queue.get() coroutine.
+    async def _timeout(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with patch("blackcat.agent.loop.asyncio.wait_for", side_effect=_timeout):
         results = await injection_callback()
         assert results == []
 

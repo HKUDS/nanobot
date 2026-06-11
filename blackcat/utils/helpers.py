@@ -1,9 +1,9 @@
 """Utility functions for blackcat."""
 
-import base64
 import json
 import re
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,78 +11,11 @@ from typing import Any
 from loguru import logger
 
 
-def strip_think(text: str) -> str:
-    """Remove thinking blocks, unclosed trailing tags, and tokenizer-level
-    template leaks occasionally emitted by some models (notably Gemma 4's
-    Ollama renderer).
+def ensure_dir(path: Path) -> Path:
+    """Ensure directory exists, return it."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
-    Covers:
-      1. Well-formed `<think>...</think>` and `<thought>...</thought>` blocks.
-      2. Streaming prefixes where the block is never closed.
-      3. *Malformed* opening tags missing the `>` — e.g. `<think广场…`. The
-         model sometimes emits the tag name directly followed by user-facing
-         content with no delimiter; without this step the literal `<think`
-         leaks into the rendered message.
-      4. Harmony-style channel markers like `<channel|>` / `<|channel|>`
-         **at the start of the text** — conservative to avoid eating
-         explanatory prose that mentions these tokens.
-      5. Orphan closing tags `</think>` / `</thought>` **at the very start
-         or end of the text** only, for the same reason.
-
-    Since this is also applied before persisting to history (memory.py),
-    the edge-only stripping of (4) and (5) is deliberate: stripping those
-    tokens mid-text would silently rewrite any message where a user or the
-    assistant discusses the tokens themselves.
-    """
-    # Well-formed blocks first.
-    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
-    text = re.sub(r"^\s*<think>[\s\S]*$", "", text)
-    text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
-    text = re.sub(r"^\s*<thought>[\s\S]*$", "", text)
-    # Malformed opening tags: `<think` / `<thought` where the next char is
-    # NOT one that could continue a valid tag / identifier name. Explicitly
-    # listing ASCII tag-name chars (letters, digits, `_`, `-`, `:`) plus
-    # `>` / `/` — we can't use `\w` here because in Python's default
-    # Unicode regex mode it matches CJK characters too, which would defeat
-    # the primary fix for `<think广场…` leaks.
-    text = re.sub(r"<think(?![A-Za-z0-9_\-:>/])", "", text)
-    text = re.sub(r"<thought(?![A-Za-z0-9_\-:>/])", "", text)
-    # Edge-only orphan closing tags (start or end of text).
-    text = re.sub(r"^\s*</think>\s*", "", text)
-    text = re.sub(r"\s*</think>\s*$", "", text)
-    text = re.sub(r"^\s*</thought>\s*", "", text)
-    text = re.sub(r"\s*</thought>\s*$", "", text)
-    # Edge-only channel markers (harmony / Gemma 4 variant leaks).
-    text = re.sub(r"^\s*<\|?channel\|?>\s*", "", text)
-    return text.strip()
-
-
-def detect_image_mime(data: bytes) -> str | None:
-    """Detect image MIME type from magic bytes, ignoring file extension."""
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if data[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
-
-
-def build_image_content_blocks(
-    raw: bytes, mime: str, path: str, label: str
-) -> list[dict[str, Any]]:
-    """Build native image blocks plus a short text label."""
-    b64 = base64.b64encode(raw).decode()
-    return [
-        {
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-            "_meta": {"path": path},
-        },
-        {"type": "text", "text": label},
-    ]
 
 def timestamp() -> str:
     """Current ISO timestamp."""
@@ -210,7 +143,13 @@ def build_status_content(
     active_task_count: int = 0,
     max_completion_tokens: int = 8192,
 ) -> str:
-    """Build a human-readable runtime status snapshot."""
+    """Build a human-readable runtime status snapshot.
+
+    Args:
+        search_usage_text: Optional pre-formatted web search usage string
+                           (produced by SearchUsageInfo.format()). When provided
+                           it is appended as an extra section.
+    """
     uptime_s = int(time.time() - start_time)
     uptime = (
         f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
@@ -248,7 +187,7 @@ def build_status_content(
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
-    """Sync bundled templates to workspace. Only creates missing files."""
+    """Sync bundled templates to workspace. Creates missing files without overwriting user files."""
     from importlib.resources import files as pkg_files
 
     try:
@@ -259,11 +198,13 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         return []
 
     added: list[str] = []
+
     def _write(src, dest: Path):
+        content = src.read_text(encoding="utf-8") if src else ""
         if dest.exists():
             return
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
+        dest.write_text(content, encoding="utf-8")
         added.append(str(dest.relative_to(workspace)))
 
     for item in tpl.iterdir():
@@ -293,6 +234,17 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         )
         gs.init()
     except Exception:
-        logger.warning("Failed to initialize git store for {}", workspace)
+        logger.exception("Failed to initialize git store for {}", workspace)
 
     return added
+
+
+def load_bundled_template(template_name: str) -> str | None:
+    """Read a bundled template file from the blackcat package."""
+    from importlib.resources import files as pkg_files
+
+    with suppress(Exception):
+        tpl = pkg_files("blackcat") / "templates" / template_name
+        if tpl.is_file():
+            return tpl.read_text(encoding="utf-8")
+    return None

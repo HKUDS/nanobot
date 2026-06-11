@@ -69,7 +69,7 @@ def test_whatsapp_dedup_init():
 
 
 def test_manager_validates_empty_allow_from():
-    """ChannelManager should fail fast on empty allow_from."""
+    """ChannelManager with empty allow_from logs pairing-only mode instead of exiting."""
     from unittest.mock import MagicMock
 
     from blackcat.channels.manager import ChannelManager
@@ -82,9 +82,8 @@ def test_manager_validates_empty_allow_from():
     fake_channel.config.allow_from = []
     mgr.channels["test"] = fake_channel
 
-    import pytest
-    with pytest.raises(SystemExit, match="empty allowFrom"):
-        mgr._validate_allow_from()
+    # Empty allow_from no longer triggers SystemExit — it logs pairing-only mode
+    mgr._validate_allow_from()  # should not raise
 
 
 def test_manager_allows_populated_allow_from():

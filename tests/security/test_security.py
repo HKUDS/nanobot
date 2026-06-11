@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from blackcat.utils.paths import resolve_path
+from blackcat.security.workspace_policy import resolve_path
 
 # ── Deny-by-default is_allowed ────────────────────────────────────
 
@@ -69,15 +69,17 @@ def test_resolve_path_inside_allowed(tmp_path):
     target = tmp_path / "subdir" / "file.txt"
     target.parent.mkdir(parents=True)
     target.touch()
-    result = resolve_path(str(target), allowed_dir=tmp_path)
+    result = resolve_path(str(target), workspace=tmp_path)
     assert result == target.resolve()
 
 
 def test_resolve_path_traversal_blocked(tmp_path):
     """Paths that escape the allowed directory should be rejected."""
     evil = tmp_path / ".." / "etc" / "passwd"
+    from blackcat.security.workspace_policy import resolve_allowed_path
+
     with pytest.raises(PermissionError, match="outside allowed directory"):
-        resolve_path(str(evil), allowed_dir=tmp_path)
+        resolve_allowed_path(str(evil), workspace=tmp_path, allowed_root=tmp_path)
 
 
 def test_resolve_path_prefix_attack(tmp_path):
@@ -86,8 +88,10 @@ def test_resolve_path_prefix_attack(tmp_path):
     evil_dir.mkdir(exist_ok=True)
     evil_file = evil_dir / "secrets.txt"
     evil_file.touch()
+    from blackcat.security.workspace_policy import resolve_allowed_path
+
     with pytest.raises(PermissionError, match="outside allowed directory"):
-        resolve_path(str(evil_file), allowed_dir=tmp_path)
+        resolve_allowed_path(str(evil_file), workspace=tmp_path, allowed_root=tmp_path)
 
 
 def test_resolve_path_no_restriction(tmp_path):

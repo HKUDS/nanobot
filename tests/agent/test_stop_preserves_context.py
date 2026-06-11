@@ -4,54 +4,59 @@ When /stop cancels an active task, the runtime checkpoint (tool results,
 assistant messages accumulated so far) should be materialized into session
 history rather than silently discarded.
 
-See: https://github.com/HKUDS/blackcat/issues/2966
+See: https://github.com/HKUDS/nanobot/issues/2966
 """
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from blackcat.agent.loop import AgentLoop
+from blackcat.bus.queue import MessageBus
 
 
-@pytest.fixture
-def mock_loop():
-    """Create a minimal AgentLoop with mocked dependencies."""
-    with patch.object(AgentLoop, "__init__", lambda self: None):
-        loop = AgentLoop()
-        loop.sessions = MagicMock()
-        loop._pending_queues = {}
-        loop._session_locks = {}
-        loop._active_tasks = {}
-        loop._concurrency_gate = None
-        loop._RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
-        loop._PENDING_USER_TURN_KEY = "pending_user_turn"
-        loop.bus = MagicMock()
-        loop.bus.publish_outbound = AsyncMock()
-        loop.bus.publish_inbound = AsyncMock()
-        loop.commands = MagicMock()
-        loop.commands.dispatch_priority = AsyncMock(return_value=None)
-        return loop
+def _make_provider():
+    """Create an LLM provider mock with required attributes."""
+    from types import SimpleNamespace
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = SimpleNamespace(max_tokens=4096, temperature=0.1, reasoning_effort=None)
+    provider.estimate_prompt_tokens.return_value = (10_000, "test")
+    return provider
+
+
+def _make_loop(tmp_path: Path) -> AgentLoop:
+    """Create a real AgentLoop with mocked provider — avoids patching __init__."""
+    bus = MessageBus()
+    provider = _make_provider()
+    with patch("blackcat.agent.loop.ContextBuilder"), \
+         patch("blackcat.agent.loop.SessionManager"), \
+         patch("blackcat.agent.loop.SubagentManager") as MockSubMgr:
+        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+        return AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
 
 
 class TestStopPreservesContext:
     """Verify that /stop restores partial context via checkpoint."""
 
-    def test_restore_checkpoint_method_exists(self, mock_loop):
+    def test_restore_checkpoint_method_exists(self, tmp_path):
         """AgentLoop should have _restore_runtime_checkpoint."""
-        assert hasattr(mock_loop, "_restore_runtime_checkpoint")
+        loop = _make_loop(tmp_path)
+        assert hasattr(loop, "_restore_runtime_checkpoint")
 
-    def test_checkpoint_key_constant(self, mock_loop):
+    def test_checkpoint_key_constant(self, tmp_path):
         """The runtime checkpoint key should be defined."""
-        assert mock_loop._RUNTIME_CHECKPOINT_KEY == "runtime_checkpoint"
+        loop = _make_loop(tmp_path)
+        assert loop._RUNTIME_CHECKPOINT_KEY == "runtime_checkpoint"
 
-    def test_cancel_dispatch_restores_checkpoint(self, mock_loop):
+    def test_cancel_dispatch_restores_checkpoint(self, tmp_path):
         """When a task is cancelled, the checkpoint should be restored."""
-        # Create a mock session with a checkpoint
+        loop = _make_loop(tmp_path)
         session = MagicMock()
         session.metadata = {
             "runtime_checkpoint": {
@@ -73,14 +78,11 @@ class TestStopPreservesContext:
         session.messages = [
             {"role": "user", "content": "Search for something"},
         ]
-        mock_loop.sessions.get_or_create.return_value = session
+        loop.sessions.get_or_create.return_value = session
 
-        # The restore method should add checkpoint messages to session history
-        restored = mock_loop._restore_runtime_checkpoint(session)
+        restored = loop._restore_runtime_checkpoint(session)
         assert restored is True
-        # After restore, session should have more messages
         assert len(session.messages) > 1
-        # The checkpoint should be cleared
         assert "runtime_checkpoint" not in session.metadata
 
 

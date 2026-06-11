@@ -46,17 +46,15 @@ core_agent=$(count_top_level_py_lines "blackcat/agent")
 core_bus=$(count_top_level_py_lines "blackcat/bus")
 core_config=$(count_top_level_py_lines "blackcat/config")
 core_cron=$(count_top_level_py_lines "blackcat/cron")
-core_heartbeat=$(count_top_level_py_lines "blackcat/heartbeat")
 core_session=$(count_top_level_py_lines "blackcat/session")
 
 print_row "agent/" "$core_agent"
 print_row "bus/" "$core_bus"
 print_row "config/" "$core_config"
 print_row "cron/" "$core_cron"
-print_row "heartbeat/" "$core_heartbeat"
 print_row "session/" "$core_session"
 
-core_total=$((core_agent + core_bus + core_config + core_cron + core_heartbeat + core_session))
+core_total=$((core_agent + core_bus + core_config + core_cron + core_session))
 
 echo ""
 echo "Separate buckets"

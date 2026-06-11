@@ -4,7 +4,8 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = env.BLACKCAT_API_URL ?? "http://127.0.0.1:8765";
+const target = env.BLACKCAT_API_URL ?? "http://127.0.0.1:8765";
+  const hmrPath = "/__blackcat_vite_hmr";
   const wsTarget = target.replace(/^http/, "ws");
 
   return {
@@ -25,18 +26,48 @@ export default defineConfig(({ mode }) => {
       outDir: path.resolve(__dirname, "../blackcat/web/dist"),
       emptyOutDir: true,
       sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/refractor/lang/")) {
+              return;
+            }
+            if (
+              id.includes("node_modules/react-syntax-highlighter")
+              || id.includes("node_modules/refractor/core")
+            ) {
+              return "syntax-highlight";
+            }
+            if (
+              id.includes("node_modules/react-markdown")
+              || id.includes("node_modules/remark-")
+              || id.includes("node_modules/rehype-")
+              || id.includes("node_modules/unified")
+              || id.includes("node_modules/mdast-")
+              || id.includes("node_modules/hast-")
+              || id.includes("node_modules/micromark")
+              || id.includes("node_modules/unist-")
+            ) {
+              return "markdown-vendor";
+            }
+            if (id.includes("node_modules/katex")) {
+              return "katex";
+            }
+          },
+        },
+      },
     },
     server: {
       host: "127.0.0.1",
       port: 5173,
       strictPort: true,
-      // Move Vite's HMR socket to a dedicated port so it doesn't collide with
+// Move Vite's HMR socket to a dedicated port so it doesn't collide with
       // the ``/`` proxy below (Vite HMR and the blackcat ws upgrade both sit on
       // the root path, which triggers spurious write-after-end errors as each
       // side tries to close the other's socket).
       hmr: {
         host: "127.0.0.1",
-        port: 5174,
+        path: hmrPath,
       },
       proxy: {
         "/webui": { target, changeOrigin: true },

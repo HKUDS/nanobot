@@ -228,8 +228,9 @@ async def test_running_service_honors_external_disable(tmp_path) -> None:
     )
     await service.start()
     try:
-        # Wait slightly to ensure file mtime is definitively different
-        await asyncio.sleep(0.05)
+        # Disable before yielding back to the event loop. On slower Windows CI
+        # a short sleep here can overrun the 200ms schedule and let the job fire
+        # before the external update is written.
         external = CronService(store_path)
         updated = external.enable_job(job.id, enabled=False)
         assert updated is not None
@@ -552,7 +553,7 @@ def test_update_job_offline_writes_action(tmp_path) -> None:
 
     action_path = tmp_path / "cron" / "action.jsonl"
     assert action_path.exists()
-    lines = [l for l in action_path.read_text().strip().split("\n") if l]
+    lines = [line for line in action_path.read_text().strip().split("\n") if line]
     last = json.loads(lines[-1])
     assert last["action"] == "update"
     assert last["params"]["name"] == "updated-offline"

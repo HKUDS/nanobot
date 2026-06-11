@@ -1,37 +1,60 @@
-"""Context manager for assembling agent prompts with trust and token management.
-
-Delegates consolidation to Consolidator and AutoCompact for token-budget
-and TTL-based session lifecycle management.
-"""
+"""Context builder for assembling agent prompts."""
 
 import base64
 import mimetypes
 import platform
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from loguru import logger
 
+from blackcat.agent.memory import MemoryStore
 from blackcat.agent.skills import SkillsLoader
-from blackcat.memory.memory import MemoryStore
+from blackcat.agent.tools import mcp as mcp_tools
+from blackcat.agent.tools.registry import ToolRegistry
+from blackcat.apps.cli import utils as cli_app_utils
+from blackcat.bus.events import InboundMessage
+from blackcat.session.goal_state import goal_state_runtime_lines
 from blackcat.session.manager import SessionManager
 from blackcat.utils.formatting import truncate_text
-from blackcat.utils.helpers import (
-    current_time_str,
-    detect_image_mime,
-)
+from blackcat.utils.helpers import current_time_str, load_bundled_template
+from blackcat.utils.media import detect_image_mime
 from blackcat.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from blackcat.lens import LensClient
 
+def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return persisted kwargs for turn-attached capabilities."""
+    return cli_app_utils.session_extra(metadata) | mcp_tools.session_extra(metadata)
+
+
+def runtime_lines(state: Any, msg: Any, workspace: Path, *, skip: bool = False) -> list[str]:
+    """Return model-visible runtime annotations for turn-attached capabilities."""
+    return [
+        *cli_app_utils.runtime_lines(msg, workspace, skip=skip),
+        *mcp_tools.runtime_lines(
+            msg,
+            configured_server_names=set(state._mcp_servers),
+            connected_server_names=set(state._mcp_stacks),
+            skip=skip,
+        ),
+    ]
+
+
+async def connect_mcp(state: Any, tools: ToolRegistry) -> None:
+    await mcp_tools.connect_missing_servers(state, tools)
+
+
+async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolRegistry) -> bool:
+    return await mcp_tools.handle_runtime_control(state, msg, tools)
 
 
 class ContextBuilder:
     """
     Assembles LLM context from identity, trust, skills, and memory.
 
-    Nanobot-compatible API:
+    Blackcat-compatible API:
     - build_system_prompt() - same signature
     - build_messages() - same signature
     - _merge_message_content() - same behavior
@@ -84,14 +107,14 @@ class ContextBuilder:
     ):
         self.workspace = workspace
         self.timezone = timezone
-        self.store = MemoryStore(workspace)
+        self.memory = MemoryStore(workspace)
+        self.authors: dict[str, Any] = {}
         self.skills = SkillsLoader(
             workspace,
             disabled_skills=set(disabled_skills) if disabled_skills else None,
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.lens_client: "LensClient | None" = None
-        self.memory = self.store
         self.timezone = timezone
 
     def set_lens_client(self, client: "LensClient | None") -> None:
@@ -137,12 +160,13 @@ class ContextBuilder:
             "agent/guidelines.md",
             workspace_path=workspace_path,
             runtime=runtime,
+            platform_policy=render_template("agent/platform_policy.md", system=system),
             channel=channel or "",
         )
 
     def _toml_to_string(self, data: dict) -> str:
         """Convert TOML dict to prompt string."""
-        import tomli_w
+        import tomli_w  # FIXME: add tomli to the pyproject
 
         parts = []
         for section, content in data.items():
@@ -181,6 +205,25 @@ class ContextBuilder:
     # ==========================================================================
     # 4. TRUST SYSTEM (black-cat extension)
     # ==========================================================================
+
+    def resolve_author(self, sender_id: str | None = None, channel: str | None = None) -> str:
+        """
+        Resolve sender_id to author name using configured identities.
+
+        Args:
+            sender_id: The platform-specific sender identifier.
+            channel: The channel name (telegram, whatsapp, discord, cli).
+
+        Returns:
+            Author name if found in config, otherwise "unknown".
+        """
+        if sender_id and channel:
+            for author_name, identity in self.authors.items(): # FIXME: iterate through the config files for authors
+                platform_id = getattr(identity, channel, None)
+                if platform_id and platform_id == sender_id:
+                    return author_name
+        return "unknown"
+
 
     def get_trust_level(self, author: str, identity: dict | None = None) -> str:
         """Evaluate trust level: 'trusted' | 'high' | 'moderate' | 'low' | 'unknown'."""
@@ -370,19 +413,31 @@ class ContextBuilder:
             return f"## Lens Code Health\n\n{workspaces_header}\n\nNo issues in referenced files."
         return "## Lens Code Health\n\nNo issues in referenced files."
 
+    @staticmethod
+    def _is_template_content(content: str, template_path: str) -> bool:
+        """Check if *content* is identical to the bundled template (user hasn't customized it)."""
+        tpl = load_bundled_template(template_path)
+        if tpl is not None:
+            return content.strip() == tpl.strip()
+        return False
+
+    @staticmethod
     def _build_runtime_context(
-        self,
-        channel: str | None, chat_id: str | None, timezone: str | None = None,
-        session_summary: str | None = None,
+        channel: str | None,
+        chat_id: str | None,
+        timezone: str | None = None,
+        sender_id: str | None = None,
+        supplemental_lines: Sequence[str] | None = None,
     ) -> str:
-        """Build untrusted runtime metadata block for injection before the user message."""
+        """Build untrusted runtime metadata block appended after user content."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        if session_summary:
-            lines += ["", "[Resumed Session]", session_summary]
+        if sender_id:
+            lines += [f"Sender ID: {sender_id}"]
+        if supplemental_lines:
+            lines.extend(supplemental_lines)
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
-
 
     # ==========================================================================
     # 6. SYSTEM PROMPT BUILDING
@@ -392,6 +447,7 @@ class ContextBuilder:
         self,
         author: str,
         channel: str | None,
+        sender_id: str | None,
         chat_id: str | None,
         history: list[dict[str, Any]] | None = None,
     ) -> str:
@@ -415,30 +471,32 @@ class ContextBuilder:
                 pass  # Silently skip if lens fails
 
         return f"""## Runtime
-{runtime}
+        {runtime}
 
-## Author
-- Author: {author}
-- Trust level: {trust_level}
-- Autonomous tools: {", ".join(permissions["autonomous"]) or "none"}
-- Requires confirmation: {", ".join(permissions["confirmation_required"]) or "none"}
+        ## Author
+        - Author: {author} (Sender ID: {sender_id})
+        - Trust level: {trust_level}
+        - Autonomous tools: {", ".join(permissions["autonomous"]) or "none"}
+        - Requires confirmation: {", ".join(permissions["confirmation_required"]) or "none"}
 
-## Trust Protocol for This Session
-{trust_instructions}
+        ## Trust Protocol for This Session
+        {trust_instructions}
 
-## Voice
-{voice_tone}
+        ## Voice
+        {voice_tone}
 
-## Personality traits
-{personality}
+        ## Personality traits
+        {personality}
 
-{diagnostics_prompt or "## Lens Code Health: Lens not connected. Start VSCode with the lens extension in your workspace."}
-"""
+        {diagnostics_prompt or "## Lens Code Health: Lens not connected. Start VSCode with the lens extension in your workspace."}
+        """
 
     def _build_static_blocks(
         self,
         skill_names: list[str] | None = None,
-        enable_caching: bool = True,
+        session_summary: str | None = None,
+        include_memory_recent_history: bool = True,
+        channel: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build static blocks for Anthropic-style prompt caching.
@@ -459,28 +517,42 @@ class ContextBuilder:
 
         system = platform.system()
         workspace_string = render_template("agent/platform_policy.md", system=system)
-        guidelines_string = self._get_guidelines()
+        guidelines_string = self._get_guidelines(channel=channel)
         # Add guideline and workspace blocks (static content)
         blocks.append({"type": "text", "text": guidelines_string})
         blocks.append({"type": "text", "text": workspace_string})
 
-        # Skills (semi-static - cached per skill_names)
-        if skill_names:
-            skills_content = self.skills.load_skills_for_context(skill_names)
-            if skills_content:
-                blocks.append({"type": "text", "text": f"# Active Skills\n\n{skills_content}"})
+        blocks.append({"type": "text", "text": render_template("agent/tool_contract.md")})
 
-        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
-        if entries:
-            capped = entries[-self._MAX_RECENT_HISTORY:]
-            history_text = "\n".join(
-                f"- [{e['timestamp']}] {e['content']}" for e in capped
-            )
-            history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
-            blocks.append({"type": "text", "text": "# Recent History\n\n" + history_text})
+        memory = self.memory.get_memory_context()
+        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
+            blocks.append({"type": "text", "text": f"# Memory\n\n{memory}"})
+
+        always_skills = self.skills.get_always_skills()
+        if always_skills:
+            always_content = self.skills.load_skills_for_context(always_skills)
+            if always_content:
+                blocks.append({"type": "text", "text": f"# Active Skills\n\n{always_content}"})
+
+        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+        if skills_summary:
+            blocks.append({"type": "text", "text": render_template("agent/skills_section.md", skills_summary=skills_summary)})
+
+        if include_memory_recent_history:
+            entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+            if entries:
+                capped = entries[-self._MAX_RECENT_HISTORY:]
+                history_text = "\n".join(
+                    f"- [{e['timestamp']}] {e['content']}" for e in capped
+                )
+                history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
+                blocks.append({"type": "text", "text": f"# Recent History\n\n{history_text}"})
+
+        if session_summary:
+            blocks.append({"type": "text", "text": f"[Archived Context Summary]\n\n{session_summary}"})
 
         # Mark the last static block as cacheable
-        if blocks and enable_caching:
+        if blocks:
             blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
 
         return blocks
@@ -488,6 +560,7 @@ class ContextBuilder:
     async def _build_dynamic_blocks(
         self,
         author: str = "unknown",
+        sender_id: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
         history: list[dict[str, Any]] | None = None,
@@ -503,19 +576,19 @@ class ContextBuilder:
         blocks: list[dict[str, Any]] = []
 
         # Dynamic: session block (time, channel, author, trust)
-        session_block = await self._build_session_block(author, channel, chat_id, history)
+        session_block = await self._build_session_block(author, channel, sender_id, chat_id, history)
         blocks.append({"type": "text", "text": session_block})
 
         return blocks
 
     async def build_system_prompt(
         self,
-        author: str = "unknown",
+        sender_id: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
         skill_names: list[str] | None = None,
         history: list[dict[str, Any]] | None = None,
-        enable_caching: bool=False,
+        include_memory_recent_history: bool = True,
     ) -> str:
         """
         Build the complete system prompt for non-Anthropic providers.
@@ -528,9 +601,11 @@ class ContextBuilder:
         """
         intro_block = [{"type": "text", "text": """# Blackcat 🐈‍⬛
 You are within blackcat harness/structure.
-"""}]
-        static_blocks = self._build_static_blocks(skill_names, enable_caching)
-        dynamic_blocks = await self._build_dynamic_blocks(author, channel, chat_id, history)
+"""}] # FIXME: brings the name and sigil of the app dynamically
+        author = self.resolve_author(channel, sender_id)
+
+        static_blocks = self._build_static_blocks(skill_names, channel=channel, include_memory_recent_history=include_memory_recent_history)
+        dynamic_blocks = await self._build_dynamic_blocks(author, sender_id, channel, chat_id, history)
 
         # Convert blocks to string
         all_blocks = intro_block + static_blocks + dynamic_blocks
@@ -539,23 +614,20 @@ You are within blackcat harness/structure.
 
 
     # ==========================================================================
-    # 7. MESSAGE BUILDING (nanobot-compatible API)
+    # 7. MESSAGE BUILDING (blackcat-compatible API)
     # ==========================================================================
 
     @staticmethod
     def _merge_message_content(
         left: Any, right: Any
     ) -> str | list[dict[str, Any]]:
-        """Merge content, handling both string and list formats (nanobot compat)."""
+        """Merge content, handling both string and list formats (blackcat compat)."""
         if isinstance(left, str) and isinstance(right, str):
             return f"{left}\n\n{right}" if left else right
 
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
-                return [
-                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
-                    for item in value
-                ]
+                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
             if value is None:
                 return []
             return [{"type": "text", "text": str(value)}]
@@ -589,34 +661,62 @@ You are within blackcat harness/structure.
             return text
         return images + [{"type": "text", "text": text}]
 
-    async def build_messages(
+    async def build_messages( # FIXME: check with Blackcat's for params allocation
         self,
         history: list[dict[str, Any]],
         current_message: str,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
-        author: str = "unknown",
         channel: str | None = None,
         chat_id: str | None = None,
-        use_prompt_caching: bool = False,
+        current_role: str = "user",
+        sender_id: str | None = None,
+        session_summary: str | None = None,
+        session_metadata: Mapping[str, Any] | None = None,
+        current_runtime_lines: Sequence[str] | None = None,
+        workspace: Path | None = None,
+        runtime_state: Any | None = None,
+        inbound_message: Any | None = None,
+        skip_runtime_lines: bool = False,
+        include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call (nanobot-compatible)."""
+        """Build the complete message list for an LLM call (blackcat-compatible)."""
         system_prompt = await self.build_system_prompt(
-            author, channel, chat_id, skill_names, history, enable_caching=True if use_prompt_caching else False
+            sender_id, channel, chat_id, skill_names, history,
+            include_memory_recent_history=include_memory_recent_history,
             )
 
         messages = [{"role": "system", "content": system_prompt}]
 
+        extra = [
+            *goal_state_runtime_lines(session_metadata),
+        ]
+        if runtime_state is not None and inbound_message is not None:
+            extra.extend(runtime_lines(runtime_state, inbound_message, self.workspace, skip=skip_runtime_lines))
+        if current_runtime_lines:
+            extra.extend(line for line in current_runtime_lines if line)
+        runtime_ctx = self._build_runtime_context(
+            channel,
+            chat_id,
+            self.timezone,
+            sender_id=sender_id,
+            supplemental_lines=extra or None,
+        )
+        user_content = self._build_user_content(current_message, media)
+
+        if isinstance(user_content, str):
+            merged = f"{user_content}\n\n{runtime_ctx}"
+        else:
+            merged = user_content + [{"type": "text", "text": runtime_ctx}]
+
         messages.extend(history)
 
-        # Merge with last message if same role (defensive for edge cases)
-        user_content = self._build_user_content(current_message, media)
-        if messages and messages[-1].get("role") == "user":
+        if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
-            last["content"] = self._merge_message_content(last.get("content"), user_content)
+            last["content"] = self._merge_message_content(last.get("content"), merged)
             messages[-1] = last
-        else:
-            messages.append({"role": "user", "content": user_content})
+            return messages
+        messages.append({"role": current_role, "content": merged})
 
         return messages
 

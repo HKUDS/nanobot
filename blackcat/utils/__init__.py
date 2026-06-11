@@ -1,120 +1,42 @@
 """Utility functions for blackcat."""
 
-# Path utilities
-# Formatting utilities
-from blackcat.utils.formatting import (
-    build_assistant_message,
-    camel_to_snake,
-    convert_keys,
-    convert_to_camel,
-    snake_to_camel,
-    stringify_text_blocks,
-    truncate_text,
-)
-from blackcat.utils.helpers import (
-    build_status_content,
-    build_tool_call_dicts,
-    extract_system_message,
-    find_legal_message_start,
-    parse_session_key,
-    safe_filename,
-    safe_json_dumps,
-    sync_workspace_templates,
-    truncate_string,
-)
-from blackcat.utils.paths import (
-    get_cli_history_path,
-    get_cron_dir,
-    get_data_dir,
-    get_legacy_sessions_dir,
-    get_logs_dir,
-    get_media_dir,
-    get_runtime_subdir,
-    get_workspace_path,
-    is_default_workspace,
-)
+from __future__ import annotations
 
-# Runtime utilities
-from blackcat.utils.runtime import (
-    EMPTY_FINAL_RESPONSE_MESSAGE,
-    FINALIZATION_RETRY_PROMPT,
-    build_finalization_retry_message,
-    empty_tool_result_message,
-    ensure_nonempty_tool_result,
-    external_lookup_signature,
-    is_blank_text,
-    repeated_external_lookup_error,
-)
+import sys
+from importlib import import_module
+from types import ModuleType
 
-# Time utilities
-from blackcat.utils.time import (
-    current_time_str,
-    last_24h,
-    now_ms,
-    timestamp,
-    today_date,
-)
+from blackcat.utils.helpers import ensure_dir
+from blackcat.utils.path import abbreviate_path
 
-# Token estimation utilities
-from blackcat.utils.tokens import (
-    estimate_message_tokens,
-    estimate_prompt_tokens,
-    estimate_prompt_tokens_chain,
-)
+__all__ = ["ensure_dir", "abbreviate_path"]
 
-# Tool result utilities
-from blackcat.utils.tools import (
-    maybe_persist_tool_result,
-)
 
-__all__ = [
-    # Path utilities
-    "get_data_dir",
-    "get_runtime_subdir",
-    "get_media_dir",
-    "get_cron_dir",
-    "get_logs_dir",
-    "get_workspace_path",
-    "is_default_workspace",
-    "get_cli_history_path",
-    "get_legacy_sessions_dir",
-    "safe_filename",
-    "safe_json_dumps",
-    "parse_session_key",
-    "truncate_string",
-    "resolve_path",
-    "extract_system_message",
-    "build_tool_call_dicts",
-    "build_status_content",
-    "find_legal_message_start",
-    # Time utilities
-    "today_date",
-    "last_24h",
-    "timestamp",
-    "now_ms",
-    "current_time_str",
-    # Token utilities
-    "estimate_prompt_tokens",
-    "estimate_message_tokens",
-    "estimate_prompt_tokens_chain",
-    # Formatting utilities
-    "camel_to_snake",
-    "snake_to_camel",
-    "convert_keys",
-    "convert_to_camel",
-    "truncate_text",
-    "stringify_text_blocks",
-    "build_assistant_message",
-    # Runtime utilities
-    "EMPTY_FINAL_RESPONSE_MESSAGE",
-    "FINALIZATION_RETRY_PROMPT",
-    "empty_tool_result_message",
-    "ensure_nonempty_tool_result",
-    "is_blank_text",
-    "build_finalization_retry_message",
-    "external_lookup_signature",
-    "repeated_external_lookup_error",
-    # Tool result utilities
-    "maybe_persist_tool_result",
-    "sync_workspace_templates",
-]
+class _LazyModuleAlias(ModuleType):
+    def __init__(self, name: str, target: str) -> None:
+        super().__init__(name)
+        self.__dict__["_target"] = target
+
+    def _load(self) -> ModuleType:
+        module = import_module(self.__dict__["_target"])
+        sys.modules[self.__name__] = module
+        return module
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._load(), name)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(super().__dir__()) | set(dir(self._load())))
+
+
+_LEGACY_MODULE_ALIASES = {
+    "webui_thread_disk": "blackcat.webui.thread_disk",
+    "webui_transcript": "blackcat.webui.transcript",
+    "webui_turn_helpers": "blackcat.session.webui_turns",
+}
+
+for _legacy_name, _target_name in _LEGACY_MODULE_ALIASES.items():
+    sys.modules.setdefault(
+        f"{__name__}.{_legacy_name}",
+        _LazyModuleAlias(f"{__name__}.{_legacy_name}", _target_name),
+    )

@@ -11,8 +11,6 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from blackcat.cli import onboard as onboard_wizard
-
-# Import functions to test
 from blackcat.cli.commands import _merge_missing_defaults
 from blackcat.cli.onboard import (
     _BACK_PRESSED,
@@ -22,7 +20,6 @@ from blackcat.cli.onboard import (
     _get_field_display_name,
     _get_field_type_info,
     _input_text,
-    _validate_field_constraint,
     run_onboard,
 )
 from blackcat.config.schema import Config
@@ -348,6 +345,26 @@ class TestSyncWorkspaceTemplates:
         content = (workspace / "AGENTS.md").read_text()
         assert content == "existing content"
 
+    def test_does_not_create_tools_md(self, tmp_path):
+        """Tool contract is injected internally, not copied into user workspaces."""
+        workspace = tmp_path / "workspace"
+
+        added = sync_workspace_templates(workspace, silent=True)
+
+        assert "TOOLS.md" not in added
+        assert not (workspace / "TOOLS.md").exists()
+
+    def test_preserves_existing_tools_md_without_overwriting(self, tmp_path):
+        """Legacy user workspaces may have TOOLS.md; sync should leave it untouched."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(parents=True)
+        tools_path = workspace / "TOOLS.md"
+        tools_path.write_text("custom tool notes", encoding="utf-8")
+
+        sync_workspace_templates(workspace, silent=True)
+
+        assert tools_path.read_text(encoding="utf-8") == "custom tool notes"
+
     def test_creates_memory_directory(self, tmp_path):
         """Should create memory directory structure."""
         workspace = tmp_path / "workspace"
@@ -526,6 +543,7 @@ class TestValidateFieldConstraint:
             name: str = "hello"
 
         field_info = M.model_fields["name"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint("anything", field_info) is None
 
@@ -537,6 +555,7 @@ class TestValidateFieldConstraint:
             count: int = Field(default=3, ge=0)
 
         field_info = M.model_fields["count"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         result = _validate_field_constraint(-1, field_info)
         assert result is not None
@@ -550,6 +569,7 @@ class TestValidateFieldConstraint:
             count: int = Field(default=3, ge=0)
 
         field_info = M.model_fields["count"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint(0, field_info) is None
 
@@ -561,6 +581,7 @@ class TestValidateFieldConstraint:
             retries: int = Field(default=3, le=10)
 
         field_info = M.model_fields["retries"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         result = _validate_field_constraint(11, field_info)
         assert result is not None
@@ -574,6 +595,7 @@ class TestValidateFieldConstraint:
             retries: int = Field(default=3, le=10)
 
         field_info = M.model_fields["retries"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint(10, field_info) is None
 
@@ -585,6 +607,7 @@ class TestValidateFieldConstraint:
             retries: int = Field(default=3, ge=0, le=10)
 
         field_info = M.model_fields["retries"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint(5, field_info) is None
         assert _validate_field_constraint(-1, field_info) is not None
@@ -598,6 +621,7 @@ class TestValidateFieldConstraint:
             ratio: float = Field(default=0.5, gt=0.0, lt=1.0)
 
         field_info = M.model_fields["ratio"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint(0.5, field_info) is None
         assert _validate_field_constraint(0.0, field_info) is not None
@@ -611,6 +635,7 @@ class TestValidateFieldConstraint:
             name: str = Field(default="x", min_length=1)
 
         field_info = M.model_fields["name"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint("a", field_info) is None
         assert _validate_field_constraint("", field_info) is not None
@@ -623,12 +648,14 @@ class TestValidateFieldConstraint:
             tag: str = Field(default="x", max_length=5)
 
         field_info = M.model_fields["tag"]
+        from blackcat.cli.onboard import _validate_field_constraint
 
         assert _validate_field_constraint("abc", field_info) is None
         assert _validate_field_constraint("abcdef", field_info) is not None
 
     def test_real_send_max_retries_field(self):
         """Validate against the actual ChannelsConfig.send_max_retries field."""
+        from blackcat.cli.onboard import _validate_field_constraint
         from blackcat.config.schema import ChannelsConfig
 
         field_info = ChannelsConfig.model_fields["send_max_retries"]
@@ -950,3 +977,361 @@ class TestMainMenuUpdate:
 
         assert result.should_save is True
         assert pause_called["n"] == 1
+
+
+class TestInputTextEmptyString:
+    """Tests for _input_text empty-string handling bug fix."""
+
+    def test_empty_string_returned_not_none(self, monkeypatch):
+        """_input_text should return empty string, not None, when user enters ''."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: "")),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result == ""
+
+    def test_none_still_returns_none(self, monkeypatch):
+        """_input_text should return None when questionary returns None."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: None)),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result is None
+
+
+class TestIsStrOrNone:
+    """Tests for _is_str_or_none helper."""
+
+    def test_str_or_none_true(self):
+        from blackcat.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(str | None) is True
+
+    def test_optional_str_true(self):
+        from typing import Optional
+
+        from blackcat.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(Optional[str]) is True
+
+    def test_str_only_false(self):
+        from blackcat.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(str) is False
+
+    def test_int_or_none_false(self):
+        from blackcat.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(int | None) is False
+
+
+class TestConfigurePydanticModelEmptyString:
+    """Tests that optional string fields are cleared when empty string is entered."""
+
+    def test_optional_str_empty_string_becomes_none(self, monkeypatch):
+        """Entering '' for an optional str field should set it to None."""
+        from pydantic import BaseModel
+
+
+        class M(BaseModel):
+            api_key: str | None = None
+
+        model = M(api_key="secret")
+
+        call_count = {"select": 0}
+
+        def fake_select(_prompt, choices, default=None):
+            call_count["select"] += 1
+            # First call: select the api_key field, then Done
+            if call_count["select"] == 1:
+                for c in choices:
+                    if "Api Key" in c:
+                        return c
+                return choices[0]
+            return "[Done]"
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *a, **kw: None)
+        # Simulate user entering empty string
+        monkeypatch.setattr(
+            onboard_wizard, "_input_with_existing", lambda *a, **kw: ""
+        )
+
+        result = _configure_pydantic_model(model, "Test")
+        assert result is not None
+        assert result.api_key is None
+
+    def test_required_str_empty_string_kept(self, monkeypatch):
+        """Entering '' for a required str field should keep the empty string."""
+        from pydantic import BaseModel
+
+        class M(BaseModel):
+            api_key: str = ""
+
+        model = M(api_key="secret")
+
+        call_count = {"select": 0}
+
+        def fake_select(_prompt, choices, default=None):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                for c in choices:
+                    if "Api Key" in c:
+                        return c
+                return choices[0]
+            return "[Done]"
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard, "_input_with_existing", lambda *a, **kw: ""
+        )
+
+        result = _configure_pydantic_model(model, "Test")
+        assert result is not None
+        assert result.api_key == ""
+
+
+class TestModelPresetWizard:
+    """Tests for model preset CRUD in the onboard wizard."""
+
+    def test_sync_preset_cache(self):
+        """_sync_preset_cache should populate the module-level cache."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _sync_preset_cache
+        from blackcat.config.schema import ModelPresetConfig
+
+        config = Config()
+        config.model_presets["fast"] = ModelPresetConfig(model="gpt-4.1-mini")
+        config.model_presets["power"] = ModelPresetConfig(model="gpt-4.1")
+        _sync_preset_cache(config)
+        assert _MODEL_PRESET_CACHE == {"fast", "power"}
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_model_preset_add(self, monkeypatch):
+        """_configure_model_presets should add a new preset."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _configure_model_presets
+        from blackcat.config.schema import ModelPresetConfig
+
+        config = Config()
+        _MODEL_PRESET_CACHE.clear()
+
+        responses = iter([
+            "[+] Add new preset",
+            "my-preset",
+            "<- Back",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_text(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure(*_model, **_kwargs):
+            return ModelPresetConfig(model="gpt-test", temperature=0.5)
+
+        def fake_select_with_back(*_args, **_kwargs):
+            return next(responses)
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+        monkeypatch.setattr(
+            onboard_wizard, "questionary", SimpleNamespace(select=fake_select, text=fake_text)
+        )
+        monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fake_configure)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None))
+
+        _configure_model_presets(config)
+
+        assert "my-preset" in config.model_presets
+        assert config.model_presets["my-preset"].model == "gpt-test"
+        assert config.model_presets["my-preset"].temperature == 0.5
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_model_preset_delete(self, monkeypatch):
+        """_configure_model_presets should delete an existing preset."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _configure_model_presets
+        from blackcat.config.schema import ModelPresetConfig
+
+        config = Config()
+        config.model_presets["old"] = ModelPresetConfig(model="x")
+        _MODEL_PRESET_CACHE.clear()
+        _MODEL_PRESET_CACHE.update({"old", "default"})
+
+        responses = iter([
+            "old (x)",
+            "Delete",
+            True,
+            "<- Back",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_confirm(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_select_with_back(*_args, **_kwargs):
+            return next(responses)
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+        monkeypatch.setattr(
+            onboard_wizard, "questionary", SimpleNamespace(select=fake_select, confirm=fake_confirm)
+        )
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None))
+
+        _configure_model_presets(config)
+
+        assert "old" not in config.model_presets
+        assert "old" not in _MODEL_PRESET_CACHE
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_model_preset_field_handler(self, monkeypatch):
+        """_handle_model_preset_field should set a preset name from choices."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _handle_model_preset_field
+        from blackcat.config.schema import AgentDefaults
+
+        _MODEL_PRESET_CACHE.clear()
+        _MODEL_PRESET_CACHE.update({"fast", "power", "default"})
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "fast")
+
+        defaults = AgentDefaults()
+        _handle_model_preset_field(defaults, "model_preset", "Model Preset", None)
+        assert defaults.model_preset == "fast"
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_model_preset_field_handler_clear(self, monkeypatch):
+        """_handle_model_preset_field should clear preset when (clear/unset) chosen."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _handle_model_preset_field
+        from blackcat.config.schema import AgentDefaults
+
+        _MODEL_PRESET_CACHE.clear()
+        _MODEL_PRESET_CACHE.add("fast")
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "(clear/unset)")
+
+        defaults = AgentDefaults(model_preset="fast")
+        _handle_model_preset_field(defaults, "model_preset", "Model Preset", "fast")
+        assert defaults.model_preset is None
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_main_menu_dispatch_includes_model_presets(self):
+        """_configure_model_presets should be importable and callable."""
+        from blackcat.cli.onboard import _configure_model_presets
+
+        assert callable(_configure_model_presets)
+
+    def test_run_onboard_model_presets_edit(self, monkeypatch):
+        """run_onboard should handle [M] Model Presets correctly."""
+        from blackcat.config.schema import ModelPresetConfig
+
+        initial_config = Config()
+
+        responses = iter([
+            "[M] Model Presets",
+            "[S] Save and Exit",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        preset_mutated = {"n": 0}
+
+        def fake_configure_model_presets(config):
+            preset_mutated["n"] += 1
+            config.model_presets["test"] = ModelPresetConfig(model="gpt-test")
+
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_model_presets", fake_configure_model_presets)
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None))
+
+        result = run_onboard(initial_config)
+        assert result.should_save is True
+        assert preset_mutated["n"] == 1
+        assert "test" in result.config.model_presets
+
+    def test_fallback_models_field_add(self, monkeypatch):
+        """_handle_fallback_models_field should add a preset name."""
+        from blackcat.cli.onboard import _MODEL_PRESET_CACHE, _handle_fallback_models_field
+        from blackcat.config.schema import AgentDefaults
+
+        _MODEL_PRESET_CACHE.clear()
+        _MODEL_PRESET_CACHE.update({"fast", "default"})
+
+        select_responses = iter(["fast"])
+        questionary_responses = iter(["[+] Add preset", "[Done]"])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_questionary_select(*_args, **_kwargs):
+            return FakePrompt(next(questionary_responses))
+
+        def fake_select_with_back(*_args, **_kwargs):
+            return next(select_responses)
+
+        monkeypatch.setattr(
+            onboard_wizard, "questionary",
+            SimpleNamespace(select=fake_questionary_select, press_any_key_to_continue=lambda: FakePrompt(None)),
+        )
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+        monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None, print=lambda *a, **kw: None))
+
+        defaults = AgentDefaults()
+        _handle_fallback_models_field(defaults, "fallback_models", "Fallback Models", [])
+        assert defaults.fallback_models == ["fast"]
+        _MODEL_PRESET_CACHE.clear()
+
+    def test_provider_field_handler(self, monkeypatch):
+        """_handle_provider_field should set provider from choices."""
+        from blackcat.cli.onboard import _handle_provider_field
+        from blackcat.config.schema import AgentDefaults
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "anthropic")
+
+        defaults = AgentDefaults()
+        _handle_provider_field(defaults, "provider", "Provider", "auto")
+        assert defaults.provider == "anthropic"

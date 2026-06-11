@@ -10,7 +10,7 @@
 **Install from source** (latest features, experimental changes may land here first; recommended for development)
 
 ```bash
-git clone https://github.com/HKUDS/blackcat.git
+git clone https://github.com/HKUDS/nanobot.git
 cd blackcat
 pip install -e .
 ```

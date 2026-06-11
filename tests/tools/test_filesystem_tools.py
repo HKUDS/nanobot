@@ -329,7 +329,7 @@ class TestWorkspaceRestriction:
         media_file = media_dir / "photo.txt"
         media_file.write_text("shared media", encoding="utf-8")
 
-        monkeypatch.setattr("blackcat.agent.tools.filesystem.get_media_dir", lambda: media_dir)
+        monkeypatch.setattr("blackcat.agent.tools.path_utils.get_media_dir", lambda: media_dir)
 
         tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
         result = await tool.execute(path=str(media_file))

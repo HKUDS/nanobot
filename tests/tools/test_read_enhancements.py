@@ -98,6 +98,67 @@ class TestReadDedup:
 
 
 # ---------------------------------------------------------------------------
+# Cross-session isolation (issue #3571)
+# ---------------------------------------------------------------------------
+# Each session must keep its own read cache. When session A reads a file,
+# session B reading the same file must still receive the full content, not
+# the "[File unchanged since last read]" dedup stub. The stub is only valid
+# within the session that first cached the read.
+
+class TestReadDedupSessionIsolation:
+
+    @pytest.mark.asyncio
+    async def test_separate_sessions_do_not_share_dedup_state(self, tmp_path):
+        f = tmp_path / "shared.txt"
+        f.write_text("\n".join(f"line {i}" for i in range(10)), encoding="utf-8")
+
+        session_a_tool = ReadFileTool(workspace=tmp_path)
+        session_b_tool = ReadFileTool(workspace=tmp_path)
+
+        first = await session_a_tool.execute(path=str(f))
+        assert "line 0" in first
+
+        # Session B has never read this file before — it must see the full
+        # content, not the dedup stub from session A.
+        second = await session_b_tool.execute(path=str(f))
+        assert "unchanged" not in second.lower(), (
+            "Session B should not inherit session A's read-dedup state. "
+            f"Got: {second!r}"
+        )
+        assert "line 0" in second
+
+    @pytest.mark.asyncio
+    async def test_shared_loop_tool_uses_bound_session_state(self, tmp_path):
+        f = tmp_path / "shared.txt"
+        f.write_text("\n".join(f"line {i}" for i in range(10)), encoding="utf-8")
+
+        # AgentLoop registers one shared ReadFileTool instance. The session
+        # boundary is the task-local FileStates binding, not the tool object.
+        shared_tool = ReadFileTool(workspace=tmp_path)
+        session_a = file_state.FileStates()
+        session_b = file_state.FileStates()
+
+        token = file_state.bind_file_states(session_a)
+        try:
+            first = await shared_tool.execute(path=str(f))
+            repeat = await shared_tool.execute(path=str(f))
+        finally:
+            file_state.reset_file_states(token)
+
+        assert "line 0" in first
+        assert "unchanged" in repeat.lower()
+
+        token = file_state.bind_file_states(session_b)
+        try:
+            second_session_read = await shared_tool.execute(path=str(f))
+        finally:
+            file_state.reset_file_states(token)
+
+        assert "unchanged" not in second_session_read.lower()
+        assert "line 0" in second_session_read
+
+
+# ---------------------------------------------------------------------------
 # PDF support
 # ---------------------------------------------------------------------------
 

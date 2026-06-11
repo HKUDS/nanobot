@@ -1,12 +1,17 @@
 """Skill management tools: list, get, create, update skills."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from blackcat.agent.skills import SkillsLoader
 from blackcat.agent.tools.base import Tool, tool_parameters
 from blackcat.agent.tools.schema import BooleanSchema, StringSchema, tool_parameters_schema
+
+if TYPE_CHECKING:
+    from blackcat.agent.tools.context import ToolContext
 
 
 class _SkillTool(Tool):
@@ -15,6 +20,10 @@ class _SkillTool(Tool):
     def __init__(self, workspace: Path):
         self._workspace = workspace
         self._skills = SkillsLoader(workspace)
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(workspace=Path(ctx.workspace))
 
     def _skill_path(self, name: str) -> Path:
         """Get path to skill directory."""

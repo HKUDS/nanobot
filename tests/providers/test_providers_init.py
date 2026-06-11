@@ -13,6 +13,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "blackcat.providers.openai_codex_provider", raising=False)
     monkeypatch.delitem(sys.modules, "blackcat.providers.github_copilot_provider", raising=False)
     monkeypatch.delitem(sys.modules, "blackcat.providers.azure_openai_provider", raising=False)
+    monkeypatch.delitem(sys.modules, "blackcat.providers.bedrock_provider", raising=False)
 
     providers = importlib.import_module("blackcat.providers")
 
@@ -21,6 +22,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     assert "blackcat.providers.openai_codex_provider" not in sys.modules
     assert "blackcat.providers.github_copilot_provider" not in sys.modules
     assert "blackcat.providers.azure_openai_provider" not in sys.modules
+    assert "blackcat.providers.bedrock_provider" not in sys.modules
     assert providers.__all__ == [
         "LLMProvider",
         "LLMResponse",
@@ -29,6 +31,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
         "OpenAICodexProvider",
         "GitHubCopilotProvider",
         "AzureOpenAIProvider",
+        "BedrockProvider",
     ]
 
 

@@ -865,7 +865,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history"])
+@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history", "model"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -888,6 +888,31 @@ async def test_slash_commands_forward_via_handle_message(slash_name: str) -> Non
     ]
     assert len(handled) == 1
     assert handled[0]["content"] == f"/{slash_name}"
+    assert handled[0]["metadata"]["is_slash_command"] is True
+
+
+@pytest.mark.asyncio
+async def test_slash_model_forwards_optional_preset() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction()
+    interaction.command.qualified_name = "model"
+
+    model_cmd = client.tree.get_command("model")
+    assert model_cmd is not None
+    await model_cmd.callback(interaction, preset="fast")
+
+    assert interaction.response.messages == [
+        {"content": "Processing /model fast...", "ephemeral": True}
+    ]
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/model fast"
     assert handled[0]["metadata"]["is_slash_command"] is True
 
 

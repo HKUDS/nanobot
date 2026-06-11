@@ -8,7 +8,26 @@
 > If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.blackcat`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
 >
 > [!IMPORTANT]
-> Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/blackcat; do not mount API keys or bot tokens into them unless you trust the publisher.
+> Official Docker usage currently means building from this repository with the included `Dockerfile`. Docker Hub images under third-party namespaces are not maintained or verified by HKUDS/nanobot; do not mount API keys or bot tokens into them unless you trust the publisher.
+
+> [!IMPORTANT]
+> The gateway and WebSocket channel default to `host: "127.0.0.1"` in `config.json` (set in `blackcat/config/schema.py`). Docker `-p` port forwarding cannot reach a container's loopback interface, so for the host or LAN to reach the exposed ports you must set both binds to `0.0.0.0` in `~/.blackcat/config.json` before starting the container. To serve the bundled WebUI from Docker, enable the WebSocket channel and protect bootstrap with a secret:
+>
+> ```json
+> {
+>   "gateway": { "host": "0.0.0.0" },
+>   "channels": {
+>     "websocket": {
+>       "enabled": true,
+>       "host": "0.0.0.0",
+>       "port": 8765,
+>       "tokenIssueSecret": "your-secret-here"
+>     }
+>   }
+> }
+> ```
+>
+> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured — see [`webui/README.md`](../webui/README.md) for details.
 
 ### Docker Compose
 
@@ -36,8 +55,20 @@ docker run -v ~/.blackcat:/home/blackcat/.blackcat --rm blackcat onboard
 # Edit config on host to add API keys
 vim ~/.blackcat/config.json
 
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.blackcat:/home/blackcat/.blackcat -p 18790:18790 blackcat gateway
+# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat).
+# Mirrors the security caps and port mappings declared in docker-compose.yml:
+#   - `--cap-drop ALL --cap-add SYS_ADMIN` + unconfined apparmor/seccomp are required
+#     when `tools.exec.sandbox: "bwrap"` is enabled (bwrap needs CAP_SYS_ADMIN for
+#     user namespaces). Without them, `bwrap` exits with `clone3: Operation not permitted`.
+#   - `-p 8765:8765` exposes the WebSocket channel / WebUI alongside the gateway health
+#     endpoint on 18790.
+docker run \
+  --cap-drop ALL --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined \
+  --security-opt seccomp=unconfined \
+  -v ~/.blackcat:/home/blackcat/.blackcat \
+  -p 18790:18790 -p 8765:8765 \
+  blackcat gateway
 
 # Or run a single command
 docker run -v ~/.blackcat:/home/blackcat/.blackcat --rm blackcat agent -m "Hello!"

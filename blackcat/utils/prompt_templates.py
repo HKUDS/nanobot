@@ -1,6 +1,6 @@
 """Load and render agent system prompt templates (Jinja2) under blackcat/templates/.
 
-Agent prompts live in ``templates/agent/`` (pass names like ``agent/identity.md``).
+    Agent prompts live in ``templates/agent/`` (pass names like ``agent/guidelines.md``).
 Shared copy lives under ``agent/_snippets/`` and is included via
 ``{% include 'agent/_snippets/....md' %}``.
 """
