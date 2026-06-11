@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -40,6 +42,27 @@ LOCK_FILENAME = ".telemetry.json.lock"
 TMP_GLOB = ".telemetry.json.tmp*"
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+_KIND_TO_COUNTER = {"view": "views", "use": "uses", "patch": "patches"}
+_KIND_TO_LAST_TS = {"view": "last_view", "use": "last_use", "patch": None}
+
+
+def _zero_entry_with_unknown_origin() -> TelemetryEntrySnapshot:
+    return {
+        "origin": "unknown",
+        "shadowed": [],
+        "views": 0,
+        "uses": 0,
+        "patches": 0,
+        "entry_created_at": _now_iso(),
+        "last_view": None,
+        "last_use": None,
+    }
+
+
 class SkillTelemetry:
     def __init__(self, workspace: Path) -> None:
         self._workspace = workspace
@@ -60,7 +83,6 @@ class SkillTelemetry:
                 pass
 
     def snapshot(self) -> TelemetrySnapshot:
-        from copy import deepcopy
         with self._lock:
             return {
                 "schema_version": SCHEMA_VERSION,
@@ -68,7 +90,15 @@ class SkillTelemetry:
                 "entries": deepcopy(self._entries),
             }
 
-
-def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def bump(self, name: str, kind: BumpKind) -> None:
+        if kind not in _KIND_TO_COUNTER:
+            raise ValueError(f"unknown bump kind: {kind!r}")
+        counter_key = _KIND_TO_COUNTER[kind]
+        last_ts_key = _KIND_TO_LAST_TS[kind]
+        now = _now_iso()
+        with self._lock:
+            entry = self._entries.setdefault(name, _zero_entry_with_unknown_origin())
+            entry[counter_key] = entry[counter_key] + 1  # type: ignore[literal-required]
+            if last_ts_key is not None:
+                entry[last_ts_key] = now  # type: ignore[literal-required]
+            self._dirty = True
