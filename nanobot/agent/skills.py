@@ -70,7 +70,7 @@ class SkillsLoader:
 
         if filter_unavailable:
             return [s for s in skills if self._is_skill_fully_available(s["name"], skills)]
-        
+
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -242,7 +242,7 @@ class SkillsLoader:
         return all(shutil.which(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
         )
-    
+
     def _is_skill_fully_available(
         self, name: str, all_skills: list[dict[str, str]], visited: set[str] | None = None,
     ) -> bool:
