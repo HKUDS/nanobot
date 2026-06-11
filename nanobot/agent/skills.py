@@ -31,6 +31,15 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self._entries_cache: list[dict[str, str]] | None = None
+        self._entries_snapshot: tuple[tuple[str, str, int, int], ...] | None = None
+        self._metadata_cache: dict[str, tuple[tuple[str, int, int], dict | None]] = {}
+
+    def reload(self) -> None:
+        """Clear skill caches so the next lookup reloads from disk."""
+        self._entries_cache = None
+        self._entries_snapshot = None
+        self._metadata_cache.clear()
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -48,6 +57,69 @@ class SkillsLoader:
             entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
 
+    def _list_skill_entries_cached(self) -> list[dict[str, str]]:
+        snapshot = self._skill_entries_snapshot()
+        if self._entries_cache is not None and snapshot == self._entries_snapshot:
+            return [dict(entry) for entry in self._entries_cache]
+
+        skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
+        workspace_names = {entry["name"] for entry in skills}
+        if self.builtin_skills and self.builtin_skills.exists():
+            skills.extend(
+                self._skill_entries_from_dir(
+                    self.builtin_skills,
+                    "builtin",
+                    skip_names=workspace_names,
+                )
+            )
+
+        self._entries_snapshot = snapshot
+        self._entries_cache = [dict(entry) for entry in skills]
+        return [dict(entry) for entry in skills]
+
+    def _skill_entries_snapshot(self) -> tuple[tuple[str, str, int, int], ...]:
+        items: list[tuple[str, str, int, int]] = []
+        roots = [("workspace", self.workspace_skills)]
+        if self.builtin_skills:
+            roots.append(("builtin", self.builtin_skills))
+
+        for source, base in roots:
+            if not base.exists():
+                continue
+            try:
+                skill_dirs = sorted(base.iterdir(), key=lambda item: item.name)
+            except OSError:
+                continue
+            for skill_dir in skill_dirs:
+                if not skill_dir.is_dir():
+                    continue
+                skill_file = skill_dir / "SKILL.md"
+                signature = self._skill_file_signature(skill_file)
+                if signature is None:
+                    continue
+                resolved_path, mtime_ns, size = signature
+                items.append((source, resolved_path, mtime_ns, size))
+        return tuple(items)
+
+    def _skill_file_signature(self, path: Path) -> tuple[str, int, int] | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        if not path.is_file():
+            return None
+        return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+    def _skill_file_for_name(self, name: str) -> Path | None:
+        roots = [self.workspace_skills]
+        if self.builtin_skills:
+            roots.append(self.builtin_skills)
+        for root in roots:
+            path = root / name / "SKILL.md"
+            if path.is_file():
+                return path
+        return None
+
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
         List all available skills.
@@ -58,12 +130,7 @@ class SkillsLoader:
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
-        skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        workspace_names = {entry["name"] for entry in skills}
-        if self.builtin_skills and self.builtin_skills.exists():
-            skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
-            )
+        skills = self._list_skill_entries_cached()
 
         if self.disabled_skills:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
@@ -82,14 +149,10 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        roots = [self.workspace_skills]
-        if self.builtin_skills:
-            roots.append(self.builtin_skills)
-        for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
-        return None
+        path = self._skill_file_for_name(name)
+        if path is None:
+            return None
+        return path.read_text(encoding="utf-8")
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -240,7 +303,22 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        content = self.load_skill(name)
+        path = self._skill_file_for_name(name)
+        if path is None:
+            return None
+        signature = self._skill_file_signature(path)
+        if signature is None:
+            return None
+        cached = self._metadata_cache.get(name)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+
+        content = path.read_text(encoding="utf-8")
+        metadata = self._parse_skill_frontmatter(content)
+        self._metadata_cache[name] = (signature, metadata)
+        return metadata
+
+    def _parse_skill_frontmatter(self, content: str) -> dict | None:
         if not content or not content.startswith("---"):
             return None
         match = _STRIP_SKILL_FRONTMATTER.match(content)
