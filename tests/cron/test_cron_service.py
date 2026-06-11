@@ -138,6 +138,33 @@ async def test_run_history_records_errors(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_history_records_job_cancellation(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def cancel(_):
+        raise asyncio.CancelledError("turn cancelled")
+
+    service = CronService(store_path, on_job=cancel)
+    job = service.add_job(
+        name="cancel",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        session_key="websocket:chat-1",
+    )
+
+    assert await service.run_job(job.id) is True
+
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert loaded.state.last_status == "error"
+    assert loaded.state.last_error == "turn cancelled"
+    assert len(loaded.state.run_history) == 1
+    assert loaded.state.run_history[0].status == "error"
+    assert loaded.state.run_history[0].error == "turn cancelled"
+    assert loaded.state.next_run_at_ms is not None
+
+
+@pytest.mark.asyncio
 async def test_run_history_trimmed_to_max(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))

@@ -448,6 +448,13 @@ class CronService:
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)
 
+        except asyncio.CancelledError as e:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            job.state.last_status = "error"
+            job.state.last_error = str(e) or e.__class__.__name__
+            logger.exception("Cron: job '{}' was cancelled", job.name)
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
