@@ -207,6 +207,47 @@ nanobot agent -m "Hello!"
 
 `apiBase` is the HTTP base URL, not the model name. Include the version path when the service expects it, such as `/v1`. If the service requires a non-empty key but does not validate it, use a placeholder such as `"apiKey": "EMPTY"`.
 
+For multiple custom endpoints, do not overload the single `custom` block. Name each endpoint under `providers` and reference that same name from the preset:
+
+```json
+{
+  "providers": {
+    "workProxy": {
+      "apiKey": "${WORK_PROXY_API_KEY}",
+      "apiBase": "https://proxy.example.com/v1"
+    },
+    "lab-local": {
+      "apiBase": "http://127.0.0.1:8000/v1"
+    }
+  },
+  "modelPresets": {
+    "work": {
+      "label": "Work proxy",
+      "provider": "workProxy",
+      "model": "gpt-4o-mini",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    },
+    "lab": {
+      "label": "Lab local",
+      "provider": "lab-local",
+      "model": "served-model-name",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "work"
+    }
+  }
+}
+```
+
+These custom names behave like direct OpenAI-compatible providers: `apiBase` is required, `apiKey` is optional when the endpoint allows anonymous or placeholder credentials, and `apiType` should be left unset.
+
 ## Recipe: Ollama Local Model
 
 This recipe applies when Ollama is already installed and the model has been pulled locally.
