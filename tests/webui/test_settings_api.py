@@ -113,6 +113,31 @@ def test_create_model_configuration_accepts_dynamic_custom_provider(
     assert saved.model_presets["tenant-model"].model == "gpt-4o-mini"
 
 
+def test_create_model_configuration_rejects_dynamic_custom_provider_without_api_base(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "providers": {
+            DYNAMIC_PROVIDER_NAME: {
+                "apiKey": "sk-test",
+            }
+        }
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="provider is not configured"):
+        create_model_configuration(
+            {
+                "label": ["Tenant model"],
+                "provider": [DYNAMIC_PROVIDER_NAME],
+                "model": ["gpt-4o-mini"],
+            }
+        )
+
+
 def test_create_model_configuration_rejects_unconfigured_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -313,6 +338,29 @@ def test_settings_payload_includes_dynamic_custom_provider(
     assert providers[DYNAMIC_PROVIDER_NAME]["configured"] is True
     assert providers[DYNAMIC_PROVIDER_NAME]["api_key_required"] is False
     assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == DYNAMIC_PROVIDER_API_BASE
+
+
+def test_settings_payload_marks_dynamic_custom_provider_without_api_base_unconfigured(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "providers": {
+            DYNAMIC_PROVIDER_NAME: {
+                "apiKey": "sk-test",
+            }
+        }
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    providers = {row["name"]: row for row in payload["providers"]}
+
+    assert providers[DYNAMIC_PROVIDER_NAME]["configured"] is False
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_key_hint"] == "••••"
+    assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] is None
 
 
 def test_settings_payload_includes_network_safety_fields(

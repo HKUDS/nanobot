@@ -270,6 +270,12 @@ def _provider_requires_api_key(spec: Any) -> bool:
     return True
 
 
+def _provider_requires_api_base(spec: Any) -> bool:
+    if spec.name == "azure_openai":
+        return True
+    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
+
+
 def _oauth_provider_status(spec: Any) -> dict[str, Any]:
     if not getattr(spec, "is_oauth", False):
         return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
@@ -321,7 +327,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
-    if spec.name == "azure_openai":
+    if _provider_requires_api_base(spec):
         return bool(provider_config.api_base)
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
