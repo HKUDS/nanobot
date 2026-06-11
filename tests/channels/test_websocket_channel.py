@@ -2058,7 +2058,7 @@ def test_settings_payload_reports_workspace_sandbox(monkeypatch, tmp_path) -> No
     config.tools.restrict_to_workspace = True
     save_config(config, config_path)
     monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
-    monkeypatch.setenv("NANOBOT_SANDBOX_ENFORCED", "macos_app_sandbox")
+    monkeypatch.setenv("BLACKCAT_SANDBOX_ENFORCED", "macos_app_sandbox")
 
     body = settings_payload()
     sandbox = body["advanced"]["workspace_sandbox"]

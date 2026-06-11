@@ -485,7 +485,7 @@ async def test_openrouter_sets_default_attribution_headers() -> None:
         await provider._ensure_client()
 
     headers = mock_client_cls.call_args.kwargs["default_headers"]
-    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
+    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/blackcat"
     assert headers["X-OpenRouter-Title"] == "blackcat"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert "x-session-affinity" in headers
@@ -946,7 +946,7 @@ def test_openai_compat_build_kwargs_max_completion_tokens_by_model_name(
     expected_key: str,
 ) -> None:
     spec = find_by_name("custom")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="sk-test-key",
             default_model=model_name,
@@ -1231,7 +1231,7 @@ def test_openai_compat_defaults_missing_tool_arguments_to_empty_object() -> None
 
 @pytest.mark.asyncio
 async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
-    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
+    monkeypatch.setenv("BLACKCAT_STREAM_IDLE_TIMEOUT_S", "0")
     mock_create = AsyncMock(return_value=_StalledStream())
     spec = find_by_name("openai")
 

@@ -16,7 +16,7 @@ describe("MarkdownTextRenderer", () => {
     const onOpenFilePreview = vi.fn();
     render(
       <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
+        {"Edited [hook.py](/Users/test/project/blackcat/agent/hook.py:12)"}
       </MarkdownTextRenderer>,
     );
 
@@ -24,13 +24,13 @@ describe("MarkdownTextRenderer", () => {
     expect(reference).toHaveTextContent("hook.py");
     expect(reference).toHaveAttribute(
       "aria-label",
-      "/Users/test/project/nanobot/agent/hook.py",
+      "/Users/test/project/blackcat/agent/hook.py",
     );
 
     fireEvent.click(reference);
 
     expect(onOpenFilePreview).toHaveBeenCalledWith(
-      "/Users/test/project/nanobot/agent/hook.py",
+      "/Users/test/project/blackcat/agent/hook.py",
     );
   });
 

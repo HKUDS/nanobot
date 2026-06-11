@@ -25,7 +25,7 @@ RUN mkdir -p blackcat bridge && touch blackcat/__init__.py && \
 COPY blackcat/ blackcat/
 COPY bridge/ bridge/
 COPY webui/ webui/
-RUN NANOBOT_FORCE_WEBUI_BUILD=1 uv pip install --system --no-cache .
+RUN BLACKCAT_FORCE_WEBUI_BUILD=1 uv pip install --system --no-cache .
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge

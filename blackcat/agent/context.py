@@ -54,7 +54,7 @@ class ContextBuilder:
     """
     Assembles LLM context from identity, trust, skills, and memory.
 
-    Nanobot-compatible API:
+    Blackcat-compatible API:
     - build_system_prompt() - same signature
     - build_messages() - same signature
     - _merge_message_content() - same behavior
@@ -661,7 +661,7 @@ You are within blackcat harness/structure.
             return text
         return images + [{"type": "text", "text": text}]
 
-    async def build_messages( # FIXME: check with Nanobot's for params allocation
+    async def build_messages( # FIXME: check with Blackcat's for params allocation
         self,
         history: list[dict[str, Any]],
         current_message: str,

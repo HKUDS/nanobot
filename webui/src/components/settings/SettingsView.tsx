@@ -10,9 +10,9 @@ import {
   Cloud,
   Cpu,
   Database,
+  ExternalLink,
   Eye,
   EyeOff,
-  ExternalLink,
   Gem,
   Globe2,
   Grid3X3,
@@ -1678,7 +1678,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-          {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentVersion ? `v${currentVersion}` : "blackcat"}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">

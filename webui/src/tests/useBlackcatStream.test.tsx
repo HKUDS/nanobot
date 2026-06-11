@@ -95,7 +95,7 @@ async function flushStreamFrame() {
   });
 }
 
-describe("useNanobotStream", () => {
+describe("useBlackcatStream", () => {
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");

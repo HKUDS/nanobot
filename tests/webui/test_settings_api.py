@@ -253,8 +253,8 @@ def test_settings_payload_includes_exec_path_flags(
     config.tools.exec.path_prepend = "/venv/bin"
     config.tools.exec.path_append = "/usr/sbin"
     save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("blackcat.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
 
     payload = settings_payload()
 

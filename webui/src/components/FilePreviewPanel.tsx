@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, ChevronRight, FileText, Loader2, X } from "lucide-react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
@@ -73,7 +73,7 @@ export function FilePreviewPanel({
         const message = error instanceof ApiError
           ? (error.status === 404 && /API route not found/i.test(error.message)
             ? t("filePreview.routeMissing", {
-              defaultValue: "File preview needs the latest gateway. Restart nanobot gateway and try again.",
+              defaultValue: "File preview needs the latest gateway. Restart blackcat gateway and try again.",
             })
             : error.message)
           : t("filePreview.failed", { defaultValue: "Could not preview this file." });

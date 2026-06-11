@@ -323,7 +323,7 @@ class LensConfig(Base):
 
     def get_workspace_paths(self) -> dict[str, str]:
         """Get workspace name -> path mapping (normalizes str | WorkspaceConfig)."""
-        return {name: get_workspace_path(cfg) for name, cfg in self.workspaces.items()}
+        return {name: str(get_workspace_path(cfg)) for name, cfg in self.workspaces.items()}
 
     def get_workspace_source(self, workspace: str) -> Literal["cli", "vscode"]:
         """Get diagnostics_source for a workspace (with per-workspace override)."""

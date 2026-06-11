@@ -36,7 +36,7 @@ from blackcat.webui.settings_api import (
     update_transcription_settings,
     update_web_search_settings,
 )
-from nanobot.webui.version_check import check_for_update
+from blackcat.webui.version_check import check_for_update
 
 QueryParams = dict[str, list[str]]
 

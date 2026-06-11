@@ -52,7 +52,7 @@ _ALNUM = string.ascii_letters + string.digits
 _STANDARD_TC_KEYS = frozenset({"id", "type", "index", "function"})
 _STANDARD_FN_KEYS = frozenset({"name", "arguments"})
 _DEFAULT_OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/HKUDS/nanobot",
+    "HTTP-Referer": "https://github.com/HKUDS/blackcat",
     "X-OpenRouter-Title": "blackcat",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
@@ -1353,7 +1353,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = int(os.environ.get("BLACKCAT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:

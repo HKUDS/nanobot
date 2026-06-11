@@ -253,7 +253,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
             "      bins:",
             "        - definitely-missing-blackcat-skill-cli",
             "      env:",
-            "        - DEFINITELY_MISSING_NANOBOT_SKILL_ENV",
+            "        - DEFINITELY_MISSING_BLACKCAT_SKILL_ENV",
             "---",
             "Use the missing CLI and env var.",
         ]),
@@ -298,7 +298,7 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         assert unavailable["available"] is False
         assert unavailable["unavailable_reason"] == (
             "CLI: definitely-missing-blackcat-skill-cli, "
-            "ENV: DEFINITELY_MISSING_NANOBOT_SKILL_ENV"
+            "ENV: DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"
         )
 
         detail = await _http_get(
@@ -310,9 +310,9 @@ async def test_webui_skills_route_requires_token_and_hides_paths(
         assert "path" not in detail_body
         assert detail_body["requirements"] == {
             "bins": ["definitely-missing-blackcat-skill-cli"],
-            "env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+            "env": ["DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"],
             "missing_bins": ["definitely-missing-blackcat-skill-cli"],
-            "missing_env": ["DEFINITELY_MISSING_NANOBOT_SKILL_ENV"],
+            "missing_env": ["DEFINITELY_MISSING_BLACKCAT_SKILL_ENV"],
         }
         assert "Use the missing CLI and env var." in detail_body["raw_markdown"]
     finally:

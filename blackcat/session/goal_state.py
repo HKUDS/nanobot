@@ -116,7 +116,7 @@ def runner_wall_llm_timeout_s(
     """Wall-clock cap for :class:`~blackcat.agent.runner.AgentRunner` when streaming an LLM.
 
     Returns ``0.0`` to disable ``asyncio.wait_for`` around the request when this is a
-    sustained-goal turn; ``None`` means use ``NANOBOT_LLM_TIMEOUT_S``. Pass in-memory
+    sustained-goal turn; ``None`` means use ``BLACKCAT_LLM_TIMEOUT_S``. Pass in-memory
     ``metadata`` when the caller already holds :attr:`~blackcat.session.manager.Session.metadata`
     for this turn.
     """

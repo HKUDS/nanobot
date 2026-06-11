@@ -798,9 +798,9 @@ class AgentRunner:
             coro = self.provider.chat_with_retry(**kwargs)
 
         # Streaming requests already have provider-level idle timeouts
-        # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
+        # (BLACKCAT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
         # LLM timeout here, or healthy long reasoning streams can be killed just
-        # because total elapsed time exceeded NANOBOT_LLM_TIMEOUT_S.
+        # because total elapsed time exceeded BLACKCAT_LLM_TIMEOUT_S.
         outer_timeout_s = None if (wants_streaming or wants_progress_streaming) else timeout_s
         try:
             response = (

@@ -824,7 +824,7 @@ def _load_or_create_desktop_config(config: str | None, workspace: str | None) ->
         save_config,
         set_config_path,
     )
-    from blackcat.config.schema import Config as NanobotConfig
+    from blackcat.config.schema import Config as BlackcatConfig
 
     config_path = Path(config).expanduser().resolve() if config else get_config_path()
     set_config_path(config_path)
@@ -836,7 +836,7 @@ def _load_or_create_desktop_config(config: str | None, workspace: str | None) ->
             console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
     else:
-        loaded = NanobotConfig()
+        loaded = BlackcatConfig()
         changed = True
 
     if workspace:

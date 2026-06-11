@@ -222,7 +222,7 @@ class Consolidator:
         except Exception:
             return truncate_text(text, budget * 4)
 
-    async def archive(self, messages: list[dict]) -> str | None:
+    async def archive(self, messages: list[dict], session_key: str | None = None) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
         Returns the summary text on success, None if nothing to archive.

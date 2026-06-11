@@ -127,7 +127,7 @@ def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> No
 
 
 def test_fetch_new_messages_rejected_returns_skipped_uid(monkeypatch) -> None:
-    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+    raw = _make_raw_email(from_addr="Blackcat <bot@example.com>", subject="Loop test")
 
     class FakeIMAP:
         def login(self, _user: str, _pw: str):
