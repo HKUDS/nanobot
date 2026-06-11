@@ -242,6 +242,15 @@ class ProvidersConfig(Base):
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
 
     @model_validator(mode="after")
+    def convert_extra_providers(self):
+        """Convert extra fields (custom providers) to ProviderConfig objects."""
+        if self.model_extra:
+            for key, value in self.model_extra.items():
+                if isinstance(value, dict):
+                    self.model_extra[key] = ProviderConfig.model_validate(value)
+        return self
+
+    @model_validator(mode="after")
     def _validate_api_type_scope(self) -> "ProvidersConfig":
         for name in self.__class__.model_fields:
             if name == "openai":
@@ -249,15 +258,9 @@ class ProvidersConfig(Base):
             provider = getattr(self, name, None)
             if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
-        return self
-
-    @model_validator(mode="after")
-    def convert_extra_providers(self):
-        """Convert extra fields (custom providers) to ProviderConfig objects."""
-        if self.model_extra:
-            for key, value in self.model_extra.items():
-                if isinstance(value, dict):
-                    self.model_extra[key] = ProviderConfig.model_validate(value)
+        for provider in (self.model_extra or {}).values():
+            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
+                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
         return self
 
 
@@ -478,10 +481,7 @@ class Config(BaseSettings):
                 return p, spec.name
 
         # Final fallback: check for any configured custom provider
-        for attr_name in dir(self.providers):
-            if attr_name.startswith("_"):
-                continue
-            p = getattr(self.providers, attr_name, None)
+        for attr_name, p in (self.providers.model_extra or {}).items():
             if isinstance(p, ProviderConfig) and p.api_base:
                 return p, attr_name
 
