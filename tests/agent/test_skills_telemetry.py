@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import filelock
@@ -564,3 +565,33 @@ def test_multiproc_bumps_via_rmw_no_loss(tmp_path: Path) -> None:
         assert p.exitcode == 0, f"worker process exited with code {p.exitcode}"
     data = json.loads((workspace / "skills" / ".telemetry.json").read_text())
     assert data["entries"]["shared"]["views"] == 1000
+
+
+def test_init_cleans_tmp_residue(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "ws" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".telemetry.json.tmp").write_text("partial")
+    (skills_dir / ".telemetry.json.tmp42").write_text("partial")
+    SkillTelemetry(tmp_path / "ws")
+    leftover = list(skills_dir.glob(".telemetry.json.tmp*"))
+    assert leftover == []
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="dir fsync is POSIX-only; spec §4.3 explicitly skips on Windows",
+)
+def test_atomic_write_fsyncs_parent_dir(tmp_path: Path, monkeypatch) -> None:
+    from nanobot.agent import skills_telemetry as st
+
+    calls: list[int] = []
+    orig = st.os.fsync
+
+    def tracking(fd: int) -> None:
+        calls.append(fd)
+        orig(fd)
+
+    monkeypatch.setattr(st.os, "fsync", tracking)
+    st._atomic_write(tmp_path / "data.json", {"k": "v"})
+    # Expect exactly 2 fsyncs: one for tmp fd, one for parent dir fd
+    assert len(calls) == 2
