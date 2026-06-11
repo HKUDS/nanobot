@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-discord = pytest.importorskip("discord")
+pytest.importorskip("discord")
+import discord
 
 from blackcat.bus.events import OutboundMessage
 from blackcat.bus.queue import MessageBus

@@ -55,6 +55,23 @@ describe("ThreadMessages", () => {
     expect(rows[1]).toHaveClass("mt-4");
   });
 
+  it("renders a fork boundary divider after the copied history", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "original", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer", createdAt: 2 },
+      { id: "u2", role: "user", content: "branch prompt", createdAt: 3 },
+    ];
+
+    render(
+      <ThreadMessages
+        messages={messages}
+        forkBoundaryMessageCount={2}
+      />,
+    );
+
+    expect(screen.getByText("Forked from history")).toBeInTheDocument();
+  });
+
   it("keeps file edits as their own activity row inside a turn", () => {
     const messages: UIMessage[] = [
       {
@@ -639,7 +656,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
@@ -649,7 +666,31 @@ describe("ThreadMessages", () => {
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+  });
+
+  it("uses turn ids as activity grouping boundaries when available", () => {
+    const units = buildDisplayUnits([
+      { id: "u1", role: "user", content: "one", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer one", turnId: "turn-1", createdAt: 2 },
+      {
+        id: "t2",
+        role: "tool",
+        kind: "trace",
+        content: "search()",
+        traces: ["search()"],
+        turnId: "turn-2",
+        createdAt: 3,
+      },
+      { id: "a2", role: "assistant", content: "answer two", turnId: "turn-2", createdAt: 4 },
+    ]);
+
+    expect(units.map((unit) => unit.type === "message" ? unit.message.id : "activity")).toEqual([
+      "u1",
+      "a1",
+      "activity",
+      "a2",
+    ]);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {

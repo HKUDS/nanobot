@@ -150,6 +150,7 @@ async def test_runner_goal_continue_not_limited_by_injection_cycle_cap():
         max_iterations=max_iterations,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         goal_active_predicate=lambda: True,
+        finalize_on_max_iterations=False,
     ))
 
     assert result.stop_reason == "max_iterations"

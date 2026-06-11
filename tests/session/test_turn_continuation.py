@@ -17,6 +17,7 @@ from blackcat.session.turn_continuation import (
     internal_continuation_pending,
     internal_continuation_run_started_at,
     maybe_continue_turn,
+    should_finalize_on_max_iterations,
     should_stream_budget_response,
 )
 
@@ -124,4 +125,16 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
         stop_reason="max_iterations",
         pending_queue_available=False,
         session_metadata=meta,
+    )
+    assert not should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata=meta,
+    )
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=False,
+        session_metadata=meta,
+    )
+    assert should_finalize_on_max_iterations(
+        pending_queue_available=True,
+        session_metadata={},
     )

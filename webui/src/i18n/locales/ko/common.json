@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "blackcat",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "blackcat에 연결 중…",
-      "boot": "blackcat 불러오는 중…"
+      "connecting": "nanobot에 연결 중…",
+      "boot": "nanobot 불러오는 중…"
     },
     "error": {
-      "title": "blackcat에 연결할 수 없습니다",
-      "gatewayHint": "gateway(`blackcat gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
+      "title": "nanobot에 연결할 수 없습니다",
+      "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
     },
     "auth": {
       "title": "인증이 필요합니다",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "시스템",
-      "restartHint": "런타임 변경 사항을 적용하려면 blackcat을 다시 시작하세요.",
-      "restart": "blackcat 다시 시작",
+      "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
+      "restart": "nanobot 다시 시작",
       "restarting": "다시 시작 중...",
       "restartEngine": "엔진 다시 시작",
       "restartingEngine": "엔진 다시 시작 중..."
@@ -33,11 +33,11 @@
       "completed": "{{seconds}}초 만에 다시 시작되었습니다."
     },
     "documentTitle": {
-      "base": "blackcat",
-      "chat": "{{title}} · blackcat"
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "blackcat 웹 UI — blackcat 작업공간과 대화하세요."
+      "description": "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
     }
   },
   "sidebar": {
@@ -108,7 +108,7 @@
       "language": "언어",
       "provider": "제공자",
       "model": "모델",
-      "restart": "blackcat 재시작",
+      "restart": "nanobot 재시작",
       "configPath": "설정 경로",
       "activePreset": "활성 프리셋",
       "gateway": "게이트웨이",
@@ -156,7 +156,7 @@
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
       "language": "WebUI에서 사용할 언어를 선택합니다.",
       "provider": "새 모델 요청을 처리할 제공자를 선택합니다.",
-      "model": "blackcat이 기본으로 사용할 모델 이름을 설정합니다.",
+      "model": "nanobot이 기본으로 사용할 모델 이름을 설정합니다.",
       "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다.",
       "selectedPreset": "이름 있는 프리셋은 여기서 읽기 전용입니다. config.json에서 편집하세요.",
       "presetModel": "Default로 전환하면 WebUI에서 모델과 제공자를 편집할 수 있습니다.",
@@ -173,7 +173,7 @@
       "defaultAspectRatio": "프롬프트가 비율을 선택하지 않을 때 사용됩니다.",
       "defaultImageSize": "지원하는 제공자에 보낼 크기 힌트입니다.",
       "maxImagesPerTurn": "한 번의 generate_image 요청에서 생성할 수 있는 이미지 상한입니다.",
-      "botName": "blackcat이 표시 이름을 사용하는 곳에 표시됩니다.",
+      "botName": "nanobot이 표시 이름을 사용하는 곳에 표시됩니다.",
       "botIcon": "Bot 이름 옆에 표시할 짧은 emoji 또는 텍스트입니다.",
       "timezone": "일정과 시간 인식 답변에 사용됩니다.",
       "localServiceAccess": "Full Access shell 명령이 localhost 서비스에 접근할 수 있게 합니다.",
@@ -183,7 +183,7 @@
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
       "brandLogos": "설정에서 타사 제공자와 CLI 로고를 표시합니다.",
-      "cliAppsCatalog": "blackcat이 로컬에서 실행할 수 있는 앱 CLI 어댑터만 설치합니다. 네이티브 앱은 변경하지 않습니다.",
+      "cliAppsCatalog": "nanobot이 로컬에서 실행할 수 있는 앱 CLI 어댑터만 설치합니다. 네이티브 앱은 변경하지 않습니다.",
       "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다.",
       "logs": "네이티브 엔진 로그 폴더를 엽니다.",
       "diagnostics": "지원용 작은 런타임 보고서를 내보냅니다.",
@@ -225,11 +225,11 @@
       "loadError": "설정을 불러올 수 없습니다",
       "unsaved": "저장되지 않은 변경 사항이 있습니다.",
       "upToDate": "최신 상태입니다.",
-      "savedRestart": "저장했습니다. 적용하려면 blackcat을 재시작하세요.",
+      "savedRestart": "저장했습니다. 적용하려면 nanobot을 재시작하세요.",
       "restartAfterSaving": "변경 사항을 저장한 뒤 준비되면 재시작하세요.",
       "savedRestartApply": "저장했습니다. 준비되면 재시작하세요.",
       "imageProviderRestart": "이미지 제공자 변경 사항을 저장했습니다. 준비되면 재시작하세요.",
-      "hostRestartAfterSaving": "저장하면 blackcat이 엔진을 재시작합니다.",
+      "hostRestartAfterSaving": "저장하면 nanobot이 엔진을 재시작합니다.",
       "hostRestartPending": "저장했습니다. 준비되면 엔진을 재시작합니다.",
       "hostApiUnavailable": "호스트 작업은 네이티브 앱 안에서만 사용할 수 있습니다.",
       "logsOpened": "로그 폴더를 열었습니다.",
@@ -248,7 +248,7 @@
       "exporting": "내보내는 중..."
     },
     "byok": {
-      "description": "직접 provider 키를 가져옵니다. Blackcat은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
+      "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
       "configured": "설정됨",
       "notConfigured": "설정 안 됨",
       "configuredSection": "설정됨",
@@ -417,7 +417,7 @@
       "saveCustom": "MCP 저장",
       "configImport": "mcp.json 가져오기",
       "importConfig": "가져오기",
-      "restartRequired": "업데이트된 MCP 도구를 연결하려면 blackcat을 다시 시작하세요.",
+      "restartRequired": "업데이트된 MCP 도구를 연결하려면 nanobot을 다시 시작하세요.",
       "toolsFound": "도구 {{count}}개",
       "loading": "MCP 프리셋 로드 중...",
       "empty": "이 필터와 일치하는 MCP 프리셋이 없습니다.",
@@ -448,7 +448,7 @@
       "thirdPartyBrands": "제품 이름, 로고 및 브랜드는 각 소유자의 자산입니다. 사용은 식별 목적일 뿐 보증이나 제휴를 의미하지 않습니다."
     },
     "apps": {
-      "description": "blackcat이 채팅에서 사용할 수 있는 App CLI와 MCP 서비스를 추가합니다.",
+      "description": "nanobot이 채팅에서 사용할 수 있는 App CLI와 MCP 서비스를 추가합니다.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "전체",
@@ -509,6 +509,7 @@
   },
   "chat": {
     "fallbackTitle": "채팅 {{id}}",
+    "forkTitle": "분기: {{title}}",
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
     "showMore": "{{count}}개 더 보기",
@@ -598,7 +599,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "앱 아이콘 디자인",
-          "prompt": "blackcat을 위한 깔끔한 1:1 앱 아이콘을 생성해 주세요. 친근한 로봇, 단순한 벡터 스타일, 부드러운 파란색과 흰색 팔레트, 텍스트 없음."
+          "prompt": "nanobot을 위한 깔끔한 1:1 앱 아이콘을 생성해 주세요. 친근한 로봇, 단순한 벡터 스타일, 부드러운 파란색과 흰색 팔레트, 텍스트 없음."
         },
         "sticker": {
           "title": "스티커 만들기",
@@ -728,7 +729,7 @@
             "description": "이 채팅에서 실행 중인 agent 턴을 취소합니다."
           },
           "restart": {
-            "title": "blackcat 재시작",
+            "title": "nanobot 재시작",
             "description": "bot 프로세스를 제자리에서 재시작합니다."
           },
           "status": {
@@ -810,6 +811,7 @@
     },
     "scrollToBottom": "맨 아래로 스크롤",
     "loadEarlier": "이전 메시지 불러오기",
+    "forkedFromHistory": "기록에서 분기됨",
     "promptNavigator": {
       "open": "프롬프트 탐색기 열기",
       "title": "프롬프트",
@@ -835,8 +837,9 @@
     "agentActivityLiveSummary": "진행 중… · {{reasoning}}단계 · 도구 호출 {{tools}}회",
     "agentActivityLiveToolsOnly": "진행 중… · 도구 호출 {{tools}}회",
     "imageAttachment": "이미지 첨부",
-    "copyReply": "답변 복사",
-    "copiedReply": "답변이 복사됨",
+    "forkFromHere": "분기",
+    "copyReply": "복사",
+    "copiedReply": "복사됨",
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",
@@ -865,7 +868,7 @@
     "close": "파일 미리보기 닫기",
     "loading": "미리보기 로딩 중...",
     "failed": "이 파일을 미리 볼 수 없습니다.",
-    "routeMissing": "파일 미리보기에는 최신 gateway가 필요합니다. blackcat gateway를 다시 시작한 뒤 다시 시도하세요.",
+    "routeMissing": "파일 미리보기에는 최신 gateway가 필요합니다. nanobot gateway를 다시 시작한 뒤 다시 시도하세요.",
     "resize": "파일 미리보기 크기 조절",
     "truncated": "파일이 커서 미리보기가 잘렸습니다."
   },
@@ -885,7 +888,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

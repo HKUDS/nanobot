@@ -55,7 +55,7 @@ function baseSettingsPayload() {
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
-      bot_name: "blackcat",
+      bot_name: "nanobot",
       bot_icon: "nb",
       tool_hint_max_length: 40,
     },
@@ -145,6 +145,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         error: null,
         refresh: refreshSpy,
         createChat: createChatSpy,
+        forkChat: async () => "fork-chat",
         deleteChat: async (key: string) => {
           await deleteChatSpy(key);
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
@@ -179,7 +180,7 @@ vi.mock("@/lib/bootstrap", () => ({
   clearSavedSecret: vi.fn(),
 }));
 
-vi.mock("@/lib/blackcat-client", () => {
+vi.mock("@/lib/nanobot-client", () => {
   class MockClient {
     status = "idle" as const;
     defaultChatId: string | null = null;
@@ -202,11 +203,11 @@ vi.mock("@/lib/blackcat-client", () => {
     updateUrl = updateUrlSpy;
   }
 
-  return { BlackcatClient: MockClient };
+  return { NanobotClient: MockClient };
 });
 
-import App from "@/App";
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
+import App from "@/App";
 
 describe("App layout", () => {
   beforeEach(() => {
@@ -220,10 +221,9 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
-    localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
     setNavigatorPlatform("Linux x86_64");
-    localStorage.removeItem("blackcat-webui.sidebar");
-    localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
+    localStorage.removeItem("nanobot-webui.sidebar");
+    localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -309,7 +309,7 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Skills · blackcat");
+    expect(document.title).toBe("Skills · nanobot");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
@@ -584,7 +584,7 @@ describe("App layout", () => {
         chatId: "new",
         createdAt: "2026-04-15T12:00:00Z",
         updatedAt: "2026-04-15T12:00:00Z",
-        preview: "hi blackcat",
+        preview: "hi nanobot",
       },
       {
         key: "websocket:alpha",
@@ -760,7 +760,7 @@ describe("App layout", () => {
       },
     ];
     localStorage.setItem(
-      "blackcat-webui.sidebar.completed-runs.v1",
+      "nanobot-webui.sidebar.completed-runs.v1",
       JSON.stringify(["chat-b"]),
     );
 
@@ -803,7 +803,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    await waitFor(() => expect(document.title).toBe("Active after reload · blackcat"));
+    await waitFor(() => expect(document.title).toBe("Active after reload · nanobot"));
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(
       within(sidebar).getByRole("button", { name: /^Active after reload$/ }),
@@ -858,7 +858,7 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "blackcat",
+                bot_name: "nanobot",
                 bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
@@ -1045,13 +1045,12 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
-    expect(document.title).toBe("Settings · blackcat");
-    expect(screen.getByTestId("overview-blackcat-logo")).toBeInTheDocument();
+    expect(document.title).toBe("Settings · nanobot");
     expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-blackcat-gateway")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-blackcat-workspace")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview-logo-nanobot-gateway")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(settingsNav.className).toContain("overflow-x-auto");
@@ -1230,7 +1229,7 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Apps · blackcat");
+    expect(document.title).toBe("Apps · nanobot");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -1271,7 +1270,7 @@ describe("App layout", () => {
                 temperature: 0.1,
                 reasoning_effort: null,
                 timezone: "UTC",
-                bot_name: "blackcat",
+                bot_name: "nanobot",
                 bot_icon: "nb",
                 tool_hint_max_length: 40,
               },
@@ -1368,13 +1367,13 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(document.title).toBe("blackcat"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
-    await waitFor(() => expect(document.title).toBe("blackcat"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
   });
 

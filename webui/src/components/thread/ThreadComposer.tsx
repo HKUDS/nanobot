@@ -47,6 +47,12 @@ import {
 import { useTranslation } from "react-i18next";
 
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   WorkspaceAccessMenu,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
@@ -782,6 +788,7 @@ export function ThreadComposer({
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
+  const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const wasStreamingRef = useRef(isStreaming);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
@@ -1128,6 +1135,23 @@ export function ThreadComposer({
     });
   }, []);
 
+// Runs before paint so switching sessions never flashes stale draft text.
+  useLayoutEffect(() => {
+    if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
+    previousPendingQueueKeyRef.current = pendingQueueKey;
+    setValue("");
+    setInlineError(null);
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(0);
+    clear();
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+    });
+  }, [clear, pendingQueueKey]);
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
@@ -1749,7 +1773,6 @@ export function ThreadComposer({
                       disabled={voiceRecorder.buttonDisabled}
                       aria-label={voiceButtonLabel}
                       aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
-                      title={voiceButtonTooltip}
                       onPointerDown={voiceRecorder.beginPress}
                       onPointerUp={voiceRecorder.endPress}
                       onPointerCancel={voiceRecorder.endPress}

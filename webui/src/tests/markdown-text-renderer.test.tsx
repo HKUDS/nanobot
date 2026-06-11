@@ -16,7 +16,7 @@ describe("MarkdownTextRenderer", () => {
     const onOpenFilePreview = vi.fn();
     render(
       <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-        {"Edited [hook.py](/Users/test/project/blackcat/agent/hook.py:12)"}
+        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
       </MarkdownTextRenderer>,
     );
 
@@ -24,13 +24,13 @@ describe("MarkdownTextRenderer", () => {
     expect(reference).toHaveTextContent("hook.py");
     expect(reference).toHaveAttribute(
       "aria-label",
-      "/Users/test/project/blackcat/agent/hook.py",
+      "/Users/test/project/nanobot/agent/hook.py",
     );
 
     fireEvent.click(reference);
 
     expect(onOpenFilePreview).toHaveBeenCalledWith(
-      "/Users/test/project/blackcat/agent/hook.py",
+      "/Users/test/project/nanobot/agent/hook.py",
     );
   });
 
@@ -76,11 +76,11 @@ describe("MarkdownTextRenderer", () => {
   it("does not wrap complete fenced code blocks in an extra pre", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.blackcat/workspace\n```"}
+        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace\n```"}
       </MarkdownTextRenderer>,
     );
 
-    expect(screen.getByText("/Users/renxubin/.blackcat/workspace")).toBeInTheDocument();
+    expect(screen.getByText("/Users/renxubin/.nanobot/workspace")).toBeInTheDocument();
     expect(container.querySelectorAll("pre")).toHaveLength(1);
     expect(container.querySelector("pre div")).toBeNull();
   });
@@ -100,11 +100,11 @@ describe("MarkdownTextRenderer", () => {
   it("keeps streaming unfinished fenced code blocks to a single shell", () => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.blackcat/workspace"}
+        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace"}
       </MarkdownTextRenderer>,
     );
 
-    expect(screen.getByText("/Users/renxubin/.blackcat/workspace")).toBeInTheDocument();
+    expect(screen.getByText("/Users/renxubin/.nanobot/workspace")).toBeInTheDocument();
     expect(container.querySelectorAll("pre")).toHaveLength(1);
     expect(container.querySelector("pre div")).toBeNull();
   });
@@ -121,13 +121,13 @@ describe("MarkdownTextRenderer", () => {
   });
 
   it("renders markdown videos as inline players", () => {
-    render(<MarkdownTextRenderer>![blackcat-intro.mp4](/api/media/sig/video)</MarkdownTextRenderer>);
+    render(<MarkdownTextRenderer>![nanobot-intro.mp4](/api/media/sig/video)</MarkdownTextRenderer>);
 
-    const video = screen.getByLabelText("Video attachment: blackcat-intro.mp4");
+    const video = screen.getByLabelText("Video attachment: nanobot-intro.mp4");
     expect(video.tagName).toBe("VIDEO");
     expect(video).toHaveAttribute("src", "/api/media/sig/video");
     expect(video).toHaveAttribute("controls");
-    expect(screen.queryByRole("img", { name: "blackcat-intro.mp4" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "nanobot-intro.mp4" })).not.toBeInTheDocument();
   });
 
   it("renders markdown links with file-looking names as file attachments", () => {
