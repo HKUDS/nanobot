@@ -65,6 +65,28 @@ def test_add_job_preserves_channel_meta_and_session_key(tmp_path) -> None:
     assert reloaded.payload.session_key == "slack:C123:1234567890.123456"
 
 
+def test_list_bound_agent_jobs_excludes_legacy_delivery_payloads(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    schedule = CronSchedule(kind="every", every_ms=60_000)
+    bound = service.add_job(
+        name="Bound",
+        schedule=schedule,
+        message="new bound job",
+        session_key="websocket:chat-1",
+    )
+    service.add_job(
+        name="Legacy same session",
+        schedule=schedule,
+        message="legacy job",
+        deliver=True,
+        channel="websocket",
+        to="chat-1",
+        session_key="websocket:chat-1",
+    )
+
+    assert service.list_bound_agent_jobs_for_session("websocket:chat-1") == [bound]
+
+
 @pytest.mark.asyncio
 async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"

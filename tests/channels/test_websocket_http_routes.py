@@ -184,16 +184,16 @@ async def test_session_automations_route_filters_by_webui_session(
             name=name,
             schedule=hourly,
             message=message,
-            channel="websocket",
-            to=to,
             session_key=f"websocket:{to}",
         )
     cron.add_job(
         name="Legacy same target",
         schedule=hourly,
         message="Legacy job should not be treated as bound",
+        deliver=True,
         channel="websocket",
         to="abc",
+        session_key="websocket:abc",
     )
     cron.register_system_job(
         CronJob(

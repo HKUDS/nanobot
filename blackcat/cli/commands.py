@@ -980,6 +980,7 @@ def _run_gateway(
     from blackcat.cron.automation import (
         AUTOMATION_DEFER_UNTIL_IDLE_META,
         AUTOMATION_TRIGGER_META,
+        is_bound_agent_job,
     )
     from blackcat.cron.service import CronService
     from blackcat.cron.types import CronJob
@@ -1189,17 +1190,6 @@ def _run_gateway(
         )
         return response
 
-    def _is_bound_cron_job(job: CronJob) -> bool:
-        payload = job.payload
-        if payload.kind != "agent_turn" or not payload.session_key:
-            return False
-        return not (
-            payload.deliver
-            or payload.channel
-            or payload.to
-            or payload.channel_meta
-        )
-
     async def _deliver_to_channel(
         msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
     ) -> None:
@@ -1360,7 +1350,7 @@ def _run_gateway(
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
 
-        if _is_bound_cron_job(job):
+        if is_bound_agent_job(job):
             return await _run_bound_cron_job(job)
 
         reminder_note = (

@@ -14,6 +14,7 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
+from blackcat.cron.automation import is_bound_agent_job
 from blackcat.cron.types import (
     CronJob,
     CronJobState,
@@ -508,7 +509,7 @@ class CronService:
         return [
             job
             for job in self.list_jobs(include_disabled=include_disabled)
-            if job.payload.kind == "agent_turn"
+            if is_bound_agent_job(job)
             and job.payload.session_key == session_key
         ]
 
@@ -520,10 +521,9 @@ class CronService:
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
+        delete_after_run: bool = False,
         channel_meta: dict | None = None,
         session_key: str | None = None,
-        delete_after_run: bool = False,
-        metadata: dict | None = None,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -547,7 +547,6 @@ class CronService:
             created_at_ms=now,
             updated_at_ms=now,
             delete_after_run=delete_after_run,
-            metadata=metadata,
         )
         if self._running:
             store = self._load_store()
