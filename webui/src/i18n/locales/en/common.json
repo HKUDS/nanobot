@@ -54,7 +54,10 @@
       "label": "Language",
       "ariaLabel": "Change language"
     },
-    "apps": "Apps"
+    "apps": "Apps",
+    "skills": {
+      "title": "Skills"
+    }
   },
   "settings": {
     "backToChat": "Back to chat",
@@ -70,12 +73,14 @@
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
+      "voice": "Voice",
       "browser": "Web",
       "cliApps": "CLI Apps",
       "mcp": "MCP",
       "runtime": "System",
       "advanced": "Security",
-      "apps": "Apps"
+      "apps": "Apps",
+      "skills": "Skills"
     },
     "sections": {
       "interface": "Interface",
@@ -95,7 +100,8 @@
       "capabilities": "Capabilities",
       "apps": "Apps",
       "nativeHost": "Native host",
-      "hostSafety": "App safety"
+      "hostSafety": "App safety",
+      "voiceInput": "Voice input"
     },
     "models": {
       "selectModel": "Select model",
@@ -157,7 +163,13 @@
       "engine": "Engine",
       "logs": "Logs",
       "diagnostics": "Diagnostics",
-      "contextWindow": "Context window"
+      "contextWindow": "Context window",
+      "transcription": "Transcription",
+      "transcriptionProvider": "Provider",
+      "transcriptionProviderStatus": "Provider status",
+      "transcriptionModel": "Model",
+      "transcriptionLanguage": "Language",
+      "voiceLimits": "Limits"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
@@ -196,7 +208,12 @@
       "diagnostics": "Export a small runtime report for support.",
       "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
       "webuiDefaultAccessNative": "Used by native chats without a project-specific permission.",
-      "contextWindow": "Choose the default context budget for this model configuration."
+      "contextWindow": "Choose the default context budget for this model configuration.",
+      "transcription": "Transcribe microphone input before sending it. Chat channel voice messages use the same settings.",
+      "transcriptionProvider": "Uses the matching provider credentials from Providers.",
+      "transcriptionProviderStatus": "API keys stay under providers, not in transcription settings.",
+      "transcriptionModel": "Leave as the resolved default unless your provider needs a custom model id.",
+      "transcriptionLanguage": "Optional ISO-639 hint such as en, zh, ja, or ko."
     },
     "timezone": {
       "select": "Select timezone",
@@ -295,6 +312,9 @@
       "disabled": "Disabled",
       "restartPending": "Restart pending",
       "ready": "Ready",
+      "privateEngine": "Private engine",
+      "unixSocket": "Unix socket",
+      "defaultWorkspace": "Default workspace",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -384,7 +404,33 @@
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
       "imageGeneration": "Image generation",
+      "voiceInput": "Voice input",
       "workspace": "Workspace"
+    },
+    "usage": {
+      "title": "Token activity",
+      "shortTitle": "Token Usage",
+      "subtitle": "Provider-reported usage over the last 12 months.",
+      "empty": "Token activity will appear after new model replies.",
+      "totalTokens": "Total tokens",
+      "peakTokens": "Peak tokens",
+      "thirtyDayTokens": "30-day tokens",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "daysValue": "{{count}}d",
+      "last30": "30 days",
+      "activeDays": "Active days",
+      "requests": "Requests",
+      "estimated": "estimated",
+      "includesEstimates": "includes estimates",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
+      "sources": {
+        "user": "Chat",
+        "api": "API",
+        "cron": "Automations",
+        "dream": "Memory",
+        "system": "System"
+      }
     },
     "providers": {
       "searchPlaceholder": "Search providers",
@@ -427,10 +473,43 @@
       "signInBeforeSaving": "Sign in before saving this OAuth provider as the active model provider.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in"
+    },
+    "skills": {
+      "description": "Review the instruction skills this agent can load during a conversation.",
+      "caption": "{{available}} available · {{total}} total",
+      "featured": "Agent skills",
+      "empty": "No skills are available.",
+      "sourceWorkspace": "Custom",
+      "sourceBuiltin": "Built-in",
+      "statusAvailable": "Available",
+      "statusUnavailable": "Unavailable",
+      "unavailableReason": "Missing: {{reason}}",
+      "openDetails": "Open details for {{name}}",
+      "loadingDetail": "Loading skill details...",
+      "loadFailed": "Could not load skill details.",
+      "descriptionTitle": "Description",
+      "source": "Source",
+      "status": "Status",
+      "requirements": "Requirements",
+      "noRequirements": "No explicit requirements.",
+      "commands": "Commands",
+      "environment": "Environment variables",
+      "missingCommands": "Missing CLI",
+      "missingEnvironment": "Missing ENV",
+      "unavailableReasonLabel": "Unavailable reason",
+      "rawInstructions": "Raw SKILL.md",
+      "rawInstructionsEmpty": "No raw instructions.",
+      "detailDescription": "Details for {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Select provider",
+      "configureProvider": "Configure provider",
+      "languageAuto": "Auto"
     }
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
+    "forkTitle": "Fork: {{title}}",
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "showMore": "Show {{count}} more",
@@ -548,7 +627,30 @@
       "toggleSidebar": "Toggle sidebar",
       "newChat": "Start a new chat",
       "toggleTheme": "Toggle theme from header",
-      "settings": "Open settings"
+      "settings": "Open settings",
+      "sessionInfo": "Session details"
+    },
+    "sessionInfo": {
+      "title": "Session",
+      "untitled": "Untitled chat",
+      "automations": "Automations",
+      "count": "{{count}}",
+      "loading": "Loading automations...",
+      "loadFailed": "Could not load automations.",
+      "empty": "No automations in this session yet.",
+      "disabled": "Off",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "Every {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Custom schedule"
+      },
+      "next": {
+        "label": "{{time}}",
+        "disabled": "Paused",
+        "none": "No next run"
+      }
     },
     "composer": {
       "placeholderThread": "Type your message…",
@@ -565,6 +667,8 @@
       "goalStateCloseAria": "Close goal",
       "send": "Send message",
       "stop": "Stop response",
+      "modelNotConfigured": "Model not configured",
+      "configureModel": "Configure model",
       "queued": {
         "label": "Queued guidance",
         "guide": "Guide",
@@ -593,6 +697,21 @@
         "reason": "Reason",
         "deepResearch": "Deep research",
         "voice": "Voice input"
+      },
+      "voice": {
+        "hint": "Click to dictate or hold",
+        "stop": "Stop recording",
+        "transcribing": "Transcribing...",
+        "recordingStatus": "Recording {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Voice input is not supported in this browser.",
+        "permission": "Microphone permission is required.",
+        "notConfigured": "Configure a transcription provider first.",
+        "tooLong": "Recording is too long.",
+        "tooShort": "Hold a little longer to record voice.",
+        "noInput": "No microphone input detected.",
+        "failed": "Could not transcribe audio."
       },
       "slash": {
         "ariaLabel": "Slash commands",
@@ -691,7 +810,15 @@
       }
     },
     "scrollToBottom": "Scroll to bottom",
-    "loadEarlier": "Load earlier messages"
+    "loadEarlier": "Load earlier messages",
+    "forkedFromHistory": "Forked from history",
+    "promptNavigator": {
+      "open": "Open prompt navigator",
+      "title": "Prompts",
+      "search": "Search prompts",
+      "noResults": "No matching prompts.",
+      "jumpTo": "Jump to prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "streaming",
@@ -722,8 +849,11 @@
     "cliRunRan": "Used",
     "cliRunFailed": "Failed",
     "imageAttachment": "Image attachment",
-    "copyReply": "Copy reply",
-    "copiedReply": "Copied reply",
+    "automationSourceFallback": "Automation",
+    "automationTriggered": "Triggered automatically",
+    "forkFromHere": "Fork",
+    "copyReply": "Copy",
+    "copiedReply": "Copied",
     "turnLatencyTitle": "Response time (end-to-end)"
   },
   "lightbox": {
@@ -732,6 +862,15 @@
     "prev": "Previous image",
     "next": "Next image",
     "close": "Close image preview"
+  },
+  "filePreview": {
+    "aria": "File preview",
+    "close": "Close file preview",
+    "loading": "Loading preview...",
+    "failed": "Could not preview this file.",
+    "routeMissing": "File preview needs the latest gateway. Restart nanobot gateway and try again.",
+    "resize": "Resize file preview",
+    "truncated": "Preview is truncated because this file is large."
   },
   "code": {
     "fallbackLanguage": "code",

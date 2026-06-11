@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
 
@@ -10,6 +10,67 @@ describe("MarkdownTextRenderer", () => {
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
     expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+  });
+
+  it("renders local file links as previewable file references", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Edited [hook.py](/Users/test/project/nanobot/agent/hook.py:12)"}
+      </MarkdownTextRenderer>,
+    );
+
+    const reference = screen.getByTestId("inline-file-path");
+    expect(reference).toHaveTextContent("hook.py");
+    expect(reference).toHaveAttribute(
+      "aria-label",
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+
+    fireEvent.click(reference);
+
+    expect(onOpenFilePreview).toHaveBeenCalledWith(
+      "/Users/test/project/nanobot/agent/hook.py",
+    );
+  });
+
+  it("does not treat non-file hrefs as previews just because the label looks like a file", () => {
+    const onOpenFilePreview = vi.fn();
+    render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"Download [index.html](/api/media/sig/html)"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "index.html" })).toHaveAttribute(
+      "href",
+      "/api/media/sig/html",
+    );
+  });
+
+  it("renders glob file links as plain text instead of preview targets", () => {
+    const onOpenFilePreview = vi.fn();
+    const { container } = render(
+      <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
+        {"原始对话通常还在 [*.json](*.json)。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "*.json" })).not.toBeInTheDocument();
+    expect(container).toHaveTextContent("*.json");
+  });
+
+  it("keeps glob inline code as code instead of a file preview chip", () => {
+    render(
+      <MarkdownTextRenderer>
+        {"检查 `src/**/*.json`。"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(screen.queryByTestId("inline-file-path")).not.toBeInTheDocument();
+    expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
   it("does not wrap complete fenced code blocks in an extra pre", () => {
@@ -117,6 +178,42 @@ describe("MarkdownTextRenderer", () => {
     ).toHaveAttribute("href", "https://polymarket.com/event/when-will-gpt-5pt6-be-released");
   });
 
+  it("falls back through favicon sources before showing a globe for compact link rows", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "Useful links:\n\n- Savills Hong Kong Corporate Relocation — Corporate relocation services\n  https://www.savills.com.hk/services/corporate-relocation.aspx"
+        }
+      </MarkdownTextRenderer>,
+    );
+    const link = screen.getByRole("link", {
+      name: "Open link: Savills Hong Kong Corporate Relocation — Corporate relocation services",
+    });
+    const favicon = () => link.querySelector("img");
+
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://www.savills.com.hk/favicon.ico",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://icons.duckduckgo.com/ip3/www.savills.com.hk.ico",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).toHaveAttribute(
+      "src",
+      "https://www.google.com/s2/favicons?domain=www.savills.com.hk&sz=64",
+    );
+
+    fireEvent.error(favicon()!);
+    expect(favicon()).not.toBeInTheDocument();
+    expect(link.querySelector("svg")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("SC");
+  });
+
   it("renders media attachments without an extra preview/code wrapper", () => {
     render(<MarkdownTextRenderer>![Diagram](/api/media/sig/payload)</MarkdownTextRenderer>);
 
@@ -197,6 +294,71 @@ describe("MarkdownTextRenderer", () => {
       "VBeats mentions $24 million, while Globe states a total of $130.6 million since founding.",
     );
     expect(container.querySelector(".katex")).toBeNull();
+  });
+
+  it("renders guarded single-dollar inline math", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "Variables $x$ and powers $2^n$ render inline, while a price range $10-20$ stays literal."
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container).not.toHaveTextContent("$x$");
+    expect(container).not.toHaveTextContent("$2^n$");
+    expect(container).toHaveTextContent("$10-20$");
+  });
+
+  it("renders model-style single-dollar formula lists", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {[
+          "- Fourier transform: $\\hat{f}(\\xi) = \\int_{-\\infty}^{+\\infty} f(x)e^{-2\\pi i x \\xi}\\, dx$",
+          "- Taylor expansion: $e^x = \\sum_{n=0}^{\\infty} \\frac{x^n}{n!}$",
+          "- KL divergence: $D_\\text{KL}(P || Q) = \\sum_x P(x) \\log \\frac{P(x)}{Q(x)}$",
+          "- Quantum state: $\\psi = \\alpha|0\\rangle + \\beta|1\\rangle$",
+        ].join("\n")}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(4);
+    expect(container).not.toHaveTextContent("$\\hat{f}");
+    expect(container).not.toHaveTextContent("$D_\\text");
+  });
+
+  it("renders TeX inline math delimiters", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>{"Einstein wrote \\(E = mc^2\\) for mass-energy equivalence."}</MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex")).toBeInTheDocument();
+    expect(container.querySelector(".katex-display")).toBeNull();
+    expect(container).not.toHaveTextContent("\\(");
+    expect(container).not.toHaveTextContent("\\)");
+  });
+
+  it("renders TeX display math delimiters", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>{"\\[x^2 + y^2 = z^2\\]"}</MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex-display")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("\\[");
+    expect(container).not.toHaveTextContent("\\]");
+  });
+
+  it("keeps TeX delimiters inside code literal", () => {
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>
+        {"Inline `\\(x\\)` stays literal.\n\n```text\n\\[x^2\\]\n```"}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("\\(x\\)").tagName).toBe("CODE");
+    expect(screen.getByText("\\[x^2\\]")).toBeInTheDocument();
   });
 
   it("still renders explicit math blocks", () => {

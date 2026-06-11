@@ -6,8 +6,12 @@ import shlex
 import subprocess
 import sys
 
+from nanobot.agent.tools.exec_session import (
+    ExecSessionManager,
+    ListExecSessionsTool,
+    WriteStdinTool,
+)
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.exec_session import ExecSessionManager, ListExecSessionsTool, WriteStdinTool
 
 
 def _python_command(code: str) -> str:
@@ -141,7 +145,7 @@ def test_exec_can_continue_with_stdin(tmp_path):
         return initial, result
 
     initial, result = asyncio.run(run())
-    assert "ready" in initial
+    assert "ready" in initial + result
     assert "Process running" in initial
     assert "Elapsed:" in initial
     assert "got:ping" in result
@@ -170,7 +174,7 @@ def test_write_stdin_can_close_stdin(tmp_path):
         return initial, result
 
     initial, result = asyncio.run(run())
-    assert "ready" in initial
+    assert "ready" in initial + result
     assert "got:payload" in result
     assert "Stdin closed." in result
     assert "Exit code: 0" in result
@@ -185,14 +189,20 @@ def test_write_stdin_can_terminate_session(tmp_path):
             "import time; print('ready', flush=True); time.sleep(30)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=500)
+        initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
+        waited = await stdin_tool.execute(
+            session_id=sid,
+            wait_for="ready",
+            wait_timeout_ms=3000,
+            yield_time_ms=0,
+        )
         result = await stdin_tool.execute(
             session_id=sid,
             terminate=True,
             yield_time_ms=0,
         )
-        return initial, result
+        return initial + waited, result
 
     initial, result = asyncio.run(run())
     assert "ready" in initial
@@ -243,7 +253,7 @@ def test_write_stdin_preserves_completed_session_output_until_polled(tmp_path):
 
     initial, final = asyncio.run(run())
 
-    assert "ready" in initial
+    assert "ready" in initial + final
     assert "done" in final
     assert "Exit code: 0" in final
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from nanobot.providers.base import tool_arguments_json_for_replay
+
 
 def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """Convert Chat Completions messages to Responses API input items.
@@ -46,7 +48,7 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
                     "id": response_item_id,
                     "call_id": call_id or f"call_{idx}",
                     "name": fn.get("name"),
-                    "arguments": fn.get("arguments") or "{}",
+                    "arguments": tool_arguments_json_for_replay(fn.get("arguments")),
                 })
             continue
 

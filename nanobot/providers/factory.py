@@ -41,6 +41,8 @@ def _make_provider_core(
     provider_name = config.get_provider_name(model, preset=resolved)
     p = config.get_provider(model, preset=resolved)
     spec = find_by_name(provider_name) if provider_name else None
+    if spec and spec.is_transcription_only:
+        raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
 
     if backend == "azure_openai":
@@ -99,6 +101,7 @@ def _make_provider_core(
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p and provider_name == "openai" else "auto",
+            extra_query=p.extra_query if p else None,
         )
 
     provider.generation = resolved.to_generation_settings()
@@ -185,6 +188,7 @@ def provider_signature(
             fp.extra_headers if fp else None,
             fp.extra_body if fp else None,
             fp.api_type if fp else "auto",
+            fp.extra_query if fp else None,
             getattr(fp, "region", None) if fp else None,
             getattr(fp, "profile", None) if fp else None,
             fallback.max_tokens,
@@ -202,6 +206,7 @@ def provider_signature(
         p.extra_headers if p else None,
         p.extra_body if p else None,
         p.api_type if p else "auto",
+        p.extra_query if p else None,
         getattr(p, "region", None) if p else None,
         getattr(p, "profile", None) if p else None,
         resolved.max_tokens,

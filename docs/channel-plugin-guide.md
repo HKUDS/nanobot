@@ -2,7 +2,7 @@
 
 Build a custom nanobot channel in three steps: subclass, package, install.
 
-> **Note:** We recommend developing channel plugins against a source checkout of nanobot (`pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
+> **Note:** We recommend developing channel plugins against a source checkout of nanobot (`python -m pip install -e .`) rather than a PyPI release, so you always have access to the latest base-channel features and APIs.
 
 ## How It Works
 
@@ -153,7 +153,7 @@ The key (`webhook`) becomes the config section name. The value points to your `B
 ### 3. Install & Configure
 
 ```bash
-pip install -e .
+python -m pip install -e .
 nanobot plugins list      # verify "Webhook" shows as "plugin"
 nanobot onboard           # auto-adds default config for detected plugins
 ```
@@ -234,7 +234,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | **Call this when you receive a message.** Checks `is_allowed()`, then publishes to the bus. Automatically sets `_wants_stream` if `supports_streaming` is true. |
 | `is_allowed(sender_id)` | Checks against `config.allow_from`; `"*"` allows all, `[]` denies all. |
 | `default_config()` (classmethod) | Returns default config dict for `nanobot onboard`. Override to declare your fields. |
-| `transcribe_audio(file_path)` | Transcribes audio via Groq Whisper (if configured). |
+| `transcribe_audio(file_path)` | Transcribes audio via the shared top-level `transcription` config (if configured). |
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
 | `is_running` | Returns `self._running`. |
 | `login(force=False)` | Perform interactive login (e.g. QR code scan). Returns `True` if already authenticated or login succeeds. Override in subclasses that support interactive login. |
@@ -533,7 +533,7 @@ If not overridden, the base class returns `{"enabled": false}`.
 ```bash
 git clone https://github.com/you/nanobot-channel-webhook
 cd nanobot-channel-webhook
-pip install -e .
+python -m pip install -e .
 nanobot plugins list    # should show "Webhook" as "plugin"
 nanobot gateway         # test end-to-end
 ```

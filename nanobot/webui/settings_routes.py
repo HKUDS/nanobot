@@ -27,13 +27,16 @@ from nanobot.webui.settings_api import (
     logout_oauth_provider,
     provider_models_payload,
     settings_payload,
+    settings_usage_payload,
     update_agent_settings,
     update_image_generation_settings,
     update_model_configuration,
     update_network_safety_settings,
     update_provider_settings,
+    update_transcription_settings,
     update_web_search_settings,
 )
+from nanobot.webui.version_check import check_for_update
 
 QueryParams = dict[str, list[str]]
 
@@ -79,6 +82,8 @@ class WebUISettingsRouter:
     async def dispatch(self, request: WsRequest, path: str) -> Response | None:
         if path == "/api/settings":
             return self._handle_settings(request)
+        if path == "/api/settings/usage":
+            return self._handle_settings_usage(request)
         if path == "/api/settings/update":
             return self._handle_settings_update(request)
         if path == "/api/settings/model-configurations/create":
@@ -97,6 +102,8 @@ class WebUISettingsRouter:
             return self._handle_settings_web_search_update(request)
         if path == "/api/settings/image-generation/update":
             return self._handle_settings_image_generation_update(request)
+        if path == "/api/settings/transcription/update":
+            return self._handle_settings_transcription_update(request)
         if path == "/api/settings/network-safety/update":
             return self._handle_settings_network_safety_update(request)
         if path == "/api/settings/cli-apps":
@@ -111,6 +118,8 @@ class WebUISettingsRouter:
             return await self._handle_settings_cli_apps_action(request, "test")
         if path == "/api/settings/mcp-presets":
             return await self._handle_settings_mcp_presets(request)
+        if path == "/api/settings/version-check":
+            return await self._handle_settings_version_check(request)
         mcp_action = _MCP_PRESET_ACTIONS_BY_PATH.get(path)
         if mcp_action is not None:
             return await self._handle_settings_mcp_presets(request, mcp_action)
@@ -183,6 +192,11 @@ class WebUISettingsRouter:
                 )
             )
         )
+
+    def _handle_settings_usage(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        return self._json_response(settings_usage_payload())
 
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
@@ -267,6 +281,15 @@ class WebUISettingsRouter:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="image"))
 
+    def _handle_settings_transcription_update(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = update_transcription_settings(self._query(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload))
+
     def _handle_settings_network_safety_update(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -327,3 +350,15 @@ class WebUISettingsRouter:
         if action is None:
             return self._json_response(payload)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    async def _handle_settings_version_check(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            update_info = await asyncio.to_thread(check_for_update)
+        except Exception:
+            self.logger.exception("version check failed")
+            return self._error_response(500, "version check failed")
+        return self._json_response({
+            "updateAvailable": update_info,
+        })

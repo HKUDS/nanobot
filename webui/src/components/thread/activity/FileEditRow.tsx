@@ -22,18 +22,34 @@ export interface FileEditSummary {
   error?: string;
 }
 
-export function FileEditGroup({ edits }: { edits: FileEditSummary[] }) {
+export function FileEditGroup({
+  edits,
+  onOpenFilePreview,
+}: {
+  edits: FileEditSummary[];
+  onOpenFilePreview?: (path: string) => void;
+}) {
   if (edits.length === 0) return null;
   return (
     <ul className="space-y-1">
       {edits.map((edit) => (
-        <FileEditRow key={edit.key} edit={edit} />
+        <FileEditRow
+          key={edit.key}
+          edit={edit}
+          onOpenFilePreview={onOpenFilePreview}
+        />
       ))}
     </ul>
   );
 }
 
-function FileEditRow({ edit }: { edit: FileEditSummary }) {
+function FileEditRow({
+  edit,
+  onOpenFilePreview,
+}: {
+  edit: FileEditSummary;
+  onOpenFilePreview?: (path: string) => void;
+}) {
   const { t } = useTranslation();
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
@@ -76,6 +92,8 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
           <FileReferenceChip
             path={edit.path}
             tooltipPath={edit.absolute_path}
+            previewPath={edit.absolute_path || edit.path}
+            onOpen={onOpenFilePreview}
             display="path"
             active={editing}
             className="min-w-0"

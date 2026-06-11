@@ -326,3 +326,40 @@ async def test_sdk_capture_prefers_run_level_snapshot():
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
+
+
+@pytest.mark.asyncio
+async def test_aclose_delegates_to_loop_close_mcp(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.close_mcp = AsyncMock()
+
+    await bot.aclose()
+
+    bot._loop.close_mcp.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_context_manager_calls_aclose_on_exit(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.close_mcp = AsyncMock()
+
+    async with bot as b:
+        assert b is bot
+
+    bot._loop.close_mcp.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_context_manager_does_not_swallow_exceptions(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.close_mcp = AsyncMock()
+
+    with pytest.raises(ValueError):
+        async with bot as b:
+            assert b is bot
+            raise ValueError("boom")
+
+    bot._loop.close_mcp.assert_awaited_once()

@@ -106,7 +106,7 @@ export function WorkspaceProjectPicker({
 
   if (nativeProjectPicker) {
     return (
-      <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
+      <div className="flex items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
         <button
           type="button"
           disabled={disabled || pickingFolder}
@@ -133,7 +133,7 @@ export function WorkspaceProjectPicker({
   }
 
   return (
-    <div className="flex items-center border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
+    <div className="flex items-center rounded-b-[28px] border-t border-border/25 bg-muted/60 px-4 py-1.5 dark:bg-white/[0.055]">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button

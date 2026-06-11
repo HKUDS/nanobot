@@ -47,6 +47,28 @@ async def test_exec_path_append_preserves_system_path():
 
 @_UNIX_ONLY
 @pytest.mark.asyncio
+async def test_exec_path_prepend_takes_lookup_precedence(tmp_path):
+    """pathPrepend should win over pathAppend for executable lookup."""
+    preferred = tmp_path / "preferred"
+    fallback = tmp_path / "fallback"
+    preferred.mkdir()
+    fallback.mkdir()
+    preferred_tool = preferred / "pathprobe"
+    fallback_tool = fallback / "pathprobe"
+    preferred_tool.write_text("#!/bin/sh\necho preferred\n", encoding="utf-8")
+    fallback_tool.write_text("#!/bin/sh\necho fallback\n", encoding="utf-8")
+    preferred_tool.chmod(0o755)
+    fallback_tool.chmod(0o755)
+
+    tool = ExecTool(path_prepend=str(preferred), path_append=str(fallback))
+    result = await tool.execute(command="pathprobe")
+
+    assert "preferred" in result
+    assert "fallback" not in result
+
+
+@_UNIX_ONLY
+@pytest.mark.asyncio
 async def test_exec_allowed_env_keys_passthrough(monkeypatch):
     """Env vars listed in allowed_env_keys should be visible to commands."""
     monkeypatch.setenv("MY_CUSTOM_VAR", "hello-from-config")

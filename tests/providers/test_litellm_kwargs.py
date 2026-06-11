@@ -54,6 +54,15 @@ def _fake_tool_call_response() -> SimpleNamespace:
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
+def _fake_tool_call_response_with_arguments(arguments) -> SimpleNamespace:
+    """Build a minimal chat response with caller-supplied tool arguments."""
+    function = SimpleNamespace(name="optional_tool", arguments=arguments)
+    tool_call = SimpleNamespace(id="call_123", type="function", function=function)
+    message = SimpleNamespace(content=None, tool_calls=[tool_call], reasoning_content=None)
+    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
+    return SimpleNamespace(choices=[choice], usage=SimpleNamespace())
+
+
 def _fake_responses_response(content: str = "ok") -> MagicMock:
     """Build a minimal Responses API response object."""
     resp = MagicMock()
@@ -611,6 +620,24 @@ async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
     assert serialized["function"]["provider_specific_fields"] == {"inner": "value"}
 
 
+def test_openai_compat_parse_preserves_malformed_tool_arguments() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('{path:"foo.txt"}'))
+
+    assert result.tool_calls[0].arguments == '{path:"foo.txt"}'
+
+
+def test_openai_compat_parse_preserves_array_tool_arguments() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('["foo.txt"]'))
+
+    assert result.tool_calls[0].arguments == ["foo.txt"]
+
+
 def test_openai_model_passthrough() -> None:
     """OpenAI models pass through unchanged."""
     spec = find_by_name("openai")
@@ -902,6 +929,47 @@ def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
     assert "temperature" not in kwargs
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_key"),
+    [
+        ("gpt-5.4", "max_completion_tokens"),
+        ("o1-mini", "max_completion_tokens"),
+        ("o3-mini", "max_completion_tokens"),
+        ("o4-mini", "max_completion_tokens"),
+        ("gpt-4", "max_tokens"),
+        ("foo3-mini", "max_tokens"),
+        ("foo4-mini", "max_tokens"),
+    ],
+)
+def test_openai_compat_build_kwargs_max_completion_tokens_by_model_name(
+    model_name: str,
+    expected_key: str,
+) -> None:
+    spec = find_by_name("custom")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model=model_name,
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model=model_name,
+        max_tokens=2048,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    other_key = (
+        "max_tokens" if expected_key == "max_completion_tokens" else "max_completion_tokens"
+    )
+    assert kwargs[expected_key] == 2048
+    assert other_key not in kwargs
+
+
 def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
@@ -1110,7 +1178,7 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "ls -la"}'
 
 
-def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
