@@ -1,15 +1,15 @@
-import type {
-  ConnectionStatus,
-  InboundEvent,
-  Outbound,
-  OutboundCliAppMention,
-  OutboundImageGeneration,
-  OutboundMcpPresetMention,
-  OutboundMedia,
-  GoalStateWsPayload,
-  WorkspaceScopePayload,
-} from "./types";
 import { createHostWebSocket } from "./runtime";
+import type {
+    ConnectionStatus,
+    GoalStateWsPayload,
+    InboundEvent,
+    Outbound,
+    OutboundCliAppMention,
+    OutboundImageGeneration,
+    OutboundMcpPresetMention,
+    OutboundMedia,
+    WorkspaceScopePayload,
+} from "./types";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -445,7 +445,7 @@ export class BlackcatClient {
       if (wsInboundDebugEnabled()) {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
         console.warn(
-          "[nanobot ws inbound] invalid JSON",
+          "[blackcat ws inbound] invalid JSON",
           raw.length > 400 ? `${raw.slice(0, 400)}… (${raw.length} chars)` : raw,
         );
       }
@@ -453,7 +453,7 @@ export class BlackcatClient {
     }
 
     if (wsInboundDebugEnabled()) {
-      console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
+      console.log("[blackcat ws inbound]", summarizeInboundWsPayload(parsed));
     }
 
     if (parsed.event === "ready") {

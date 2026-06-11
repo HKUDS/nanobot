@@ -33,11 +33,11 @@
       "completed": "Restart completed in {{seconds}}s."
     },
     "documentTitle": {
-      "base": "nanobot",
-      "chat": "{{title}} · nanobot"
+      "base": "blackcat",
+      "chat": "{{title}} · blackcat"
     },
     "meta": {
-      "description": "nanobot web UI — chat with your nanobot workspace."
+      "description": "blackcat web UI — chat with your blackcat workspace."
     }
   },
   "sidebar": {

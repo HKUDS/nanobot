@@ -137,7 +137,7 @@ function mockBlobUrls() {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(window, "nanobotHost");
+  Reflect.deleteProperty(window, "blackcatHost");
   if (ORIGINAL_MEDIA_DEVICES) {
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
@@ -282,7 +282,7 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
+    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_hsl(var(--brand)/0.03)]"); // HACK: specific to blackcat
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
@@ -559,7 +559,7 @@ describe("ThreadComposer", () => {
   it("keeps project selection as a compact composer dropdown", async () => {
     const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
+      project_path: "/Users/test/.blackcat/workspace",
       project_name: "workspace",
       access_mode: "restricted" as const,
       restrict_to_workspace: true,
@@ -621,12 +621,12 @@ describe("ThreadComposer", () => {
     const onWorkspaceScopeChange = vi.fn();
     const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
     const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
+      project_path: "/Users/test/.blackcat/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
-    Object.defineProperty(window, "nanobotHost", {
+    Object.defineProperty(window, "blackcatHost", {
       configurable: true,
       value: {
         getRuntimeInfo: vi.fn(),
@@ -663,7 +663,7 @@ describe("ThreadComposer", () => {
 
   it("uses the web path menu when no native host picker is available", async () => {
     const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
+      project_path: "/Users/test/.blackcat/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
@@ -811,11 +811,11 @@ describe("ThreadComposer", () => {
 
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("");
-    expect(window.localStorage.getItem("nanobot.webui.slashCommandRecents")).toBeNull();
+    expect(window.localStorage.getItem("blackcat.webui.slashCommandRecents")).toBeNull();
   });
 
   it("orders recent slash commands first for the blank slash menu", () => {
-    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/history"]));
+    window.localStorage.setItem("blackcat.webui.slashCommandRecents", JSON.stringify(["/history"]));
     render(
       <ThreadComposer
         onSend={vi.fn()}

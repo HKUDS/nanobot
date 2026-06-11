@@ -19,7 +19,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { BlackcatBrandLogo } from "./settings/SettingsView";
+import { BlackcatBrandLogo } from "./settings/BrandLogo";
 
 interface SidebarProps {
   sessions: ChatSummary[];
@@ -58,6 +58,15 @@ interface SidebarProps {
   hostChromeInset?: boolean;
 }
 
+interface SidebarActionProps {
+  label: string;
+  onClick: () => void;
+  icon: ReactNode;
+  active?: boolean;
+  shortcut?: string;
+  ariaKeyShortcuts?: string;
+}
+
 type NavigatorWithUserAgentData = Navigator & {
   userAgentData?: { platform?: string };
 };
@@ -81,6 +90,33 @@ export function Sidebar(props: SidebarProps) {
   const collapsed = Boolean(props.collapsed);
   const toggleLabel = t("thread.header.toggleSidebar");
   const newChatShortcut = newChatShortcutLabel();
+
+  const sidebarActionProps: SidebarActionProps[] = [
+    {
+      label: "sidebar.newChat",
+      onClick: props.onNewChat,
+      icon: <SquarePen className="h-4 w-4" />,
+      shortcut: newChatShortcut,
+      ariaKeyShortcuts: "Meta+Shift+O Control+Shift+O",
+    },
+    {
+      label: "sidebar.searchAria",
+      onClick: props.onOpenSearch,
+      icon: <Search className="h-4 w-4" />
+    },
+    {
+      label: "sidebar.apps",
+      onClick: props.onOpenApps,
+      active: props.activeUtility === "apps",
+      icon: <Blocks className="h-4 w-4" />,
+    },
+    {
+      label: "sidebar.skills.title",
+      onClick: props.onOpenSkills,
+      icon: <Brain className="h-4 w-4" />,
+      active: props.activeUtility === "skills",
+    }
+  ]
 
   return (
     <nav
@@ -134,34 +170,18 @@ export function Sidebar(props: SidebarProps) {
           collapsed && "flex w-14 flex-col items-center px-0",
         )}
       >
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.newChat")}
-          onClick={props.onNewChat}
-          icon={<SquarePen className="h-4 w-4" />}
-          shortcut={newChatShortcut}
-          ariaKeyShortcuts="Meta+Shift+O Control+Shift+O"
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.searchAria")}
-          onClick={props.onOpenSearch}
-          icon={<Search className="h-4 w-4" />}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.apps")}
-          onClick={props.onOpenApps}
-          active={props.activeUtility === "apps"}
-          icon={<Blocks className="h-4 w-4" />}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("sidebar.skills.title")}
-          onClick={props.onOpenSkills}
-          active={props.activeUtility === "skills"}
-          icon={<Brain className="h-4 w-4" />}
-        />
+        {sidebarActionProps.map((action: SidebarActionProps) => {
+          return (
+            <SidebarActionButton
+              collapsed={collapsed}
+              label={t(action.label)}
+              onClick={action.onClick}
+              icon={action.icon}
+              active={action.active}
+              ariaKeyShortcuts={action.ariaKeyShortcuts}
+            />
+          )
+        })}
         {props.archivedCount ? (
           <SidebarActionButton
             collapsed={collapsed}

@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createModelConfiguration,
   deleteSession,
-  fetchFilePreview,
   fetchCliApps,
+  fetchFilePreview,
   fetchMcpPresets,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -22,13 +22,13 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
-  updateSidebarState,
   updateImageGenerationSettings,
-  updateModelConfiguration,
   updateMcpServerTools,
+  updateModelConfiguration,
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSidebarState,
   updateWebSearchSettings,
 } from "@/lib/api";
 
@@ -138,13 +138,13 @@ describe("webui API helpers", () => {
       provider: "openrouter",
       contextWindowTokens: 262144,
       timezone: "Asia/Shanghai",
-      botName: "nanobot",
+      botName: "blackcat",
       botIcon: "nb",
       toolHintMaxLength: 120,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=blackcat&bot_icon=nb&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -212,7 +212,7 @@ describe("webui API helpers", () => {
       }),
     ).rejects.toMatchObject({
       status: 200,
-      message: "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again.",
+      message: "Gateway returned WebUI HTML instead of JSON. Restart blackcat gateway and try again.",
     });
   });
 
@@ -389,7 +389,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
+          "X-Blackcat-MCP-Values": JSON.stringify({
             browserbase_api_key: "bb_live_test",
           }),
         }),
@@ -410,7 +410,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
+          "X-Blackcat-MCP-Values": JSON.stringify({
             name: "docs",
             transport: "stdio",
             command: "npx",
@@ -427,7 +427,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
+          "X-Blackcat-MCP-Values": JSON.stringify({
             config: '{"mcpServers":{"docs":{"command":"npx"}}}',
           }),
         }),
@@ -440,7 +440,7 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer tok",
-          "X-Nanobot-MCP-Values": JSON.stringify({
+          "X-Blackcat-MCP-Values": JSON.stringify({
             name: "docs",
             enabled_tools: ["search", "fetch"],
           }),
@@ -455,7 +455,7 @@ describe("webui API helpers", () => {
       pinned_keys: ["websocket:chat-1"],
       archived_keys: ["websocket:old"],
       title_overrides: { "websocket:chat-1": "Release" },
-      project_name_overrides: { "/Users/me/nanobot": "Core" },
+      project_name_overrides: { "/Users/me/blackcat": "Core" },
       tags_by_key: {},
       collapsed_groups: {},
       view: {
@@ -491,7 +491,7 @@ describe("webui API helpers", () => {
     expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
       pinned_keys: ["websocket:chat-1"],
       title_overrides: { "websocket:chat-1": "Release" },
-      project_name_overrides: { "/Users/me/nanobot": "Core" },
+      project_name_overrides: { "/Users/me/blackcat": "Core" },
     });
   });
 
@@ -563,7 +563,7 @@ describe("webui API helpers", () => {
           },
           {
             command: "/restart",
-            title: "Restart nanobot",
+            title: "Restart blackcat",
             description: "Restart the bot process.",
             icon: "rotate-cw",
           },

@@ -1,4 +1,3 @@
-import { BlackcatBrandLogo } from "@/components/settings/SettingsView";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,6 +11,7 @@ import {
 } from "@/lib/bootstrap";
 import {
   createRuntimeHost,
+  getHostApi,
   toRuntimeSurface,
 } from "@/lib/runtime";
 import type {
@@ -19,6 +19,7 @@ import type {
 } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 import AuthForm from "./components/Auth";
+import { BlackcatBrandLogo } from "./components/settings/BrandLogo";
 import Shell from "./components/Shell";
 import { TOKEN_REFRESH_MARGIN_MS, TOKEN_REFRESH_MIN_DELAY_MS } from "./constants";
 
@@ -53,6 +54,36 @@ export default function App() {
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
+
+  const refreshReadyClient = useCallback(
+    async (client: BlackcatClient, fallbackSurface: RuntimeSurface) => {
+      const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+      const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+      const runtimeSurface = boot.runtime_surface
+        ? toRuntimeSurface(boot.runtime_surface)
+        : fallbackSurface;
+      const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
+      const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
+      if (runtimeHost.socketFactory) {
+        client.updateUrl(url, runtimeHost.socketFactory);
+      } else {
+        client.updateUrl(url);
+      }
+      setState((current) =>
+        current.status === "ready" && current.client === client
+          ? {
+              ...current,
+              token: boot.token,
+              tokenExpiresAt,
+              modelName: boot.model_name ?? current.modelName,
+              runtimeSurface,
+            }
+          : current,
+      );
+      return { token: boot.token, url };
+    },
+    [],
+  );
 
   const bootstrapWithSecret = useCallback(
     (secret: string) => {
@@ -230,6 +261,16 @@ export default function App() {
     setState({ status: "auth" });
   };
 
+    const handleNativeEngineRestart = async (): Promise<string> => {
+    const hostApi = getHostApi();
+    if (!hostApi?.restartEngine) {
+      throw new Error("native engine restart is unavailable");
+    }
+    await hostApi.restartEngine();
+    const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
+    return refreshed.token;
+  };
+
   return (
     <ClientProvider
       client={state.client}
@@ -240,6 +281,7 @@ export default function App() {
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
+        onNativeEngineRestart={handleNativeEngineRestart}
       />
     </ClientProvider>
   );

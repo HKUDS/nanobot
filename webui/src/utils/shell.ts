@@ -1,6 +1,6 @@
 import { SettingsSectionKey } from "@/components/settings/SettingsView";
 
-export type ShellView = "chat" | "settings" | "apps";
+export type ShellView = "chat" | "settings" | "apps" | "skills";
 
 export type ShellRoute = {
   view: ShellView;
@@ -13,8 +13,10 @@ export const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "appearance",
   "models",
   "image",
+  "voice",
   "browser",
   "apps",
+  "skills",
   "runtime",
   "advanced",
 ];
@@ -91,4 +93,9 @@ export function shellRouteHash(route: ShellRoute): string {
 
 function isSettingsSectionKey(value: string | null): value is SettingsSectionKey {
   return SETTINGS_SECTION_KEYS.includes(value as SettingsSectionKey);
+}
+
+export function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
+  if (section === "apps" || section === "skills") return section;
+  return "settings";
 }

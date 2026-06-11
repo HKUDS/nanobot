@@ -14,7 +14,7 @@ import { projectNameFromPath } from "../lib/workspace";
 import { useClient } from "../providers/ClientProvider";
 import { useShellStore } from "../stores/shell-store";
 import { normalizeWorkspaceScope, writeCompletedRunChatIds } from "../utils/helpers";
-import { defaultShellRoute, readShellRoute, ShellView } from "../utils/shell";
+import { defaultShellRoute, readShellRoute, ShellView, shellViewForSettingsSection } from "../utils/shell";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { RenameChatDialog } from "./RenameChatDialog";
 import { SessionSearchDialog } from "./SessionSearchDialog";
@@ -28,10 +28,12 @@ export default function Shell({
   runtimeSurface,
   onModelNameChange,
   onLogout,
+  onNativeEngineRestart,
 }: {
   runtimeSurface: RuntimeSurface;
   onModelNameChange: (modelName: string | null) => void;
-  onLogout: () => void;
+    onLogout: () => void;
+  onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
   const { client, token } = useClient();
@@ -484,7 +486,7 @@ export default function Shell({
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
-        view: section === "apps" ? "apps" : "settings",
+        view: shellViewForSettingsSection(section),
         activeKey,
         settingsSection: section,
       });
@@ -640,7 +642,7 @@ export default function Shell({
     onNewChatInProject,
     onOpenSettings: () => onOpenPage("overview", "settings"),
     onOpenApps: () => onOpenPage("apps", "apps"),
-    onOpenSkills: () => onOpenPage("skills", "apps"),
+    onOpenSkills: () => onOpenPage("skills", "skills"),
     onOpenSearch: onOpenSessionSearch,
     activeUtility: view === "apps" ? "apps" as const : null,
     onToggleArchived,
@@ -797,6 +799,7 @@ export default function Shell({
                   onSectionChange={onSettingsSectionChange}
                   onLogout={onLogout}
                   onRestart={onRestart}
+                  onNativeEngineRestart={onNativeEngineRestart}
                   isRestarting={isRestarting}
                   hostChromeInset={showHostChrome}
                 />

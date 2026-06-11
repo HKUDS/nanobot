@@ -1,29 +1,19 @@
 import {
-  useCallback,
-  useEffect,
-  forwardRef,
-  useMemo,
-  useState,
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-} from "react";
-import {
   Activity,
   ArrowUpCircle,
   Bot,
   Brain,
   Check,
-  CircleAlert,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   Cloud,
   Cpu,
   Database,
+  ExternalLink,
   Eye,
   EyeOff,
-  ExternalLink,
   Gem,
   Globe2,
   Grid3X3,
@@ -35,11 +25,11 @@ import {
   LogOut,
   Mic,
   Moon,
-  PlayCircle,
-  Plus,
   Orbit,
   Palette,
   Pencil,
+  PlayCircle,
+  Plus,
   RotateCcw,
   Search,
   Server,
@@ -53,19 +43,22 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -74,16 +67,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
   createModelConfiguration,
-  fetchSettings,
-  fetchSettingsUsage,
   fetchCliApps,
   fetchMcpPresets,
   fetchProviderModels,
+  fetchSettings,
+  fetchSettingsUsage,
   importMcpConfig,
   loginProviderOAuth,
   logoutProviderOAuth,
@@ -100,16 +100,13 @@ import {
   updateWebSearchSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
-import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import {
   logoFallbackUrls,
   providerBrand,
   providerDisplayLabel,
 } from "@/lib/provider-brand";
-import { cn } from "@/lib/utils";
-import { shortWorkspacePath } from "@/lib/workspace";
-import { useClient } from "@/providers/ClientProvider";
+import { getHostApi } from "@/lib/runtime";
 import type {
   CliAppInfo,
   CliAppsPayload,
@@ -124,6 +121,9 @@ import type {
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { shortWorkspacePath } from "@/lib/workspace";
+import { useClient } from "@/providers/ClientProvider";
 
 export type SettingsSectionKey =
   | "overview"
@@ -1906,7 +1906,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-          {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentVersion ? `v${currentVersion}` : "blackcat"}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
@@ -3348,7 +3348,7 @@ function AppsCatalogSettings({
           <p className="max-w-[680px] text-[13px] leading-5 text-muted-foreground">
             {tx(
               "settings.apps.description",
-              "Add local app adapters and connected tool servers that nanobot can use from chat.",
+              "Add local app adapters and connected tool servers that blackcat can use from chat.",
             )}
           </p>
           <span className="text-[12px] font-medium text-muted-foreground">{caption}</span>
@@ -4408,7 +4408,7 @@ function RuntimeSettings({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.identity", "Identity")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever nanobot uses a display name.")}>
+          <SettingsRow title={tx("settings.rows.botName", "Bot name")} description={tx("settings.help.botName", "Shown wherever blackcat uses a display name.")}>
             <Input
               value={form.botName}
               onChange={(event) => setForm((prev) => ({ ...prev, botName: event.target.value }))}
@@ -6011,18 +6011,6 @@ function NumberInput({
         className="h-8 w-24 rounded-full text-[13px]"
       />
       {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
-    </div>
-  );
-}
-
-export function BlackcatBrandLogo({ size = "md", testId }: { size?: "sm" | "md" | "lg"; testId?: string }) {
-  const sizeClass = size === "sm" ? "w-8 h-8" : size === "lg" ? "w-16 h-16" : "w-10 h-10";
-  return (
-    <div
-      data-testid={testId ?? "blackcat-brand-logo"}
-      className={`${sizeClass} flex items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-600 p-1 shadow-lg`}
-    >
-      <span className="text-lg font-bold text-white">🐈</span>
     </div>
   );
 }
