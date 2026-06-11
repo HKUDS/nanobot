@@ -683,7 +683,7 @@ def test_make_provider_treats_dynamic_custom_provider_as_direct():
         }
     )
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         provider = make_provider(config)
         asyncio.run(provider._ensure_client())
 
@@ -1819,94 +1819,6 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
-
-
-def test_configure_desktop_gateway_forces_local_websocket_only() -> None:
-    from blackcat.cli.commands import _configure_desktop_gateway
-
-    config = Config()
-    config.channels.__pydantic_extra__ = {
-        "telegram": {"enabled": True, "token": "x"},
-        "websocket": {"enabled": False, "port": 8765},
-    }
-
-    _configure_desktop_gateway(
-        config,
-        webui_port=29888,
-        webui_socket="/tmp/blackcat-test.sock",
-        token_issue_secret="secret",
-    )
-
-    extras = config.channels.__pydantic_extra__ or {}
-    assert config.gateway.host == "127.0.0.1"
-    assert config.gateway.port == 29888
-    assert config.gateway.heartbeat.enabled is False
-    assert extras["telegram"]["enabled"] is False
-    assert extras["websocket"]["enabled"] is True
-    assert extras["websocket"]["host"] == "127.0.0.1"
-    assert extras["websocket"]["port"] == 29888
-    assert extras["websocket"]["unix_socket_path"] == "/tmp/blackcat-test.sock"
-    assert extras["websocket"]["token_issue_secret"] == "secret"
-    assert extras["websocket"]["websocket_requires_token"] is True
-
-
-def test_load_or_create_desktop_config_bootstraps_without_api_key(tmp_path: Path) -> None:
-    from blackcat.cli.commands import _load_or_create_desktop_config
-
-    config_path = tmp_path / "config.json"
-    loaded = _load_or_create_desktop_config(
-        str(config_path),
-        str(tmp_path / "workspace"),
-    )
-
-    assert loaded.agents.defaults.provider == "openai_codex"
-    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
-    assert loaded.agents.defaults.model_preset is None
-    assert config_path.exists()
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-    assert saved["agents"]["defaults"]["provider"] == ""
-    assert saved["agents"]["defaults"]["model"] == ""
-    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
-
-
-def test_load_or_create_desktop_config_repairs_existing_unconfigured_default(
-    tmp_path: Path,
-) -> None:
-    from blackcat.cli.commands import _load_or_create_desktop_config
-    from blackcat.config.loader import save_config
-
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-
-    loaded = _load_or_create_desktop_config(str(config_path), None)
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-
-    assert loaded.agents.defaults.provider == "openai_codex"
-    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
-    assert saved["agents"]["defaults"]["provider"] == ""
-    assert saved["agents"]["defaults"]["model"] == ""
-    assert make_provider(loaded).get_default_model() == "openai-codex/gpt-5.1-codex"
-
-
-def test_load_or_create_desktop_config_unwinds_persisted_bootstrap(
-    tmp_path: Path,
-) -> None:
-    from blackcat.cli.commands import _load_or_create_desktop_config
-    from blackcat.config.loader import save_config
-
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.agents.defaults.provider = "openai_codex"
-    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
-    save_config(config, config_path)
-
-    loaded = _load_or_create_desktop_config(str(config_path), None)
-    saved = json.loads(config_path.read_text(encoding="utf-8"))
-
-    assert loaded.agents.defaults.provider == "openai_codex"
-    assert loaded.agents.defaults.model == "openai-codex/gpt-5.1-codex"
-    assert saved["agents"]["defaults"]["provider"] == ""
-    assert saved["agents"]["defaults"]["model"] == ""
 
 
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
