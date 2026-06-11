@@ -164,7 +164,7 @@ class Consolidator:
             len(chunk),
             replay_max_messages,
         )
-        summary = await self.archive(chunk)
+        summary = await self.archive(chunk, session_key=session.key)
         session.last_consolidated = end_idx
         self.sessions.save(session)
         return summary
@@ -337,7 +337,7 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk)
+                summary = await self.archive(chunk, session_key=session.key)
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
@@ -409,7 +409,7 @@ class Consolidator:
             last_active = session.updated_at
             summary: str | None = ""
             if archive_msgs:
-                summary = await self.archive(archive_msgs)
+                summary = await self.archive(archive_msgs, session_key=session_key)
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {
