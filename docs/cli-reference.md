@@ -13,6 +13,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
 | Use WebUI or chat apps | `nanobot gateway` | Keep this terminal running while those surfaces are in use |
+| Run WebUI/chat apps in the background | `nanobot gateway start` | Starts the gateway if it is not already running |
 | Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
@@ -84,6 +85,11 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Command | Description |
 |---|---|
 | `nanobot gateway` | Start the gateway with config defaults |
+| `nanobot gateway run` | Start the gateway in the foreground |
+| `nanobot gateway start` | Start the gateway in the background if it is not already running |
+| `nanobot gateway stop` | Stop the running gateway process |
+| `nanobot gateway restart` | Restart the running gateway process |
+| `nanobot gateway status` | Show gateway runtime status |
 | `nanobot gateway --verbose` | Show verbose runtime output |
 | `nanobot gateway --port <port>` | Override `gateway.port` for the health endpoint |
 | `nanobot gateway --workspace <path>` | Override workspace |
