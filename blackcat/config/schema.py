@@ -245,7 +245,14 @@ class ProvidersConfig(Base):
     def convert_extra_providers(self):
         """Convert extra fields (custom providers) to ProviderConfig objects."""
         if self.model_extra:
+            from nanobot.providers.registry import find_by_name
+
             for key, value in self.model_extra.items():
+                if spec := find_by_name(key):
+                    raise ValueError(
+                        f"providers.{key} conflicts with built-in provider {spec.name!r}; "
+                        "use the built-in provider key or choose a different custom provider name"
+                    )
                 if isinstance(value, dict):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self

@@ -60,6 +60,18 @@ def test_provider_api_type_is_openai_only() -> None:
         })
 
 
+@pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
+def test_dynamic_custom_provider_rejects_builtin_provider_aliases(provider_name: str) -> None:
+    with pytest.raises(ValueError, match="conflicts with built-in provider"):
+        Config.model_validate({
+            "providers": {
+                provider_name: {
+                    "apiBase": "https://example.test/v1",
+                }
+            }
+        })
+
+
 def test_custom_provider_fallback_uses_model_extra_without_pydantic_warnings() -> None:
     config = Config.model_validate({
         "agents": {
