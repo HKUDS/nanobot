@@ -695,6 +695,41 @@ def test_make_provider_treats_dynamic_custom_provider_as_direct():
     assert kwargs["base_url"] == "https://example.com/v1"
 
 
+def test_make_provider_rejects_dynamic_custom_provider_without_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "my-company-api", "model": "gpt-4o-mini"}},
+            "providers": {
+                "my-company-api": {
+                    "apiKey": "sk-test",
+                }
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="Provider 'my-company-api' requires api_base"):
+        make_provider(config)
+
+
+def test_make_provider_rejects_auto_dynamic_custom_prefix_without_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "companyProxy/gpt-4o"}},
+            "providers": {
+                "otherProxy": {
+                    "apiBase": "https://other.example.test/v1",
+                },
+                "companyProxy": {
+                    "apiKey": "sk-company",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="Provider 'companyProxy' requires api_base"):
+        make_provider(config)
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""

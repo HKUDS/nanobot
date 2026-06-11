@@ -406,16 +406,24 @@ class Config(BaseSettings):
 
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
+
+        def _custom_provider_by_name(name: str) -> tuple[ProviderConfig, str] | None:
+            normalized = name.replace("-", "_").lower()
+            for attr_name, provider in (self.providers.model_extra or {}).items():
+                if not isinstance(provider, ProviderConfig):
+                    continue
+                if attr_name.replace("-", "_").lower() == normalized:
+                    return provider, attr_name
+            return None
+
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
-            # Check for custom provider by name (try both original and normalized)
-            for name_to_try in (forced, forced.replace("-", "_")):
-                p = getattr(self.providers, name_to_try, None)
-                if p and isinstance(p, ProviderConfig):
-                    return p, name_to_try
+            custom = _custom_provider_by_name(forced)
+            if custom is not None:
+                return custom
             return None, None
 
         model_lower = (model or resolved.model).lower()
@@ -436,13 +444,14 @@ class Config(BaseSettings):
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
 
-        # Check for custom provider by prefix (e.g., "myprovider/gpt-4")
-        # Try both original prefix and normalized (snake_case) prefix
+        # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
+        # Return the matching provider even when apiBase is missing, so a
+        # malformed explicit prefix fails instead of falling through to a
+        # different custom provider.
         if model_prefix:
-            for prefix_to_try in (model_prefix, normalized_prefix):
-                p = getattr(self.providers, prefix_to_try, None)
-                if p and isinstance(p, ProviderConfig) and p.api_base:
-                    return p, prefix_to_try
+            custom = _custom_provider_by_name(normalized_prefix)
+            if custom is not None:
+                return custom
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
