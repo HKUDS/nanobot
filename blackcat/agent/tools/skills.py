@@ -1,5 +1,7 @@
 """Skill management tools: list, get, create, update skills."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
