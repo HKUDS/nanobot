@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -405,21 +405,28 @@ async def test_close_server_cleans_up_tracked_generators_on_error():
     different task), _close_server must explicitly aclose() tracked async
     generators to prevent GC finalization from crashing the process.
 
+    Uses a real @asynccontextmanager to match the object shape returned by
+    MCP SDK's streamable_http_client(), which stores the underlying async
+    generator at .gen.
+
     Regression test for https://github.com/HKUDS/nanobot/issues/4302
     """
 
     closed_generators: list[str] = []
 
-    class _FakeAsyncGen:
-        """Simulates streamable_http_client async generator."""
+    @asynccontextmanager
+    async def _fake_streamable_http_client():
+        """Simulates streamable_http_client() which returns an
+        _AsyncGeneratorContextManager with the real generator at .gen."""
+        try:
+            yield ("read", "write")
+        finally:
+            closed_generators.append("streamable_http")
 
-        def __init__(self, label: str):
-            self.label = label
-
-        async def aclose(self):
-            closed_generators.append(self.label)
-
-    gen = _FakeAsyncGen("streamable_http")
+    cm = _fake_streamable_http_client()
+    # Enter the context manager so it's in a half-open state, just like
+    # connect_mcp_servers does after enter_async_context().
+    await cm.__aenter__()
 
     class _BrokenStack(AsyncExitStack):
         """Stack whose aclose() raises RuntimeError, simulating the anyio
@@ -433,8 +440,9 @@ async def test_close_server_cleans_up_tracked_generators_on_error():
 
     stack = _BrokenStack()
     await stack.__aenter__()
-    # Simulate what connect_mcp_servers does: attach tracked generators
-    stack._tracked_async_generators = [gen]
+    # Simulate what connect_mcp_servers does: attach the context manager
+    # (not yet unwrapped).  _close_server must unwrap via getattr(cm, "gen", cm).
+    stack._tracked_async_generators = [cm]
 
     state = SimpleNamespace(_mcp_stacks={"test": stack})
 
@@ -444,5 +452,5 @@ async def test_close_server_cleans_up_tracked_generators_on_error():
     # Server removed from state.
     assert "test" not in state._mcp_stacks
 
-    # The tracked async generator was explicitly closed.
+    # The underlying async generator was explicitly closed via .gen.aclose().
     assert closed_generators == ["streamable_http"]
