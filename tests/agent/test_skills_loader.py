@@ -444,3 +444,52 @@ def test_entries_from_agent_dir_returns_real_skill_entries(tmp_path: Path) -> No
     assert any(e["name"] == "auto-sum" for e in entries)
     # Source field stays "workspace" per spec §3.1
     assert all(e["source"] == "workspace" for e in entries)
+
+
+def test_list_skills_priority_user_over_agent_over_builtin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # All three sources have "summarize"
+    builtin = tmp_path / "_fake_builtin"
+    builtin.mkdir()
+    (builtin / "summarize").mkdir()
+    (builtin / "summarize" / "SKILL.md").write_text(
+        "---\nname: summarize\n---\nbuiltin-body"
+    )
+
+    agent_dir = tmp_path / "skills" / "agent" / "summarize"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "SKILL.md").write_text("---\nname: summarize\n---\nagent-body")
+
+    user_dir = tmp_path / "skills" / "summarize"
+    user_dir.mkdir()
+    (user_dir / "SKILL.md").write_text("---\nname: summarize\n---\nuser-body")
+
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=builtin)
+    entries = loader.list_skills(filter_unavailable=False)
+    names = [e["name"] for e in entries]
+    # exactly one "summarize"; the user copy wins
+    assert names.count("summarize") == 1
+    winner = next(e for e in entries if e["name"] == "summarize")
+    assert winner["path"] == str(user_dir / "SKILL.md")
+
+
+def test_collision_warning_logged_once_per_loader(
+    tmp_path: Path, loguru_caplog
+) -> None:
+    builtin = tmp_path / "_fake_builtin"
+    builtin.mkdir()
+    (builtin / "dup").mkdir()
+    (builtin / "dup" / "SKILL.md").write_text("---\nname: dup\n---\nb")
+    user = tmp_path / "skills" / "dup"
+    user.mkdir(parents=True)
+    (user / "SKILL.md").write_text("---\nname: dup\n---\nu")
+
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=builtin)
+    loader.list_skills()
+    loader.list_skills()
+    loader.list_skills()
+    collisions = [
+        r for r in loguru_caplog.records if "collision" in r.getMessage().lower()
+    ]
+    assert len(collisions) == 1

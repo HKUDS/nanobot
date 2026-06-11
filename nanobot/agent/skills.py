@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from loguru import logger
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -32,6 +33,40 @@ class SkillsLoader:
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self._collision_warned = False
+        self._detect_collisions_once()
+
+    def _detect_collisions_once(self) -> None:
+        """Walk all 3 skill sources once and warn about each name collision.
+
+        Order matters: ``(user, agent, builtin)`` — first occurrence wins,
+        rest are reported as "hidden". Idempotent via ``_collision_warned``.
+        """
+        if self._collision_warned:
+            return
+        user = self._skill_entries_from_dir(self.workspace_skills, "workspace")
+        agent = self._entries_from_agent_dir()
+        builtin = (
+            self._skill_entries_from_dir(self.builtin_skills, "builtin")
+            if self.builtin_skills and self.builtin_skills.exists()
+            else []
+        )
+        by_name: dict[str, list[tuple[str, str]]] = {}
+        for src, entries in (("user", user), ("agent", agent), ("builtin", builtin)):
+            for e in entries:
+                by_name.setdefault(e["name"], []).append((src, e["path"]))
+        for name, locs in by_name.items():
+            if len(locs) <= 1:
+                continue
+            _winning_src, winning_path = locs[0]
+            hidden = [p for _src, p in locs[1:]]
+            logger.warning(
+                "Skill name collision: '{}' shadowed at {}, hidden at [{}]",
+                name,
+                winning_path,
+                ", ".join(hidden),
+            )
+        self._collision_warned = True
 
     def _infer_origin_from_path(self, path: Path) -> Literal["user", "agent", "builtin"]:
         """Single inference site for skill physical source (spec §3.1).
@@ -90,29 +125,36 @@ class SkillsLoader:
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
-        List all available skills.
+        List all available skills with user > agent > builtin priority.
 
         Args:
             filter_unavailable: If True, filter out skills with unmet requirements.
 
         Returns:
-            List of skill info dicts with 'name', 'path', 'source'.
+            List of skill info dicts with 'name', 'path', 'source'. Each name
+            appears at most once; user > agent > builtin shadow priority.
         """
         skills = self._skill_entries_from_dir(self.workspace_skills, "workspace")
-        # B2 minimal: agent layer concatenated with workspace before builtin-skip-names
-        # is computed. B3 refines with user > agent > builtin priority + collision warn.
-        skills.extend(self._entries_from_agent_dir())
         workspace_names = {entry["name"] for entry in skills}
+        agent_entries = [
+            e for e in self._entries_from_agent_dir()
+            if e["name"] not in workspace_names
+        ]
+        skills.extend(agent_entries)
+        seen = {e["name"] for e in skills}
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
+                self._skill_entries_from_dir(
+                    self.builtin_skills, "builtin", skip_names=seen
+                )
             )
-
         if self.disabled_skills:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
-
         if filter_unavailable:
-            return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
+            return [
+                s for s in skills
+                if self._check_requirements(self._get_skill_meta(s["name"]))
+            ]
         return skills
 
     def load_skill(self, name: str) -> str | None:
