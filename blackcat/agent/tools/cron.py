@@ -58,6 +58,12 @@ class CronTool(Tool, ContextAware):
         self._cron = cron_service
         self._default_timezone = default_timezone
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
+        self._origin_channel: ContextVar[str] = ContextVar("cron_origin_channel", default="")
+        self._origin_chat_id: ContextVar[str] = ContextVar("cron_origin_chat_id", default="")
+        self._origin_metadata: ContextVar[dict[str, Any] | None] = ContextVar(
+            "cron_origin_metadata",
+            default=None,
+        )
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     @classmethod
@@ -74,6 +80,9 @@ class CronTool(Tool, ContextAware):
         self._session_key.set(
             raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
         )
+        self._origin_channel.set(ctx.channel or "")
+        self._origin_chat_id.set(ctx.chat_id or "")
+        self._origin_metadata.set(dict(ctx.metadata or {}))
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -165,6 +174,10 @@ class CronTool(Tool, ContextAware):
         session_key = self._session_key.get()
         if not session_key:
             return "Error: scheduled cron jobs must be created from a chat session"
+        origin_channel = self._origin_channel.get()
+        origin_chat_id = self._origin_chat_id.get()
+        if not origin_channel or not origin_chat_id:
+            return "Error: scheduled cron jobs must be created from a chat session"
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:
@@ -203,6 +216,9 @@ class CronTool(Tool, ContextAware):
             message=message,
             delete_after_run=delete_after,
             session_key=session_key,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+            origin_metadata=dict(self._origin_metadata.get() or {}),
         )
         return f"Created job '{job.name}' (id: {job.id})"
 

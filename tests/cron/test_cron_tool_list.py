@@ -339,6 +339,9 @@ def test_add_job_binds_current_session_key(tmp_path) -> None:
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
     assert job.payload.session_key == "telegram:chat-1"
+    assert job.payload.origin_channel == "telegram"
+    assert job.payload.origin_chat_id == "chat-1"
+    assert job.payload.origin_metadata == {}
     assert job.payload.channel is None
     assert job.payload.to is None
 
@@ -392,8 +395,8 @@ def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
     assert "Retry including message=" in result
 
 
-def test_add_job_captures_only_session_key(tmp_path) -> None:
-    """CronTool stores the canonical session key without legacy delivery fields."""
+def test_add_job_captures_owner_and_origin_without_legacy_delivery_fields(tmp_path) -> None:
+    """CronTool stores owner/session identity separately from origin delivery context."""
     tool = _make_tool(tmp_path)
     meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     tool.set_context(RequestContext(
@@ -406,6 +409,9 @@ def test_add_job_captures_only_session_key(tmp_path) -> None:
     jobs = tool._cron.list_jobs()
     assert len(jobs) == 1
     assert jobs[0].payload.session_key == "slack:C99:111.222"
+    assert jobs[0].payload.origin_channel == "slack"
+    assert jobs[0].payload.origin_chat_id == "C99"
+    assert jobs[0].payload.origin_metadata == meta
     assert jobs[0].payload.channel is None
     assert jobs[0].payload.to is None
     assert jobs[0].payload.channel_meta == {}

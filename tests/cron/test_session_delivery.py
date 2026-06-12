@@ -1,45 +1,44 @@
 import pytest
 
-from nanobot.cron.session_delivery import bound_session_inbound_context
+from nanobot.cron.session_delivery import origin_delivery_context
+from nanobot.cron.types import CronJob, CronPayload
 
 
-@pytest.mark.parametrize(
-    ("session_key", "expected"),
-    [
-        ("websocket:chat-1", ("websocket", "chat-1", {})),
-        (
-            "discord:456:thread:777",
-            (
-                "discord",
-                "777",
-                {
-                    "context_chat_id": "456",
-                    "parent_channel_id": "456",
-                    "thread_id": "777",
-                },
-            ),
+def test_origin_delivery_context_uses_explicit_origin_fields() -> None:
+    metadata = {
+        "context_chat_id": "456",
+        "parent_channel_id": "456",
+        "thread_id": "777",
+    }
+    job = CronJob(
+        id="thread-check",
+        name="Thread check",
+        payload=CronPayload(
+            message="check",
+            session_key="discord:456:thread:777",
+            origin_channel="discord",
+            origin_chat_id="777",
+            origin_metadata=metadata,
         ),
-        (
-            "feishu:oc_abc:om_root123",
-            (
-                "feishu",
-                "oc_abc",
-                {
-                    "chat_type": "group",
-                    "message_id": "om_root123",
-                    "thread_id": "om_root123",
-                },
-            ),
+    )
+
+    channel, chat_id, returned_metadata = origin_delivery_context(job)
+
+    assert channel == "discord"
+    assert chat_id == "777"
+    assert returned_metadata == metadata
+    assert returned_metadata is not metadata
+
+
+def test_origin_delivery_context_rejects_missing_origin_fields() -> None:
+    job = CronJob(
+        id="old-bound",
+        name="Old bound job",
+        payload=CronPayload(
+            message="check",
+            session_key="websocket:chat-1",
         ),
-        ("slack:C123:1700.42", ("slack", "C123", {"slack": {"thread_ts": "1700.42"}})),
-        ("telegram:-100123:topic:42", ("telegram", "-100123", {"message_thread_id": 42})),
-        ("dingtalk:group:conv-1:user-1", ("dingtalk", "group:conv-1", {})),
-    ],
-)
-def test_bound_session_inbound_context(session_key, expected) -> None:
-    assert bound_session_inbound_context(session_key) == expected
+    )
 
-
-def test_bound_session_inbound_context_rejects_invalid_key() -> None:
-    with pytest.raises(ValueError):
-        bound_session_inbound_context("unified")
+    with pytest.raises(ValueError, match="missing origin delivery context"):
+        origin_delivery_context(job)

@@ -138,6 +138,19 @@ class CronService:
                                 or {}
                             ),
                             session_key=j["payload"].get("sessionKey") or j["payload"].get("session_key"),
+                            origin_channel=(
+                                j["payload"].get("originChannel")
+                                or j["payload"].get("origin_channel")
+                            ),
+                            origin_chat_id=(
+                                j["payload"].get("originChatId")
+                                or j["payload"].get("origin_chat_id")
+                            ),
+                            origin_metadata=(
+                                j["payload"].get("originMetadata")
+                                or j["payload"].get("origin_metadata")
+                                or {}
+                            ),
                         ),
                         state=CronJobState(
                             next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -268,6 +281,9 @@ class CronService:
                         "to": j.payload.to,
                         "channelMeta": j.payload.channel_meta,
                         "sessionKey": j.payload.session_key,
+                        "originChannel": j.payload.origin_channel,
+                        "originChatId": j.payload.origin_chat_id,
+                        "originMetadata": j.payload.origin_metadata,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -524,6 +540,9 @@ class CronService:
         delete_after_run: bool = False,
         channel_meta: dict | None = None,
         session_key: str | None = None,
+        origin_channel: str | None = None,
+        origin_chat_id: str | None = None,
+        origin_metadata: dict | None = None,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -542,6 +561,9 @@ class CronService:
                 to=to,
                 channel_meta=channel_meta or {},
                 session_key=session_key,
+                origin_channel=origin_channel,
+                origin_chat_id=origin_chat_id,
+                origin_metadata=origin_metadata or {},
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,
