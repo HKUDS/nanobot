@@ -341,6 +341,13 @@ function settingsProviderConfigured(
 ): boolean {
   const row = settingsProviderRow(payload, provider);
   if (row) return row.configured;
+  if (provider === "auto") {
+    const resolvedRow = settingsProviderRow(
+      payload,
+      payload.agent.resolved_provider ?? payload.agent.provider,
+    );
+    if (resolvedRow) return resolvedRow.configured;
+  }
   return payload.agent.has_api_key;
 }
 

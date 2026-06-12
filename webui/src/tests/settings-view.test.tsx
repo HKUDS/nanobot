@@ -100,6 +100,46 @@ function settingsPayload(): SettingsPayload {
   };
 }
 
+function autoDynamicProviderPayload(
+  options: {
+    configured: boolean;
+    hasApiKey: boolean;
+    apiBase: string | null;
+    apiKeyHint: string | null;
+  },
+): SettingsPayload {
+  const base = settingsPayload();
+  return {
+    ...base,
+    agent: {
+      ...base.agent,
+      model: "companyProxy/gpt-4o",
+      provider: "companyProxy",
+      resolved_provider: "companyProxy",
+      has_api_key: options.hasApiKey,
+    },
+    model_presets: [
+      {
+        ...base.model_presets[0],
+        model: "companyProxy/gpt-4o",
+        provider: "auto",
+      },
+    ],
+    providers: [
+      {
+        name: "companyProxy",
+        label: "Company Proxy",
+        configured: options.configured,
+        auth_type: "api_key",
+        api_key_required: false,
+        api_key_hint: options.apiKeyHint,
+        api_base: options.apiBase,
+        default_api_base: null,
+      },
+    ],
+  };
+}
+
 const installedAnyGen = {
   name: "anygen",
   display_name: "AnyGen",
@@ -333,6 +373,47 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+  });
+
+  it("uses the resolved provider row for auto dynamic providers without api keys", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({
+      initialSection: "models",
+      initialSettings: autoDynamicProviderPayload({
+        configured: true,
+        hasApiKey: false,
+        apiBase: "https://proxy.example.test/v1",
+        apiKeyHint: null,
+      }),
+    });
+
+    const configurationButton = await screen.findByRole("button", {
+      name: "Current configuration",
+    });
+    expect(configurationButton).toHaveTextContent("companyProxy/gpt-4o");
+    expect(configurationButton).toHaveTextContent("Company Proxy");
+    expect(configurationButton).not.toHaveTextContent("Not configured");
+  });
+
+  it("does not treat auto dynamic provider api keys as configured without apiBase", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({
+      initialSection: "models",
+      initialSettings: autoDynamicProviderPayload({
+        configured: false,
+        hasApiKey: true,
+        apiBase: null,
+        apiKeyHint: "sk-...",
+      }),
+    });
+
+    const configurationButton = await screen.findByRole("button", {
+      name: "Current configuration",
+    });
+    expect(configurationButton).toHaveTextContent("Not configured");
+    expect(configurationButton).toHaveTextContent("Company Proxy · companyProxy/gpt-4o");
   });
 
   it("marks the current model as unconfigured when its provider needs setup", async () => {
