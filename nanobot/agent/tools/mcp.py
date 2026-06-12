@@ -675,16 +675,14 @@ async def connect_mcp_servers(
                 )
                 _sh_cm = streamable_http_client(cfg.url, http_client=http_client)
                 read, write, _ = await server_stack.enter_async_context(_sh_cm)
-                # Track the context manager so _close_server can call __aexit__()
-                # if stack.aclose() fails with a cross-task cancel-scope
-                # RuntimeError.  See #4302.
-                # streamable_http_client() returns an
-                # _AsyncGeneratorContextManager; __aexit__() drives its finally
-                # block (including anyio task-group teardown), which gen.aclose()
-                # alone may not fully unwind.
-                server_stack._tracked_context_managers = [  # type: ignore[attr-defined]
-                    _sh_cm
-                ]
+                # Track the raw async generator so _close_server can attempt
+                # gen.aclose() if stack.aclose() fails with a cross-task
+                # anyio cancel-scope RuntimeError.  See #4302.
+                _tracked_gen = getattr(_sh_cm, "gen", None)
+                if _tracked_gen is not None:
+                    if not hasattr(server_stack, "_tracked_async_generators"):
+                        server_stack._tracked_async_generators = []  # type: ignore[attr-defined]
+                    server_stack._tracked_async_generators.append(_tracked_gen)  # type: ignore[attr-defined]
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 await server_stack.aclose()
@@ -1121,6 +1119,14 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
     return removed
 
 
+# Generators that could not be properly closed because of cross-task
+# anyio cancel-scope errors.  Keeping a strong reference prevents Python's
+# GC from attempting finalization, which would crash the process with
+# "RuntimeError: Attempted to exit cancel scope in a different task".
+# See https://github.com/HKUDS/nanobot/issues/4302
+_unclosed_mcp_generators: set = set()
+
+
 async def _close_server(state: Any, server_name: str) -> None:
     stack = state._mcp_stacks.pop(server_name, None)
     if stack is None:
@@ -1141,19 +1147,13 @@ async def _close_server(state: Any, server_name: str) -> None:
         #
         # See https://github.com/HKUDS/nanobot/issues/4302
         logger.debug("MCP server '{}' cleanup error (can be ignored)", server_name)
-        for cm in getattr(stack, "_tracked_context_managers", []):
-            # Use __aexit__ to properly drive the context manager's finally
-            # block.  For MCP SDK's streamable_http_client this unwinds the
-            # anyio task group and closes the underlying async generator;
-            # gen.aclose() alone may not fully unwind the anyio cancel scope.
+        for gen in getattr(stack, "_tracked_async_generators", []):
             try:
-                await cm.__aexit__(None, None, None)
+                await gen.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                # The generator's finally block runs anyio task-group teardown
+                # which hits the same cross-task cancel-scope error.
+                # Prevent GC from trying again by keeping a strong reference.
+                _unclosed_mcp_generators.add(gen)
             except Exception:
-                # As a last resort, try aclose() on the underlying generator
-                # so it is not left for GC finalization.
-                gen = getattr(cm, "gen", None)
-                if gen is not None:
-                    try:
-                        await gen.aclose()
-                    except Exception:
-                        pass
+                _unclosed_mcp_generators.add(gen)

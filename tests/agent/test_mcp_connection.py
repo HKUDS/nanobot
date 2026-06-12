@@ -400,34 +400,39 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
 
 
 @pytest.mark.asyncio
-async def test_close_server_cleans_up_tracked_context_managers_on_error():
+async def test_close_server_cleans_up_tracked_generators_on_error():
     """When stack.aclose() raises RuntimeError (anyio cancel scope exit from a
-    different task), _close_server must __aexit__() tracked context managers
-    to prevent GC finalization from crashing the process.
+    different task), _close_server must attempt gen.aclose() on the tracked
+    raw async generators.  If gen.aclose() also raises (same cancel-scope
+    issue), the generator must be kept alive in _unclosed_mcp_generators to
+    prevent GC finalization from crashing the process.
 
     Uses a real @asynccontextmanager to match the object shape returned by
-    MCP SDK's streamable_http_client().  __aexit__() drives the finally block
-    (including anyio task-group teardown), which gen.aclose() alone may not
-    fully unwind.
+    MCP SDK's streamable_http_client().  The ``.gen`` attribute on the
+    context manager is the actual async generator that needs cleanup.
 
     Regression test for https://github.com/HKUDS/nanobot/issues/4302
     """
 
-    closed_via_exit: list[str] = []
+    closed_via_gen: list[str] = []
 
     @asynccontextmanager
     async def _fake_streamable_http_client():
         """Simulates streamable_http_client() which returns an
-        _AsyncGeneratorContextManager."""
+        _AsyncGeneratorContextManager with a .gen attribute."""
         try:
             yield ("read", "write")
         finally:
-            closed_via_exit.append("streamable_http")
+            closed_via_gen.append("streamable_http")
 
     cm = _fake_streamable_http_client()
     # Enter the context manager so it's in a half-open state, just like
     # connect_mcp_servers does after enter_async_context().
     await cm.__aenter__()
+
+    # Verify the SDK object shape: _AsyncGeneratorContextManager has .gen
+    raw_gen = cm.gen
+    assert raw_gen is not None
 
     class _BrokenStack(AsyncExitStack):
         """Stack whose aclose() raises RuntimeError, simulating the anyio
@@ -441,11 +446,13 @@ async def test_close_server_cleans_up_tracked_context_managers_on_error():
 
     stack = _BrokenStack()
     await stack.__aenter__()
-    # Simulate what connect_mcp_servers does: store the context manager.
-    # _close_server calls __aexit__() on it for proper cleanup.
-    stack._tracked_context_managers = [cm]
+    # Simulate what connect_mcp_servers does: track the raw generator.
+    stack._tracked_async_generators = [raw_gen]
 
     state = SimpleNamespace(_mcp_stacks={"test": stack})
+
+    # Clear any prior unclosed references.
+    mcp_runtime._unclosed_mcp_generators.clear()
 
     # Should not raise -- the RuntimeError is caught internally.
     await mcp_runtime._close_server(state, "test")
@@ -453,5 +460,62 @@ async def test_close_server_cleans_up_tracked_context_managers_on_error():
     # Server removed from state.
     assert "test" not in state._mcp_stacks
 
-    # The context manager's finally block ran via __aexit__().
-    assert closed_via_exit == ["streamable_http"]
+    # gen.aclose() succeeded and the finally block ran.
+    assert closed_via_gen == ["streamable_http"]
+    # No unclosed generators left behind (aclose succeeded).
+    assert raw_gen not in mcp_runtime._unclosed_mcp_generators
+
+
+@pytest.mark.asyncio
+async def test_close_server_keeps_ref_when_gen_aclose_also_fails():
+    """When stack.aclose() AND gen.aclose() both raise (anyio cancel scope),
+    the generator must be kept alive in _unclosed_mcp_generators to prevent
+    GC finalization from crashing the process.
+
+    This simulates the production scenario where the generator's finally block
+    also uses anyio task groups and hits the same cross-task error.
+    """
+
+    class _CancelScopeBrokenGenerator:
+        """Simulates a generator whose aclose() always raises the cancel scope
+        RuntimeError, matching the MCP SDK streamable_http_client behavior."""
+
+        def __init__(self):
+            self.closed = False
+
+        async def aclose(self):
+            raise RuntimeError(
+                "Attempted to exit cancel scope in a different task "
+                "than it was entered in"
+            )
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    gen = _CancelScopeBrokenGenerator()
+
+    class _BrokenStack(AsyncExitStack):
+        async def aclose(self):
+            raise RuntimeError(
+                "Attempted to exit cancel scope in a different task "
+                "than it was entered in"
+            )
+
+    stack = _BrokenStack()
+    await stack.__aenter__()
+    stack._tracked_async_generators = [gen]
+
+    state = SimpleNamespace(_mcp_stacks={"test": stack})
+
+    mcp_runtime._unclosed_mcp_generators.clear()
+
+    # Should not raise.
+    await mcp_runtime._close_server(state, "test")
+
+    assert "test" not in state._mcp_stacks
+
+    # gen.aclose() failed, so the generator must be kept alive.
+    assert gen in mcp_runtime._unclosed_mcp_generators
