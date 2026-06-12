@@ -551,7 +551,22 @@
     "title": "删除这个对话？",
     "description": "此操作无法撤销。",
     "cancel": "取消",
-    "confirm": "删除"
+    "confirm": "删除",
+    "automationsDescription": "这个对话有关联的自动任务。删除对话也会删除这些自动任务。",
+    "moreAutomations": "另有 {{count}} 个",
+    "confirmWithAutomations": "删除对话和自动任务",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "每 {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "自定义计划"
+    },
+    "next": {
+      "label": "下次：{{time}}",
+      "disabled": "已暂停",
+      "none": "没有下次运行"
+    }
   },
   "connection": {
     "idle": "空闲",

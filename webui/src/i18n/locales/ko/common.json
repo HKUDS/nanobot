@@ -551,7 +551,22 @@
     "title": "이 채팅을 삭제할까요?",
     "description": "이 작업은 되돌릴 수 없습니다.",
     "cancel": "취소",
-    "confirm": "삭제"
+    "confirm": "삭제",
+    "automationsDescription": "이 채팅에는 예약된 자동화가 있습니다. 채팅을 삭제하면 자동화도 함께 삭제됩니다.",
+    "moreAutomations": "+ {{count}}개 더",
+    "confirmWithAutomations": "채팅과 자동화 삭제",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "{{duration}}마다",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "사용자 지정 일정"
+    },
+    "next": {
+      "label": "다음: {{time}}",
+      "disabled": "일시 중지됨",
+      "none": "다음 실행 없음"
+    }
   },
   "connection": {
     "idle": "대기 중",

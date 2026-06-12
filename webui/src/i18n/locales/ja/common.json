@@ -551,7 +551,22 @@
     "title": "このチャットを削除しますか？",
     "description": "この操作は元に戻せません。",
     "cancel": "キャンセル",
-    "confirm": "削除"
+    "confirm": "削除",
+    "automationsDescription": "このチャットにはスケジュール済みの自動タスクがあります。削除するとそれらも削除されます。",
+    "moreAutomations": "他 {{count}} 件",
+    "confirmWithAutomations": "チャットと自動タスクを削除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "{{duration}} ごと",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "カスタムスケジュール"
+    },
+    "next": {
+      "label": "次回: {{time}}",
+      "disabled": "一時停止中",
+      "none": "次回実行なし"
+    }
   },
   "connection": {
     "idle": "待機中",

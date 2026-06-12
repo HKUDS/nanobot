@@ -551,7 +551,22 @@
     "title": "刪除這個對話？",
     "description": "此操作無法復原。",
     "cancel": "取消",
-    "confirm": "刪除"
+    "confirm": "刪除",
+    "automationsDescription": "這個對話有關聯的自動任務。刪除對話也會刪除這些自動任務。",
+    "moreAutomations": "另有 {{count}} 個",
+    "confirmWithAutomations": "刪除對話和自動任務",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "每 {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "自訂計畫"
+    },
+    "next": {
+      "label": "下次：{{time}}",
+      "disabled": "已暫停",
+      "none": "沒有下次執行"
+    }
   },
   "connection": {
     "idle": "閒置",

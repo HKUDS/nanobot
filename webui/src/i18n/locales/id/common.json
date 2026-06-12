@@ -551,7 +551,22 @@
     "title": "Hapus obrolan ini?",
     "description": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
-    "confirm": "Hapus"
+    "confirm": "Hapus",
+    "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
+    "moreAutomations": "+ {{count}} lagi",
+    "confirmWithAutomations": "Hapus obrolan dan automasi",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Setiap {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Jadwal khusus"
+    },
+    "next": {
+      "label": "Berikutnya: {{time}}",
+      "disabled": "Dijeda",
+      "none": "Tidak ada jadwal berikutnya"
+    }
   },
   "connection": {
     "idle": "Idle",

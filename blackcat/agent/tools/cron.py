@@ -72,7 +72,7 @@ class CronTool(Tool, ContextAware):
         """Set the current session context for scheduled cron job ownership."""
         raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
         self._session_key.set(
-            raw_key if ctx.session_key in {None, "", UNIFIED_SESSION_KEY} else ctx.session_key
+            raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
         )
 
     def set_cron_context(self, active: bool):

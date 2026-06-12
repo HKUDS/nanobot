@@ -551,7 +551,22 @@
     "title": "Supprimer cette discussion ?",
     "description": "Cette action est irréversible.",
     "cancel": "Annuler",
-    "confirm": "Supprimer"
+    "confirm": "Supprimer",
+    "automationsDescription": "Cette discussion contient des automatisations planifiées. La supprimer les supprimera aussi.",
+    "moreAutomations": "+ {{count}} autres",
+    "confirmWithAutomations": "Supprimer la discussion et les automatisations",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Tous les {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Planification personnalisée"
+    },
+    "next": {
+      "label": "Prochaine exécution : {{time}}",
+      "disabled": "En pause",
+      "none": "Aucune prochaine exécution"
+    }
   },
   "connection": {
     "idle": "Inactif",
