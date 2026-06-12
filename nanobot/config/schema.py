@@ -270,6 +270,16 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+class AuditConfig(Base):
+    """Audit tool configuration for agent action observability."""
+
+    enable: bool = False
+    scope: list[str] = Field(default_factory=lambda: ["*"])  # Tool name glob patterns; ["*"] = all
+    transport: Literal["log", "bus", "callback"] = "log"  # Where to emit audit events
+
+
+class ToolsConfig(Base):
+    """Tools configuration."""
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
@@ -305,6 +315,7 @@ class ToolsConfig(Base):
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
 
 
 class Config(BaseSettings):
