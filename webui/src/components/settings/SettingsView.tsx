@@ -2720,7 +2720,7 @@ function BehaviorSection({
         className="mb-2 flex w-full items-center gap-1 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85 hover:text-foreground"
       >
         {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
-        {tx("settings.sections.behavior", "Behavior")}
+        {tx("settings.sections.behavior", "Agent limits")}
       </button>
       {open ? (
         <SettingsGroup>
