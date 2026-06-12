@@ -54,7 +54,13 @@ def _error_json(status: int, message: str, err_type: str = "invalid_request_erro
     )
 
 
-def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
+def _chat_completion_response(
+    content: str,
+    model: str,
+    usage: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    prompt = (usage or {}).get("prompt_tokens", 0)
+    completion = (usage or {}).get("completion_tokens", 0)
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
@@ -67,7 +73,11 @@ def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+        },
     }
 
 
@@ -346,7 +356,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         logger.exception("Unexpected API lock error for session {}", session_key)
         return _error_json(500, "Internal server error", err_type="server_error")
 
-    return web.json_response(_chat_completion_response(response_text, model_name))
+    return web.json_response(
+        _chat_completion_response(response_text, model_name, agent_loop._last_usage)
+    )
 
 
 async def handle_models(request: web.Request) -> web.Response:
