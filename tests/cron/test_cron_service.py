@@ -17,6 +17,85 @@ async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01
     assert predicate()
 
 
+def test_add_job_rejects_invalid_cron_expression(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="invalid cron expression"):
+        service.add_job(
+            name="bad expr",
+            schedule=CronSchedule(kind="cron", expr="not a cron", tz="UTC"),
+            message="hello",
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
+def test_add_job_rejects_empty_cron_expression(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="cron_expr is required"):
+        service.add_job(
+            name="no expr",
+            schedule=CronSchedule(kind="cron", expr=None, tz="UTC"),
+            message="hello",
+        )
+
+
+def test_add_job_rejects_invalid_every_ms(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="every_ms must be a positive integer"):
+        service.add_job(
+            name="zero every",
+            schedule=CronSchedule(kind="every", every_ms=0),
+            message="hello",
+        )
+
+
+def test_add_job_rejects_negative_every_ms(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="every_ms must be a positive integer"):
+        service.add_job(
+            name="neg every",
+            schedule=CronSchedule(kind="every", every_ms=-1000),
+            message="hello",
+        )
+
+
+def test_add_job_rejects_missing_at_ms(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="at_ms is required"):
+        service.add_job(
+            name="no at",
+            schedule=CronSchedule(kind="at", at_ms=None),
+            message="hello",
+        )
+
+
+def test_add_job_rejects_tz_with_every_schedule(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="tz can only be used with cron schedules"):
+        service.add_job(
+            name="tz on every",
+            schedule=CronSchedule(kind="every", every_ms=60_000, tz="UTC"),
+            message="hello",
+        )
+
+
+def test_add_job_rejects_tz_with_at_schedule(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="tz can only be used with cron schedules"):
+        service.add_job(
+            name="tz on at",
+            schedule=CronSchedule(kind="at", at_ms=9999999999999, tz="UTC"),
+            message="hello",
+        )
+
+
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
