@@ -8,6 +8,7 @@ from nanobot.cron.types import CronJob
 
 AUTOMATION_TRIGGER_META = "_automation_trigger"
 AUTOMATION_DEFER_UNTIL_IDLE_META = "_defer_until_session_idle"
+AUTOMATION_HISTORY_META = "_automation_turn"
 
 
 def automation_trigger(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:

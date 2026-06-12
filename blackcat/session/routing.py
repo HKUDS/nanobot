@@ -7,8 +7,7 @@ from typing import Any, Mapping
 from blackcat.bus.events import InboundMessage
 from blackcat.cron.automation import is_automation_turn
 from blackcat.session.manager import Session
-
-SESSION_ROUTING_METADATA_KEY = "_routing_context"
+from blackcat.session.metadata import SESSION_ROUTING_METADATA_KEY
 
 _ROUTING_METADATA_KEYS = {
     "chat_type",

@@ -40,6 +40,7 @@ from blackcat.bus.runtime_events import (
 from blackcat.command import CommandContext, CommandRouter, register_builtin_commands
 from blackcat.config.schema import AgentDefaults, ModelPresetConfig
 from blackcat.cron.automation import (
+    AUTOMATION_HISTORY_META,
     automation_run_id,
     automation_trigger,
     defer_until_session_idle,
@@ -57,6 +58,7 @@ from blackcat.session.goal_state import (
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
+from blackcat.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from blackcat.session.manager import Session, SessionManager
 from blackcat.session.routing import persist_routing_context
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
@@ -77,8 +79,6 @@ if TYPE_CHECKING:
     )
     from blackcat.cron.service import CronService
 
-
-UNIFIED_SESSION_KEY = "unified:default"
 
 class TurnState(Enum):
     RESTORE = auto()
@@ -522,12 +522,11 @@ class AgentLoop:
         """Update context for all tools that need routing info."""
         from blackcat.agent.tools.context import ContextAware
 
-        if session_key is not None:
-            effective_key = session_key
-        elif self._unified_session:
-            effective_key = UNIFIED_SESSION_KEY
-        else:
-            effective_key = f"{channel}:{chat_id}"
+        effective_key = session_key or session_key_for_channel(
+            channel,
+            chat_id,
+            unified_session=self._unified_session,
+        )
         request_ctx = RequestContext(
             channel=channel,
             chat_id=chat_id,
@@ -646,7 +645,7 @@ class AgentLoop:
                 if isinstance(persist_content, str) and persist_content.strip():
                     text = persist_content
                 extra.update({
-                    "_automation_trigger": True,
+                    AUTOMATION_HISTORY_META: True,
                     "automation_id": trigger.get("job_id"),
                     "automation_name": trigger.get("job_name"),
                     "automation_run_id": trigger.get("run_id"),

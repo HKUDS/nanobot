@@ -130,7 +130,7 @@ Instead, persist a readable automation trigger event, for example:
 {
   "role": "user",
   "content": "Scheduled automation triggered: daily monitor\n\nCheck ...",
-  "_automation_trigger": true,
+  "_automation_turn": true,
   "automation_id": "abc123",
   "automation_name": "daily monitor",
   "automation_run_id": "abc123:1770000000000",

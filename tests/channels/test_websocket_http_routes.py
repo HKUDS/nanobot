@@ -11,10 +11,10 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 
-from blackcat.agent.loop import UNIFIED_SESSION_KEY
 from blackcat.channels.websocket import WebSocketChannel, WebSocketConfig
 from blackcat.cron.service import CronService
 from blackcat.cron.types import CronJob, CronPayload, CronSchedule
+from blackcat.session.keys import UNIFIED_SESSION_KEY
 from blackcat.session.manager import Session, SessionManager
 from blackcat.webui.gateway_services import GatewayServices, build_gateway_services
 

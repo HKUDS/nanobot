@@ -592,8 +592,8 @@ async def test_waiting_dispatch_does_not_replace_active_pending_queue(tmp_path):
 @pytest.mark.asyncio
 async def test_followup_routed_to_pending_queue(tmp_path):
     """Unified-session follow-ups should route into the active pending queue."""
-    from blackcat.agent.loop import UNIFIED_SESSION_KEY
     from blackcat.bus.events import InboundMessage
+    from blackcat.session.keys import UNIFIED_SESSION_KEY
 
     loop = _make_loop(tmp_path)
     loop._unified_session = True
@@ -619,8 +619,8 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 @pytest.mark.asyncio
 async def test_automation_turn_deferred_while_session_active(tmp_path):
     """Automation turns wait for the active session instead of becoming injections."""
-    from nanobot.bus.events import InboundMessage
-    from nanobot.cron.automation import (
+    from blackcat.bus.events import InboundMessage
+    from blackcat.cron.automation import (
         AUTOMATION_DEFER_UNTIL_IDLE_META,
         AUTOMATION_TRIGGER_META,
     )

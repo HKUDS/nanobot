@@ -64,6 +64,10 @@ from blackcat.utils.restart import (  # noqa: E402
     format_restart_completed_message,
     should_show_cli_restart_notice,
 )
+from blackcat.webui.metadata import (  # noqa: E402
+    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -89,8 +93,6 @@ class SafeFileHistory(FileHistory):
         super().store_string(_sanitize_surrogates(string))
 
 
-_WEBUI_TURN_META_KEY = "webui_turn_id"
-_WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
 _PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
     "proactive_webui_metadata",
     default=None,
@@ -106,13 +108,13 @@ def _proactive_delivery_metadata(
 ) -> dict[str, Any]:
     """Return channel metadata for a fresh proactive delivery turn."""
     out = dict(metadata or {})
-    out.pop(_WEBUI_TURN_META_KEY, None)
+    out.pop(WEBUI_TURN_METADATA_KEY, None)
     if channel == "websocket":
-        out[_WEBUI_TURN_META_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
+        out[WEBUI_TURN_METADATA_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
         source: dict[str, str] = {"kind": "cron"}
         if source_label:
             source["label"] = source_label
-        out[_WEBUI_MESSAGE_SOURCE_META_KEY] = source
+        out[WEBUI_MESSAGE_SOURCE_METADATA_KEY] = source
     return out
 
 app = typer.Typer(
@@ -1034,14 +1036,14 @@ def _run_gateway(
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
 
-    from blackcat.agent.loop import UNIFIED_SESSION_KEY
     from blackcat.bus.events import InboundMessage, OutboundMessage
+    from blackcat.session.keys import session_key_for_channel
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
-        return (
-            UNIFIED_SESSION_KEY
-            if config.agents.defaults.unified_session
-            else f"{channel}:{chat_id}"
+        return session_key_for_channel(
+            channel,
+            chat_id,
+            unified_session=config.agents.defaults.unified_session,
         )
 
     def _session_metadata(session_key: str) -> dict[str, Any]:
@@ -1125,17 +1127,20 @@ def _run_gateway(
             ),
         }
         metadata[AUTOMATION_DEFER_UNTIL_IDLE_META] = True
+        run_record_base: dict[str, Any] = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "session_key": session_key,
+            "prompt_ref": prompt_ref,
+            "prompt_vars": {"message": job.payload.message},
+            "rendered_prompt": prompt,
+        }
 
         cron.write_run_record(
             run_id,
             {
-                "job_id": job.id,
-                "job_name": job.name,
-                "session_key": session_key,
+                **run_record_base,
                 "status": "queued",
-                "prompt_ref": prompt_ref,
-                "prompt_vars": {"message": job.payload.message},
-                "rendered_prompt": prompt,
             },
         )
 
@@ -1159,14 +1164,9 @@ def _run_gateway(
             cron.write_run_record(
                 run_id,
                 {
-                    "job_id": job.id,
-                    "job_name": job.name,
-                    "session_key": session_key,
+                    **run_record_base,
                     "status": "error",
                     "error": error_text,
-                    "prompt_ref": prompt_ref,
-                    "prompt_vars": {"message": job.payload.message},
-                    "rendered_prompt": prompt,
                 },
             )
             raise
@@ -1178,13 +1178,8 @@ def _run_gateway(
         cron.write_run_record(
             run_id,
             {
-                "job_id": job.id,
-                "job_name": job.name,
-                "session_key": session_key,
+                **run_record_base,
                 "status": "ok",
-                "prompt_ref": prompt_ref,
-                "prompt_vars": {"message": job.payload.message},
-                "rendered_prompt": prompt,
                 "response": response,
             },
         )

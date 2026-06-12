@@ -347,7 +347,7 @@ def test_add_job_requires_session_key(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     tool.set_context(RequestContext(channel="telegram", chat_id="chat-1"))
 
-    result = tool._add_job(None, "Background refresh", 60, None, None, None, deliver=False)
+    result = tool._add_job(None, "Background refresh", 60, None, None, None)
 
     assert result == "Error: scheduled automations must be created from a chat session"
     assert tool._cron.list_jobs() == []
