@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -30,6 +31,7 @@ class WhatsAppConfig(Base):
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
+    mention_sender: bool = False
 
 
 def _bridge_token_path() -> Path:
@@ -174,7 +176,46 @@ class WhatsAppChannel(BaseChannel):
 
         if msg.content:
             try:
+                metadata = msg.metadata or {}
+                mentions: list[str] = []
+
+                configured_mentions = metadata.get("mentions") or metadata.get("mentioned_jids") or []
+                if isinstance(configured_mentions, str):
+                    configured_mentions = [configured_mentions]
+
+                for value in configured_mentions:
+                    raw = str(value).strip()
+                    if not raw:
+                        continue
+                    if "@" in raw:
+                        mentions.append(raw)
+                    else:
+                        digits = re.sub(r"\\D", "", raw)
+                        if digits:
+                            mentions.append(f"{digits}@s.whatsapp.net")
+
+                if getattr(self.config, "mention_sender", False):
+                    participant = metadata.get("participant")
+                    if participant:
+                        mentions.append(str(participant).strip())
+
+
+                for raw_number in re.findall(r"@(\d{5,20})\b", msg.content):
+                    if len(raw_number) >= 14:
+                        mentions.append(f"{raw_number}@lid")
+                    else:
+                        mentions.append(f"{raw_number}@s.whatsapp.net")
+
+                deduped_mentions: list[str] = []
+                seen_mentions: set[str] = set()
+                for jid in mentions:
+                    if jid and jid not in seen_mentions:
+                        seen_mentions.add(jid)
+                        deduped_mentions.append(jid)
+
                 payload = {"type": "send", "to": chat_id, "text": msg.content}
+                if deduped_mentions:
+                    payload["mentions"] = deduped_mentions
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
             except Exception:
                 self.logger.exception("Error sending message")
@@ -290,7 +331,6 @@ class WhatsAppChannel(BaseChannel):
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
                     "is_group": data.get("isGroup", False),
-                    "is_forwarded": bool(data.get("isForwarded", False)),
                     "participant": participant or None,
                     "is_reply_to_bot": data.get("isReplyToBot", False),
                 },

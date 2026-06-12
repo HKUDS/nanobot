@@ -30,7 +30,6 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
-  isForwarded?: boolean;
   wasMentioned?: boolean;
   isReplyToBot?: boolean;
   media?: string[];
@@ -98,20 +97,12 @@ export class WhatsAppClient {
     return { wasMentioned, isReplyToBot };
   }
 
-  private isForwarded(msg: any): boolean {
-    return this.messageContextInfos(msg).some((info) => Boolean(info?.isForwarded));
-  }
-
   async connect(): Promise<void> {
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
     console.log(`Using Baileys version: ${version.join('.')}`);
-
-    // Record startup time — messages older than this will be ignored
-    // to avoid replaying history on reconnect
-    const startupTimestamp = Math.floor(Date.now() / 1000);
 
     // Create socket following OpenClaw's pattern
     this.sock = makeWASocket({
@@ -177,10 +168,6 @@ export class WhatsAppClient {
         if (msg.key.fromMe) continue;
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
-        // Drop messages older than startup time (avoid replaying history on reconnect)
-        const msgTimestamp = msg.messageTimestamp as number;
-        if (msgTimestamp && msgTimestamp < startupTimestamp) continue;
-
         const unwrapped = baileysExtractMessageContent(msg.message);
         if (!unwrapped) continue;
 
@@ -205,23 +192,7 @@ export class WhatsAppClient {
           fallbackContent = '[Voice Message]';
           const path = await this.downloadMedia(msg, unwrapped.audioMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
-        } else if (unwrapped.contactMessage) {
-          // Single shared contact
-          const displayName = unwrapped.contactMessage.displayName || '';
-          const vcard = unwrapped.contactMessage.vcard || '';
-          fallbackContent = `[Contact: ${displayName}]\n${vcard}`;
-        } else if (unwrapped.contactsArrayMessage) {
-          // Multiple shared contacts
-          const vcards = unwrapped.contactsArrayMessage.contacts || [];
-          const parts = vcards.map((c: any) => {
-            const name = c.displayName || '';
-            const vc = c.vcard || '';
-            return `[Contact: ${name}]\n${vc}`;
-          });
-          fallbackContent = parts.join('\n\n');
         }
-
-        const isForwarded = this.isForwarded(msg);
 
         const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
         if (!finalContent && mediaPaths.length === 0) continue;
@@ -237,7 +208,6 @@ export class WhatsAppClient {
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
-          ...(isForwarded ? { isForwarded } : {}),
           ...(isGroup ? { wasMentioned: wasMentioned || isReplyToBot, isReplyToBot } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
@@ -309,12 +279,15 @@ export class WhatsAppClient {
     return null;
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  async sendMessage(to: string, text: string, mentions?: string[]): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    await this.sock.sendMessage(to, {
+      text,
+      ...(mentions?.length ? { mentions } : {}),
+    });
   }
 
   async sendMedia(
