@@ -58,6 +58,7 @@ Tool signatures are provided automatically via function calling. This section do
 - Use `message` to send content or local media to the user/channel.
 - `read_file` only reads content for your analysis; it does not deliver a file to the user.
 - When sending an existing local file, attach it through the message/media mechanism instead of pasting file contents unless the user asked for text.
+- To send a voice message, set `tts=True` on the `message` tool. The content text is synthesized into speech and sent as audio. Requires TTS to be enabled and configured in nanobot settings.
 
 ## Scheduling and Background Work
 
