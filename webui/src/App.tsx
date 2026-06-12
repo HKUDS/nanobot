@@ -43,7 +43,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { fetchSessionAutomations, fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
   getHostApi,
@@ -548,7 +548,6 @@ function Shell({
     key: string;
     label: string;
     automations?: SessionAutomationJob[];
-    confirmAutomations?: boolean;
   } | null>(null);
   const [pendingRename, setPendingRename] = useState<{
     key: string;
@@ -1273,6 +1272,7 @@ function Shell({
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
     const key = pendingDelete.key;
+    const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
     const deletingActive = activeKey === key;
     const currentIndex = sessions.findIndex((s) => s.key === key);
     const fallbackKey = deletingActive
@@ -1281,13 +1281,12 @@ function Shell({
     try {
       const result = await deleteChat(
         key,
-        pendingDelete.confirmAutomations ? { deleteAutomations: true } : undefined,
+        hasAutomations ? { deleteAutomations: true } : undefined,
       );
       if (result.blocked_by_automations) {
         setPendingDelete({
           ...pendingDelete,
           automations: result.automations ?? [],
-          confirmAutomations: true,
         });
         return;
       }
@@ -1303,6 +1302,16 @@ function Shell({
       console.error("Failed to delete session", e);
     }
   }, [pendingDelete, deleteChat, activeKey, navigate, sessions]);
+
+  const onRequestDelete = useCallback(async (key: string, label: string) => {
+    let automations: SessionAutomationJob[] = [];
+    try {
+      automations = (await fetchSessionAutomations(token, key)).jobs;
+    } catch {
+      // Delete remains protected by the backend block; prefetch only improves the first prompt.
+    }
+    setPendingDelete({ key, label, automations });
+  }, [token]);
 
   const headerTitle = activeSession
     ? sidebarState.title_overrides[activeSession.key] ||
@@ -1340,8 +1349,7 @@ function Shell({
     loading,
     onNewChat,
     onSelect: onSelectChat,
-    onRequestDelete: (key: string, label: string) =>
-      setPendingDelete({ key, label }),
+    onRequestDelete,
     onTogglePin,
     onRequestRename,
     onToggleArchive,
@@ -1566,7 +1574,7 @@ function Shell({
         <DeleteConfirm
           open={!!pendingDelete}
           title={pendingDelete?.label ?? ""}
-          automations={pendingDelete?.confirmAutomations ? pendingDelete.automations : undefined}
+          automations={pendingDelete?.automations}
           onCancel={() => setPendingDelete(null)}
           onConfirm={onConfirmDelete}
         />
