@@ -1467,6 +1467,23 @@ def test_save_turn_drops_orphaned_tool_results() -> None:
     assert [m["role"] for m in session.messages] == ["user", "assistant"]
 
 
+def test_save_turn_drops_tool_results_without_tool_call_id() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:missing-tool-call-id")
+    session.add_message("user", "hi")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "tool", "name": "exec", "content": "missing id"},
+            {"role": "assistant", "content": "done"},
+        ],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["user", "assistant"]
+
+
 def test_save_turn_keeps_tool_results_declared_in_prior_history() -> None:
     # Declarations may live in already-persisted history (e.g. a restored
     # runtime checkpoint), not only in the new-turn slice.

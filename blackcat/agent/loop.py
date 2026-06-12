@@ -1626,13 +1626,13 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 tool_call_id = entry.get("tool_call_id")
-                if tool_call_id and str(tool_call_id) not in declared_tool_call_ids:
+                if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
                     # A tool result without a declared call violates the
                     # OpenAI/Anthropic pairing contract and would poison
                     # every future request built from this session (#4006).
                     logger.warning(
                         "Dropping orphaned tool result {} from session {} during persistence",
-                        tool_call_id,
+                        tool_call_id or "(missing id)",
                         session.key,
                     )
                     continue
