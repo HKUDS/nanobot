@@ -10,7 +10,7 @@ from loguru import logger
 from blackcat.agent.tools.base import Tool
 from blackcat.agent.tools.context import ContextAware, RequestContext
 from blackcat.agent.tools.runtime_state import RuntimeState
-from blackcat.config.schema import Base, Field
+from blackcat.config_base import Base
 
 if TYPE_CHECKING:
     from blackcat.agent.subagent import SubagentStatus
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class MyToolConfig(Base):
     """Self-inspection tool configuration."""
     enable: bool = True
-    allow_set: bool = Field(default=False, alias="allowSet")
+    allow_set: bool = False
 
 
 def _has_real_attr(obj: Any, key: str) -> bool:

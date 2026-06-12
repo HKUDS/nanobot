@@ -4,10 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
-from pydantic.alias_generators import to_camel
+from pydantic import AliasChoices, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 
+from blackcat.config_base import Base
 from blackcat.cron.types import CronSchedule
 
 if TYPE_CHECKING:
@@ -16,12 +16,6 @@ if TYPE_CHECKING:
     from blackcat.agent.tools.self import MyToolConfig
     from blackcat.agent.tools.shell import ExecToolConfig
     from blackcat.agent.tools.web import WebToolsConfig
-
-
-class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 class ChannelsConfig(Base):
@@ -245,7 +239,7 @@ class ProvidersConfig(Base):
     def convert_extra_providers(self):
         """Convert extra fields (custom providers) to ProviderConfig objects."""
         if self.model_extra:
-            from nanobot.providers.registry import find_by_name
+            from blackcat.providers.registry import find_by_name
 
             for key, value in self.model_extra.items():
                 if spec := find_by_name(key):
@@ -320,8 +314,8 @@ class ToolsConfig(Base):
     """Tools configuration.
 
     Field types for tool-specific sub-configs are resolved via model_rebuild()
-    at the bottom of this file to avoid circular imports (tool modules import
-    Base from schema.py).
+    at the bottom of this file so tool config classes can stay next to their
+    tool implementations.
     """
 
     web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.web", "WebToolsConfig"))

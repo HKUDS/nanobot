@@ -14,21 +14,21 @@ from blackcat.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.config.paths import get_media_dir
-from blackcat.config.schema import Base
+from blackcat.config_base import Base
 from blackcat.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,
     get_image_gen_provider,
 )
-from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from blackcat.utils.artifacts import (
     ArtifactError,
     generated_image_tool_result,
     store_generated_image_artifact,
 )
-from blackcat.utils.media import detect_image_mime
+from blackcat.utils.helpers import detect_image_mime
 
 if TYPE_CHECKING:
     from blackcat.config.schema import ProviderConfig

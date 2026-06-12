@@ -34,7 +34,7 @@ from blackcat.agent.tools.schema import (
     tool_parameters_schema,
 )
 from blackcat.config.paths import get_media_dir
-from blackcat.config.schema import Base
+from blackcat.config_base import Base
 from blackcat.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from blackcat.security.workspace_policy import is_path_within
 
