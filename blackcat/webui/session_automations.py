@@ -8,7 +8,7 @@ from blackcat.cron.types import CronJob
 
 
 class _CronServiceLike(Protocol):
-    def list_bound_agent_jobs_for_session(
+    def list_bound_cron_jobs_for_session(
         self,
         session_key: str,
         *,
@@ -23,7 +23,7 @@ def session_automation_jobs(
     """Return user automations attached to the WebUI session."""
     if cron_service is None:
         return []
-    return cron_service.list_bound_agent_jobs_for_session(
+    return cron_service.list_bound_cron_jobs_for_session(
         session_key,
         include_disabled=True,
     )

@@ -617,12 +617,12 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_automation_turn_deferred_while_session_active(tmp_path):
-    """Automation turns wait for the active session instead of becoming injections."""
+async def test_cron_turn_deferred_while_session_active(tmp_path):
+    """Cron turns wait for the active session instead of becoming injections."""
     from blackcat.bus.events import InboundMessage
-    from blackcat.cron.automation import (
-        AUTOMATION_DEFER_UNTIL_IDLE_META,
-        AUTOMATION_TRIGGER_META,
+    from blackcat.cron.session_turns import (
+        CRON_DEFER_UNTIL_IDLE_META,
+        CRON_TRIGGER_META,
     )
 
     loop = _make_loop(tmp_path)
@@ -639,15 +639,15 @@ async def test_automation_turn_deferred_while_session_active(tmp_path):
         chat_id="chat-1",
         content="scheduled work",
         metadata={
-            AUTOMATION_TRIGGER_META: {"run_id": "run-1"},
-            AUTOMATION_DEFER_UNTIL_IDLE_META: True,
+            CRON_TRIGGER_META: {"run_id": "run-1"},
+            CRON_DEFER_UNTIL_IDLE_META: True,
         },
         session_key_override=session_key,
     )
     await loop.bus.publish_inbound(msg)
 
     for _ in range(20):
-        if loop._deferred_automation_queues.get(session_key):
+        if loop._cron_turns.deferred_queues.get(session_key):
             break
         await asyncio.sleep(0.05)
 
@@ -656,12 +656,12 @@ async def test_automation_turn_deferred_while_session_active(tmp_path):
 
     assert pending.empty()
     assert loop._dispatch.await_count == 0
-    assert loop._deferred_automation_queues[session_key] == [msg]
+    assert loop._cron_turns.deferred_queues[session_key] == [msg]
 
-    await loop._publish_next_deferred_automation(session_key)
+    await loop._cron_turns.publish_next_deferred(session_key)
     queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
     assert queued is msg
-    assert session_key not in loop._deferred_automation_queues
+    assert session_key not in loop._cron_turns.deferred_queues
 
 
 @pytest.mark.asyncio

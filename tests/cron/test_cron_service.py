@@ -84,7 +84,7 @@ def test_list_bound_agent_jobs_excludes_legacy_delivery_payloads(tmp_path) -> No
         session_key="websocket:chat-1",
     )
 
-    assert service.list_bound_agent_jobs_for_session("websocket:chat-1") == [bound]
+    assert service.list_bound_cron_jobs_for_session("websocket:chat-1") == [bound]
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from blackcat.agent import context as agent_context
 from blackcat.agent import model_presets as preset_helpers
 from blackcat.agent.autocompact import AutoCompact
 from blackcat.agent.context import ContextBuilder
+from blackcat.agent.cron_turns import CronTurnCoordinator
 from blackcat.agent.hook import AgentHook, CompositeHook
 from blackcat.agent.memory import Consolidator
 from blackcat.agent.progress_hook import AgentProgressHook
@@ -39,11 +40,9 @@ from blackcat.bus.runtime_events import (
 )
 from blackcat.command import CommandContext, CommandRouter, register_builtin_commands
 from blackcat.config.schema import AgentDefaults, ModelPresetConfig
-from blackcat.cron.automation import (
-    AUTOMATION_HISTORY_META,
-    automation_run_id,
-    automation_trigger,
-    defer_until_session_idle,
+from blackcat.cron.session_turns import (
+    CRON_HISTORY_META,
+    cron_trigger,
 )
 from blackcat.providers.base import LLMProvider
 from blackcat.providers.factory import ProviderSnapshot
@@ -306,10 +305,11 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
-        # Scheduled automations wait for the current visible turn to finish.
-        # They must not be injected into the active model call as follow-up text.
-        self._deferred_automation_queues: dict[str, list[InboundMessage]] = {}
-        self._automation_waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
+        self._cron_turns = CronTurnCoordinator(
+            publish_inbound=self.bus.publish_inbound,
+            dispatch=self._dispatch,
+            is_running=lambda: self._running,
+        )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -573,54 +573,8 @@ class AgentLoop:
     def _runtime_events(self) -> RuntimeEventPublisher:
         return ensure_runtime_event_publisher(self)
 
-    async def submit_automation_turn(self, msg: InboundMessage) -> OutboundMessage | None:
-        """Submit a scheduled automation as an internal session turn and wait for it."""
-        run_id = automation_run_id(msg.metadata)
-        if not run_id:
-            raise ValueError("automation turn metadata must include a run_id")
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[OutboundMessage | None] = loop.create_future()
-        if run_id in self._automation_waiters:
-            raise RuntimeError(f"automation run {run_id!r} is already pending")
-        self._automation_waiters[run_id] = future
-        try:
-            if self._running:
-                await self.bus.publish_inbound(msg)
-            else:
-                await self._dispatch(msg)
-            return await future
-        finally:
-            self._automation_waiters.pop(run_id, None)
-
-    def _complete_automation_turn(
-        self,
-        msg: InboundMessage,
-        *,
-        response: OutboundMessage | None = None,
-        error: BaseException | None = None,
-    ) -> None:
-        run_id = automation_run_id(msg.metadata)
-        if not run_id:
-            return
-        future = self._automation_waiters.get(run_id)
-        if future is None or future.done():
-            return
-        if error is not None:
-            future.set_exception(error)
-        else:
-            future.set_result(response)
-
-    def _defer_automation_turn(self, session_key: str, msg: InboundMessage) -> None:
-        self._deferred_automation_queues.setdefault(session_key, []).append(msg)
-
-    async def _publish_next_deferred_automation(self, session_key: str) -> None:
-        queue = self._deferred_automation_queues.get(session_key)
-        if not queue:
-            return
-        msg = queue.pop(0)
-        if not queue:
-            self._deferred_automation_queues.pop(session_key, None)
-        await self.bus.publish_inbound(msg)
+    async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
+        return await self._cron_turns.submit(msg)
 
     def _persist_user_message_early(
         self,
@@ -640,16 +594,16 @@ class AgentLoop:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
-            if trigger := automation_trigger(msg.metadata):
+            if trigger := cron_trigger(msg.metadata):
                 persist_content = trigger.get("persist_content")
                 if isinstance(persist_content, str) and persist_content.strip():
                     text = persist_content
                 extra.update({
-                    AUTOMATION_HISTORY_META: True,
-                    "automation_id": trigger.get("job_id"),
-                    "automation_name": trigger.get("job_name"),
-                    "automation_run_id": trigger.get("run_id"),
-                    "automation_prompt_ref": trigger.get("prompt_ref"),
+                    CRON_HISTORY_META: True,
+                    "cron_job_id": trigger.get("job_id"),
+                    "cron_job_name": trigger.get("job_name"),
+                    "cron_run_id": trigger.get("run_id"),
+                    "cron_prompt_ref": trigger.get("prompt_ref"),
                 })
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
@@ -951,9 +905,10 @@ class AgentLoop:
                     self.commands.dispatch_priority,
                 )
                 continue
-            if (
-                defer_until_session_idle(msg.metadata)
-                and effective_key in self._pending_queues
+            if self._cron_turns.should_defer(
+                msg,
+                session_key=effective_key,
+                active_session_keys=self._pending_queues.keys(),
             ):
                 pending_msg = msg
                 if effective_key != msg.session_key:
@@ -961,9 +916,9 @@ class AgentLoop:
                         msg,
                         session_key_override=effective_key,
                     )
-                self._defer_automation_turn(effective_key, pending_msg)
+                self._cron_turns.defer(effective_key, pending_msg)
                 logger.info(
-                    "Deferred automation turn for active session {}",
+                    "Deferred cron turn for active session {}",
                     effective_key,
                 )
                 continue
@@ -1080,9 +1035,9 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
-                    self._complete_automation_turn(msg, response=response)
+                    self._cron_turns.complete(msg, response=response)
                 except asyncio.CancelledError:
-                    self._complete_automation_turn(
+                    self._cron_turns.complete(
                         msg,
                         error=asyncio.CancelledError(),
                     )
@@ -1124,7 +1079,7 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
-                    self._complete_automation_turn(msg, error=exc)
+                    self._cron_turns.complete(msg, error=exc)
                 finally:
                     # Drain any messages still in the pending queue and re-publish
                     # them to the bus so they are processed as fresh inbound messages
@@ -1155,14 +1110,14 @@ class AgentLoop:
                             msg, session_key, "idle"
                         )
                         self._runtime_events().clear_turn(session_key)
-                    await self._publish_next_deferred_automation(session_key)
+                    await self._cron_turns.publish_next_deferred(session_key)
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
                     msg, session_key, "idle"
                 )
                 self._runtime_events().clear_turn(session_key)
-                await self._publish_next_deferred_automation(session_key)
+                await self._cron_turns.publish_next_deferred(session_key)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""

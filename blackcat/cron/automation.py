@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from nanobot.cron.types import CronJob
+from blackcat.cron.types import CronJob
 
 AUTOMATION_TRIGGER_META = "_automation_trigger"
 AUTOMATION_DEFER_UNTIL_IDLE_META = "_defer_until_session_idle"

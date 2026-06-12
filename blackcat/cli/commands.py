@@ -979,12 +979,12 @@ def _run_gateway(
     from blackcat.bus.queue import MessageBus
     from blackcat.bus.runtime_events import RuntimeEventBus
     from blackcat.channels.manager import ChannelManager
-    from blackcat.cron.automation import (
-        AUTOMATION_DEFER_UNTIL_IDLE_META,
-        AUTOMATION_TRIGGER_META,
-        is_bound_agent_job,
-    )
     from blackcat.cron.service import CronService
+    from blackcat.cron.session_turns import (
+        CRON_DEFER_UNTIL_IDLE_META,
+        CRON_TRIGGER_META,
+        is_bound_cron_job,
+    )
     from blackcat.cron.types import CronJob
     from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
     from blackcat.providers.image_generation import image_gen_provider_configs
@@ -1093,7 +1093,7 @@ def _run_gateway(
 
         return channel, rest, metadata
 
-    def _automation_prompt_ref(prompt: str) -> dict[str, Any]:
+    def _cron_prompt_ref(prompt: str) -> dict[str, Any]:
         return {
             "id": "cron.agent_turn.reminder",
             "version": 1,
@@ -1110,23 +1110,23 @@ def _run_gateway(
             strip=True,
             message=job.payload.message,
         )
-        prompt_ref = _automation_prompt_ref(prompt)
+        prompt_ref = _cron_prompt_ref(prompt)
         run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
         channel, chat_id, metadata = _bound_session_delivery_context(
             session_key,
             turn_seed=f"cron:{job.id}",
             source_label=job.name,
         )
-        metadata[AUTOMATION_TRIGGER_META] = {
+        metadata[CRON_TRIGGER_META] = {
             "job_id": job.id,
             "job_name": job.name,
             "run_id": run_id,
             "prompt_ref": prompt_ref,
             "persist_content": (
-                f"Scheduled automation triggered: {job.name}\n\n{job.payload.message}"
+                f"Scheduled cron job triggered: {job.name}\n\n{job.payload.message}"
             ),
         }
-        metadata[AUTOMATION_DEFER_UNTIL_IDLE_META] = True
+        metadata[CRON_DEFER_UNTIL_IDLE_META] = True
         run_record_base: dict[str, Any] = {
             "job_id": job.id,
             "job_name": job.name,
@@ -1149,7 +1149,7 @@ def _run_gateway(
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
-            resp = await agent.submit_automation_turn(
+            resp = await agent.submit_cron_turn(
                 InboundMessage(
                     channel=channel,
                     sender_id="cron",
@@ -1345,7 +1345,7 @@ def _run_gateway(
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
 
-        if is_bound_agent_job(job):
+        if is_bound_cron_job(job):
             return await _run_bound_cron_job(job)
 
         reminder_note = (

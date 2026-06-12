@@ -1,7 +1,7 @@
 # Cron / Session / Memory Design Decisions
 
 This note records the agreed design direction for fixing the mismatch between
-scheduled automations and chat session memory.
+scheduled cron jobs and chat session memory.
 
 ## Problem
 
@@ -14,7 +14,7 @@ The visible failure mode is awkward: a cron job reports something into a chat,
 the user discusses it in that chat, and the next cron run behaves as if that
 discussion never happened.
 
-The fix is not to make cron a separate delivery system. A user automation should
+The fix is not to make cron a separate delivery system. A user cron job should
 be a scheduled input into a session.
 
 ## Core Model
@@ -39,11 +39,11 @@ These fields are legacy-only. New cron creation should not depend on them.
 
 Use explicit branching:
 
-- **Bound user automation**: `payload.kind == "agent_turn"`,
+- **Bound user cron job**: `payload.kind == "agent_turn"`,
   `payload.session_key` is present, and no legacy delivery fields
   (`deliver`, `channel`, `to`, or `channel_meta`) are set. This uses the new
   session-turn model.
-- **Legacy unbound automation**: user job with no `payload.session_key`. Keep the
+- **Legacy unbound cron job**: user job with no `payload.session_key`. Keep the
   existing behavior. Do not migrate, infer, bind, or add UI for these jobs in
   this change.
 - **System job**: `payload.kind == "system_event"` or known internal jobs such
@@ -54,7 +54,7 @@ The project should not grow a compatibility subsystem for legacy jobs. Missing
 
 ## New Job Creation
 
-`CronTool` must create user automations with a `session_key`.
+`CronTool` must create user cron jobs with a `session_key`.
 
 - If no request/session context exists, `cron action=add` should fail.
 - Do not create new unbound jobs.
@@ -66,16 +66,16 @@ The project should not grow a compatibility subsystem for legacy jobs. Missing
 
 ## Execution Path
 
-Bound user automations should execute through `AgentLoop` as internal inbound
+Bound user cron jobs should execute through `AgentLoop` as internal inbound
 session events, not as an out-of-band `agent.process_direct()` call.
 
 The intended flow is:
 
 ```text
-cron due -> create automation inbound -> AgentLoop dispatches session turn
+cron due -> create cron inbound -> AgentLoop dispatches session turn
 ```
 
-The inbound event should carry metadata identifying the automation, such as:
+The inbound event should carry metadata identifying the cron run, such as:
 
 - job id
 - job name
@@ -93,28 +93,28 @@ to legacy `payload.channel`, `payload.to`, or `payload.channel_meta` for bound
 jobs. Those fields are only for the legacy unbound path.
 
 The scheduler must not mark a bound job run as complete just because the inbound
-event was queued. It should either wait for the automation turn to complete and
+event was queued. It should either wait for the cron turn to complete and
 record the real outcome, or explicitly model the run as separate states such as
-`queued` and `turn_completed`. A failed automation turn must be reflected in the
+`queued` and `turn_completed`. A failed cron turn must be reflected in the
 cron run record/job state, not hidden behind a successful enqueue.
 
 ## Active Session Behavior
 
 Cron must not interrupt an active session turn.
 
-- If the target session is idle, run the automation turn immediately.
-- If the target session is running, defer the automation until the current turn
+- If the target session is idle, run the cron turn immediately.
+- If the target session is running, defer the cron turn until the current turn
   completes.
-- Do not inject the automation into the active turn's runtime context.
-- Do not route automation messages into the existing mid-turn pending injection
+- Do not inject the cron turn into the active turn's runtime context.
+- Do not route cron messages into the existing mid-turn pending injection
   queue.
-- UI/runtime status may show that an automation is queued, but the current LLM
-  call should not see the queued automation.
+- UI/runtime status may show that a cron run is queued, but the current LLM
+  call should not see the queued cron turn.
 
-Automation inbound events need explicit metadata, for example
-`_automation_trigger` plus `_defer_until_session_idle`. `AgentLoop.run()` must
+Cron inbound events need explicit metadata, for example
+`_cron_trigger` plus `_cron_defer_until_session_idle`. `AgentLoop.run()` must
 recognize that metadata before the existing `_pending_queues` mid-turn injection
-branch. If the session is active, the event goes to a deferred automation queue,
+branch. If the session is active, the event goes to a deferred cron queue,
 not the pending injection queue.
 
 The user experience goal is: cron can run after the current answer, but it
@@ -124,17 +124,17 @@ should not take over an answer already in progress.
 
 Do not persist the raw internal execution prompt as a normal user message.
 
-Instead, persist a readable automation trigger event, for example:
+Instead, persist a readable cron trigger event, for example:
 
 ```json
 {
   "role": "user",
-  "content": "Scheduled automation triggered: daily monitor\n\nCheck ...",
-  "_automation_turn": true,
-  "automation_id": "abc123",
-  "automation_name": "daily monitor",
-  "automation_run_id": "abc123:1770000000000",
-  "automation_prompt_ref": {
+  "content": "Scheduled cron job triggered: daily monitor\n\nCheck ...",
+  "_cron_turn": true,
+  "cron_job_id": "abc123",
+  "cron_job_name": "daily monitor",
+  "cron_run_id": "abc123:1770000000000",
+  "cron_prompt_ref": {
     "id": "cron.agent_turn.reminder",
     "version": 1,
     "sha256": "..."
@@ -160,7 +160,7 @@ Preferred direction:
 
 - Move the cron execution prompt out of `commands.py` into a named template.
 - Use a stable prompt id such as `cron.agent_turn.reminder`.
-- Store `prompt_ref` and `automation_run_id` in session history.
+- Store `prompt_ref` and `cron_run_id` in session history.
 - Store the full rendered prompt, prompt variables, and errors in an internal
   run record.
 
@@ -169,15 +169,15 @@ cron store grow without bound.
 
 ## Visibility and Evaluation
 
-A bound user automation is a real session turn.
+A bound user cron job is a real session turn.
 
 - If it succeeds, save and publish the assistant response.
-- Do not pass bound automation responses through `evaluate_response()`.
+- Do not pass bound cron responses through `evaluate_response()`.
 - Keep `evaluate_response()` only for system/legacy paths where the old behavior
   still applies.
 - Avoid states where session history contains a response the user never saw.
 
-If a bound automation starts executing, it must leave a visible closure in the
+If a bound cron job starts executing, it must leave a visible closure in the
 session:
 
 - success response
@@ -189,9 +189,10 @@ the user-facing transcript.
 
 ## Deleting Sessions
 
-Deleting a session with bound automations should be a two-step operation.
+Deleting a session with bound cron jobs should be a two-step operation.
 
-Default delete behavior should block and return the associated automations:
+Default delete behavior should block and return the associated cron jobs.
+Existing WebUI/API response field names are kept for compatibility:
 
 ```json
 {
@@ -203,7 +204,7 @@ Default delete behavior should block and return the associated automations:
 }
 ```
 
-After explicit confirmation, the API may delete the bound user automations and
+After explicit confirmation, the API may delete the bound user cron jobs and
 then delete the session/thread.
 
 Rules:
@@ -212,18 +213,18 @@ Rules:
   session being deleted.
 - Do not block on system jobs.
 - Do not block on legacy unbound jobs.
-- In unified-session mode, WebUI chats display automations owned by
+- In unified-session mode, WebUI chats display cron jobs owned by
   `unified:default`, but deleting an individual `websocket:*` thread should not
-  block on or delete those unified automations.
+  block on or delete those unified cron jobs.
 - If the user manually deletes files outside the WebUI/API, do not try to
   compensate.
 
 ## Unified Session Mode
 
-When `unified_session` is enabled, WebUI-created automations should bind to the
+When `unified_session` is enabled, WebUI-created cron jobs should bind to the
 same unified session as normal WebUI chat turns: `unified:default`.
 
-- All WebUI chats should display automations owned by `unified:default`.
+- All WebUI chats should display cron jobs owned by `unified:default`.
 - Individual WebUI thread deletion should remain scoped to the concrete
   `websocket:*` thread being deleted.
 - Toggling `unified_session` does not migrate existing cron jobs. Existing jobs
@@ -232,15 +233,15 @@ same unified session as normal WebUI chat turns: `unified:default`.
 
 ## WebUI Scope
 
-This change should not grow into a full automation manager.
+This change should not grow into a global scheduler/task manager.
 
 Keep the scope focused:
 
 - Fix cron/session/memory semantics for new bound jobs.
 - Preserve legacy job behavior.
-- Add deletion protection for sessions with bound automations.
-- Update the existing session automation panel only as needed for the new
-  bound-job status.
+- Add deletion protection for sessions with bound cron jobs.
+- Update the existing WebUI panel that lists scheduled jobs only as needed for
+  the new bound-job status.
 
 Do not add deterministic legacy migration, legacy binding UI, or a global
 calendar/task manager in this change.
@@ -258,6 +259,6 @@ execution path that behaves differently from scheduled runs.
 - No legacy migration.
 - No automatic binding of legacy jobs.
 - No runtime-context prompt asking the model to bind jobs.
-- No new global automation manager.
+- No new global scheduler/task manager.
 - No new delivery-target abstraction.
 - No user-visible manual cron run.

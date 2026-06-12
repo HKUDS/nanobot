@@ -14,7 +14,7 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
-from blackcat.cron.automation import is_bound_agent_job
+from blackcat.cron.session_turns import is_bound_cron_job
 from blackcat.cron.types import (
     CronJob,
     CronJobState,
@@ -499,17 +499,17 @@ class CronService:
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
 
-    def list_bound_agent_jobs_for_session(
+    def list_bound_cron_jobs_for_session(
         self,
         session_key: str,
         *,
         include_disabled: bool = True,
     ) -> list[CronJob]:
-        """Return user-created bound automation jobs owned by *session_key*."""
+        """Return user-created bound cron jobs owned by *session_key*."""
         return [
             job
             for job in self.list_jobs(include_disabled=include_disabled)
-            if is_bound_agent_job(job)
+            if is_bound_cron_job(job)
             and job.payload.session_key == session_key
         ]
 

@@ -349,7 +349,7 @@ def test_add_job_requires_session_key(tmp_path) -> None:
 
     result = tool._add_job(None, "Background refresh", 60, None, None, None)
 
-    assert result == "Error: scheduled automations must be created from a chat session"
+    assert result == "Error: scheduled cron jobs must be created from a chat session"
     assert tool._cron.list_jobs() == []
 
 

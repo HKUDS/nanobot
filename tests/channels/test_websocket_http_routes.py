@@ -749,7 +749,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
         assert body["blocked_by_automations"] is True
         assert [job["name"] for job in body["automations"]] == ["Daily check"]
         assert path.exists()
-        assert cron.list_bound_agent_jobs_for_session("websocket:doomed")
+        assert cron.list_bound_cron_jobs_for_session("websocket:doomed")
     finally:
         await channel.stop()
         await server_task
@@ -792,7 +792,7 @@ async def test_session_delete_can_cascade_bound_automations(
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
-        assert cron.list_bound_agent_jobs_for_session("websocket:doomed") == []
+        assert cron.list_bound_cron_jobs_for_session("websocket:doomed") == []
         assert [job.name for job in cron.list_jobs(include_disabled=True)] == [
             "Legacy same target"
         ]
@@ -837,7 +837,7 @@ async def test_session_delete_does_not_cascade_unified_automations(
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
-        assert [job.name for job in cron.list_bound_agent_jobs_for_session(UNIFIED_SESSION_KEY)] == [
+        assert [job.name for job in cron.list_bound_cron_jobs_for_session(UNIFIED_SESSION_KEY)] == [
             "Shared daily check"
         ]
     finally:

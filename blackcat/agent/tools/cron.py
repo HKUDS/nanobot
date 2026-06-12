@@ -71,7 +71,7 @@ class CronTool(Tool, ContextAware):
         return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
 
     def set_context(self, ctx: RequestContext) -> None:
-        """Set the current session context for scheduled automation ownership."""
+        """Set the current session context for scheduled cron job ownership."""
         self._channel.set(ctx.channel)
         self._chat_id.set(ctx.chat_id)
         self._metadata.set(ctx.metadata)
@@ -166,7 +166,7 @@ class CronTool(Tool, ContextAware):
             )
         session_key = self._session_key.get()
         if not session_key:
-            return "Error: scheduled automations must be created from a chat session"
+            return "Error: scheduled cron jobs must be created from a chat session"
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:

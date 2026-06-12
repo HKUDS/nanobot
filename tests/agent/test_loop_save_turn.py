@@ -8,7 +8,7 @@ from blackcat.agent.context import ContextBuilder
 from blackcat.agent.loop import AgentLoop
 from blackcat.bus.events import InboundMessage
 from blackcat.bus.queue import MessageBus
-from blackcat.cron.automation import AUTOMATION_HISTORY_META, AUTOMATION_TRIGGER_META
+from blackcat.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from blackcat.providers.base import LLMResponse
 from blackcat.session.goal_state import GOAL_STATE_KEY
 from blackcat.session.manager import Session, SessionManager
@@ -66,7 +66,7 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     assert runtime.model == "next-model"
 
 
-def test_persist_automation_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
+def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:auto")
     prompt_ref = {"id": "cron.agent_turn.reminder", "version": 1, "sha256": "abc"}
@@ -76,14 +76,14 @@ def test_persist_automation_turn_uses_distinct_history_marker(tmp_path: Path) ->
             channel="websocket",
             sender_id="cron",
             chat_id="auto",
-            content="Automation: internal prompt",
+            content="Cron job: internal prompt",
             metadata={
-                AUTOMATION_TRIGGER_META: {
+                CRON_TRIGGER_META: {
                     "job_id": "job-1",
                     "job_name": "Daily check",
                     "run_id": "job-1:1",
                     "prompt_ref": prompt_ref,
-                    "persist_content": "Scheduled automation triggered: Daily check",
+                    "persist_content": "Scheduled cron job triggered: Daily check",
                 }
             },
         ),
@@ -92,13 +92,13 @@ def test_persist_automation_turn_uses_distinct_history_marker(tmp_path: Path) ->
 
     assert persisted is True
     message = session.messages[-1]
-    assert message["content"] == "Scheduled automation triggered: Daily check"
-    assert message[AUTOMATION_HISTORY_META] is True
-    assert AUTOMATION_TRIGGER_META not in message
-    assert message["automation_id"] == "job-1"
-    assert message["automation_name"] == "Daily check"
-    assert message["automation_run_id"] == "job-1:1"
-    assert message["automation_prompt_ref"] == prompt_ref
+    assert message["content"] == "Scheduled cron job triggered: Daily check"
+    assert message[CRON_HISTORY_META] is True
+    assert CRON_TRIGGER_META not in message
+    assert message["cron_job_id"] == "job-1"
+    assert message["cron_job_name"] == "Daily check"
+    assert message["cron_run_id"] == "job-1:1"
+    assert message["cron_prompt_ref"] == prompt_ref
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:

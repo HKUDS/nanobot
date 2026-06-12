@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from blackcat.bus.events import InboundMessage
-from blackcat.cron.automation import is_automation_turn
+from blackcat.cron.session_turns import is_cron_turn
 from blackcat.session.manager import Session
 from blackcat.session.metadata import SESSION_ROUTING_METADATA_KEY
 
@@ -26,7 +26,7 @@ _ROUTING_METADATA_KEYS = {
 }
 _CHANNEL_ROUTING_METADATA_KEYS = {
     # Feishu needs a message anchor to reply into an existing topic. Other
-    # channels should avoid stale reply anchors for scheduled automation turns.
+    # channels should avoid stale reply anchors for scheduled cron turns.
     "feishu": {"message_id"},
 }
 _SLACK_ROUTING_KEYS = {"channel_type", "thread_ts"}
@@ -74,8 +74,8 @@ def routing_context_for_message(msg: InboundMessage) -> dict[str, Any]:
 
 
 def persist_routing_context(session: Session, msg: InboundMessage) -> bool:
-    """Persist the latest non-automation delivery context for a session."""
-    if is_automation_turn(msg.metadata):
+    """Persist the latest non-cron delivery context for a session."""
+    if is_cron_turn(msg.metadata):
         return False
     context = routing_context_for_message(msg)
     if session.metadata.get(SESSION_ROUTING_METADATA_KEY) == context:

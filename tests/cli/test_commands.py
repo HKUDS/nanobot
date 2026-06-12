@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from blackcat.bus.events import InboundMessage, OutboundMessage
 from blackcat.cli.commands import _proactive_delivery_metadata, app
 from blackcat.config.schema import Config
-from blackcat.cron.automation import AUTOMATION_DEFER_UNTIL_IDLE_META, AUTOMATION_TRIGGER_META
+from blackcat.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from blackcat.cron.types import CronJob, CronPayload
 from blackcat.providers.factory import ProviderSnapshot, make_provider
 from blackcat.providers.openai_codex_provider import _strip_model_prefix
@@ -1430,8 +1430,8 @@ def test_gateway_legacy_cron_payloads_with_session_key_stay_legacy(
                 content="Legacy response.",
             )
 
-        async def submit_automation_turn(self, _msg: InboundMessage):
-            raise AssertionError("legacy cron payload must not run as bound automation")
+        async def submit_cron_turn(self, _msg: InboundMessage):
+            raise AssertionError("legacy cron payload must not run as bound cron turn")
 
         async def close_mcp(self) -> None:
             return None
@@ -1601,8 +1601,8 @@ def test_gateway_bound_cron_runs_as_session_turn(
             self.tools = {}
             seen["agent"] = self
 
-        async def submit_automation_turn(self, msg: InboundMessage):
-            seen["automation_msg"] = msg
+        async def submit_cron_turn(self, msg: InboundMessage):
+            seen["cron_msg"] = msg
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -1646,26 +1646,26 @@ def test_gateway_bound_cron_runs_as_session_turn(
     response = asyncio.run(cron.on_job(job))
 
     assert response == "Checked the repo."
-    msg = seen["automation_msg"]
+    msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "websocket"
     assert msg.chat_id == "chat-1"
     assert msg.sender_id == "cron"
     assert msg.session_key_override == "websocket:chat-1"
-    assert "Automation: Check repository health." in msg.content
+    assert "Cron job: Check repository health." in msg.content
     assert msg.metadata["webui"] is True
     assert msg.metadata["workspace_scope"]["project_path"] == str(tmp_path)
     assert msg.metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] == {
         "kind": "cron",
         "label": "Repo check",
     }
-    trigger = msg.metadata[AUTOMATION_TRIGGER_META]
+    trigger = msg.metadata[CRON_TRIGGER_META]
     assert trigger["job_id"] == "repo-check"
     assert trigger["job_name"] == "Repo check"
     assert trigger["persist_content"] == (
-        "Scheduled automation triggered: Repo check\n\nCheck repository health."
+        "Scheduled cron job triggered: Repo check\n\nCheck repository health."
     )
-    assert msg.metadata[AUTOMATION_DEFER_UNTIL_IDLE_META] is True
+    assert msg.metadata[CRON_DEFER_UNTIL_IDLE_META] is True
     statuses = [record["status"] for _run_id, record in seen["run_records"]]
     assert statuses == ["queued", "ok"]
     assert seen["run_records"][0][0] == seen["run_records"][1][0]
@@ -1682,7 +1682,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     response = asyncio.run(cron.on_job(discord_job))
 
     assert response == "Checked the repo."
-    msg = seen["automation_msg"]
+    msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "discord"
     assert msg.chat_id == "777"
