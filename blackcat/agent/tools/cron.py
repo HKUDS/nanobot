@@ -15,6 +15,7 @@ from blackcat.agent.tools.schema import (
 )
 from blackcat.cron.service import CronService
 from blackcat.cron.types import CronJob, CronJobState, CronSchedule
+from blackcat.session.keys import UNIFIED_SESSION_KEY
 
 _CRON_PARAMETERS = tool_parameters_schema(
     action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
@@ -56,9 +57,6 @@ class CronTool(Tool, ContextAware):
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
-        self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
-        self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
         self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
@@ -72,10 +70,10 @@ class CronTool(Tool, ContextAware):
 
     def set_context(self, ctx: RequestContext) -> None:
         """Set the current session context for scheduled cron job ownership."""
-        self._channel.set(ctx.channel)
-        self._chat_id.set(ctx.chat_id)
-        self._metadata.set(ctx.metadata)
-        self._session_key.set(f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else "")
+        raw_key = f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else ""
+        self._session_key.set(
+            raw_key if ctx.session_key in {None, "", UNIFIED_SESSION_KEY} else ctx.session_key
+        )
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""

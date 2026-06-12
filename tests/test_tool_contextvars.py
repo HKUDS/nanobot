@@ -275,6 +275,27 @@ async def test_webui_cron_tool_uses_origin_session_when_unified_enabled(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_cron_tool_preserves_thread_scoped_session_key(tmp_path) -> None:
+    """Channel-provided thread session keys should remain the cron owner."""
+    tool = CronTool(CronService(tmp_path / "jobs.json"))
+    tool.set_context(
+        RequestContext(
+            channel="slack",
+            chat_id="C123",
+            metadata={"slack": {"thread_ts": "1700.42"}},
+            session_key="slack:C123:1700.42",
+        )
+    )
+
+    result = await tool.execute(action="add", message="check thread", every_seconds=300)
+    assert result.startswith("Created job")
+
+    jobs = tool._cron.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.session_key == "slack:C123:1700.42"
+
+
+@pytest.mark.asyncio
 async def test_cron_tool_no_context_returns_error(tmp_path) -> None:
     """Without set_context, add should fail with a clear error."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))

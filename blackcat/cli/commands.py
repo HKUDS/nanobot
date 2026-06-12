@@ -980,6 +980,7 @@ def _run_gateway(
     from blackcat.bus.runtime_events import RuntimeEventBus
     from blackcat.channels.manager import ChannelManager
     from blackcat.cron.service import CronService
+    from blackcat.cron.session_delivery import bound_session_inbound_context
     from blackcat.cron.session_turns import (
         CRON_DEFER_UNTIL_IDLE_META,
         CRON_TRIGGER_META,
@@ -1050,13 +1051,7 @@ def _run_gateway(
         turn_seed: str,
         source_label: str | None,
     ) -> tuple[str, str, dict[str, Any]]:
-        if ":" not in session_key:
-            raise ValueError(f"bound cron session_key is invalid: {session_key!r}")
-        channel, rest = session_key.split(":", 1)
-        if not channel or not rest:
-            raise ValueError(f"bound cron session_key is invalid: {session_key!r}")
-
-        metadata: dict[str, Any] = {}
+        channel, chat_id, metadata = bound_session_inbound_context(session_key)
 
         if channel == "websocket":
             metadata["webui"] = True
@@ -1068,15 +1063,8 @@ def _run_gateway(
                     source_label=source_label,
                 )
             )
-            return channel, rest, metadata
 
-        if channel == "slack" and ":" in rest:
-            chat_id, thread_ts = rest.split(":", 1)
-            if thread_ts:
-                metadata["slack"] = {"thread_ts": thread_ts}
-            return channel, chat_id, metadata
-
-        return channel, rest, metadata
+        return channel, chat_id, metadata
 
     def _cron_prompt_ref(prompt: str) -> dict[str, Any]:
         return {
@@ -1141,6 +1129,7 @@ def _run_gateway(
                     chat_id=chat_id,
                     content=prompt,
                     metadata=metadata,
+                    session_key_override=session_key,
                 )
             )
         except (Exception, asyncio.CancelledError) as exc:

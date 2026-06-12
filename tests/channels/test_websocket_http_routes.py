@@ -30,7 +30,6 @@ def _make_handler(
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
-    unified_session: bool = False,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -44,7 +43,6 @@ def _make_handler(
         runtime_model_name=runtime_model_name,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
-        unified_session=unified_session,
         cron_service=cron_service,
     )
 
@@ -58,7 +56,6 @@ def _ch(
     port: int = _PORT,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
-    unified_session: bool = False,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -77,7 +74,6 @@ def _ch(
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
-        unified_session=unified_session,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -243,7 +239,7 @@ async def test_session_automations_route_filters_by_webui_session(
 
 
 @pytest.mark.asyncio
-async def test_session_automations_route_uses_origin_owner_when_unified_enabled(
+async def test_session_automations_route_ignores_unified_owner(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     cron = CronService(tmp_path / "cron" / "jobs.json")
@@ -264,7 +260,6 @@ async def test_session_automations_route_uses_origin_owner_when_unified_enabled(
         bus,
         session_manager=_seed_session(tmp_path, key="websocket:abc"),
         cron_service=cron,
-        unified_session=True,
         port=29917,
     )
     server_task = asyncio.create_task(channel.start())
@@ -823,7 +818,6 @@ async def test_session_delete_blocks_origin_automation_when_unified_enabled(
         bus,
         session_manager=sm,
         cron_service=cron,
-        unified_session=True,
         port=29918,
     )
     server_task = asyncio.create_task(channel.start())

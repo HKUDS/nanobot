@@ -1622,7 +1622,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     assert msg.channel == "websocket"
     assert msg.chat_id == "chat-1"
     assert msg.sender_id == "cron"
-    assert msg.session_key_override is None
+    assert msg.session_key_override == "websocket:chat-1"
     assert "Cron job: Check repository health." in msg.content
     assert msg.metadata["webui"] is True
     assert msg.metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] == {
@@ -1645,7 +1645,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
         name="Thread check",
         payload=CronPayload(
             message="Check the Discord thread.",
-            session_key="discord:777",
+            session_key="discord:456:thread:777",
         ),
     )
 
@@ -1656,7 +1656,49 @@ def test_gateway_bound_cron_runs_as_session_turn(
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "discord"
     assert msg.chat_id == "777"
-    assert msg.session_key_override is None
+    assert msg.session_key_override == "discord:456:thread:777"
+    assert msg.metadata["context_chat_id"] == "456"
+    assert msg.metadata["parent_channel_id"] == "456"
+    assert msg.metadata["thread_id"] == "777"
+
+    telegram_job = CronJob(
+        id="telegram-topic",
+        name="Telegram topic",
+        payload=CronPayload(
+            message="Check the Telegram topic.",
+            session_key="telegram:-100123:topic:42",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(telegram_job))
+
+    assert response == "Checked the repo."
+    msg = seen["cron_msg"]
+    assert isinstance(msg, InboundMessage)
+    assert msg.channel == "telegram"
+    assert msg.chat_id == "-100123"
+    assert msg.session_key_override == "telegram:-100123:topic:42"
+    assert msg.metadata["message_thread_id"] == 42
+
+    feishu_job = CronJob(
+        id="feishu-topic",
+        name="Feishu topic",
+        payload=CronPayload(
+            message="Check the Feishu topic.",
+            session_key="feishu:oc_abc:om_root123",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(feishu_job))
+
+    assert response == "Checked the repo."
+    msg = seen["cron_msg"]
+    assert isinstance(msg, InboundMessage)
+    assert msg.channel == "feishu"
+    assert msg.chat_id == "oc_abc"
+    assert msg.session_key_override == "feishu:oc_abc:om_root123"
+    assert msg.metadata["message_id"] == "om_root123"
+    assert msg.metadata["thread_id"] == "om_root123"
 
 
 def test_gateway_cron_job_suppresses_intermediate_progress(
