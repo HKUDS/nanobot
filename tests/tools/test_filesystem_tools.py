@@ -91,6 +91,12 @@ class TestReadFileTool:
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("limit", [0, -1])
+    async def test_rejects_non_positive_limit(self, tool, sample_file, limit):
+        result = await tool.execute(path=str(sample_file), limit=limit)
+        assert result == "Error: limit must be >= 1."
+
 
 # ---------------------------------------------------------------------------
 # _find_match  (unit tests for the helper)
@@ -262,6 +268,13 @@ class TestListDirTool:
         result = await tool.execute(path=str(tmp_path), max_entries=3)
         assert "truncated" in result
         assert "3 of 10" in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_entries", [0, -1])
+    async def test_rejects_non_positive_max_entries(self, tool, tmp_path, max_entries):
+        (tmp_path / "file.txt").write_text("x")
+        result = await tool.execute(path=str(tmp_path), max_entries=max_entries)
+        assert result == "Error: max_entries must be >= 1."
 
     @pytest.mark.asyncio
     async def test_empty_dir(self, tool, tmp_path):

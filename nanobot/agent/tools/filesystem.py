@@ -10,13 +10,13 @@ from typing import Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -202,6 +202,8 @@ class ReadFileTool(_FsTool):
         try:
             if not path:
                 return "Error reading file: Unknown path"
+            if limit is not None and limit < 1:
+                return "Error: limit must be >= 1."
 
             # Device path blacklist
             if _is_blocked_device(path):
@@ -982,6 +984,8 @@ class ListDirTool(_FsTool):
         try:
             if path is None:
                 raise ValueError("Unknown path")
+            if max_entries is not None and max_entries < 1:
+                return "Error: max_entries must be >= 1."
             dp = self._resolve(path)
             if not dp.exists():
                 return f"Error: Directory not found: {path}"
