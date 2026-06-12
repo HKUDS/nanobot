@@ -142,11 +142,6 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
 
 
 def test_save_skip_matches_prefix_when_current_message_merged():
-    # ``build_messages`` merges the current user message into a same-role
-    # history tail, so the prompt prefix is ``1 + history_count`` instead of
-    # ``2 + history_count``. The old boundary then cut the first new-turn
-    # assistant message (carrying tool_calls) from persistence, leaving its
-    # tool results orphaned in session history (#4006).
     skip = _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=2,  # [system, merged user]
@@ -157,14 +152,13 @@ def test_save_skip_matches_prefix_when_current_message_merged():
 
 
 def test_save_skip_unchanged_for_standalone_current_message():
-    # [system, history user, current user] — early-persisted current message.
+    # [system, history user, current user] with the current user already saved.
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
         history_count=1,
         user_persisted_early=True,
     ) == 3
-    # Same prefix, current message not persisted early: re-save it.
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
