@@ -39,6 +39,34 @@ async def test_message_tool_rejects_malformed_buttons(bad) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "output/image.png",
+        [123],
+        [""],
+        ["   "],
+    ],
+)
+async def test_message_tool_rejects_malformed_media(bad) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    result = await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=bad,
+    )
+
+    assert result == "Error: media must be a list of non-empty strings"
+    assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_message_tool_suppresses_delivery_when_active() -> None:
     sent: list[OutboundMessage] = []
 

@@ -10,9 +10,9 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
+from nanobot.security.workspace_access import current_tool_workspace
 
 
 @tool_parameters(
@@ -199,6 +199,12 @@ class MessageTool(Tool, ContextAware):
                 for row in buttons
             ):
                 return "Error: buttons must be a list of list of strings"
+        if media is not None:
+            if (
+                not isinstance(media, list)
+                or any(not isinstance(path, str) or not path.strip() for path in media)
+            ):
+                return "Error: media must be a list of non-empty strings"
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
