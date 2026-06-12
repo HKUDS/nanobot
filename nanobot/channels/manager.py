@@ -368,6 +368,14 @@ class ChannelManager:
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
+        # TTS: synthesize audio and attach as media before sending
+        if msg.metadata.get("_tts") and msg.content:
+            audio_path = await channel.synthesize_speech(msg.content)
+            if audio_path:
+                msg.media = list(msg.media or []) + [audio_path]
+                # Clear the text content so the channel sends voice-only
+                msg.content = ""
+
         if msg.metadata.get("_reasoning_end"):
             await channel.send_reasoning_end(msg.chat_id, msg.metadata)
         elif msg.metadata.get("_reasoning_delta"):

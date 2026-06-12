@@ -9,10 +9,15 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
-from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.agent.tools.schema import (
+    ArraySchema,
+    BooleanSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
+from nanobot.security.workspace_access import current_tool_workspace
 
 
 @tool_parameters(
@@ -41,6 +46,13 @@ from nanobot.config.paths import get_workspace_path
         buttons=ArraySchema(
             ArraySchema(StringSchema("Button label")),
             description="Optional: inline keyboard buttons as list of rows, each row is list of button labels.",
+        ),
+        tts=BooleanSchema(
+            description=(
+                "When true, synthesize the content as speech using the configured TTS provider "
+                "and send as a voice message instead of text. Requires TTS to be enabled and "
+                "configured in nanobot settings."
+            ),
         ),
         required=["content"],
     )
@@ -158,7 +170,8 @@ class MessageTool(Tool, ContextAware):
             "When generate_image creates images in the current chat, use the message tool "
             "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
-            "Do NOT use read_file to send files — that only reads content for your own analysis."
+            "Do NOT use read_file to send files — that only reads content for your own analysis. "
+            "Set tts=true to synthesize the content as speech and send as a voice message."
         )
 
     def _resolve_media(self, media: list[str]) -> list[str]:
@@ -187,6 +200,7 @@ class MessageTool(Tool, ContextAware):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
+        tts: bool = False,
         **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
@@ -245,6 +259,8 @@ class MessageTool(Tool, ContextAware):
             metadata["message_id"] = message_id
         if self._record_channel_delivery_var.get() or media:
             metadata["_record_channel_delivery"] = True
+        if tts:
+            metadata["_tts"] = True
 
         msg = OutboundMessage(
             channel=channel,
@@ -268,6 +284,7 @@ class MessageTool(Tool, ContextAware):
                     self._turn_delivered_media_var.set(prev + tuple(str(p) for p in media))
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
+            tts_info = " as voice message" if tts else ""
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}{tts_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"

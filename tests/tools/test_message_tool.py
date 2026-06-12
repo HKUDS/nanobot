@@ -434,6 +434,48 @@ async def test_message_tool_allows_ws_explicit_when_matches_context(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_message_tool_sets_tts_metadata() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    await tool.execute(content="speak this", channel="telegram", chat_id="1", tts=True)
+
+    assert sent[0].metadata.get("_tts") is True
+
+
+@pytest.mark.asyncio
+async def test_message_tool_no_tts_metadata_when_false() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    await tool.execute(content="text only", channel="telegram", chat_id="1", tts=False)
+
+    assert "_tts" not in sent[0].metadata
+
+
+@pytest.mark.asyncio
+async def test_message_tool_tts_return_includes_voice_label() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    result = await tool.execute(content="hello", channel="telegram", chat_id="1", tts=True)
+
+    assert "voice message" in result
+
+
+@pytest.mark.asyncio
 async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> None:
     """Cron / CLI handlers keep non-websocket defaults; explicit websocket + uuid remains valid."""
     sent: list[OutboundMessage] = []
