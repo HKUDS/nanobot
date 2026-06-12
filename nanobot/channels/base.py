@@ -59,6 +59,24 @@ class BaseChannel(ABC):
             self.logger.exception("Audio transcription failed")
             return ""
 
+    async def synthesize_speech(self, text: str) -> bytes | None:
+        """Synthesize speech from text using configured TTS provider.
+
+        Args:
+            text: The text to synthesize.
+
+        Returns:
+            Audio bytes if TTS is enabled and configured, None otherwise.
+        """
+        try:
+            from nanobot.audio.tts import resolve_tts_config, synthesize_audio
+            from nanobot.config.loader import load_config
+
+            return await synthesize_audio(text, resolve_tts_config(load_config()))
+        except Exception:
+            self.logger.exception("TTS synthesis failed")
+            return None
+
     async def login(self, force: bool = False) -> bool:
         """
         Perform channel-specific interactive login (e.g. QR code scan).

@@ -522,6 +522,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.assemblyai.com/v2",
         is_transcription_only=True,
     ),
+    # ElevenLabs: text-to-speech
+    ProviderSpec(
+        name="elevenlabs",
+        keywords=("elevenlabs", "eleven"),
+        env_key="ELEVENLABS_API_KEY",
+        display_name="ElevenLabs",
+        backend="openai_compat",
+        default_api_base="https://api.elevenlabs.io/v1",
+        is_transcription_only=True,
+    ),
     # Qianfan (百度千帆): OpenAI-compatible API
     ProviderSpec(
         name="qianfan",

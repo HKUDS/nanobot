@@ -119,3 +119,84 @@ At minimum, cover:
 6. Update user-facing docs.
 
 Add the provider to [`configuration.md`](./configuration.md) where users choose `transcription.provider`, but keep implementation details in this development guide.
+
+## Adding a TTS Provider
+
+TTS mirrors the transcription architecture with two layers:
+
+- `nanobot/audio/tts_registry.py` owns provider names, aliases, default models/voices, and adapter loading.
+- `nanobot/providers/tts.py` owns provider-specific HTTP behavior.
+
+Credentials live under `providers.<provider>` just like transcription.
+
+1. Add provider credentials to `ProvidersConfig` (if not already present).
+
+```python
+class ProvidersConfig(BaseModel):
+    ...
+    my_tts: ProviderConfig = Field(default_factory=ProviderConfig)
+```
+
+2. Add a `ProviderSpec` in `nanobot/providers/registry.py`.
+
+For TTS-only providers, set `is_transcription_only=True` so they show up in credential/settings surfaces but stay out of chat model selection.
+
+```python
+ProviderSpec(
+    name="my_tts",
+    keywords=("my_tts",),
+    env_key="MY_TTS_API_KEY",
+    display_name="My TTS",
+    default_api_base="https://api.example.com/v1",
+    is_transcription_only=True,
+)
+```
+
+3. Add an adapter class in `nanobot/providers/tts.py`.
+
+Adapters receive resolved credentials and config. They raise `TTSIngressError` for validation errors and return raw audio bytes on success.
+
+```python
+class MyTTSTTSProvider:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        model: str | None = None,
+        voice: str | None = None,
+        speed: float = 1.0,
+    ):
+        self.api_key = api_key or os.environ.get("MY_TTS_API_KEY")
+        self.api_base = api_base or "https://api.example.com/v1"
+        self.model = model or "my-default-tts-model"
+        self.voice = voice or "default-voice"
+        self.speed = speed
+
+    async def synthesize(self, text: str) -> bytes:
+        ...
+```
+
+4. Register the adapter in `nanobot/audio/tts_registry.py`.
+
+```python
+TTSProviderSpec(
+    name="my_tts",
+    default_model="my-default-tts-model",
+    default_voice="default-voice",
+    adapter="nanobot.providers.tts:MyTTSTTSProvider",
+    aliases=("mytts",),
+)
+```
+
+5. Add tests.
+
+At minimum, cover:
+
+- config resolution in `tests/audio/test_tts.py`
+- adapter request/response behavior and retry/error handling
+- WebUI settings payload/update behavior in `tests/webui/test_tts_settings.py`
+- provider brand mapping if the provider appears in Settings
+
+6. Update user-facing docs.
+
+Add the provider to [`configuration.md`](./configuration.md) where users choose `tts.provider`, but keep implementation details in this development guide.

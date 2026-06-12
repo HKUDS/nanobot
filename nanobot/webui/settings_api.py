@@ -21,6 +21,8 @@ from nanobot.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
+from nanobot.audio.tts import resolve_tts_config
+from nanobot.audio.tts_registry import resolve_tts_provider, tts_provider_names
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
@@ -670,6 +672,22 @@ def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _tts_provider_rows(config: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for name in tts_provider_names():
+        spec = find_by_name(name)
+        provider_config = getattr(config.providers, name, None)
+        rows.append({
+            "name": name,
+            "label": spec.label if spec is not None else name,
+            "configured": bool(getattr(provider_config, "api_key", None)),
+            "api_key_hint": _mask_secret_hint(getattr(provider_config, "api_key", None)),
+            "api_base": getattr(provider_config, "api_base", None),
+            "default_api_base": spec.default_api_base if spec and spec.default_api_base else None,
+        })
+    return rows
+
+
 def settings_payload(
     *,
     requires_restart: bool = False,
@@ -715,6 +733,7 @@ def settings_payload(
     search_config = config.tools.web.search
     image_config = config.tools.image_generation
     transcription = resolve_transcription_config(config)
+    tts = resolve_tts_config(config)
     search_provider = (
         search_config.provider
         if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
@@ -824,6 +843,17 @@ def settings_payload(
             "max_duration_sec": transcription.max_duration_sec,
             "max_upload_mb": transcription.max_upload_mb,
             "providers": _transcription_provider_rows(config),
+        },
+        "tts": {
+            "enabled": tts.enabled,
+            "provider": tts.provider,
+            "provider_configured": tts.configured,
+            "model": tts.model,
+            "voice": tts.voice,
+            "speed": tts.speed,
+            "max_char_length": tts.max_char_length,
+            "response_format": tts.response_format,
+            "providers": _tts_provider_rows(config),
         },
         "runtime": {
             "config_path": str(get_config_path().expanduser()),
@@ -1470,6 +1500,85 @@ def update_transcription_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("max_upload_mb must be between 1 and 100")
         if transcription.max_upload_mb != parsed_upload:
             transcription.max_upload_mb = parsed_upload
+            changed = True
+
+    if changed:
+        save_config(config)
+    return settings_payload()
+
+
+def update_tts_settings(query: QueryParams) -> dict[str, Any]:
+    config = load_config()
+    tts = config.tts
+    changed = False
+
+    enabled = _query_first(query, "enabled")
+    if enabled is not None:
+        parsed_enabled = _parse_bool(enabled, "enabled")
+        if tts.enabled != parsed_enabled:
+            tts.enabled = parsed_enabled
+            changed = True
+
+    provider = _query_first(query, "provider")
+    if provider is not None:
+        provider = provider.strip().lower()
+        provider_spec = resolve_tts_provider(provider)
+        if provider_spec is None:
+            raise WebUISettingsError("unknown TTS provider")
+        provider = provider_spec.name
+        if tts.provider != provider:
+            tts.provider = provider
+            changed = True
+
+    model = _query_first(query, "model")
+    if model is not None:
+        model = model.strip() or None
+        if model is not None and len(model) > 200:
+            raise WebUISettingsError("TTS model is too long")
+        if tts.model != model:
+            tts.model = model
+            changed = True
+
+    voice = _query_first(query, "voice")
+    if voice is not None:
+        voice = voice.strip() or None
+        if voice is not None and len(voice) > 200:
+            raise WebUISettingsError("TTS voice is too long")
+        if tts.voice != voice:
+            tts.voice = voice
+            changed = True
+
+    speed = _query_first(query, "speed")
+    if speed is not None:
+        try:
+            parsed_speed = float(speed)
+        except ValueError:
+            raise WebUISettingsError("speed must be a number") from None
+        if parsed_speed < 0.25 or parsed_speed > 4.0:
+            raise WebUISettingsError("speed must be between 0.25 and 4.0")
+        if tts.speed != parsed_speed:
+            tts.speed = parsed_speed
+            changed = True
+
+    max_char_length = _query_first_alias(query, "max_char_length", "maxCharLength")
+    if max_char_length is not None:
+        try:
+            parsed_length = int(max_char_length)
+        except ValueError:
+            raise WebUISettingsError("max_char_length must be an integer") from None
+        if parsed_length < 1 or parsed_length > 100000:
+            raise WebUISettingsError("max_char_length must be between 1 and 100000")
+        if tts.max_char_length != parsed_length:
+            tts.max_char_length = parsed_length
+            changed = True
+
+    response_format = _query_first_alias(query, "response_format", "responseFormat")
+    if response_format is not None:
+        response_format = response_format.strip() or None
+        if response_format is not None and len(response_format) > 20:
+            raise WebUISettingsError("response_format is too long")
+        if tts.response_format != response_format:
+            tts.response_format = response_format
             changed = True
 
     if changed:

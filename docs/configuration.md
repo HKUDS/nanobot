@@ -23,6 +23,7 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 | Name and switch model choices | [Model Presets](#model-presets) |
 | Add fallback chains | [Model Fallbacks](#model-fallbacks) |
 | Configure voice transcription | [Transcription Settings](#transcription-settings) |
+| Configure voice synthesis (TTS) | [TTS Settings](#tts-settings) |
 | Tune channel defaults | [Channel Settings](#channel-settings) |
 | Configure web search and fetch | [Web Tools](#web-tools) |
 | Enable image generation | [Image Generation](#image-generation) |
@@ -43,6 +44,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Open the bundled WebUI | `channels.websocket.enabled`, optional `channels.websocket.port`, `channels.websocket.tokenIssueSecret` | `nanobot gateway`, then open `http://127.0.0.1:8765` | [Channel Settings](#channel-settings), [WebSocket docs](./websocket.md) |
 | Connect one chat app | `channels.<channel>.enabled`, channel credentials, `channels.<channel>.allowFrom` | `nanobot channels status`, then `nanobot gateway --verbose` | [Channel Settings](#channel-settings), [Chat Apps](./chat-apps.md) |
 | Enable voice transcription | `transcription.enabled`, `transcription.provider`, matching `providers.<name>.apiKey` | Send or upload a short voice message through a configured surface | [Transcription Settings](#transcription-settings) |
+| Enable voice synthesis (TTS) | `tts.enabled`, `tts.provider`, `tts.voice`, matching `providers.<name>.apiKey` | Ask the agent to speak a reply in a configured channel | [TTS Settings](#tts-settings) |
 | Enable web search or fetch | `tools.web.search.*`, `tools.web.fetch.*`, optional `tools.ssrfWhitelist` | Ask a question that requires current web information, then inspect logs if needed | [Web Tools](#web-tools), [Security](#security) |
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
@@ -1331,6 +1333,78 @@ Transcription credentials are intentionally not stored in `transcription`. Put t
 Selecting a transcription provider does not configure credentials by itself. For example, the effective provider may default to Groq for compatibility, but transcription is only usable when `providers.groq.apiKey` or the matching environment-backed config is available. The Settings UI writes only the top-level `transcription` fields.
 
 If you are adding a new transcription provider, see [`development.md`](./development.md#adding-a-transcription-provider).
+
+## TTS Settings
+
+Text-to-speech (TTS) lets the agent synthesize spoken audio from text replies. Configure under the top-level `tts` section:
+
+```json
+{
+  "tts": {
+    "enabled": true,
+    "provider": "openai",
+    "model": null,
+    "voice": null,
+    "speed": 1.0,
+    "maxCharLength": 4096,
+    "responseFormat": null
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enabled` | `true` | Enables TTS. When enabled and configured, the agent can synthesize speech from text. |
+| `provider` | `"openai"` | TTS backend: `"openai"`, `"groq"`, or `"elevenlabs"`. |
+| `model` | provider default | Optional model override. Defaults to `tts-1` for OpenAI, `canopylabs/orpheus-v1-english` for Groq, `eleven_multilingual_v2` for ElevenLabs. |
+| `voice` | provider default | Voice name. Defaults to `alloy` for OpenAI, `autumn` for Groq, `Matilda` for ElevenLabs. OpenAI voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`. Groq/Orpheus voices: `autumn`, `austin`, `daniel`, `diana`, `hannah`, `troy`. ElevenLabs premade voices: `Adam`, `Alice`, `Bella`, `Bill`, `Brian`, `Callum`, `Charlie`, `Chris`, `Daniel`, `Eric`, `George`, `Harry`, `Jessica`, `Laura`, `Liam`, `Lily`, `Matilda`, `River`, `Roger`, `Sarah`, `Will`. You can also use any custom voice name from your ElevenLabs account (resolved to UUID automatically), or pass a UUID directly. |
+| `speed` | `1.0` | Speech speed. Range 0.25–4.0. Supported by OpenAI and Groq; ElevenLabs ignores this setting. |
+| `maxCharLength` | `4096` | Maximum input text length in characters. Texts exceeding this limit are rejected before synthesis. |
+| `responseFormat` | provider default | Audio output format. OpenAI: `mp3` (default), `opus`, `flac`, `wav`. Groq: `wav` (default, only format supported). ElevenLabs: `mp3` (default), `wav`, `opus`, `flac`, `pcm`. |
+
+TTS credentials are not stored in `tts`. Put the API key and optional endpoint in the matching provider config:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-..."
+    }
+  },
+  "tts": {
+    "provider": "openai",
+    "voice": "nova"
+  }
+}
+```
+
+Selecting a TTS provider does not configure credentials by itself. TTS is only usable when the matching `providers.<name>.apiKey` or environment-backed config is available. The Settings UI writes only the top-level `tts` fields.
+
+### OpenAI TTS Voices
+
+OpenAI TTS supports the following voices:
+
+- **`alloy`** — balanced and versatile
+- **`ash`** — warm and conversational
+- **`ballad`** — expressive and melodic
+- **`coral`** — confident and articulate
+- **`echo`** — clear and measured
+- **`fable`** — warm and storytelling
+- **`nova`** — friendly and upbeat
+- **`onyx`** — deep and authoritative
+- **`sage`** — calm and steady
+- **`shimmer`** — soft and gentle
+
+### ElevenLabs API Key Permissions
+
+The ElevenLabs API key requires the following permissions:
+
+- **Text to Speech** — required to synthesize audio from text
+- **Voices Read** — required to resolve voice names to UUIDs; without this, only raw UUIDs can be used for the `voice` setting
+
+You can set these permissions when creating or editing an API key in the ElevenLabs dashboard under **Profile → API Keys**.
+
+If you are adding a new TTS provider, see [`development.md`](./development.md#adding-a-tts-provider).
 
 ## Channel Settings
 
