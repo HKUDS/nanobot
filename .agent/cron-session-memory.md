@@ -39,8 +39,10 @@ These fields are legacy-only. New cron creation should not depend on them.
 
 Use explicit branching:
 
-- **Bound user automation**: `payload.kind == "agent_turn"` and
-  `payload.session_key` is present. This uses the new session-turn model.
+- **Bound user automation**: `payload.kind == "agent_turn"`,
+  `payload.session_key` is present, and no legacy delivery fields
+  (`deliver`, `channel`, `to`, or `channel_meta`) are set. This uses the new
+  session-turn model.
 - **Legacy unbound automation**: user job with no `payload.session_key`. Keep the
   existing behavior. Do not migrate, infer, bind, or add UI for these jobs in
   this change.
@@ -210,8 +212,23 @@ Rules:
   session being deleted.
 - Do not block on system jobs.
 - Do not block on legacy unbound jobs.
+- In unified-session mode, WebUI chats display automations owned by
+  `unified:default`, but deleting an individual `websocket:*` thread should not
+  block on or delete those unified automations.
 - If the user manually deletes files outside the WebUI/API, do not try to
   compensate.
+
+## Unified Session Mode
+
+When `unified_session` is enabled, WebUI-created automations should bind to the
+same unified session as normal WebUI chat turns: `unified:default`.
+
+- All WebUI chats should display automations owned by `unified:default`.
+- Individual WebUI thread deletion should remain scoped to the concrete
+  `websocket:*` thread being deleted.
+- Toggling `unified_session` does not migrate existing cron jobs. Existing jobs
+  keep their stored `payload.session_key` and continue to execute against that
+  owner until explicitly removed or recreated.
 
 ## WebUI Scope
 
