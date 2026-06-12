@@ -13,6 +13,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.audit import AuditTool, AuditToolConfig, AuditEvent
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -108,6 +109,7 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: str | None = None
+    audit_tool: Any | None = None  # AuditTool instance, set by AgentLoop
 
 
 @dataclass(slots=True)
@@ -367,6 +369,21 @@ class AgentRunner:
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
+
+                # --- Audit: emit events for each tool invocation ---
+                if spec.audit_tool is not None:
+                    for tc, (result, event, _err) in zip(response.tool_calls, tool_results):
+                        action = "call" if event.get("status") == "ok" else "error"
+                        result_summary = event.get("detail", "")
+                        duration_ms = None
+                        spec.audit_tool.record(
+                            tool=tc.name,
+                            action=action,
+                            params=tc.arguments if isinstance(tc.arguments, dict) else {},
+                            result_summary=result_summary,
+                            detail=result_summary,
+                            duration_ms=duration_ms,
+                        )
                 completed_tool_results: list[dict[str, Any]] = []
                 for tool_call, result in zip(response.tool_calls, results):
                     tool_message = {
