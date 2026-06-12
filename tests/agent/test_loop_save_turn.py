@@ -1339,3 +1339,70 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
     loop.sessions.invalidate("slack:C123:1700.42")
     persisted = loop.sessions.get_or_create("slack:C123:1700.42")
     assert any(m.get("subagent_task_id") == "sub-1" for m in persisted.messages)
+
+
+@pytest.mark.asyncio
+async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path) -> None:
+    """Regression for #4006: when history ends with a user message,
+    ``build_messages`` merges the new user message into it, shrinking the
+    prompt prefix by one. The save boundary must follow, or the first
+    new-turn assistant message (carrying tool_calls) is cut from
+    persistence and its tool results are orphaned."""
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("feishu:c-merge")
+    session.add_message("user", "earlier question that never got an answer")
+    loop.sessions.save(session)
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        # The merge branch collapsed the current user message into the
+        # history tail: the prompt prefix is [system, merged-user].
+        assert [m["role"] for m in initial_messages] == ["system", "user"]
+        return (
+            "done",
+            [],
+            [
+                *initial_messages,
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_ls",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": '{"command": "ls"}'},
+                    }],
+                },
+                {"role": "tool", "tool_call_id": "call_ls", "name": "exec", "content": "file.txt"},
+                {"role": "assistant", "content": "done"},
+            ],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="feishu", sender_id="u1", chat_id="c-merge", content="and another thing"
+        )
+    )
+
+    assert result is not None
+    loop.sessions.invalidate("feishu:c-merge")
+    persisted = loop.sessions.get_or_create("feishu:c-merge")
+
+    declared: set[str] = set()
+    for message in persisted.messages:
+        if message.get("role") == "assistant":
+            declared.update(
+                str(tc["id"]) for tc in message.get("tool_calls") or [] if tc.get("id")
+            )
+        if message.get("role") == "tool":
+            assert str(message.get("tool_call_id")) in declared, (
+                f"orphaned tool result {message.get('tool_call_id')!r}: "
+                f"{[m.get('role') for m in persisted.messages]}"
+            )
+    assert [m["role"] for m in persisted.messages] == [
+        "user", "user", "assistant", "tool", "assistant",
+    ]
