@@ -498,6 +498,18 @@ class AgentLoop:
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 
+        # Audit tool — programmatic registration (not LLM-callable)
+        if self.tools_config.audit.enabled:
+            from nanobot.agent.tools.audit import AuditTool
+
+            audit_tool = AuditTool(cfg=self.tools_config.audit)
+            self.tools.register(audit_tool)
+            registered.append("audit")
+            logger.info("Audit tool enabled: transport={}, scope={}", self.tools_config.audit.transport, self.tools_config.audit.scope)
+            self._audit_tool = audit_tool
+        else:
+            self._audit_tool = None
+
     async def _connect_mcp(self) -> None:
         """Connect configured MCP servers."""
         await agent_context.connect_mcp(self, self.tools)
@@ -816,6 +828,7 @@ class AgentLoop:
                 ),
                 goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
                 goal_continue_message=_goal_continue,
+                audit_tool=getattr(self, "_audit_tool", None),
             ))
         finally:
             reset_workspace_scope(workspace_token)
