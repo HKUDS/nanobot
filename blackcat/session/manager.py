@@ -14,7 +14,6 @@ from typing import Any
 from loguru import logger
 
 from blackcat.config.paths import get_legacy_sessions_dir
-from blackcat.session.metadata import SESSION_ROUTING_METADATA_KEY
 from blackcat.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
@@ -37,7 +36,6 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "pending_user_turn",
     "runtime_checkpoint",
     "thread_goal",
-    SESSION_ROUTING_METADATA_KEY,
     "title",
     "title_user_edited",
 }

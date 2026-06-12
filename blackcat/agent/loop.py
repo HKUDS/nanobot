@@ -59,7 +59,6 @@ from blackcat.session.goal_state import (
 )
 from blackcat.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from blackcat.session.manager import Session, SessionManager
-from blackcat.session.routing import persist_routing_context
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
 from blackcat.utils.helpers import image_placeholder_text
 from blackcat.utils.helpers import truncate_text as truncate_text_fn
@@ -1389,8 +1388,6 @@ class AgentLoop:
             ctx.session = self.sessions.get_or_create(ctx.session_key)
         await self._runtime_events().session_turn_started(msg, ctx.session_key)
         self.workspace_scopes.persist_message_scope(ctx.session, msg)
-        if persist_routing_context(ctx.session, msg):
-            self.sessions.save(ctx.session)
 
         if self._restore_runtime_checkpoint(ctx.session):
             self.sessions.save(ctx.session)

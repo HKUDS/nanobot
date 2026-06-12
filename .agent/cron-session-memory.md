@@ -213,20 +213,23 @@ Rules:
   session being deleted.
 - Do not block on system jobs.
 - Do not block on legacy unbound jobs.
-- In unified-session mode, WebUI chats display cron jobs owned by
-  `unified:default`, but deleting an individual `websocket:*` thread should not
-  block on or delete those unified cron jobs.
+- In unified-session mode, WebUI-created cron jobs still belong to the concrete
+  `websocket:*` chat that created them, so deleting that chat should block on or
+  delete those jobs.
 - If the user manually deletes files outside the WebUI/API, do not try to
   compensate.
 
 ## Unified Session Mode
 
-When `unified_session` is enabled, WebUI-created cron jobs should bind to the
-same unified session as normal WebUI chat turns: `unified:default`.
+When `unified_session` is enabled, WebUI-created cron jobs should still bind to
+the concrete WebUI chat that created them, for example `websocket:<chat_id>`.
+The cron trigger is delivered through that original chat. `AgentLoop` then
+applies `unified_session` normally, so the turn's memory/session context may be
+`unified:default` even though the cron job's ownership key is concrete.
 
-- All WebUI chats should display cron jobs owned by `unified:default`.
-- Individual WebUI thread deletion should remain scoped to the concrete
-  `websocket:*` thread being deleted.
+- Each WebUI chat should display cron jobs owned by that concrete chat.
+- Individual WebUI thread deletion should block on cron jobs owned by that
+  concrete `websocket:*` thread.
 - Toggling `unified_session` does not migrate existing cron jobs. Existing jobs
   keep their stored `payload.session_key` and continue to execute against that
   owner until explicitly removed or recreated.

@@ -243,7 +243,7 @@ async def test_session_automations_route_filters_by_webui_session(
 
 
 @pytest.mark.asyncio
-async def test_session_automations_route_uses_unified_owner_when_enabled(
+async def test_session_automations_route_uses_origin_owner_when_unified_enabled(
     bus: MagicMock, tmp_path: Path
 ) -> None:
     cron = CronService(tmp_path / "cron" / "jobs.json")
@@ -255,9 +255,9 @@ async def test_session_automations_route_uses_unified_owner_when_enabled(
         session_key=UNIFIED_SESSION_KEY,
     )
     cron.add_job(
-        name="Visible thread only",
+        name="Visible chat job",
         schedule=hourly,
-        message="Do not show in unified mode",
+        message="Show for this chat",
         session_key="websocket:abc",
     )
     channel = _ch(
@@ -274,14 +274,19 @@ async def test_session_automations_route_uses_unified_owner_when_enabled(
         token = boot.json()["token"]
         auth = {"Authorization": f"Bearer {token}"}
 
-        for key in ("websocket%3Aabc", "websocket%3Aother"):
-            resp = await _http_get(
-                f"http://127.0.0.1:29917/api/sessions/{key}/automations",
-                headers=auth,
-            )
-            assert resp.status_code == 200
-            body = resp.json()
-            assert [job["name"] for job in body["jobs"]] == ["Unified check"]
+        resp = await _http_get(
+            "http://127.0.0.1:29917/api/sessions/websocket%3Aabc/automations",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        assert [job["name"] for job in resp.json()["jobs"]] == ["Visible chat job"]
+
+        resp = await _http_get(
+            "http://127.0.0.1:29917/api/sessions/websocket%3Aother/automations",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["jobs"] == []
     finally:
         await channel.stop()
         await server_task
@@ -802,17 +807,17 @@ async def test_session_delete_can_cascade_bound_automations(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_does_not_cascade_unified_automations(
+async def test_session_delete_blocks_origin_automation_when_unified_enabled(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
     cron = CronService(tmp_path / "cron" / "jobs.json")
     cron.add_job(
-        name="Shared daily check",
+        name="Chat daily check",
         schedule=CronSchedule(kind="every", every_ms=86_400_000),
-        message="Check the shared session",
-        session_key=UNIFIED_SESSION_KEY,
+        message="Check this chat",
+        session_key="websocket:doomed",
     )
     channel = _ch(
         bus,
@@ -835,10 +840,13 @@ async def test_session_delete_does_not_cascade_unified_automations(
         )
 
         assert resp.status_code == 200
-        assert resp.json()["deleted"] is True
-        assert not path.exists()
-        assert [job.name for job in cron.list_bound_cron_jobs_for_session(UNIFIED_SESSION_KEY)] == [
-            "Shared daily check"
+        body = resp.json()
+        assert body["deleted"] is False
+        assert body["blocked_by_automations"] is True
+        assert [job["name"] for job in body["automations"]] == ["Chat daily check"]
+        assert path.exists()
+        assert [job.name for job in cron.list_bound_cron_jobs_for_session("websocket:doomed")] == [
+            "Chat daily check"
         ]
     finally:
         await channel.stop()

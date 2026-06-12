@@ -75,7 +75,7 @@ class CronTool(Tool, ContextAware):
         self._channel.set(ctx.channel)
         self._chat_id.set(ctx.chat_id)
         self._metadata.set(ctx.metadata)
-        self._session_key.set(ctx.session_key or "")
+        self._session_key.set(f"{ctx.channel}:{ctx.chat_id}" if ctx.channel and ctx.chat_id else "")
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""

@@ -21,7 +21,6 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from blackcat.command.builtin import builtin_command_palette
-from blackcat.session.keys import UNIFIED_SESSION_KEY
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
@@ -473,8 +472,6 @@ class GatewayHTTPHandler:
 
     def _automation_display_key(self, session_key: str) -> str:
         """Return the cron ownership key shown for this WebUI thread."""
-        if self._unified_session:
-            return UNIFIED_SESSION_KEY
         return session_key
 
     # -- Media routes -------------------------------------------------------

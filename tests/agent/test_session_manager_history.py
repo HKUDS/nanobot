@@ -1,5 +1,4 @@
 from blackcat.session.manager import Session, SessionManager
-from blackcat.session.routing import SESSION_ROUTING_METADATA_KEY
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -433,11 +432,6 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     source.metadata["webui"] = True
     source.metadata["title"] = "Old title"
     source.metadata["goal_state"] = {"status": "active", "objective": "do not inherit"}
-    source.metadata[SESSION_ROUTING_METADATA_KEY] = {
-        "channel": "websocket",
-        "chat_id": "source",
-        "metadata": {},
-    }
     source.add_message("user", "round1")
     source.add_message("assistant", "answer1")
     source.add_message("user", "round2 fork me")
@@ -456,7 +450,6 @@ def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
     assert forked.metadata["webui"] is True
     assert "title" not in forked.metadata
     assert "goal_state" not in forked.metadata
-    assert SESSION_ROUTING_METADATA_KEY not in forked.metadata
     saved = manager.read_session_file("websocket:fork")
     assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
 

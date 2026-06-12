@@ -12,7 +12,6 @@ from blackcat.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from blackcat.providers.base import LLMResponse
 from blackcat.session.goal_state import GOAL_STATE_KEY
 from blackcat.session.manager import Session, SessionManager
-from blackcat.session.routing import SESSION_ROUTING_METADATA_KEY
 from blackcat.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
@@ -864,12 +863,6 @@ async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path:
     assert result.chat_id == "thread-777"
     assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
     assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
-    session = loop.sessions.get_or_create("discord:parent-456:thread:thread-777")
-    assert session.metadata[SESSION_ROUTING_METADATA_KEY] == {
-        "channel": "discord",
-        "chat_id": "thread-777",
-        "metadata": {"context_chat_id": "parent-456"},
-    }
 
 
 @pytest.mark.asyncio

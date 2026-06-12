@@ -988,9 +988,7 @@ def _run_gateway(
     from blackcat.cron.types import CronJob
     from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
     from blackcat.providers.image_generation import image_gen_provider_configs
-    from blackcat.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
     from blackcat.session.manager import SessionManager
-    from blackcat.session.routing import read_routing_context
     from blackcat.session.webui_turns import WebuiTurnCoordinator
     from blackcat.utils.prompt_templates import render_template
     from blackcat.webui.token_usage import TokenUsageHook
@@ -1046,11 +1044,6 @@ def _run_gateway(
             unified_session=config.agents.defaults.unified_session,
         )
 
-    def _session_metadata(session_key: str) -> dict[str, Any]:
-        data = session_manager.read_session_file(session_key)
-        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
-        return dict(metadata) if isinstance(metadata, dict) else {}
-
     def _bound_session_delivery_context(
         session_key: str,
         *,
@@ -1063,18 +1056,10 @@ def _run_gateway(
         if not channel or not rest:
             raise ValueError(f"bound cron session_key is invalid: {session_key!r}")
 
-        session_metadata = _session_metadata(session_key)
-        routed = read_routing_context(session_metadata)
-        if routed is not None:
-            channel, rest, metadata = routed
-        else:
-            metadata: dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
 
         if channel == "websocket":
             metadata["webui"] = True
-            scope = session_metadata.get(WORKSPACE_SCOPE_METADATA_KEY)
-            if isinstance(scope, dict):
-                metadata[WORKSPACE_SCOPE_METADATA_KEY] = dict(scope)
             metadata.update(
                 _proactive_delivery_metadata(
                     "websocket",
@@ -1156,7 +1141,6 @@ def _run_gateway(
                     chat_id=chat_id,
                     content=prompt,
                     metadata=metadata,
-                    session_key_override=session_key,
                 )
             )
         except (Exception, asyncio.CancelledError) as exc:
