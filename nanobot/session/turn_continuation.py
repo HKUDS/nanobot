@@ -182,7 +182,15 @@ def _save_skip_for_turn(
     """Return the persisted-message append boundary for this turn."""
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
-    return 1 + history_count + (1 if user_persisted_early else 0)
+    # ``build_messages`` merges the current message into the last history
+    # entry when both share a role, so the prompt prefix is not always
+    # ``2 + history_count``. Runner-appended messages always start at
+    # ``initial_message_count``; only step back when the current message
+    # exists as a standalone entry that was not persisted early.
+    has_standalone_current = initial_message_count > 1 + history_count
+    if has_standalone_current and not user_persisted_early:
+        return initial_message_count - 1
+    return initial_message_count
 
 
 def _goal_continuation_available(
