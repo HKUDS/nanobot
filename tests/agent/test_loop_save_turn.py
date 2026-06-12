@@ -1406,3 +1406,32 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
     assert [m["role"] for m in persisted.messages] == [
         "user", "user", "assistant", "tool", "assistant",
     ]
+
+
+def test_save_turn_keeps_placeholder_for_empty_tool_result_blocks() -> None:
+    # Dropping the whole tool message would leave the assistant tool_call
+    # without a result, which strict APIs reject as firmly as orphans.
+    loop = _mk_loop()
+    session = Session(key="test:empty-tool-blocks")
+
+    loop._save_turn(
+        session,
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_empty",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_empty", "name": "exec", "content": []},
+        ],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["assistant", "tool"]
+    assert session.messages[1]["content"] == [
+        {"type": "text", "text": "[tool result omitted during persistence]"}
+    ]
