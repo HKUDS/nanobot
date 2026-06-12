@@ -1611,6 +1611,13 @@ class AgentLoop:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        declared_tool_call_ids = {
+            str(tc["id"])
+            for m in session.messages
+            if m.get("role") == "assistant"
+            for tc in m.get("tool_calls") or []
+            if isinstance(tc, dict) and tc.get("id")
+        }
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
@@ -1618,6 +1625,17 @@ class AgentLoop:
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
+                tool_call_id = entry.get("tool_call_id")
+                if tool_call_id and str(tool_call_id) not in declared_tool_call_ids:
+                    # A tool result without a declared call violates the
+                    # OpenAI/Anthropic pairing contract and would poison
+                    # every future request built from this session (#4006).
+                    logger.warning(
+                        "Dropping orphaned tool result {} from session {} during persistence",
+                        tool_call_id,
+                        session.key,
+                    )
+                    continue
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
@@ -1647,6 +1665,11 @@ class AgentLoop:
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
+                declared_tool_call_ids.update(
+                    str(tc["id"])
+                    for tc in entry.get("tool_calls") or []
+                    if isinstance(tc, dict) and tc.get("id")
+                )
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()

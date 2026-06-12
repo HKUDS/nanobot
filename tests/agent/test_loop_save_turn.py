@@ -347,11 +347,22 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
 
     loop._save_turn(
         session,
-        [{"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": content}],
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "read_file", "content": content},
+        ],
         skip=0,
     )
 
-    assert session.messages[0]["content"] == content
+    assert session.messages[1]["content"] == content
 
 
 def test_save_turn_stamps_latency_on_last_assistant() -> None:
@@ -1435,3 +1446,46 @@ def test_save_turn_keeps_placeholder_for_empty_tool_result_blocks() -> None:
     assert session.messages[1]["content"] == [
         {"type": "text", "text": "[tool result omitted during persistence]"}
     ]
+
+
+def test_save_turn_drops_orphaned_tool_results() -> None:
+    # Defense in depth for #4006: whatever upstream bug produces a tool
+    # result whose call was never declared, it must not reach history.
+    loop = _mk_loop()
+    session = Session(key="test:orphan-guard")
+    session.add_message("user", "hi")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "tool", "tool_call_id": "call_ghost", "name": "exec", "content": "boo"},
+            {"role": "assistant", "content": "done"},
+        ],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["user", "assistant"]
+
+
+def test_save_turn_keeps_tool_results_declared_in_prior_history() -> None:
+    # Declarations may live in already-persisted history (e.g. a restored
+    # runtime checkpoint), not only in the new-turn slice.
+    loop = _mk_loop()
+    session = Session(key="test:prior-declared")
+    session.add_message(
+        "assistant",
+        "working",
+        tool_calls=[{
+            "id": "call_prior",
+            "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }],
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "tool", "tool_call_id": "call_prior", "name": "exec", "content": "ok"}],
+        skip=0,
+    )
+
+    assert [m["role"] for m in session.messages] == ["assistant", "tool"]
