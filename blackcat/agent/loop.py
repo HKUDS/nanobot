@@ -528,13 +528,6 @@ class AgentLoop:
             effective_key = UNIFIED_SESSION_KEY
         else:
             effective_key = f"{channel}:{chat_id}"
-        effective_key = self._tool_context_session_key(
-            channel=channel,
-            chat_id=chat_id,
-            metadata=metadata,
-            session_key=effective_key,
-        )
-
         request_ctx = RequestContext(
             channel=channel,
             chat_id=chat_id,
@@ -547,24 +540,6 @@ class AgentLoop:
             tool = self.tools.get(name)
             if tool and isinstance(tool, ContextAware):
                 tool.set_context(request_ctx)
-
-    def _tool_context_session_key(
-        self,
-        *,
-        channel: str,
-        chat_id: str,
-        metadata: dict | None,
-        session_key: str,
-    ) -> str:
-        """Return the session key tools should use for ownership-scoped resources."""
-        if (
-            self._unified_session
-            and channel == "websocket"
-            and (metadata or {}).get("webui") is True
-            and chat_id
-        ):
-            return f"websocket:{chat_id}"
-        return session_key
 
     @staticmethod
     def _runtime_chat_id(msg: InboundMessage) -> str:

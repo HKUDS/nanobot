@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 import httpx
 import pytest
 
+from blackcat.agent.loop import UNIFIED_SESSION_KEY
 from blackcat.channels.websocket import WebSocketChannel, WebSocketConfig
 from blackcat.cron.service import CronService
 from blackcat.cron.types import CronJob, CronPayload, CronSchedule
@@ -29,6 +30,7 @@ def _make_handler(
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    unified_session: bool = False,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -42,6 +44,7 @@ def _make_handler(
         runtime_model_name=runtime_model_name,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
+        unified_session=unified_session,
         cron_service=cron_service,
     )
 
@@ -55,6 +58,7 @@ def _ch(
     port: int = _PORT,
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
+    unified_session: bool = False,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -73,6 +77,7 @@ def _ch(
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
+        unified_session=unified_session,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -232,6 +237,51 @@ async def test_session_automations_route_filters_by_webui_session(
         assert job["schedule"]["kind"] == "every"
         assert job["schedule"]["every_ms"] == 3_600_000
         assert job["payload"]["message"] == "Check the project status"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_automations_route_uses_unified_owner_when_enabled(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    hourly = CronSchedule(kind="every", every_ms=3_600_000)
+    cron.add_job(
+        name="Unified check",
+        schedule=hourly,
+        message="Check the shared session",
+        session_key=UNIFIED_SESSION_KEY,
+    )
+    cron.add_job(
+        name="Visible thread only",
+        schedule=hourly,
+        message="Do not show in unified mode",
+        session_key="websocket:abc",
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        cron_service=cron,
+        unified_session=True,
+        port=29917,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29917/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        for key in ("websocket%3Aabc", "websocket%3Aother"):
+            resp = await _http_get(
+                f"http://127.0.0.1:29917/api/sessions/{key}/automations",
+                headers=auth,
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert [job["name"] for job in body["jobs"]] == ["Unified check"]
     finally:
         await channel.stop()
         await server_task
@@ -670,7 +720,7 @@ async def test_session_delete_removes_file(
 async def test_session_delete_blocks_when_bound_automation_exists(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
     cron = CronService(tmp_path / "cron" / "jobs.json")
     cron.add_job(
@@ -709,7 +759,7 @@ async def test_session_delete_blocks_when_bound_automation_exists(
 async def test_session_delete_can_cascade_bound_automations(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
     cron = CronService(tmp_path / "cron" / "jobs.json")
     cron.add_job(
@@ -745,6 +795,50 @@ async def test_session_delete_can_cascade_bound_automations(
         assert cron.list_bound_agent_jobs_for_session("websocket:doomed") == []
         assert [job.name for job in cron.list_jobs(include_disabled=True)] == [
             "Legacy same target"
+        ]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_delete_does_not_cascade_unified_automations(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:doomed")
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    cron.add_job(
+        name="Shared daily check",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the shared session",
+        session_key=UNIFIED_SESSION_KEY,
+    )
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        cron_service=cron,
+        unified_session=True,
+        port=29918,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29918/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        path = sm._get_session_path("websocket:doomed")
+        resp = await _http_get(
+            "http://127.0.0.1:29918/api/sessions/websocket:doomed/delete",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+        assert not path.exists()
+        assert [job.name for job in cron.list_bound_agent_jobs_for_session(UNIFIED_SESSION_KEY)] == [
+            "Shared daily check"
         ]
     finally:
         await channel.stop()

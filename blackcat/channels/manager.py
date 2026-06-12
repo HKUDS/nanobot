@@ -125,6 +125,7 @@ class ChannelManager:
                         runtime_model_name=self._webui_runtime_model_name,
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
+                        unified_session=self.config.agents.defaults.unified_session,
                         cron_service=self._cron_service,
                         logger=logger,
                     )

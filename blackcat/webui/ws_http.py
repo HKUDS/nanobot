@@ -20,6 +20,7 @@ from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from blackcat.agent.loop import UNIFIED_SESSION_KEY
 from blackcat.command.builtin import builtin_command_palette
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
@@ -139,6 +140,7 @@ class GatewayHTTPHandler:
         runtime_model_name: Callable[[], str | None] | None,
         runtime_surface: str,
         runtime_capabilities_overrides: dict[str, Any] | None,
+        unified_session: bool = False,
         bus: MessageBus,
         tokens: GatewayTokenStore,
         media: WebUIMediaGateway,
@@ -161,6 +163,7 @@ class GatewayHTTPHandler:
         self.cron_service = cron_service
         self._log = log
         self._runtime_surface = runtime_surface
+        self._unified_session = unified_session
 
         from blackcat.webui.settings_api import runtime_capabilities as _rc
         from blackcat.webui.settings_routes import WebUISettingsRouter
@@ -437,7 +440,7 @@ class GatewayHTTPHandler:
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         return _http_json_response(
-            session_automations_payload(self.cron_service, decoded_key)
+            session_automations_payload(self.cron_service, self._automation_display_key(decoded_key))
         )
 
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
@@ -467,6 +470,12 @@ class GatewayHTTPHandler:
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    def _automation_display_key(self, session_key: str) -> str:
+        """Return the cron ownership key shown for this WebUI thread."""
+        if self._unified_session:
+            return UNIFIED_SESSION_KEY
+        return session_key
 
     # -- Media routes -------------------------------------------------------
 

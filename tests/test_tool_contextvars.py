@@ -245,8 +245,8 @@ async def test_cron_tool_basic_set_context_and_execute(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_webui_cron_tool_uses_visible_session_under_unified_session(tmp_path) -> None:
-    """WebUI-created automations should attach to the visible thread, not unified memory."""
+async def test_webui_cron_tool_uses_unified_session_when_enabled(tmp_path) -> None:
+    """WebUI-created automations should follow unified session ownership."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
 
     class _Tools:
@@ -270,7 +270,7 @@ async def test_webui_cron_tool_uses_visible_session_under_unified_session(tmp_pa
 
     jobs = tool._cron.list_jobs()
     assert len(jobs) == 1
-    assert jobs[0].payload.session_key == "websocket:chat-123"
+    assert jobs[0].payload.session_key == "unified:default"
 
 
 @pytest.mark.asyncio
