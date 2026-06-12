@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "Prochaine {{time}}",
+        "pending": "Exécution imminente",
         "disabled": "En pause",
         "none": "Aucune prochaine exécution"
       }

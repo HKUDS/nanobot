@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "Berikutnya {{time}}",
+        "pending": "Segera berjalan",
         "disabled": "Dijeda",
         "none": "Tidak ada jadwal berikutnya"
       }

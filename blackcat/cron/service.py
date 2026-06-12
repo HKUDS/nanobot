@@ -25,6 +25,10 @@ from blackcat.cron.types import (
 )
 
 
+class CronJobSkippedError(Exception):
+    """Raised by cron callbacks when a job was intentionally skipped."""
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -524,6 +528,10 @@ class CronService:
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)
 
+        except CronJobSkippedError as e:
+            job.state.last_status = "skipped"
+            job.state.last_error = str(e) or None
+            logger.warning("Cron: job '{}' skipped: {}", job.name, job.state.last_error or "")
         except asyncio.CancelledError as e:
             current = asyncio.current_task()
             if current is not None and current.cancelling():

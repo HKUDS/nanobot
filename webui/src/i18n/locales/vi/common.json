@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "Tiếp theo {{time}}",
+        "pending": "Sắp chạy",
         "disabled": "Đã tạm dừng",
         "none": "Không có lần chạy tiếp theo"
       }

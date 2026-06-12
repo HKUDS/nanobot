@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "{{time}}",
+        "pending": "Runs shortly",
         "disabled": "Paused",
         "none": "No next run"
       }

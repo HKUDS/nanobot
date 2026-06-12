@@ -5,6 +5,7 @@ import i18n from "@/i18n";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
+  fetchSessionAutomations,
   fetchWebuiThread,
   listSessions,
 } from "@/lib/api";
@@ -12,6 +13,7 @@ import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
 import type {
   ChatSummary,
+  SessionAutomationJob,
   SessionDeleteResult,
   UIMessage,
   WorkspaceScopePayload,
@@ -52,6 +54,7 @@ export function useSessions(): {
     key: string,
     options?: { deleteAutomations?: boolean },
   ) => Promise<SessionDeleteResult>;
+  getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>([]);
@@ -159,7 +162,21 @@ export function useSessions(): {
     [],
   );
 
-  return { sessions, loading, error, refresh, createChat, forkChat, deleteChat };
+  const getSessionAutomations = useCallback(async (key: string) => {
+    const result = await fetchSessionAutomations(tokenRef.current, key);
+    return result.jobs;
+  }, []);
+
+  return {
+    sessions,
+    loading,
+    error,
+    refresh,
+    createChat,
+    forkChat,
+    deleteChat,
+    getSessionAutomations,
+  };
 }
 
 /** Lazy-load a session's on-disk messages the first time the UI displays it. */

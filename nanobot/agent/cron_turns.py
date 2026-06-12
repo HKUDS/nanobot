@@ -7,7 +7,11 @@ import dataclasses
 from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.cron.session_turns import cron_run_id, defer_cron_until_session_idle
+from nanobot.cron.session_turns import (
+    cron_run_id,
+    cron_trigger,
+    defer_cron_until_session_idle,
+)
 
 
 class CronTurnCoordinator:
@@ -25,6 +29,7 @@ class CronTurnCoordinator:
         self._is_running = is_running
         self.deferred_queues: dict[str, list[InboundMessage]] = {}
         self._waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
+        self._pending_messages_by_run_id: dict[str, InboundMessage] = {}
 
     async def submit(self, msg: InboundMessage) -> OutboundMessage | None:
         """Submit a scheduled cron turn and wait for its session response."""
@@ -37,6 +42,7 @@ class CronTurnCoordinator:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[OutboundMessage | None] = loop.create_future()
         self._waiters[run_id] = future
+        self._pending_messages_by_run_id[run_id] = msg
         try:
             if self._is_running():
                 await self._publish_inbound(msg)
@@ -45,6 +51,7 @@ class CronTurnCoordinator:
             return await future
         finally:
             self._waiters.pop(run_id, None)
+            self._pending_messages_by_run_id.pop(run_id, None)
 
     def should_defer(
         self,
@@ -102,6 +109,21 @@ class CronTurnCoordinator:
     def defer(self, session_key: str, msg: InboundMessage) -> None:
         self.deferred_queues.setdefault(session_key, []).append(msg)
 
+    def pending_job_ids_for_session(self, session_key: str) -> set[str]:
+        """Return cron jobs that are waiting for or running in *session_key*."""
+        job_ids: set[str] = set()
+        for msg in self.deferred_queues.get(session_key, []):
+            job_id = _cron_job_id(msg)
+            if job_id:
+                job_ids.add(job_id)
+        for msg in self._pending_messages_by_run_id.values():
+            if msg.session_key != session_key:
+                continue
+            job_id = _cron_job_id(msg)
+            if job_id:
+                job_ids.add(job_id)
+        return job_ids
+
     async def publish_next_deferred(self, session_key: str) -> None:
         queue = self.deferred_queues.get(session_key)
         if not queue:
@@ -110,3 +132,11 @@ class CronTurnCoordinator:
         if not queue:
             self.deferred_queues.pop(session_key, None)
         await self._publish_inbound(msg)
+
+
+def _cron_job_id(msg: InboundMessage) -> str | None:
+    trigger = cron_trigger(msg.metadata)
+    if not trigger:
+        return None
+    value = trigger.get("job_id")
+    return value if isinstance(value, str) and value else None

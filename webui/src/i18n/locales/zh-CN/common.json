@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "下次 {{time}}",
+        "pending": "即将执行",
         "disabled": "已暂停",
         "none": "没有下次运行"
       }

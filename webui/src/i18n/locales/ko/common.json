@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "다음 {{time}}",
+        "pending": "곧 실행됨",
         "disabled": "일시 중지됨",
         "none": "다음 실행 없음"
       }

@@ -639,7 +639,7 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
         chat_id="chat-1",
         content="scheduled work",
         metadata={
-            CRON_TRIGGER_META: {"run_id": "run-1"},
+            CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-1"},
             CRON_DEFER_UNTIL_IDLE_META: True,
         },
         session_key_override=session_key,
@@ -657,11 +657,49 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
     assert pending.empty()
     assert loop._dispatch.await_count == 0
     assert loop._cron_turns.deferred_queues[session_key] == [msg]
+    assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
 
     await loop._cron_turns.publish_next_deferred(session_key)
     queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
     assert queued is msg
     assert session_key not in loop._cron_turns.deferred_queues
+    assert loop.pending_cron_job_ids_for_session(session_key) == set()
+
+
+@pytest.mark.asyncio
+async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
+    """Bound cron jobs remain marked pending while their session turn is in flight."""
+    from nanobot.bus.events import InboundMessage, OutboundMessage
+    from nanobot.cron.session_turns import CRON_TRIGGER_META
+
+    loop = _make_loop(tmp_path)
+    loop._running = True
+
+    session_key = "websocket:chat-1"
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="cron",
+        chat_id="chat-1",
+        content="scheduled work",
+        metadata={CRON_TRIGGER_META: {"job_id": "job-1", "run_id": "run-1"}},
+        session_key_override=session_key,
+    )
+
+    submit_task = asyncio.create_task(loop.submit_cron_turn(msg))
+    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
+
+    assert queued is msg
+    assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
+
+    response = OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="done",
+    )
+    loop._cron_turns.complete(msg, response=response)
+
+    assert await asyncio.wait_for(submit_task, timeout=0.5) is response
+    assert loop.pending_cron_job_ids_for_session(session_key) == set()
 
 
 @pytest.mark.asyncio

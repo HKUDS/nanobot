@@ -43,7 +43,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchSessionAutomations, fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
   getHostApi,
@@ -528,7 +528,15 @@ function Shell({
   const { t, i18n } = useTranslation();
   const { client, token } = useClient();
   const { theme, toggle } = useTheme();
-  const { sessions, loading, refresh, createChat, forkChat, deleteChat } = useSessions();
+  const {
+    sessions,
+    loading,
+    refresh,
+    createChat,
+    forkChat,
+    deleteChat,
+    getSessionAutomations,
+  } = useSessions();
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
   const initialRouteRef = useRef<ShellRoute | null>(null);
@@ -1306,12 +1314,12 @@ function Shell({
   const onRequestDelete = useCallback(async (key: string, label: string) => {
     let automations: SessionAutomationJob[] = [];
     try {
-      automations = (await fetchSessionAutomations(token, key)).jobs;
+      automations = await getSessionAutomations(key);
     } catch {
       // Delete remains protected by the backend block; prefetch only improves the first prompt.
     }
     setPendingDelete({ key, label, automations });
-  }, [token]);
+  }, [getSessionAutomations]);
 
   const headerTitle = activeSession
     ? sidebarState.title_overrides[activeSession.key] ||

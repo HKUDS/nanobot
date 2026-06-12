@@ -113,6 +113,7 @@ export interface SessionAutomationJob {
   state: {
     next_run_at_ms?: number | null;
     last_status?: "ok" | "error" | "skipped" | string | null;
+    pending?: boolean;
   };
 }
 

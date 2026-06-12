@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "次回 {{time}}",
+        "pending": "まもなく実行",
         "disabled": "一時停止",
         "none": "次回実行なし"
       }

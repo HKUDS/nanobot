@@ -663,6 +663,7 @@
       },
       "next": {
         "label": "下次 {{time}}",
+        "pending": "即將執行",
         "disabled": "已暫停",
         "none": "沒有下次執行"
       }

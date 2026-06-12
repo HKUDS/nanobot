@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, Protocol
 
 from blackcat.cron.types import CronJob
@@ -32,18 +33,27 @@ def session_automation_jobs(
 def session_automations_payload(
     cron_service: _CronServiceLike | None,
     session_key: str,
+    *,
+    pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
     return {
-        "jobs": serialize_automation_jobs(session_automation_jobs(cron_service, session_key))
+        "jobs": serialize_automation_jobs(
+            session_automation_jobs(cron_service, session_key),
+            pending_job_ids=pending_job_ids,
+        )
     }
 
 
-def serialize_automation_jobs(jobs: list[CronJob]) -> list[dict[str, Any]]:
-    return [_serialize_job(job) for job in jobs]
+def serialize_automation_jobs(
+    jobs: list[CronJob],
+    *,
+    pending_job_ids: Collection[str] | None = None,
+) -> list[dict[str, Any]]:
+    return [_serialize_job(job, pending=job.id in (pending_job_ids or ())) for job in jobs]
 
 
-def _serialize_job(job: CronJob) -> dict[str, Any]:
+def _serialize_job(job: CronJob, *, pending: bool = False) -> dict[str, Any]:
     return {
         "id": job.id,
         "name": job.name,
@@ -61,5 +71,6 @@ def _serialize_job(job: CronJob) -> dict[str, Any]:
         "state": {
             "next_run_at_ms": job.state.next_run_at_ms,
             "last_status": job.state.last_status,
+            "pending": pending,
         },
     }

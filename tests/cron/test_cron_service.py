@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from blackcat.cron.service import CronService
+from blackcat.cron.service import CronJobSkippedError, CronService
 from blackcat.cron.types import CronJob, CronPayload, CronSchedule
 
 
@@ -294,6 +294,30 @@ async def test_run_history_records_errors(tmp_path) -> None:
     assert len(loaded.state.run_history) == 1
     assert loaded.state.run_history[0].status == "error"
     assert loaded.state.run_history[0].error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_history_records_skipped_jobs(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def skip(_):
+        raise CronJobSkippedError("missing session binding")
+
+    service = CronService(store_path, on_job=skip)
+    job = service.add_job(
+        name="skip",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    await service.run_job(job.id)
+
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert loaded.state.last_status == "skipped"
+    assert loaded.state.last_error == "missing session binding"
+    assert len(loaded.state.run_history) == 1
+    assert loaded.state.run_history[0].status == "skipped"
+    assert loaded.state.run_history[0].error == "missing session binding"
 
 
 @pytest.mark.asyncio

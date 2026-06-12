@@ -51,9 +51,7 @@ export function DeleteConfirm({
           </AlertDialogTitle>
           <AlertDialogDescription className="mt-3 max-w-[17rem] text-center text-[14px] leading-6 text-muted-foreground">
             {hasAutomations
-              ? t("deleteConfirm.automationsDescription", {
-                  count: automations.length,
-                })
+              ? t("deleteConfirm.automationsDescription")
               : t("deleteConfirm.description")}
           </AlertDialogDescription>
           {hasAutomations ? (
@@ -94,9 +92,7 @@ export function DeleteConfirm({
             className="h-11 rounded-full bg-destructive px-5 text-[15px] font-semibold text-destructive-foreground shadow-[0_10px_25px_rgba(239,68,68,0.28)] hover:bg-destructive/90"
           >
             {hasAutomations
-              ? t("deleteConfirm.confirmWithAutomations", {
-                  count: automations.length,
-                })
+              ? t("deleteConfirm.confirmWithAutomations")
               : t("deleteConfirm.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
