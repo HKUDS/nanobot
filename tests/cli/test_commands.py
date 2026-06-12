@@ -9,14 +9,18 @@ import pytest
 from typer.testing import CliRunner
 
 from blackcat.bus.events import InboundMessage, OutboundMessage
-from blackcat.cli.commands import _proactive_delivery_metadata, app
+from blackcat.cli.commands import app
 from blackcat.config.schema import Config
 from blackcat.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from blackcat.cron.types import CronJob, CronPayload
+from blackcat.cron.webui_metadata import cron_proactive_delivery_metadata
 from blackcat.providers.factory import ProviderSnapshot, make_provider
 from blackcat.providers.openai_codex_provider import _strip_model_prefix
 from blackcat.providers.registry import find_by_name
-from blackcat.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from blackcat.webui.metadata import (
+    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
 
 runner = CliRunner()
 
@@ -28,7 +32,7 @@ def test_proactive_websocket_delivery_gets_fresh_turn_id() -> None:
         "workspace_scope": {"mode": "default"},
     }
 
-    out = _proactive_delivery_metadata(
+    out = cron_proactive_delivery_metadata(
         "websocket",
         metadata,
         turn_seed="cron:drink-water",

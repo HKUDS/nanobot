@@ -41,8 +41,7 @@ from blackcat.bus.runtime_events import (
 from blackcat.command import CommandContext, CommandRouter, register_builtin_commands
 from blackcat.config.schema import AgentDefaults, ModelPresetConfig
 from blackcat.cron.session_turns import (
-    CRON_HISTORY_META,
-    cron_trigger,
+    cron_history_overrides,
 )
 from blackcat.providers.base import LLMProvider
 from blackcat.providers.factory import ProviderSnapshot
@@ -593,17 +592,10 @@ class AgentLoop:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
-            if trigger := cron_trigger(msg.metadata):
-                persist_content = trigger.get("persist_content")
-                if isinstance(persist_content, str) and persist_content.strip():
-                    text = persist_content
-                extra.update({
-                    CRON_HISTORY_META: True,
-                    "cron_job_id": trigger.get("job_id"),
-                    "cron_job_name": trigger.get("job_name"),
-                    "cron_run_id": trigger.get("run_id"),
-                    "cron_prompt_ref": trigger.get("prompt_ref"),
-                })
+            text_override, cron_extra = cron_history_overrides(msg.metadata)
+            if text_override is not None:
+                text = text_override
+            extra.update(cron_extra)
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
@@ -904,18 +896,11 @@ class AgentLoop:
                     self.commands.dispatch_priority,
                 )
                 continue
-            if self._cron_turns.should_defer(
+            if self._cron_turns.defer_if_active(
                 msg,
                 session_key=effective_key,
                 active_session_keys=self._pending_queues.keys(),
             ):
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                self._cron_turns.defer(effective_key, pending_msg)
                 logger.info(
                     "Deferred cron turn for active session {}",
                     effective_key,

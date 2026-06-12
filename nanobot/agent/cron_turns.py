@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -56,6 +57,29 @@ class CronTurnCoordinator:
             defer_cron_until_session_idle(msg.metadata)
             and session_key in active_session_keys
         )
+
+    def defer_if_active(
+        self,
+        msg: InboundMessage,
+        *,
+        session_key: str,
+        active_session_keys: Iterable[str],
+    ) -> bool:
+        """Defer a cron turn when its target session is already active."""
+        if not self.should_defer(
+            msg,
+            session_key=session_key,
+            active_session_keys=active_session_keys,
+        ):
+            return False
+        pending_msg = msg
+        if session_key != msg.session_key:
+            pending_msg = dataclasses.replace(
+                msg,
+                session_key_override=session_key,
+            )
+        self.defer(session_key, pending_msg)
+        return True
 
     def complete(
         self,

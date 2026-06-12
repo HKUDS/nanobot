@@ -36,6 +36,26 @@ def cron_run_id(metadata: Mapping[str, Any] | None) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def cron_history_overrides(metadata: Mapping[str, Any] | None) -> tuple[str | None, dict[str, Any]]:
+    """Return session-history text/metadata overrides for a cron turn."""
+    trigger = cron_trigger(metadata)
+    if not trigger:
+        return None, {}
+    persist_content = trigger.get("persist_content")
+    text = (
+        persist_content
+        if isinstance(persist_content, str) and persist_content.strip()
+        else None
+    )
+    return text, {
+        CRON_HISTORY_META: True,
+        "cron_job_id": trigger.get("job_id"),
+        "cron_job_name": trigger.get("job_name"),
+        "cron_run_id": trigger.get("run_id"),
+        "cron_prompt_ref": trigger.get("prompt_ref"),
+    }
+
+
 def is_bound_cron_job(job: CronJob) -> bool:
     """True for new session-bound cron jobs, excluding legacy delivery payloads."""
     payload = job.payload

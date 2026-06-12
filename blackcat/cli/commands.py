@@ -1,13 +1,10 @@
 """CLI commands for blackcat."""
 
 import asyncio
-import hashlib
 import os
 import select
 import signal
 import sys
-import time
-import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
@@ -57,16 +54,13 @@ from blackcat.agent.loop import AgentLoop  # noqa: E402
 from blackcat.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from blackcat.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from blackcat.config.schema import Config  # noqa: E402
+from blackcat.cron.webui_metadata import cron_proactive_delivery_metadata  # noqa: E402
 from blackcat.utils.evaluator import evaluate_response  # noqa: E402
 from blackcat.utils.helpers import sync_workspace_templates  # noqa: E402
 from blackcat.utils.restart import (  # noqa: E402
     consume_restart_notice_from_env,
     format_restart_completed_message,
     should_show_cli_restart_notice,
-)
-from blackcat.webui.metadata import (  # noqa: E402
-    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
-    WEBUI_TURN_METADATA_KEY,
 )
 
 
@@ -98,24 +92,6 @@ _PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
     default=None,
 )
 
-
-def _proactive_delivery_metadata(
-    channel: str,
-    metadata: dict[str, Any] | None,
-    *,
-    turn_seed: str,
-    source_label: str | None = None,
-) -> dict[str, Any]:
-    """Return channel metadata for a fresh proactive delivery turn."""
-    out = dict(metadata or {})
-    out.pop(WEBUI_TURN_METADATA_KEY, None)
-    if channel == "websocket":
-        out[WEBUI_TURN_METADATA_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
-        source: dict[str, str] = {"kind": "cron"}
-        if source_label:
-            source["label"] = source_label
-        out[WEBUI_MESSAGE_SOURCE_METADATA_KEY] = source
-    return out
 
 app = typer.Typer(
     name="blackcat",
@@ -979,19 +955,14 @@ def _run_gateway(
     from blackcat.bus.queue import MessageBus
     from blackcat.bus.runtime_events import RuntimeEventBus
     from blackcat.channels.manager import ChannelManager
+    from blackcat.cron.bound_runner import run_bound_cron_job
     from blackcat.cron.service import CronService
-    from blackcat.cron.session_delivery import origin_delivery_context
-    from blackcat.cron.session_turns import (
-        CRON_DEFER_UNTIL_IDLE_META,
-        CRON_TRIGGER_META,
-        is_bound_cron_job,
-    )
+    from blackcat.cron.session_turns import is_bound_cron_job
     from blackcat.cron.types import CronJob
     from blackcat.providers.factory import build_provider_snapshot, load_provider_snapshot
     from blackcat.providers.image_generation import image_gen_provider_configs
     from blackcat.session.manager import SessionManager
     from blackcat.session.webui_turns import WebuiTurnCoordinator
-    from blackcat.utils.prompt_templates import render_template
     from blackcat.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -1035,7 +1006,7 @@ def _run_gateway(
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
 
-    from blackcat.bus.events import InboundMessage, OutboundMessage
+    from blackcat.bus.events import OutboundMessage
     from blackcat.session.keys import session_key_for_channel
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
@@ -1044,119 +1015,6 @@ def _run_gateway(
             chat_id,
             unified_session=config.agents.defaults.unified_session,
         )
-
-    def _bound_session_delivery_context(
-        job: CronJob,
-        *,
-        turn_seed: str,
-        source_label: str | None,
-    ) -> tuple[str, str, dict[str, Any]]:
-        channel, chat_id, metadata = origin_delivery_context(job)
-
-        if channel == "websocket":
-            metadata["webui"] = True
-            metadata.update(
-                _proactive_delivery_metadata(
-                    "websocket",
-                    metadata,
-                    turn_seed=turn_seed,
-                    source_label=source_label,
-                )
-            )
-
-        return channel, chat_id, metadata
-
-    def _cron_prompt_ref(prompt: str) -> dict[str, Any]:
-        return {
-            "id": "cron.agent_turn.reminder",
-            "version": 1,
-            "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-        }
-
-    async def _run_bound_cron_job(job: CronJob) -> str | None:
-        session_key = job.payload.session_key
-        if not session_key:
-            raise ValueError(f"cron job {job.id} is missing payload.session_key")
-
-        prompt = render_template(
-            "agent/cron_reminder.md",
-            strip=True,
-            message=job.payload.message,
-        )
-        prompt_ref = _cron_prompt_ref(prompt)
-        run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
-        channel, chat_id, metadata = _bound_session_delivery_context(
-            job,
-            turn_seed=f"cron:{job.id}",
-            source_label=job.name,
-        )
-        metadata[CRON_TRIGGER_META] = {
-            "job_id": job.id,
-            "job_name": job.name,
-            "run_id": run_id,
-            "prompt_ref": prompt_ref,
-            "persist_content": (
-                f"Scheduled cron job triggered: {job.name}\n\n{job.payload.message}"
-            ),
-        }
-        metadata[CRON_DEFER_UNTIL_IDLE_META] = True
-        run_record_base: dict[str, Any] = {
-            "job_id": job.id,
-            "job_name": job.name,
-            "session_key": session_key,
-            "prompt_ref": prompt_ref,
-            "prompt_vars": {"message": job.payload.message},
-            "rendered_prompt": prompt,
-        }
-
-        cron.write_run_record(
-            run_id,
-            {
-                **run_record_base,
-                "status": "queued",
-            },
-        )
-
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-        try:
-            resp = await agent.submit_cron_turn(
-                InboundMessage(
-                    channel=channel,
-                    sender_id="cron",
-                    chat_id=chat_id,
-                    content=prompt,
-                    metadata=metadata,
-                    session_key_override=session_key,
-                )
-            )
-        except (Exception, asyncio.CancelledError) as exc:
-            error_text = str(exc) or exc.__class__.__name__
-            cron.write_run_record(
-                run_id,
-                {
-                    **run_record_base,
-                    "status": "error",
-                    "error": error_text,
-                },
-            )
-            raise
-        finally:
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-
-        response = resp.content if resp else ""
-        cron.write_run_record(
-            run_id,
-            {
-                **run_record_base,
-                "status": "ok",
-                "response": response,
-            },
-        )
-        return response
 
     async def _deliver_to_channel(
         msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
@@ -1319,7 +1177,7 @@ def _run_gateway(
             return response
 
         if is_bound_cron_job(job):
-            return await _run_bound_cron_job(job)
+            return await run_bound_cron_job(job, agent=agent, cron=cron)
 
         reminder_note = (
             "The scheduled time has arrived. Deliver this reminder to the user now, "
@@ -1338,7 +1196,7 @@ def _run_gateway(
         if isinstance(message_tool, MessageTool):
             message_record_token = message_tool.set_record_channel_delivery(True)
 
-        proactive_webui_metadata = _proactive_delivery_metadata(
+        proactive_webui_metadata = cron_proactive_delivery_metadata(
             "websocket",
             None,
             turn_seed=f"cron:{job.id}",
@@ -1371,7 +1229,7 @@ def _run_gateway(
                 response, reminder_note, agent.provider, agent.model,
             )
             if should_notify:
-                proactive_metadata = _proactive_delivery_metadata(
+                proactive_metadata = cron_proactive_delivery_metadata(
                     job.payload.channel or "cli",
                     job.payload.channel_meta,
                     turn_seed=f"cron:{job.id}",
