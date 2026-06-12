@@ -34,7 +34,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
