@@ -1354,11 +1354,6 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
 
 @pytest.mark.asyncio
 async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path) -> None:
-    """Regression for #4006: when history ends with a user message,
-    ``build_messages`` merges the new user message into it, shrinking the
-    prompt prefix by one. The save boundary must follow, or the first
-    new-turn assistant message (carrying tool_calls) is cut from
-    persistence and its tool results are orphaned."""
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
@@ -1367,8 +1362,6 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
     loop.sessions.save(session)
 
     async def fake_run_agent_loop(initial_messages, **_kwargs):
-        # The merge branch collapsed the current user message into the
-        # history tail: the prompt prefix is [system, merged-user].
         assert [m["role"] for m in initial_messages] == ["system", "user"]
         return (
             "done",
@@ -1420,8 +1413,6 @@ async def test_turn_after_unanswered_user_keeps_tool_call_pairing(tmp_path: Path
 
 
 def test_save_turn_keeps_placeholder_for_empty_tool_result_blocks() -> None:
-    # Dropping the whole tool message would leave the assistant tool_call
-    # without a result, which strict APIs reject as firmly as orphans.
     loop = _mk_loop()
     session = Session(key="test:empty-tool-blocks")
 
@@ -1449,8 +1440,6 @@ def test_save_turn_keeps_placeholder_for_empty_tool_result_blocks() -> None:
 
 
 def test_save_turn_drops_orphaned_tool_results() -> None:
-    # Defense in depth for #4006: whatever upstream bug produces a tool
-    # result whose call was never declared, it must not reach history.
     loop = _mk_loop()
     session = Session(key="test:orphan-guard")
     session.add_message("user", "hi")
@@ -1485,8 +1474,6 @@ def test_save_turn_drops_tool_results_without_tool_call_id() -> None:
 
 
 def test_save_turn_keeps_tool_results_declared_in_prior_history() -> None:
-    # Declarations may live in already-persisted history (e.g. a restored
-    # runtime checkpoint), not only in the new-turn slice.
     loop = _mk_loop()
     session = Session(key="test:prior-declared")
     session.add_message(

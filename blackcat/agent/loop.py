@@ -1627,9 +1627,7 @@ class AgentLoop:
             if role == "tool":
                 tool_call_id = entry.get("tool_call_id")
                 if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
-                    # A tool result without a declared call violates the
-                    # OpenAI/Anthropic pairing contract and would poison
-                    # every future request built from this session (#4006).
+                    # Undeclared tool results corrupt future provider requests.
                     logger.warning(
                         "Dropping orphaned tool result {} from session {} during persistence",
                         tool_call_id or "(missing id)",
@@ -1641,8 +1639,7 @@ class AgentLoop:
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
                     if not filtered:
-                        # Dropping the message would leave its assistant
-                        # tool_call without a result; keep a placeholder.
+                        # Preserve the tool_call/result pair after block filtering.
                         filtered = [
                             {"type": "text", "text": "[tool result omitted during persistence]"}
                         ]
