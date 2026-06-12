@@ -500,3 +500,23 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestGetLatestCursor:
+    def test_returns_zero_when_empty(self, store):
+        assert store.get_latest_cursor() == 0
+
+    def test_returns_cursor_of_last_entry(self, store):
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        assert store.get_latest_cursor() == 3
+
+    def test_returns_zero_when_no_entries(self, store):
+        # No history written, cursor file doesn't exist
+        assert store.get_latest_cursor() == 0
+
+    def test_matches_next_cursor_minus_one(self, store):
+        store.append_history("event 1")
+        store.append_history("event 2")
+        assert store.get_latest_cursor() == store._next_cursor() - 1

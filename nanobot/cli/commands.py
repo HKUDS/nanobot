@@ -1092,6 +1092,13 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
     else:
         console.print("[yellow]○[/yellow] Dream: disabled")
+        # Advance dream cursor so Recent History section doesn't accumulate
+        # stale entries when Dream never runs.  Without this the cursor stays
+        # at its initial value and every history entry appears "unprocessed",
+        # causing unbounded prompt bloat.
+        agent.context.memory.set_last_dream_cursor(
+            agent.context.memory.get_latest_cursor()
+        )
 
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:
