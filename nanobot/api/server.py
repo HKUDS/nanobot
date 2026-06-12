@@ -357,7 +357,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, agent_loop._last_usage)
+        _chat_completion_response(response_text, model_name, getattr(agent_loop, "_last_usage", None))
     )
 
 
