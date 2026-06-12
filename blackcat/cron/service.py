@@ -72,6 +72,62 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
+def _has_legacy_delivery_context(payload: CronPayload) -> bool:
+    return bool(payload.deliver or payload.channel or payload.to or payload.channel_meta)
+
+
+def _legacy_session_key(payload: CronPayload) -> str | None:
+    if payload.session_key:
+        return payload.session_key
+    if payload.channel and payload.to:
+        return f"{payload.channel}:{payload.to}"
+    return None
+
+
+def _disable_malformed_legacy_job(job: CronJob) -> None:
+    reason = "legacy cron payload is missing channel/to; recreate it from a chat session"
+    job.payload.deliver = False
+    job.payload.channel = None
+    job.payload.to = None
+    job.payload.channel_meta = {}
+    job.enabled = False
+    job.state.next_run_at_ms = None
+    job.state.last_status = "error"
+    job.state.last_error = reason
+    logger.warning("Cron: disabled malformed legacy job '{}' ({}): {}", job.name, job.id, reason)
+
+
+def _normalize_agent_turn_job(job: CronJob) -> bool:
+    """Migrate legacy user cron payloads into session-bound payloads.
+
+    Pre-bound user cron jobs stored their delivery target in ``channel``/``to``.
+    Normal user-created legacy jobs always have those fields; if they are
+    missing, keep the record for inspection but disable it instead of preserving
+    a runtime legacy execution path.
+    """
+    payload = job.payload
+    if payload.kind != "agent_turn" or not _has_legacy_delivery_context(payload):
+        return False
+
+    if not payload.channel or not payload.to:
+        _disable_malformed_legacy_job(job)
+        return True
+
+    payload.session_key = _legacy_session_key(payload)
+    payload.origin_channel = payload.origin_channel or payload.channel
+    payload.origin_chat_id = payload.origin_chat_id or payload.to
+    if not payload.origin_metadata:
+        payload.origin_metadata = dict(payload.channel_meta or {})
+
+    payload.deliver = False
+    payload.channel = None
+    payload.to = None
+    payload.channel_meta = {}
+    job.updated_at_ms = max(job.updated_at_ms, _now_ms())
+    logger.info("Cron: migrated legacy job '{}' ({}) to session-bound payload", job.name, job.id)
+    return True
+
+
 class CronService:
     """Service for managing and executing scheduled jobs."""
 
@@ -115,7 +171,7 @@ class CronService:
                 jobs = []
                 version = data.get("version", 1)
                 for j in data.get("jobs", []):
-                    jobs.append(CronJob(
+                    job = CronJob(
                         id=j["id"],
                         name=j["name"],
                         enabled=j.get("enabled", True),
@@ -170,7 +226,9 @@ class CronService:
                         created_at_ms=j.get("createdAtMs", 0),
                         updated_at_ms=j.get("updatedAtMs", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
-                    ))
+                    )
+                    _normalize_agent_turn_job(job)
+                    jobs.append(job)
             except Exception:
                 # Preserve the corrupt file for forensic recovery instead of
                 # letting the next save overwrite it with an empty job list.
@@ -196,6 +254,7 @@ class CronService:
         jobs_map = {j.id: j for j in self._store.jobs}
         def _update(params: dict):
             j = CronJob.from_dict(params)
+            _normalize_agent_turn_job(j)
             jobs_map[j.id] = j
 
         def _del(params: dict):
@@ -570,6 +629,7 @@ class CronService:
             updated_at_ms=now,
             delete_after_run=delete_after_run,
         )
+        _normalize_agent_turn_job(job)
         if self._running:
             store = self._load_store()
             store.jobs.append(job)
@@ -678,6 +738,7 @@ class CronService:
             job.payload.to = to
         if delete_after_run is not None:
             job.delete_after_run = delete_after_run
+        _normalize_agent_turn_job(job)
 
         job.updated_at_ms = _now_ms()
         if job.enabled:

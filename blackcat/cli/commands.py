@@ -7,7 +7,6 @@ import signal
 import sys
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +53,6 @@ from blackcat.agent.loop import AgentLoop  # noqa: E402
 from blackcat.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from blackcat.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from blackcat.config.schema import Config  # noqa: E402
-from blackcat.cron.webui_metadata import cron_proactive_delivery_metadata  # noqa: E402
 from blackcat.utils.evaluator import evaluate_response  # noqa: E402
 from blackcat.utils.helpers import sync_workspace_templates  # noqa: E402
 from blackcat.utils.restart import (  # noqa: E402
@@ -85,12 +83,6 @@ class SafeFileHistory(FileHistory):
 
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
-
-
-_PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
-    "proactive_webui_metadata",
-    default=None,
-)
 
 
 app = typer.Typer(
@@ -950,7 +942,6 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from blackcat.agent.tools.cron import CronTool
     from blackcat.agent.tools.message import MessageTool
     from blackcat.bus.queue import MessageBus
     from blackcat.bus.runtime_events import RuntimeEventBus
@@ -1022,9 +1013,6 @@ def _run_gateway(
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
         record = record or bool(metadata.pop("_record_channel_delivery", False))
-        proactive_webui_metadata = _PROACTIVE_WEBUI_METADATA.get()
-        if record and msg.channel == "websocket" and proactive_webui_metadata:
-            metadata = {**metadata, **proactive_webui_metadata}
         if metadata != (msg.metadata or {}):
             msg = OutboundMessage(
                 channel=msg.channel,
@@ -1179,73 +1167,12 @@ def _run_gateway(
         if is_bound_cron_job(job):
             return await run_bound_cron_job(job, agent=agent, cron=cron)
 
-        reminder_note = (
-            "The scheduled time has arrived. Deliver this reminder to the user now, "
-            "as a brief and natural message in their language. Speak directly to them — "
-            "do not narrate progress, summarize, include user IDs, or add status reports "
-            "like 'Done' or 'Reminded'.\n\n"
-            f"Reminder: {job.payload.message}"
+        logger.warning(
+            "Cron: skipped unbound agent job '{}' ({}); recreate it from a chat session",
+            job.name,
+            job.id,
         )
-
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-
-        message_record_token = None
-        if isinstance(message_tool, MessageTool):
-            message_record_token = message_tool.set_record_channel_delivery(True)
-
-        proactive_webui_metadata = cron_proactive_delivery_metadata(
-            "websocket",
-            None,
-            turn_seed=f"cron:{job.id}",
-            source_label=job.name,
-        )
-        proactive_token = _PROACTIVE_WEBUI_METADATA.set(proactive_webui_metadata)
-
-        try:
-            resp = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-                on_progress=_silent,
-            )
-        finally:
-            _PROACTIVE_WEBUI_METADATA.reset(proactive_token)
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-            if isinstance(message_tool, MessageTool) and message_record_token is not None:
-                message_tool.reset_record_channel_delivery(message_record_token)
-
-        response = resp.content if resp else ""
-
-        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, reminder_note, agent.provider, agent.model,
-            )
-            if should_notify:
-                proactive_metadata = cron_proactive_delivery_metadata(
-                    job.payload.channel or "cli",
-                    job.payload.channel_meta,
-                    turn_seed=f"cron:{job.id}",
-                    source_label=job.name,
-                )
-                await _deliver_to_channel(
-                    OutboundMessage(
-                        channel=job.payload.channel or "cli",
-                        chat_id=job.payload.to,
-                        content=response,
-                        metadata=proactive_metadata,
-                    ),
-                    record=True,
-                    session_key=job.payload.session_key,
-                )
-        return response
+        return None
 
     cron.on_job = on_cron_job
 

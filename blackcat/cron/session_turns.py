@@ -57,9 +57,14 @@ def cron_history_overrides(metadata: Mapping[str, Any] | None) -> tuple[str | No
 
 
 def is_bound_cron_job(job: CronJob) -> bool:
-    """True for new session-bound cron jobs, excluding legacy delivery payloads."""
+    """True for session-bound cron jobs with complete delivery context."""
     payload = job.payload
-    if payload.kind != "agent_turn" or not payload.session_key:
+    if (
+        payload.kind != "agent_turn"
+        or not payload.session_key
+        or not payload.origin_channel
+        or not payload.origin_chat_id
+    ):
         return False
     return not (
         payload.deliver

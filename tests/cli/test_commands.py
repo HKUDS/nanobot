@@ -1185,7 +1185,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
 
 
-def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
+def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch, tmp_path: Path
 ) -> None:
     config_file = tmp_path / "instance" / "config.json"
@@ -1250,11 +1250,10 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             seen["agent"] = self
 
         async def process_direct(self, *_args, **_kwargs):
-            return OutboundMessage(
-                channel="telegram",
-                chat_id="user-1",
-                content="Time to stretch.",
-            )
+            raise AssertionError("unbound cron job must not use process_direct")
+
+        async def submit_cron_turn(self, _msg: InboundMessage):
+            raise AssertionError("unbound cron job must not run as a bound cron turn")
 
         async def close_mcp(self) -> None:
             return None
@@ -1270,16 +1269,10 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             raise _StopGatewayError("stop")
 
     async def _capture_evaluate_response(
-        response: str,
-        task_context: str,
-        provider_arg: object,
-        model: str,
+        *_args,
+        **_kwargs,
     ) -> bool:
-        seen["response"] = response
-        seen["task_context"] = task_context
-        seen["provider"] = provider_arg
-        seen["model"] = model
-        return True
+        raise AssertionError("unbound cron job must not be evaluated for delivery")
 
     monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
@@ -1314,213 +1307,8 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     response = asyncio.run(cron.on_job(job))
 
-    assert response == "Time to stretch."
-    assert seen["response"] == "Time to stretch."
-    assert seen["provider"] is runtime_provider
-    assert seen["model"] == "runtime-model"
-    assert seen["task_context"] == (
-        "The scheduled time has arrived. Deliver this reminder to the user now, "
-        "as a brief and natural message in their language. Speak directly to them — "
-        "do not narrate progress, summarize, include user IDs, or add status reports "
-        "like 'Done' or 'Reminded'.\n\n"
-        "Reminder: Remind me to stretch."
-    )
-    bus.publish_outbound.assert_awaited_once_with(
-        OutboundMessage(
-            channel="telegram",
-            chat_id="user-1",
-            content="Time to stretch.",
-        )
-    )
-    assert seen["session_key"] == "telegram:user-1"
-    saved_session = seen["saved_session"]
-    assert isinstance(saved_session, _FakeSession)
-    assert saved_session.messages == [
-        {
-            "role": "assistant",
-            "content": "Time to stretch.",
-            "_channel_delivery": True,
-        }
-    ]
-
-    bus.publish_outbound.reset_mock()
-    old_turn_id = "turn-that-created-the-reminder"
-    websocket_job = CronJob(
-        id="drink-water",
-        name="drink water",
-        payload=CronPayload(
-            message="Remind me to drink water.",
-            deliver=True,
-            channel="websocket",
-            to="chat-1",
-            channel_meta={
-                "webui": True,
-                WEBUI_TURN_METADATA_KEY: old_turn_id,
-                "workspace_scope": {"mode": "default"},
-            },
-        ),
-    )
-
-    response = asyncio.run(cron.on_job(websocket_job))
-
-    assert response == "Time to stretch."
-    bus.publish_outbound.assert_awaited_once()
-    delivered = bus.publish_outbound.await_args.args[0]
-    assert delivered.channel == "websocket"
-    assert delivered.chat_id == "chat-1"
-    assert delivered.metadata["webui"] is True
-    assert delivered.metadata["workspace_scope"] == {"mode": "default"}
-    assert delivered.metadata[WEBUI_TURN_METADATA_KEY].startswith("cron:drink-water:")
-    assert delivered.metadata[WEBUI_TURN_METADATA_KEY] != old_turn_id
-    assert delivered.metadata[WEBUI_MESSAGE_SOURCE_METADATA_KEY] == {
-        "kind": "cron",
-        "label": "drink water",
-    }
-
-
-def test_gateway_legacy_cron_payloads_with_session_key_stay_legacy(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    bus = MagicMock()
-    bus.publish_outbound = AsyncMock()
-    seen: dict[str, object] = {"process_calls": [], "evaluations": [], "saved_keys": []}
-
-    class _FakeSession:
-        def __init__(self) -> None:
-            self.messages = []
-
-        def add_message(self, role: str, content: str, **kwargs) -> None:
-            self.messages.append({"role": role, "content": content, **kwargs})
-
-    class _FakeSessionManager:
-        def __init__(self, _workspace: Path) -> None:
-            self.session = _FakeSession()
-            seen["session_manager"] = self
-
-        def read_session_file(self, _key: str) -> dict[str, object]:
-            return {"metadata": {}}
-
-        def get_or_create(self, key: str) -> _FakeSession:
-            seen["saved_keys"].append(key)
-            return self.session
-
-        def save(self, session: _FakeSession) -> None:
-            seen["saved_session"] = session
-
-    class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
-            self.on_job = None
-            seen["cron"] = self
-
-    class _FakeAgentLoop:
-        @classmethod
-        def from_config(cls, config, bus=None, **extra):
-            return cls(**extra)
-
-        def __init__(self, *args, **kwargs) -> None:
-            self.model = "test-model"
-            self.provider = kwargs.get("provider", object())
-            self.tools = {}
-
-        async def process_direct(self, prompt: str, **kwargs):
-            seen["process_calls"].append((prompt, kwargs))
-            return OutboundMessage(
-                channel=kwargs["channel"],
-                chat_id=kwargs["chat_id"],
-                content="Legacy response.",
-            )
-
-        async def submit_cron_turn(self, _msg: InboundMessage):
-            raise AssertionError("legacy cron payload must not run as bound cron turn")
-
-        async def close_mcp(self) -> None:
-            return None
-
-        async def run(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
-    class _StopAfterCronSetup:
-        def __init__(self, *_args, **_kwargs) -> None:
-            raise _StopGatewayError("stop")
-
-    async def _capture_evaluate_response(*args, **_kwargs) -> bool:
-        seen["evaluations"].append(args)
-        return True
-
-    _patch_cli_command_runtime(
-        monkeypatch,
-        config,
-        message_bus=lambda: bus,
-        session_manager=_FakeSessionManager,
-        cron_service=_FakeCron,
-    )
-    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _StopAfterCronSetup)
-    monkeypatch.setattr(
-        "blackcat.cli.commands.evaluate_response",
-        _capture_evaluate_response,
-    )
-
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
-    assert isinstance(result.exception, _StopGatewayError)
-    cron = seen["cron"]
-
-    silent_job = CronJob(
-        id="silent-legacy",
-        name="Silent legacy",
-        payload=CronPayload(
-            message="Run silently.",
-            deliver=False,
-            channel="telegram",
-            to="user-1",
-            session_key="telegram:user-1",
-        ),
-    )
-
-    response = asyncio.run(cron.on_job(silent_job))
-
-    assert response == "Legacy response."
-    prompt, kwargs = seen["process_calls"][-1]
-    assert "Reminder: Run silently." in prompt
-    assert kwargs["session_key"] == "cron:silent-legacy"
-    assert kwargs["channel"] == "telegram"
-    assert kwargs["chat_id"] == "user-1"
-    assert seen["evaluations"] == []
+    assert response is None
     bus.publish_outbound.assert_not_awaited()
-
-    topic_job = CronJob(
-        id="topic-legacy",
-        name="Topic legacy",
-        payload=CronPayload(
-            message="Ping the topic.",
-            deliver=True,
-            channel="telegram",
-            to="-100123",
-            channel_meta={"message_thread_id": 42},
-            session_key="telegram:-100123:topic:42",
-        ),
-    )
-
-    response = asyncio.run(cron.on_job(topic_job))
-
-    assert response == "Legacy response."
-    _prompt, kwargs = seen["process_calls"][-1]
-    assert kwargs["session_key"] == "cron:topic-legacy"
-    assert kwargs["channel"] == "telegram"
-    assert kwargs["chat_id"] == "-100123"
-    assert len(seen["evaluations"]) == 1
-    bus.publish_outbound.assert_awaited_once()
-    delivered = bus.publish_outbound.await_args.args[0]
-    assert delivered.channel == "telegram"
-    assert delivered.chat_id == "-100123"
-    assert delivered.metadata["message_thread_id"] == 42
-    assert seen["saved_keys"] == ["telegram:-100123:topic:42"]
 
 
 def test_gateway_bound_cron_runs_as_session_turn(
@@ -1722,109 +1510,6 @@ def test_gateway_bound_cron_runs_as_session_turn(
     assert msg.session_key_override == "feishu:oc_abc:om_root123"
     assert msg.metadata["message_id"] == "om_root123"
     assert msg.metadata["thread_id"] == "om_root123"
-
-
-def test_gateway_cron_job_suppresses_intermediate_progress(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """Cron jobs must pass on_progress=_silent to process_direct so that
-    tool hints and streaming deltas are never leaked to the user channel
-    before evaluate_response decides whether to deliver."""
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
-    config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    bus = MagicMock()
-    bus.publish_outbound = AsyncMock()
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr("blackcat.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("blackcat.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("blackcat.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("blackcat.providers.factory.make_provider", lambda _config: _fake_provider())
-    monkeypatch.setattr(
-        "blackcat.providers.factory.build_provider_snapshot",
-        lambda _config: _test_provider_snapshot(object(), _config),
-    )
-    monkeypatch.setattr(
-        "blackcat.providers.factory.load_provider_snapshot",
-        lambda _config_path=None: _test_provider_snapshot(object(), config),
-    )
-    monkeypatch.setattr("blackcat.bus.queue.MessageBus", lambda: bus)
-    monkeypatch.setattr("blackcat.session.manager.SessionManager", lambda _workspace: object())
-
-    class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
-            self.on_job = None
-            seen["cron"] = self
-
-    class _FakeAgentLoop:
-        @classmethod
-        def from_config(cls, config, bus=None, **extra):
-            return cls(**extra)
-        def __init__(self, *args, **kwargs) -> None:
-            self.model = "test-model"
-            self.provider = object()
-            self.tools = {}
-
-        async def process_direct(self, *_args, on_progress=None, **_kwargs):
-            seen["on_progress"] = on_progress
-            return OutboundMessage(
-                channel="telegram",
-                chat_id="user-1",
-                content="Done.",
-            )
-
-        async def close_mcp(self) -> None:
-            return None
-
-        async def run(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
-    class _StopAfterCronSetup:
-        def __init__(self, *_args, **_kwargs) -> None:
-            raise _StopGatewayError("stop")
-
-    async def _always_reject(*_args, **_kwargs) -> bool:
-        return False
-
-    monkeypatch.setattr("blackcat.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("blackcat.cli.commands.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("blackcat.channels.manager.ChannelManager", _StopAfterCronSetup)
-    monkeypatch.setattr(
-        "blackcat.cli.commands.evaluate_response",
-        _always_reject,
-    )
-
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
-    assert isinstance(result.exception, _StopGatewayError)
-
-    cron = seen["cron"]
-    job = CronJob(
-        id="cron-silent-test",
-        name="test-silent",
-        payload=CronPayload(
-            message="Run something.",
-            deliver=True,
-            channel="telegram",
-            to="user-1",
-        ),
-    )
-    response = asyncio.run(cron.on_job(job))
-
-    assert response == "Done."
-    # on_progress must be a callable (the _silent noop), not None and not bus_progress
-    assert seen["on_progress"] is not None
-    assert callable(seen["on_progress"])
-    # Verify it actually swallows calls (no side effects)
-    asyncio.run(seen["on_progress"]("tool_hint", "🔧 $ echo test"))
-    # Nothing published to bus since evaluator rejected
-    bus.publish_outbound.assert_not_awaited()
 
 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
