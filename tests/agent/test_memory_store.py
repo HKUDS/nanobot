@@ -171,6 +171,23 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert [e["cursor"] for e in entries] == [2, 3]
 
+    def test_read_unprocessed_skips_malformed_history_payloads(self, store):
+        """Externally edited JSONL can keep an int cursor but miss required payload fields."""
+        store.history_file.write_text(
+            '{"cursor": 1, "timestamp": "2026-04-01 10:00", "content": "valid"}\n'
+            '{"cursor": 2, "timestamp": "2026-04-01 10:01"}\n'
+            '{"cursor": 3, "content": "missing timestamp"}\n'
+            '{"cursor": 4, "timestamp": "2026-04-01 10:03", "content": 123}\n'
+            '{"cursor": 5, "timestamp": "2026-04-01 10:04", "content": "bad session", "session_key": 42}\n'
+            '{"cursor": 6, "timestamp": "2026-04-01 10:05", "content": "also valid", "session_key": "telegram:chat-1"}\n',
+            encoding="utf-8",
+        )
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        assert [e["cursor"] for e in entries] == [1, 6]
+        assert [e["content"] for e in entries] == ["valid", "also valid"]
+
     def test_next_cursor_falls_back_when_last_entry_has_no_cursor(self, store):
         """Regression: _next_cursor should not KeyError on entries without cursor."""
         store.history_file.write_text(
