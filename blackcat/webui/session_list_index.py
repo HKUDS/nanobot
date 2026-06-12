@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 
+from blackcat.cron.session_turns import CRON_HISTORY_META
 from blackcat.session.manager import (
     _SESSION_LIST_PREVIEW_MAX_CHARS,
     _SESSION_LIST_PREVIEW_MAX_RECORDS,
@@ -142,6 +143,8 @@ def _preview_from_messages(messages: list[dict[str, Any]]) -> str:
             or scanned_chars > _SESSION_LIST_PREVIEW_MAX_CHARS
         ):
             break
+        if item.get(CRON_HISTORY_META) is True:
+            continue
         text = _message_preview_text(item)
         if not text:
             continue
@@ -192,6 +195,8 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                     break
                 item = json.loads(line)
                 if item.get("_type") == "metadata":
+                    continue
+                if item.get(CRON_HISTORY_META) is True:
                     continue
                 text = _message_preview_text(item)
                 if not text:

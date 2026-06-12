@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import nanobot.webui.session_list_index as session_list_index
+from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.session.manager import SessionManager
 
 
@@ -69,6 +70,20 @@ def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
     assert manager.delete_session("websocket:deleted") is True
 
     assert list_webui_sessions(manager) == []
+
+
+def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:cron-preview")
+    session.add_message(
+        "user",
+        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
+        **{CRON_HISTORY_META: True},
+    )
+    session.add_message("assistant", "提醒已经到期。")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["preview"] == "提醒已经到期。"
 
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:

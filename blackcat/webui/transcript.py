@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from blackcat.config.paths import get_webui_dir
+from blackcat.cron.session_turns import CRON_HISTORY_META
 from blackcat.session.manager import SessionManager
 from blackcat.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
@@ -853,6 +854,8 @@ def _session_user_event(
     message: dict[str, Any],
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
+        return None
+    if message.get(CRON_HISTORY_META) is True:
         return None
     content = message.get("content")
     text = content if isinstance(content, str) else ""

@@ -181,6 +181,31 @@ async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path
     loop.provider.chat_with_retry.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:cron-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message(
+        "user",
+        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
+        **{CRON_HISTORY_META: True},
+    )
+    session.add_message("assistant", "提醒已经到期。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:cron-title",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
+
+
 def test_webui_title_update_uses_captured_llm_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

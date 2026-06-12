@@ -2866,3 +2866,49 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
         "legacy question",
         "legacy answer",
     ]
+
+
+def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.cron.session_turns import CRON_HISTORY_META
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    key = "websocket:c-cron"
+    session = sessions.get_or_create(key)
+    session.add_message(
+        "user",
+        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
+        **{CRON_HISTORY_META: True},
+    )
+    session.add_message("assistant", "提醒已经到期。")
+    sessions.save(session)
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "c-cron", "text": "提醒已经到期。"},
+    )
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
+    )
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["role"] for message in body["messages"]] == ["assistant"]
+    assert [message["content"] for message in body["messages"]] == ["提醒已经到期。"]
