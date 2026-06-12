@@ -377,6 +377,16 @@ Provider selection follows this practical rule:
 - Gateway providers such as OpenRouter and AiHubMix can route many model families, so the model name must be valid for that gateway.
 - Local providers should normally be explicit because generic local model names such as `llama3.2` do not always contain provider keywords.
 
+### Model Name Prefixes
+
+`family/model-name` does not always select provider `family`. Prefix-based provider inference only runs when the active provider is `"auto"`.
+
+- Explicit provider wins: `provider: "openrouter"` with `model: "anthropic/claude-sonnet-4.5"` calls OpenRouter, not Anthropic.
+- With `provider: "auto"`, a prefix matching a configured built-in or named custom provider can select that provider. Named custom prefixes are stripped before request, so `companyProxy/gpt-4o-mini` is sent upstream as `gpt-4o-mini`.
+- With an explicit named custom provider, the model is sent as written; `provider: "companyProxy"` with `model: "openai/gpt-4o-mini"` sends `openai/gpt-4o-mini` to `companyProxy`.
+
+Pin `provider` in presets when using gateway catalog IDs such as `anthropic/claude-sonnet-4.5`.
+
 ## Model Presets
 
 Model presets are the recommended model configuration surface. Use them when you want named model choices, runtime `/model` switching, or reusable fallback targets.
