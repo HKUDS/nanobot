@@ -1380,6 +1380,13 @@ TTS credentials are not stored in `tts`. Put the API key and optional endpoint i
 
 Selecting a TTS provider does not configure credentials by itself. TTS is only usable when the matching `providers.<name>.apiKey` or environment-backed config is available. The Settings UI writes only the top-level `tts` fields.
 
+### OpenAI TTS Models
+
+OpenAI TTS supports the following models:
+
+- **`tts-1`** *(default)* — optimized for speed; lower cost, good quality
+- **`tts-1-hd`** — optimized for quality; higher fidelity audio, slower and more expensive
+
 ### OpenAI TTS Voices
 
 OpenAI TTS supports the following voices:
@@ -1394,6 +1401,39 @@ OpenAI TTS supports the following voices:
 - **`onyx`** — deep and authoritative
 - **`sage`** — calm and steady
 - **`shimmer`** — soft and gentle
+
+### Groq TTS Models
+
+Groq exposes an OpenAI-compatible TTS endpoint using the Orpheus model:
+
+- **`canopylabs/orpheus-v1-english`** *(default, only model)* — English speech synthesis with inline vocal direction tags
+
+### Groq TTS Voices
+
+Groq/Orpheus supports the following voices:
+
+- **`autumn`** *(default)*
+- **`austin`**
+- **`daniel`**
+- **`diana`**
+- **`hannah`**
+- **`troy`**
+
+### ElevenLabs TTS Models
+
+ElevenLabs offers several TTS models optimized for different use cases:
+
+- **`eleven_v3`** — latest flagship; most emotionally expressive, supports multi-speaker dialogue, 70+ languages
+- **`eleven_multilingual_v2`** *(default)* — lifelike speech with rich emotional expression, 29 languages
+- **`eleven_flash_v2_5`** — ultra-fast (~75ms latency), 32 languages; recommended over `eleven_turbo_v2_5`
+- **`eleven_flash_v2`** — ultra-fast (~75ms latency), English only; recommended over `eleven_turbo_v2`
+
+The following models are deprecated and will be removed by ElevenLabs:
+
+- **`eleven_turbo_v2_5`** — replaced by `eleven_flash_v2_5` (lower latency)
+- **`eleven_turbo_v2`** — replaced by `eleven_flash_v2` (lower latency)
+- **`eleven_monolingual_v1`** — replaced by `eleven_multilingual_v2`
+- **`eleven_multilingual_v1`** — replaced by `eleven_multilingual_v2`
 
 ### ElevenLabs API Key Permissions
 
