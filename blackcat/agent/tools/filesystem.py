@@ -10,14 +10,14 @@ from typing import Any
 from blackcat.agent.tools.base import Tool, tool_parameters
 from blackcat.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from blackcat.agent.tools.path_utils import resolve_workspace_path
-from blackcat.config.schema import Base
-from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+from blackcat.config.schema import Base
+from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
