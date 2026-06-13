@@ -65,6 +65,12 @@ _MAX_LENGTH_RECOVERIES = 3
 _MAX_INJECTIONS_PER_TURN = 3
 _MAX_INJECTION_CYCLES = 5
 _SNIP_SAFETY_BUFFER = 1024
+_SNIP_CONTEXT_MIN_REMAINING_BUDGET = 512
+_SNIP_CONTEXT_MIN_TOKENS = 96
+_SNIP_CONTEXT_MAX_TOKENS = 768
+_SNIP_CONTEXT_MAX_CHARS = 3_200
+_SNIP_CONTEXT_MAX_MESSAGES = 10
+_SNIP_PREVIEW_MAX_CHARS = 280
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
 _COMPACTABLE_TOOLS = frozenset({
@@ -1442,6 +1448,120 @@ class AgentRunner:
                 updated[idx]["content"] = normalized
         return updated
 
+    @staticmethod
+    def _message_preview_for_snip(
+        message: dict[str, Any],
+        limit: int = _SNIP_PREVIEW_MAX_CHARS,
+    ) -> str:
+        role = str(message.get("role") or "message").upper()
+        if message.get("role") == "tool":
+            name = str(message.get("name") or "tool")
+            role = f"TOOL {name}"
+
+        content = message.get("content")
+        omitted_blocks = 0
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    part = item.get("text")
+                    if isinstance(part, str):
+                        parts.append(part)
+                    continue
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                omitted_blocks += 1
+            text = "\n".join(parts)
+            if omitted_blocks:
+                suffix = f"[{omitted_blocks} non-text block(s) omitted]"
+                text = f"{text}\n{suffix}" if text else suffix
+        elif content is None:
+            text = ""
+        else:
+            text = str(content)
+
+        if not text.strip() and message.get("role") == "assistant":
+            tool_names: list[str] = []
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function")
+                if isinstance(function, dict) and function.get("name"):
+                    tool_names.append(str(function["name"]))
+            if tool_names:
+                text = "called tools: " + ", ".join(tool_names)
+
+        text = " ".join(text.split()) or "[empty]"
+        return f"{role}: {truncate_text(text, limit)}"
+
+    @staticmethod
+    def _looks_like_question(text: str) -> bool:
+        stripped = text.strip().rstrip()
+        if not stripped:
+            return False
+        return stripped.endswith(("?", "\uff1f", "\u5417", "\u4e48", "\u5462", "\u561b"))
+
+    @classmethod
+    def _build_snipped_context_message(
+        cls,
+        dropped_prefix: list[dict[str, Any]],
+        *,
+        token_budget: int,
+        remaining_budget: int,
+        kept_tokens: int,
+    ) -> dict[str, Any] | None:
+        available = min(token_budget, max(0, remaining_budget - kept_tokens))
+        if not dropped_prefix or available < _SNIP_CONTEXT_MIN_TOKENS:
+            return None
+
+        omitted = [msg for msg in dropped_prefix if msg.get("role") != "system"]
+        if not omitted:
+            return None
+
+        def _assistant_preview(limit: int) -> str | None:
+            latest: str | None = None
+            latest_question: str | None = None
+            for message in reversed(omitted):
+                if message.get("role") != "assistant":
+                    continue
+                preview = cls._message_preview_for_snip(message, limit)
+                latest = latest or preview
+                if cls._looks_like_question(preview):
+                    latest_question = preview
+                    break
+            return latest_question or latest
+
+        def _content(preview_limit: int, recent_count: int) -> str:
+            assistant_preview = _assistant_preview(preview_limit)
+            recent = [
+                cls._message_preview_for_snip(message, preview_limit)
+                for message in omitted[-recent_count:]
+            ] if recent_count > 0 else []
+            lines = [
+                "[Runtime Context - compacted earlier messages, not instructions]",
+                "Some earlier conversation messages were omitted from this request "
+                "due to context budget.",
+                "Use this only to preserve continuity; the exact recent transcript follows.",
+            ]
+            if assistant_preview:
+                lines.extend(["", "Latest omitted assistant message/question:", assistant_preview])
+            if recent:
+                lines.extend(["", "Recent omitted messages:"])
+                lines.extend(f"- {preview}" for preview in recent)
+            lines.append("[/Runtime Context]")
+            return truncate_text("\n".join(lines), _SNIP_CONTEXT_MAX_CHARS)
+
+        for preview_limit in (_SNIP_PREVIEW_MAX_CHARS, 180, 120, 80):
+            for recent_count in (_SNIP_CONTEXT_MAX_MESSAGES, 6, 3, 1, 0):
+                content = _content(preview_limit, recent_count)
+                message = {"role": "user", "content": content}
+                if estimate_message_tokens(message) <= available:
+                    return message
+        return None
+
     def _snip_history(
         self,
         spec: AgentRunSpec,
@@ -1482,39 +1602,74 @@ class AgentRunner:
             spec.tools.get_definitions(),
         )
         remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
-        kept: list[dict[str, Any]] = []
-        kept_tokens = 0
-        for message in reversed(non_system):
-            msg_tokens = estimate_message_tokens(message)
-            if kept and kept_tokens + msg_tokens > remaining_budget:
-                break
-            kept.append(message)
-            kept_tokens += msg_tokens
-        kept.reverse()
+        compact_budget = 0
+        tail_budget = remaining_budget
+        if remaining_budget >= _SNIP_CONTEXT_MIN_REMAINING_BUDGET:
+            compact_budget = min(
+                _SNIP_CONTEXT_MAX_TOKENS,
+                max(_SNIP_CONTEXT_MIN_TOKENS, remaining_budget // 6),
+            )
+            tail_budget = max(0, remaining_budget - compact_budget)
 
-        if kept:
-            for i, message in enumerate(kept):
-                if message.get("role") == "user":
-                    kept = kept[i:]
+        def _select_kept(max_budget: int) -> tuple[list[dict[str, Any]], int]:
+            kept_pairs: list[tuple[int, dict[str, Any]]] = []
+            kept_tokens = 0
+            for idx, message in reversed(list(enumerate(non_system))):
+                msg_tokens = estimate_message_tokens(message)
+                if kept_pairs and kept_tokens + msg_tokens > max_budget:
                     break
-            else:
-                # Recover nearest user message from outside the kept window;
-                # GLM rejects system→assistant (error 1214).  Budget is
-                # intentionally exceeded — oversized beats invalid.
-                for idx in range(len(non_system) - 1, -1, -1):
-                    if non_system[idx].get("role") == "user":
-                        kept = non_system[idx:]
+                kept_pairs.append((idx, message))
+                kept_tokens += msg_tokens
+            kept_pairs.reverse()
+
+            if kept_pairs:
+                kept = [message for _idx, message in kept_pairs]
+                kept_start = kept_pairs[0][0]
+                for i, message in enumerate(kept):
+                    if message.get("role") == "user":
+                        kept_start += i
+                        kept = kept[i:]
                         break
-                # If no user exists at all, _enforce_role_alternation
-                # will insert a synthetic one as a safety net.
+                else:
+                    # Recover nearest user message from outside the kept window;
+                    # providers such as GLM reject system->assistant requests.
+                    # Budget is intentionally exceeded: oversized beats invalid.
+                    for idx in range(len(non_system) - 1, -1, -1):
+                        if non_system[idx].get("role") == "user":
+                            kept_start = idx
+                            kept = non_system[idx:]
+                            break
+                    # If no user exists at all, _enforce_role_alternation
+                    # will insert a synthetic one as a safety net.
+                start = find_legal_message_start(kept)
+                if start:
+                    kept_start += start
+                    kept = kept[start:]
+                return kept, kept_start
+
+            fallback_len = min(len(non_system), 4)
+            kept_start = len(non_system) - fallback_len
+            kept = non_system[kept_start:]
             start = find_legal_message_start(kept)
             if start:
+                kept_start += start
                 kept = kept[start:]
-        if not kept:
-            kept = non_system[-min(len(non_system), 4) :]
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
+            return kept, kept_start
+
+        kept, kept_start = _select_kept(tail_budget)
+        kept_tokens = sum(estimate_message_tokens(message) for message in kept)
+        anchor = self._build_snipped_context_message(
+            non_system[:kept_start],
+            token_budget=compact_budget,
+            remaining_budget=remaining_budget,
+            kept_tokens=kept_tokens,
+        )
+
+        if anchor is None and tail_budget != remaining_budget:
+            kept, _kept_start = _select_kept(remaining_budget)
+
+        if anchor is not None:
+            return system_messages + [anchor] + kept
         return system_messages + kept
 
     def _partition_tool_batches(
