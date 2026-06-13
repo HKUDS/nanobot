@@ -16,7 +16,7 @@ from blackcat.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from blackcat.config.schema import Base
+from blackcat.config_base import Base
 from blackcat.security.workspace_access import current_tool_workspace
 from blackcat.utils.helpers import build_image_content_blocks, detect_image_mime
 
