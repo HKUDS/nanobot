@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "Otomasi ruang kerja",
       "title": "Otomasi",
-      "newInChat": "Buat di chat",
       "stats": {
         "active": "Aktif",
         "paused": "Dijeda",

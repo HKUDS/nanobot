@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "Tự động hóa không gian làm việc",
       "title": "Tự động hóa",
-      "newInChat": "Tạo trong chat",
       "stats": {
         "active": "Đang chạy",
         "paused": "Đã tạm dừng",

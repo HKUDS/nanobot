@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "工作區自動任務",
       "title": "自動任務",
-      "newInChat": "在聊天中建立",
       "stats": {
         "active": "執行中",
         "paused": "已暫停",

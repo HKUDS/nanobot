@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "작업 공간 자동화",
       "title": "자동화",
-      "newInChat": "채팅에서 만들기",
       "stats": {
         "active": "활성",
         "paused": "일시 중지",

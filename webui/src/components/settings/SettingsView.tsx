@@ -3374,16 +3374,7 @@ function AutomationsSettings({
   return (
     <div className="space-y-5">
       <section className="rounded-[24px] border border-border/50 bg-card/82 px-4 py-4 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:px-5">
-        <div className="flex justify-end">
-          <Button asChild className="h-9 rounded-full px-3 text-[13px]">
-            <a href="#/new">
-              <Plus className="mr-2 h-3.5 w-3.5" aria-hidden />
-              {tx("settings.automations.newInChat", "New in chat")}
-            </a>
-          </Button>
-        </div>
-
-        <div className="mt-4 grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-4">
           <AutomationStat label={tx("settings.automations.stats.active", "Active")} value={activeCount} />
           <AutomationStat label={tx("settings.automations.stats.paused", "Paused")} value={pausedCount} />
           <AutomationStat label={tx("settings.automations.stats.failed", "Failed")} value={failedCount} />

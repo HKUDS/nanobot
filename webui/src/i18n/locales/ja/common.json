@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "ワークスペースの自動タスク",
       "title": "自動タスク",
-      "newInChat": "チャットで作成",
       "stats": {
         "active": "実行中",
         "paused": "一時停止",

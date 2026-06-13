@@ -466,7 +466,6 @@
     "automations": {
       "kicker": "Workspace automations",
       "title": "Automations",
-      "newInChat": "New in chat",
       "stats": {
         "active": "Active",
         "paused": "Paused",
