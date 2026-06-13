@@ -52,9 +52,11 @@ class BaseChannel(ABC):
                 resolve_transcription_config,
                 transcribe_audio_file,
             )
-            from nanobot.config.loader import load_config
+            from nanobot.config.loader import load_config, resolve_config_env_vars
 
-            return await transcribe_audio_file(file_path, resolve_transcription_config(load_config()))
+            return await transcribe_audio_file(
+                file_path, resolve_transcription_config(resolve_config_env_vars(load_config()))
+            )
         except Exception:
             self.logger.exception("Audio transcription failed")
             return ""
