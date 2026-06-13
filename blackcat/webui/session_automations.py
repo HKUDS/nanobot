@@ -152,11 +152,11 @@ def _origin_payload(
     job: CronJob,
     session_manager: _SessionManagerLike | None,
 ) -> dict[str, Any] | None:
-    session_key = job.payload.session_key
-    if not session_key and job.payload.origin_channel and job.payload.origin_chat_id:
-        session_key = f"{job.payload.origin_channel}:{job.payload.origin_chat_id}"
-    if not session_key:
+    channel = job.payload.origin_channel
+    chat_id = job.payload.origin_chat_id
+    if not channel or not chat_id:
         return None
+    session_key = f"{channel}:{chat_id}"
 
     title = ""
     preview = ""
@@ -166,7 +166,6 @@ def _origin_payload(
             title = str(data.get("title") or "")
             preview = _session_preview(data.get("messages"))
 
-    channel, _, chat_id = session_key.partition(":")
     return {
         "session_key": session_key,
         "channel": channel,

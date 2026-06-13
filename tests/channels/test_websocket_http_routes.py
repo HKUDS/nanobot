@@ -826,6 +826,12 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         origin_channel="websocket",
         origin_chat_id="abc",
     )
+    legacy_job = cron.add_job(
+        name="english-quiz",
+        schedule=CronSchedule(kind="every", every_ms=3_600_000),
+        message="Practice English",
+        session_key="unified:default",
+    )
     cron.register_system_job(
         CronJob(
             id="heartbeat",
@@ -862,6 +868,8 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["state"]["run_history"] == []
         assert by_id[user_job.id]["origin"]["session_key"] == "websocket:abc"
         assert by_id[user_job.id]["origin"]["preview"] == "hi"
+        assert by_id[legacy_job.id]["payload"]["session_key"] == "unified:default"
+        assert by_id[legacy_job.id]["origin"] is None
         assert by_id["heartbeat"]["protected"] is True
 
         disabled = await _http_get(

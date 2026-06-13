@@ -493,7 +493,7 @@
         "schedule": "计划",
         "next": "下次",
         "last": "上次",
-        "origin": "来源"
+        "origin": "关联会话"
       },
       "runNow": "立即运行",
       "pause": "暂停",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "系统",
-        "unknown": "未知会话"
+        "unknown": "未关联会话",
+        "legacy": "请在目标会话中重新创建"
       },
       "schedule": {
         "at": "在 {{time}}",

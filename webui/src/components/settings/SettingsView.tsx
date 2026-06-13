@@ -3521,6 +3521,9 @@ function AutomationRow({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const status = automationStatus(job, tx);
   const origin = automationOriginLabel(job, tx);
+  const originHref = job.origin?.channel === "websocket"
+    ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
+    : null;
   const history = job.state.run_history ?? [];
   const canManage = !job.protected;
   const canRun = canManage && job.enabled && !job.state.pending;
@@ -3554,11 +3557,11 @@ function AutomationRow({
             <AutomationDetail label={tx("settings.automations.labels.last", "Last")}>
               {formatAutomationLast(job, locale, tx)}
             </AutomationDetail>
-            <AutomationDetail label={tx("settings.automations.labels.origin", "Origin")}>
-              {job.origin?.session_key ? (
+            <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
+              {originHref ? (
                 <a
                   className="inline-flex max-w-full items-center gap-1 text-foreground/80 underline-offset-2 hover:underline"
-                  href={`#/chat/${encodeURIComponent(job.origin.session_key)}`}
+                  href={originHref}
                 >
                   <span className="truncate">{origin}</span>
                   <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
@@ -3751,7 +3754,10 @@ function automationOriginLabel(
 ): string {
   if (job.protected) return tx("settings.automations.origin.system", "System");
   const origin = job.origin;
-  if (!origin) return tx("settings.automations.origin.unknown", "Unknown session");
+  if (!origin && job.payload.kind === "agent_turn") {
+    return tx("settings.automations.origin.legacy", "Recreate in target chat");
+  }
+  if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
   return origin.title || origin.preview || origin.session_key;
 }
 

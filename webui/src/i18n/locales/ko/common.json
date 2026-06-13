@@ -493,7 +493,7 @@
         "schedule": "일정",
         "next": "다음",
         "last": "마지막",
-        "origin": "출처"
+        "origin": "연결된 채팅"
       },
       "runNow": "지금 실행",
       "pause": "일시 중지",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "시스템",
-        "unknown": "알 수 없는 세션"
+        "unknown": "연결된 채팅 없음",
+        "legacy": "대상 채팅에서 다시 만드세요"
       },
       "schedule": {
         "at": "{{time}}",

@@ -493,7 +493,7 @@
         "schedule": "排程",
         "next": "下次",
         "last": "上次",
-        "origin": "來源"
+        "origin": "關聯會話"
       },
       "runNow": "立即執行",
       "pause": "暫停",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "系統",
-        "unknown": "未知會話"
+        "unknown": "未關聯會話",
+        "legacy": "請在目標會話中重新建立"
       },
       "schedule": {
         "at": "於 {{time}}",

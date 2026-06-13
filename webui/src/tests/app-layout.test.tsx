@@ -366,6 +366,26 @@ describe("App layout", () => {
             },
           },
           {
+            id: "legacy-quiz",
+            name: "english-quiz",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "cron", expr: "30 9-23 * * *", tz: "Asia/Shanghai" },
+            payload: {
+              message: "Practice English",
+              kind: "agent_turn",
+              session_key: "unified:default",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [],
+            },
+            origin: null,
+          },
+          {
             id: "heartbeat",
             name: "heartbeat",
             enabled: true,
@@ -393,6 +413,9 @@ describe("App layout", () => {
     expect(screen.getByText("Daily repo check")).toBeInTheDocument();
     expect(screen.getByText("Check the repo status")).toBeInTheDocument();
     expect(screen.getByText("Release prep")).toBeInTheDocument();
+    expect(screen.getByText("english-quiz")).toBeInTheDocument();
+    expect(screen.getByText("Recreate in target chat")).toBeInTheDocument();
+    expect(screen.queryByText("unified:default")).not.toBeInTheDocument();
     expect(screen.getByText("heartbeat")).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",

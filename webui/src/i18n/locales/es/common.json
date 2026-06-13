@@ -493,7 +493,7 @@
         "schedule": "Programación",
         "next": "Siguiente",
         "last": "Última",
-        "origin": "Origen"
+        "origin": "Chat vinculado"
       },
       "runNow": "Ejecutar ahora",
       "pause": "Pausar",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "Sistema",
-        "unknown": "Sesión desconocida"
+        "unknown": "Sin chat vinculado",
+        "legacy": "Recréala en el chat de destino"
       },
       "schedule": {
         "at": "A las {{time}}",

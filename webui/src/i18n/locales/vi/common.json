@@ -493,7 +493,7 @@
         "schedule": "Lịch",
         "next": "Tiếp theo",
         "last": "Lần trước",
-        "origin": "Nguồn"
+        "origin": "Cuộc trò chuyện liên kết"
       },
       "runNow": "Chạy ngay",
       "pause": "Tạm dừng",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "Hệ thống",
-        "unknown": "Phiên không xác định"
+        "unknown": "Chưa liên kết cuộc trò chuyện",
+        "legacy": "Tạo lại trong cuộc trò chuyện đích"
       },
       "schedule": {
         "at": "Vào {{time}}",

@@ -493,7 +493,7 @@
         "schedule": "Planning",
         "next": "Prochaine",
         "last": "Dernière",
-        "origin": "Origine"
+        "origin": "Discussion liée"
       },
       "runNow": "Exécuter maintenant",
       "pause": "Mettre en pause",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "Système",
-        "unknown": "Session inconnue"
+        "unknown": "Aucune discussion liée",
+        "legacy": "Recréez-la dans la discussion cible"
       },
       "schedule": {
         "at": "À {{time}}",

@@ -493,7 +493,7 @@
         "schedule": "スケジュール",
         "next": "次回",
         "last": "前回",
-        "origin": "発生元"
+        "origin": "関連チャット"
       },
       "runNow": "今すぐ実行",
       "pause": "一時停止",
@@ -512,7 +512,8 @@
       },
       "origin": {
         "system": "システム",
-        "unknown": "不明なセッション"
+        "unknown": "関連チャットなし",
+        "legacy": "対象チャットで作り直してください"
       },
       "schedule": {
         "at": "{{time}}",
