@@ -88,6 +88,7 @@
       "interface": "인터페이스",
       "ai": "AI",
       "system": "시스템",
+      "about": "정보",
       "status": "상태",
       "localPreferences": "로컬 환경설정",
       "presets": "프리셋",
@@ -392,6 +393,13 @@
       "install": "CLI 설치",
       "unavailable": "사용 불가",
       "noDescription": "설명이 없습니다."
+    },
+    "about": {
+      "version": "버전",
+      "checking": "확인 중...",
+      "checkForUpdates": "업데이트 확인",
+      "upToDate": "최신 버전입니다",
+      "updateAvailable": "업데이트 사용 가능 v{{version}}"
     },
     "mcp": {
       "allCategories": "모든 카테고리",

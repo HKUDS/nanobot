@@ -88,6 +88,7 @@
       "interface": "Interfaz",
       "ai": "AI",
       "system": "Sistema",
+      "about": "Acerca de",
       "status": "Estado",
       "localPreferences": "Preferencias locales",
       "presets": "Preajustes",
@@ -392,6 +393,13 @@
       "install": "Instalar CLI",
       "unavailable": "No disponible",
       "noDescription": "Sin descripción disponible."
+    },
+    "about": {
+      "version": "Versión",
+      "checking": "Buscando actualizaciones...",
+      "checkForUpdates": "Buscar actualizaciones",
+      "upToDate": "Estás al día",
+      "updateAvailable": "Actualización disponible v{{version}}"
     },
     "mcp": {
       "allCategories": "Todas las categorías",

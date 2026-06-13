@@ -88,6 +88,7 @@
       "interface": "Interface",
       "ai": "AI",
       "system": "System",
+      "about": "About",
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
@@ -252,6 +253,13 @@
       "unsupported": "Unsupported",
       "unavailable": "Unavailable",
       "noDescription": "No description available."
+    },
+    "about": {
+      "version": "Version",
+      "checking": "Checking...",
+      "checkForUpdates": "Check for updates",
+      "upToDate": "You're up to date",
+      "updateAvailable": "Update available v{{version}}"
     },
     "mcp": {
       "allCategories": "All categories",

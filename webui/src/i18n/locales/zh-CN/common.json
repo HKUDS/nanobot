@@ -88,6 +88,7 @@
       "interface": "界面",
       "ai": "AI",
       "system": "系统",
+      "about": "关于",
       "status": "状态",
       "localPreferences": "本地偏好",
       "presets": "预设",
@@ -252,6 +253,13 @@
       "unsupported": "暂不支持",
       "unavailable": "不可用",
       "noDescription": "暂无描述。"
+    },
+    "about": {
+      "version": "版本",
+      "checking": "正在检查...",
+      "checkForUpdates": "检查更新",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有可用更新 v{{version}}"
     },
     "mcp": {
       "allCategories": "全部分类",

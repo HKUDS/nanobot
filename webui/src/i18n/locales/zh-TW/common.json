@@ -88,6 +88,7 @@
       "interface": "介面",
       "ai": "AI",
       "system": "系統",
+      "about": "關於",
       "status": "狀態",
       "localPreferences": "本機偏好",
       "presets": "預設",
@@ -392,6 +393,13 @@
       "install": "安裝 CLI",
       "unavailable": "不可用",
       "noDescription": "暫無描述。"
+    },
+    "about": {
+      "version": "版本",
+      "checking": "正在檢查...",
+      "checkForUpdates": "檢查更新",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有可用更新 v{{version}}"
     },
     "mcp": {
       "allCategories": "全部分類",

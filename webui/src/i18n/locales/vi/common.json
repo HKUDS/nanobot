@@ -88,6 +88,7 @@
       "interface": "Giao diện",
       "ai": "AI",
       "system": "Hệ thống",
+      "about": "Giới thiệu",
       "status": "Trạng thái",
       "localPreferences": "Tùy chọn cục bộ",
       "presets": "Preset",
@@ -392,6 +393,13 @@
       "install": "Cài CLI",
       "unavailable": "Không khả dụng",
       "noDescription": "Không có mô tả."
+    },
+    "about": {
+      "version": "Phiên bản",
+      "checking": "Đang kiểm tra...",
+      "checkForUpdates": "Kiểm tra bản cập nhật",
+      "upToDate": "Bạn đang dùng phiên bản mới nhất",
+      "updateAvailable": "Có bản cập nhật v{{version}}"
     },
     "mcp": {
       "allCategories": "Tất cả danh mục",

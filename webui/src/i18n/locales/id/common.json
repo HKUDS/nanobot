@@ -88,6 +88,7 @@
       "interface": "Antarmuka",
       "ai": "AI",
       "system": "Sistem",
+      "about": "Tentang",
       "status": "Status",
       "localPreferences": "Preferensi lokal",
       "presets": "Preset",
@@ -392,6 +393,13 @@
       "install": "Pasang CLI",
       "unavailable": "Tidak tersedia",
       "noDescription": "Tidak ada deskripsi."
+    },
+    "about": {
+      "version": "Versi",
+      "checking": "Memeriksa pembaruan...",
+      "checkForUpdates": "Periksa pembaruan",
+      "upToDate": "Anda sudah menggunakan versi terbaru",
+      "updateAvailable": "Pembaruan tersedia v{{version}}"
     },
     "mcp": {
       "allCategories": "Semua kategori",

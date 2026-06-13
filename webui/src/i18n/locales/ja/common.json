@@ -88,6 +88,7 @@
       "interface": "インターフェース",
       "ai": "AI",
       "system": "システム",
+      "about": "情報",
       "status": "状態",
       "localPreferences": "ローカル設定",
       "presets": "プリセット",
@@ -392,6 +393,13 @@
       "install": "CLI をインストール",
       "unavailable": "利用不可",
       "noDescription": "説明はありません。"
+    },
+    "about": {
+      "version": "バージョン",
+      "checking": "確認中...",
+      "checkForUpdates": "アップデートを確認",
+      "upToDate": "最新の状態です",
+      "updateAvailable": "アップデートがあります v{{version}}"
     },
     "mcp": {
       "allCategories": "すべてのカテゴリ",
