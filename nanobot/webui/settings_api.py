@@ -1076,18 +1076,26 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     if spec.is_oauth:
         raise WebUISettingsError("unknown provider")
 
+    # Resolve env-var templates for comparison so that e.g.
+    # "${OPENAI_API_KEY}" is compared against its resolved value,
+    # not the literal template string.  This prevents false "no change"
+    # detection and avoids overwriting template references with resolved
+    # values when the user submits the same key.
+    resolved_api_key = _resolve_env_placeholders(provider_config.api_key)
+    resolved_api_base = _resolve_env_placeholders(provider_config.api_base)
+
     changed = False
     if "api_key" in query or "apiKey" in query:
         api_key = _query_first_alias(query, "api_key", "apiKey")
         api_key = (api_key or "").strip() or None
-        if provider_config.api_key != api_key:
+        if resolved_api_key != api_key:
             provider_config.api_key = api_key
             changed = True
 
     if "api_base" in query or "apiBase" in query:
         api_base = _query_first_alias(query, "api_base", "apiBase")
         api_base = (api_base or "").strip() or None
-        if provider_config.api_base != api_base:
+        if resolved_api_base != api_base:
             provider_config.api_base = api_base
             changed = True
 
@@ -1235,9 +1243,20 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     changed = False
     restart_required = False
 
-    def set_search_value(attr: str, value: object) -> None:
+    # Resolve env-var templates for comparison so that e.g.
+    # "${TAVILY_API_KEY}" is compared against its resolved value,
+    # not the literal template string.  This prevents false "no change"
+    # detection and avoids overwriting template references with resolved
+    # values when the user submits the same key.
+    resolved_search_api_key = _resolve_env_placeholders(search_config.api_key)
+    resolved_search_base_url = _resolve_env_placeholders(search_config.base_url)
+
+    def set_search_value(attr: str, value: object, resolved_value: object = None) -> None:
         nonlocal changed
-        if getattr(search_config, attr) != value:
+        # Compare against the resolved value (if provided) instead of
+        # the raw config value which may contain ${VAR} templates.
+        compare_against = resolved_value if resolved_value is not None else getattr(search_config, attr)
+        if compare_against != value:
             setattr(search_config, attr, value)
             changed = True
 
@@ -1253,26 +1272,26 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
 
     credential = provider_option["credential"]
     if credential == "none":
-        set_search_value("api_key", "")
-        set_search_value("base_url", "")
+        set_search_value("api_key", "", resolved_search_api_key)
+        set_search_value("base_url", "", resolved_search_base_url)
     elif credential == "base_url":
         base_url = _query_first_alias(query, "base_url", "baseUrl")
         base_url = base_url.strip() if base_url is not None else None
-        if not base_url and previous_provider == provider_name and search_config.base_url:
-            base_url = search_config.base_url
+        if not base_url and previous_provider == provider_name and resolved_search_base_url:
+            base_url = resolved_search_base_url
         if not base_url:
             raise WebUISettingsError("base_url is required")
-        set_search_value("base_url", base_url)
-        set_search_value("api_key", "")
+        set_search_value("base_url", base_url, resolved_search_base_url)
+        set_search_value("api_key", "", resolved_search_api_key)
     else:
         api_key = _query_first_alias(query, "api_key", "apiKey")
         api_key = api_key.strip() if api_key is not None else None
-        if not api_key and previous_provider == provider_name and search_config.api_key:
-            api_key = search_config.api_key
+        if not api_key and previous_provider == provider_name and resolved_search_api_key:
+            api_key = resolved_search_api_key
         if not api_key:
             raise WebUISettingsError("api_key is required")
-        set_search_value("api_key", api_key)
-        set_search_value("base_url", "")
+        set_search_value("api_key", api_key, resolved_search_api_key)
+        set_search_value("base_url", "", resolved_search_base_url)
 
     max_results = _query_first_alias(query, "max_results", "maxResults")
     if max_results is not None:
