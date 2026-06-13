@@ -84,6 +84,23 @@ class FakeClient:
         return self.get_response
 
 
+class CodexStreamingCompleteThenErrorResponse(FakeResponse):
+    async def aiter_lines(self):
+        yield 'data: {"type":"response.output_item.added","item":{"id":"ig_1","type":"image_generation_call","status":"in_progress"}}'
+        yield ""
+        yield (
+            f'data: {{"type":"response.output_item.done","item":{{"id":"ig_1",'
+            f'"type":"image_generation_call","result":"{PNG_DATA_URL}","status":"completed"}}}}'
+        )
+        yield ""
+        yield 'data: {"type":"response.completed","response":{"status":"completed"}}'
+        yield ""
+        raise httpx.RemoteProtocolError(
+            "peer closed connection without sending complete message body "
+            "(incomplete chunked read)"
+        )
+
+
 @pytest.mark.asyncio
 async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) -> None:
     ref = tmp_path / "ref.png"
@@ -1022,6 +1039,35 @@ async def test_codex_payload_and_response(monkeypatch) -> None:
     assert body["tool_choice"] == "auto"
     assert body["store"] is False
     assert body["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_codex_stops_reading_after_completed_event(monkeypatch) -> None:
+    import sys
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
+    @dataclass
+    class FakeToken:
+        account_id: str = "acct-123"
+        access: str = "oauth-token"
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
+    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
+
+    fake = FakeClient(CodexStreamingCompleteThenErrorResponse({}, sse_lines=[]))
+    client = CodexImageGenerationClient(
+        api_key=None, client=fake  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(prompt="draw a cat", model="gpt-5.4")
+
+    assert response.images == [PNG_DATA_URL]
+    assert response.content == ""
 
 
 @pytest.mark.asyncio
