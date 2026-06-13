@@ -402,6 +402,56 @@ class TestCompactIdleSession:
         assert "last_active" in meta
 
     @pytest.mark.asyncio
+    async def test_summarizes_retained_suffix_not_just_dropped_prefix(
+        self, real_consolidator, mock_provider
+    ):
+        """idleCompact must summarize over the full unconsolidated tail, including
+        the recent suffix it retains. Otherwise a late user correction / final
+        result that lands in the kept suffix is excluded from the persisted
+        summary, leaving a stale wrong conclusion in history. Regression for #4264."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:correction")
+        for i in range(18):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        # Final correction exchange lands inside the retained max_suffix window.
+        session.add_message("user", "no, that's wrong, use approach B")
+        session.add_message("assistant", "CORRECTED_FINAL_RESULT_alpha")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session("cli:correction", max_suffix=8)
+
+        summarized = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "CORRECTED_FINAL_RESULT_alpha" in summarized
+
+    @pytest.mark.asyncio
+    async def test_raw_dumps_only_dropped_messages_on_llm_failure(
+        self, real_consolidator, mock_provider, store
+    ):
+        """Summarizing over the full tail must not widen what gets raw-dumped on
+        LLM failure: the breadcrumb should contain only the removed prefix, not
+        the retained suffix that stays live in the session. Regression for #4264."""
+        mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:rawdrop")
+        for i in range(18):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        session.add_message("user", "final user follow-up")
+        session.add_message("assistant", "RETAINED_SUFFIX_marker")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session("cli:rawdrop", max_suffix=8)
+
+        raw = "\n".join(e["content"] for e in store.read_unprocessed_history(since_cursor=0))
+        assert "[RAW]" in raw
+        assert "user msg 0" in raw  # removed prefix is the breadcrumb
+        assert "RETAINED_SUFFIX_marker" not in raw  # retained suffix not dumped
+
+    @pytest.mark.asyncio
     async def test_idle_compact_writes_session_key_to_history(
         self,
         real_consolidator,
@@ -537,11 +587,15 @@ class TestCompactIdleSession:
             "assistant-04",
         ]
 
+        # #4264: idle compaction now summarizes the full unconsolidated tail, so
+        # the dropped head (user-00), the non-contiguous dropped tail
+        # (assistant-09), and the retained suffix (user-14) are all summarized.
+        # Retention above still proves the non-contiguous suffix is handled.
         archived_call = mock_provider.chat_with_retry.call_args
         user_content = archived_call.kwargs["messages"][1]["content"]
-        assert "user-14" not in user_content
-        assert "assistant-00" not in user_content
+        assert "user-00" in user_content
         assert "assistant-09" in user_content
+        assert "user-14" in user_content
 
     @pytest.mark.asyncio
     async def test_acquires_consolidation_lock(self, real_consolidator, mock_provider):
