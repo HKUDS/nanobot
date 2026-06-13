@@ -736,6 +736,45 @@ class SessionManager:
                 return self._session_payload(repaired)
             return None
 
+    def read_session_metadata(self, key: str) -> dict[str, Any] | None:
+        """Load only the metadata record from a session file.
+
+        This is used by WebUI routes that need session-level metadata but not the
+        full conversation transcript.
+        """
+        path = self._get_session_path(key)
+        if not path.exists():
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("_type") != "metadata":
+                        return None
+                    metadata = data.get("metadata", {})
+                    return {
+                        "key": data.get("key") or key,
+                        "created_at": data.get("created_at"),
+                        "updated_at": data.get("updated_at"),
+                        "metadata": metadata if isinstance(metadata, dict) else {},
+                    }
+            return None
+        except Exception as e:
+            logger.warning("Failed to read session metadata {}: {}", key, e)
+            repaired = self._repair(key)
+            if repaired is not None:
+                logger.info("Recovered read-only session metadata {} from corrupt file", key)
+                return {
+                    "key": repaired.key,
+                    "created_at": repaired.created_at.isoformat(),
+                    "updated_at": repaired.updated_at.isoformat(),
+                    "metadata": repaired.metadata,
+                }
+            return None
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.

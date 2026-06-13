@@ -685,6 +685,30 @@ class CliAppManager:
             "catalog_updated_at": updated,
         }
 
+    def installed_payload(self) -> dict[str, Any]:
+        installed = self._load_installed()
+        rows = []
+        for name, raw_entry in sorted(installed.items()):
+            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            strategy = str(entry.get("strategy") or "bundled")
+            app = {
+                "name": str(name),
+                "display_name": str(entry.get("display_name") or name),
+                "category": str(entry.get("category") or "installed"),
+                "description": str(entry.get("description") or ""),
+                "requires": str(entry.get("requires") or ""),
+                "_source": str(entry.get("source") or "local"),
+                "entry_point": str(entry.get("entry_point") or ""),
+                "package_manager": strategy,
+                "install_strategy": strategy,
+            }
+            rows.append(self._app_payload(app, installed))
+        return {
+            "apps": rows,
+            "installed_count": len(rows),
+            "catalog_updated_at": None,
+        }
+
     def _pip_package_from_install(self, app: dict[str, Any]) -> str | None:
         install_cmd = str(app.get("install_cmd") or "")
         try:
