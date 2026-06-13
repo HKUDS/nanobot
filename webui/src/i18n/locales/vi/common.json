@@ -55,6 +55,7 @@
       "ariaLabel": "Đổi ngôn ngữ"
     },
     "apps": "Ứng dụng",
+    "automations": "Tự động hóa",
     "skills": {
       "title": "Kỹ năng"
     }
@@ -80,6 +81,7 @@
       "cliApps": "Ứng dụng CLI",
       "mcp": "MCP",
       "apps": "Ứng dụng",
+      "automations": "Tự động hóa",
       "skills": "Kỹ năng"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "Nổi bật",
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có ứng dụng phù hợp."
+    },
+    "automations": {
+      "kicker": "Tự động hóa không gian làm việc",
+      "title": "Tự động hóa",
+      "description": "Xem nhắc nhở cron, lượt agent định kỳ, tự động hóa một lần và tự động hóa hệ thống được bảo vệ tại một nơi.",
+      "refresh": "Làm mới",
+      "newInChat": "Tạo trong chat",
+      "stats": {
+        "active": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Thất bại",
+        "system": "Hệ thống"
+      },
+      "filters": {
+        "all": "Tất cả",
+        "active": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Thất bại",
+        "system": "Hệ thống"
+      },
+      "search": "Tìm tác vụ, tin nhắn, phiên hoặc biểu thức cron",
+      "queue": "Hàng đợi",
+      "loading": "Đang tải tự động hóa...",
+      "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
+      "empty": "Chưa có tự động hóa.",
+      "oneShot": "Một lần",
+      "systemTask": "Tự động hóa do hệ thống quản lý",
+      "labels": {
+        "schedule": "Lịch",
+        "next": "Tiếp theo",
+        "last": "Lần trước",
+        "origin": "Nguồn"
+      },
+      "runNow": "Chạy ngay",
+      "pause": "Tạm dừng",
+      "resume": "Tiếp tục",
+      "delete": "Xóa",
+      "protected": "Được bảo vệ",
+      "deleteTitle": "Xóa tự động hóa",
+      "deleteDescription": "Thao tác này xóa {{name}} khỏi kho cron. Tin nhắn chat trước đó vẫn ở trong phiên.",
+      "cancel": "Hủy",
+      "status": {
+        "system": "Hệ thống",
+        "pending": "Đang chờ",
+        "paused": "Đã tạm dừng",
+        "failed": "Thất bại",
+        "active": "Đang chạy"
+      },
+      "origin": {
+        "system": "Hệ thống",
+        "unknown": "Phiên không xác định"
+      },
+      "schedule": {
+        "at": "Vào {{time}}",
+        "every": "Mỗi {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "Lịch tùy chỉnh"
+      },
+      "next": {
+        "paused": "Đã tạm dừng",
+        "pending": "Sắp chạy",
+        "none": "Không có lần chạy tiếp theo"
+      },
+      "last": {
+        "never": "Chưa từng chạy",
+        "unknown": "không xác định"
+      }
     },
     "oauth": {
       "authentication": "Xác thực OAuth",

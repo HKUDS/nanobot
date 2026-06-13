@@ -55,6 +55,7 @@
       "ariaLabel": "Cambiar idioma"
     },
     "apps": "Apps",
+    "automations": "Automatizaciones",
     "skills": {
       "title": "Habilidades"
     }
@@ -80,6 +81,7 @@
       "cliApps": "Apps CLI",
       "mcp": "MCP",
       "apps": "Aplicaciones",
+      "automations": "Automatizaciones",
       "skills": "Habilidades"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "Destacadas",
       "loading": "Cargando apps...",
       "empty": "Ninguna app coincide con este filtro."
+    },
+    "automations": {
+      "kicker": "Automatizaciones del espacio",
+      "title": "Automatizaciones",
+      "description": "Revisa recordatorios cron, turnos recurrentes del agente, automatizaciones de una vez y automatizaciones protegidas del sistema en un solo lugar.",
+      "refresh": "Actualizar",
+      "newInChat": "Crear en chat",
+      "stats": {
+        "active": "Activas",
+        "paused": "Pausadas",
+        "failed": "Fallidas",
+        "system": "Sistema"
+      },
+      "filters": {
+        "all": "Todas",
+        "active": "Activas",
+        "paused": "Pausadas",
+        "failed": "Fallidas",
+        "system": "Sistema"
+      },
+      "search": "Buscar tarea, mensaje, sesión o expresión cron",
+      "queue": "Cola",
+      "loading": "Cargando automatizaciones...",
+      "noMatches": "No hay automatizaciones que coincidan con esta vista.",
+      "empty": "Aún no hay automatizaciones.",
+      "oneShot": "Una vez",
+      "systemTask": "Automatización administrada por el sistema",
+      "labels": {
+        "schedule": "Programación",
+        "next": "Siguiente",
+        "last": "Última",
+        "origin": "Origen"
+      },
+      "runNow": "Ejecutar ahora",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "delete": "Eliminar",
+      "protected": "Protegida",
+      "deleteTitle": "Eliminar automatización",
+      "deleteDescription": "Esto elimina {{name}} del almacén cron. Los mensajes de chat anteriores permanecen en la sesión.",
+      "cancel": "Cancelar",
+      "status": {
+        "system": "Sistema",
+        "pending": "Pendiente",
+        "paused": "Pausada",
+        "failed": "Fallida",
+        "active": "Activa"
+      },
+      "origin": {
+        "system": "Sistema",
+        "unknown": "Sesión desconocida"
+      },
+      "schedule": {
+        "at": "A las {{time}}",
+        "every": "Cada {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "Programación personalizada"
+      },
+      "next": {
+        "paused": "Pausada",
+        "pending": "Se ejecutará pronto",
+        "none": "Sin próxima ejecución"
+      },
+      "last": {
+        "never": "Nunca",
+        "unknown": "desconocido"
+      }
     },
     "oauth": {
       "authentication": "Autenticación OAuth",

@@ -64,6 +64,7 @@ from blackcat.webui.http_utils import (
 )
 from blackcat.webui.media_gateway import WebUIMediaGateway
 from blackcat.webui.session_automations import (
+    all_automations_payload,
     serialize_automation_jobs,
     session_automation_jobs,
     session_automations_payload,
@@ -233,6 +234,11 @@ class GatewayHTTPHandler:
 
         # Media routes
         response = self._dispatch_media_routes(request, got)
+        if response is not None:
+            return response
+
+        # Automation routes
+        response = await self._dispatch_automation_routes(request, got)
         if response is not None:
             return response
 
@@ -513,6 +519,95 @@ class GatewayHTTPHandler:
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    # -- Automation routes --------------------------------------------------
+
+    async def _dispatch_automation_routes(
+        self,
+        request: WsRequest,
+        got: str,
+    ) -> Response | None:
+        if got == "/api/webui/automations":
+            return self._handle_webui_automations(request)
+        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run)$", got)
+        if m:
+            return await self._handle_webui_automation_action(request, m.group(1))
+        return None
+
+    def _pending_cron_job_ids_for_all(self) -> set[str]:
+        if self.cron_service is None or self.cron_pending_job_ids is None:
+            return set()
+        pending: set[str] = set()
+        for job in self.cron_service.list_jobs(include_disabled=True):
+            session_key = job.payload.session_key
+            if not session_key and job.payload.origin_channel and job.payload.origin_chat_id:
+                session_key = f"{job.payload.origin_channel}:{job.payload.origin_chat_id}"
+            if session_key:
+                pending.update(self.cron_pending_job_ids(session_key))
+        return pending
+
+    def _handle_webui_automations(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(
+            all_automations_payload(
+                self.cron_service,
+                session_manager=self.session_manager,
+                pending_job_ids=self._pending_cron_job_ids_for_all(),
+            )
+        )
+
+    async def _handle_webui_automation_action(
+        self,
+        request: WsRequest,
+        action: str,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.cron_service is None:
+            return _http_error(503, "cron service unavailable")
+
+        query = _parse_query(request.path)
+        job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
+        if not job_id:
+            return _http_error(400, "missing automation id")
+        job = self.cron_service.get_job(job_id)
+        if job is None:
+            return _http_error(404, "automation not found")
+        if job.payload.kind == "system_event":
+            return _http_error(403, "system automation is protected")
+
+        if action == "enable":
+            if self.cron_service.enable_job(job_id, enabled=True) is None:
+                return _http_error(404, "automation not found")
+        elif action == "disable":
+            if self.cron_service.enable_job(job_id, enabled=False) is None:
+                return _http_error(404, "automation not found")
+        elif action == "delete":
+            result = self.cron_service.remove_job(job_id)
+            if result == "not_found":
+                return _http_error(404, "automation not found")
+            if result == "protected":
+                return _http_error(403, "system automation is protected")
+        elif action == "run":
+            if not job.enabled:
+                return _http_error(409, "automation is disabled")
+            task = asyncio.create_task(self.cron_service.run_job(job_id, force=False))
+            task.add_done_callback(self._log_automation_run_result)
+        else:
+            return _http_error(404, "unknown automation action")
+
+        return self._handle_webui_automations(request)
+
+    @staticmethod
+    def _log_automation_run_result(task: asyncio.Task[bool]) -> None:
+        try:
+            ran = task.result()
+        except Exception:
+            logger.exception("WebUI automation run-now task failed")
+            return
+        if not ran:
+            logger.warning("WebUI automation run-now task did not execute")
 
     # -- Media routes -------------------------------------------------------
 

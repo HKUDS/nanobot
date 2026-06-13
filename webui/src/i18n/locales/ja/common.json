@@ -55,6 +55,7 @@
       "ariaLabel": "言語を変更"
     },
     "apps": "アプリ",
+    "automations": "自動タスク",
     "skills": {
       "title": "スキル"
     }
@@ -80,6 +81,7 @@
       "cliApps": "CLI アプリ",
       "mcp": "MCP",
       "apps": "アプリ",
+      "automations": "自動タスク",
       "skills": "スキル"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "注目",
       "loading": "アプリを読み込み中...",
       "empty": "一致するアプリはありません。"
+    },
+    "automations": {
+      "kicker": "ワークスペースの自動タスク",
+      "title": "自動タスク",
+      "description": "cron リマインダー、定期的な agent ターン、一回限りの自動タスク、保護されたシステム自動タスクを一か所で確認できます。",
+      "refresh": "更新",
+      "newInChat": "チャットで作成",
+      "stats": {
+        "active": "実行中",
+        "paused": "一時停止",
+        "failed": "失敗",
+        "system": "システム"
+      },
+      "filters": {
+        "all": "すべて",
+        "active": "実行中",
+        "paused": "一時停止",
+        "failed": "失敗",
+        "system": "システム"
+      },
+      "search": "タスク、メッセージ、セッション、cron 式を検索",
+      "queue": "キュー",
+      "loading": "自動タスクを読み込み中...",
+      "noMatches": "この表示に一致する自動タスクはありません。",
+      "empty": "自動タスクはまだありません。",
+      "oneShot": "一回限り",
+      "systemTask": "システム管理の自動タスク",
+      "labels": {
+        "schedule": "スケジュール",
+        "next": "次回",
+        "last": "前回",
+        "origin": "発生元"
+      },
+      "runNow": "今すぐ実行",
+      "pause": "一時停止",
+      "resume": "再開",
+      "delete": "削除",
+      "protected": "保護済み",
+      "deleteTitle": "自動タスクを削除",
+      "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
+      "cancel": "キャンセル",
+      "status": {
+        "system": "システム",
+        "pending": "待機中",
+        "paused": "一時停止",
+        "failed": "失敗",
+        "active": "実行中"
+      },
+      "origin": {
+        "system": "システム",
+        "unknown": "不明なセッション"
+      },
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}} ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "カスタムスケジュール"
+      },
+      "next": {
+        "paused": "一時停止",
+        "pending": "まもなく実行",
+        "none": "次回実行なし"
+      },
+      "last": {
+        "never": "未実行",
+        "unknown": "不明"
+      }
     },
     "oauth": {
       "authentication": "OAuth 認証",

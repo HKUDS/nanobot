@@ -334,6 +334,96 @@ describe("App layout", () => {
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
   });
 
+  it("opens Automations from the main sidebar", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "job-1",
+            name: "Daily repo check",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: {
+              message: "Check the repo status",
+              kind: "agent_turn",
+              session_key: "websocket:chat-a",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [],
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "Release prep",
+              preview: "Check release blockers",
+            },
+          },
+          {
+            id: "heartbeat",
+            name: "heartbeat",
+            enabled: true,
+            protected: true,
+            schedule: { kind: "every", every_ms: 60_000 },
+            payload: { message: "", kind: "system_event" },
+            state: { next_run_at_ms: null, pending: false, run_history: [] },
+            origin: null,
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const automationsButton = within(sidebar).getByRole("button", {
+      name: "Automations",
+    });
+
+    fireEvent.click(automationsButton);
+
+    expect(await screen.findByText("Workspace automations")).toBeInTheDocument();
+    expect(screen.getByText("Daily repo check")).toBeInTheDocument();
+    expect(screen.getByText("Check the repo status")).toBeInTheDocument();
+    expect(screen.getByText("Release prep")).toBeInTheDocument();
+    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(document.title).toBe("Automations · nanobot");
+  });
+
+  it("localizes the Automations surface", async () => {
+    await i18n.changeLanguage("zh-CN");
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": { jobs: [] },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
+
+    expect(await screen.findByText("工作区自动任务")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "自动任务" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("统一查看 cron 提醒、周期性 agent 任务、一次性自动任务和受保护的系统自动任务。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
+    expect(screen.getByText("任务队列")).toBeInTheDocument();
+    expect(screen.getByText("暂无自动任务。")).toBeInTheDocument();
+    expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
+    expect(document.title).toBe("自动任务 · nanobot");
+  });
+
   it("fully collapses the native host sidebar and previews it on hover", async () => {
     mockSessions = [
       {

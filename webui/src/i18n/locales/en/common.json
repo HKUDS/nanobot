@@ -55,6 +55,7 @@
       "ariaLabel": "Change language"
     },
     "apps": "Apps",
+    "automations": "Automations",
     "skills": {
       "title": "Skills"
     }
@@ -80,6 +81,7 @@
       "runtime": "System",
       "advanced": "Security",
       "apps": "Apps",
+      "automations": "Automations",
       "skills": "Skills"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "Featured",
       "loading": "Loading Apps...",
       "empty": "No apps match this filter."
+    },
+    "automations": {
+      "kicker": "Workspace automations",
+      "title": "Automations",
+      "description": "Review cron reminders, recurring agent turns, one-time jobs, and protected system automations in one place.",
+      "refresh": "Refresh",
+      "newInChat": "New in chat",
+      "stats": {
+        "active": "Active",
+        "paused": "Paused",
+        "failed": "Failed",
+        "system": "System"
+      },
+      "filters": {
+        "all": "All",
+        "active": "Active",
+        "paused": "Paused",
+        "failed": "Failed",
+        "system": "System"
+      },
+      "search": "Search automation, message, session, or cron expression",
+      "queue": "Queue",
+      "loading": "Loading automations...",
+      "noMatches": "No automations match this view.",
+      "empty": "No automations yet.",
+      "oneShot": "One-time",
+      "systemTask": "System-managed automation",
+      "labels": {
+        "schedule": "Schedule",
+        "next": "Next",
+        "last": "Last",
+        "origin": "Origin"
+      },
+      "runNow": "Run now",
+      "pause": "Pause",
+      "resume": "Resume",
+      "delete": "Delete",
+      "protected": "Protected",
+      "deleteTitle": "Delete automation",
+      "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+      "cancel": "Cancel",
+      "status": {
+        "system": "System",
+        "pending": "Pending",
+        "paused": "Paused",
+        "failed": "Failed",
+        "active": "Active"
+      },
+      "origin": {
+        "system": "System",
+        "unknown": "Unknown session"
+      },
+      "schedule": {
+        "at": "At {{time}}",
+        "every": "Every {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "Custom schedule"
+      },
+      "next": {
+        "paused": "Paused",
+        "pending": "Running soon",
+        "none": "No next run"
+      },
+      "last": {
+        "never": "Never",
+        "unknown": "unknown"
+      }
     },
     "oauth": {
       "authentication": "OAuth authentication",

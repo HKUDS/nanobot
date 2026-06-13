@@ -55,6 +55,7 @@
       "ariaLabel": "언어 변경"
     },
     "apps": "앱",
+    "automations": "자동화",
     "skills": {
       "title": "스킬"
     }
@@ -80,6 +81,7 @@
       "cliApps": "CLI 앱",
       "mcp": "MCP",
       "apps": "앱",
+      "automations": "자동화",
       "skills": "스킬"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "추천",
       "loading": "앱을 불러오는 중...",
       "empty": "일치하는 앱이 없습니다."
+    },
+    "automations": {
+      "kicker": "작업 공간 자동화",
+      "title": "자동화",
+      "description": "cron 알림, 반복 agent 작업, 일회성 자동화, 보호된 시스템 자동화를 한곳에서 확인합니다.",
+      "refresh": "새로 고침",
+      "newInChat": "채팅에서 만들기",
+      "stats": {
+        "active": "활성",
+        "paused": "일시 중지",
+        "failed": "실패",
+        "system": "시스템"
+      },
+      "filters": {
+        "all": "전체",
+        "active": "활성",
+        "paused": "일시 중지",
+        "failed": "실패",
+        "system": "시스템"
+      },
+      "search": "작업, 메시지, 세션 또는 cron 식 검색",
+      "queue": "대기열",
+      "loading": "자동화를 불러오는 중...",
+      "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
+      "empty": "아직 자동화가 없습니다.",
+      "oneShot": "일회성",
+      "systemTask": "시스템 관리 자동화",
+      "labels": {
+        "schedule": "일정",
+        "next": "다음",
+        "last": "마지막",
+        "origin": "출처"
+      },
+      "runNow": "지금 실행",
+      "pause": "일시 중지",
+      "resume": "재개",
+      "delete": "삭제",
+      "protected": "보호됨",
+      "deleteTitle": "자동화 삭제",
+      "deleteDescription": "{{name}}을 cron 저장소에서 삭제합니다. 이전 채팅 메시지는 세션에 남습니다.",
+      "cancel": "취소",
+      "status": {
+        "system": "시스템",
+        "pending": "대기 중",
+        "paused": "일시 중지",
+        "failed": "실패",
+        "active": "활성"
+      },
+      "origin": {
+        "system": "시스템",
+        "unknown": "알 수 없는 세션"
+      },
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}}마다",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "사용자 지정 일정"
+      },
+      "next": {
+        "paused": "일시 중지",
+        "pending": "곧 실행",
+        "none": "다음 실행 없음"
+      },
+      "last": {
+        "never": "실행된 적 없음",
+        "unknown": "알 수 없음"
+      }
     },
     "oauth": {
       "authentication": "OAuth 인증",

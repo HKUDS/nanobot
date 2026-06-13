@@ -55,6 +55,7 @@
       "ariaLabel": "切换语言"
     },
     "apps": "应用",
+    "automations": "自动任务",
     "skills": {
       "title": "技能"
     }
@@ -80,6 +81,7 @@
       "runtime": "系统",
       "advanced": "安全",
       "apps": "应用",
+      "automations": "自动任务",
       "skills": "技能"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "精选",
       "loading": "正在加载应用...",
       "empty": "没有匹配的应用。"
+    },
+    "automations": {
+      "kicker": "工作区自动任务",
+      "title": "自动任务",
+      "description": "统一查看 cron 提醒、周期性 agent 任务、一次性自动任务和受保护的系统自动任务。",
+      "refresh": "刷新",
+      "newInChat": "在聊天中创建",
+      "stats": {
+        "active": "运行中",
+        "paused": "已暂停",
+        "failed": "失败",
+        "system": "系统"
+      },
+      "filters": {
+        "all": "全部",
+        "active": "运行中",
+        "paused": "已暂停",
+        "failed": "失败",
+        "system": "系统"
+      },
+      "search": "搜索任务、消息、会话或 cron 表达式",
+      "queue": "任务队列",
+      "loading": "正在加载自动任务...",
+      "noMatches": "当前视图没有匹配的自动任务。",
+      "empty": "暂无自动任务。",
+      "oneShot": "一次性",
+      "systemTask": "系统管理的自动任务",
+      "labels": {
+        "schedule": "计划",
+        "next": "下次",
+        "last": "上次",
+        "origin": "来源"
+      },
+      "runNow": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "delete": "删除",
+      "protected": "受保护",
+      "deleteTitle": "删除自动任务",
+      "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
+      "cancel": "取消",
+      "status": {
+        "system": "系统",
+        "pending": "等待中",
+        "paused": "已暂停",
+        "failed": "失败",
+        "active": "运行中"
+      },
+      "origin": {
+        "system": "系统",
+        "unknown": "未知会话"
+      },
+      "schedule": {
+        "at": "在 {{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "自定义计划"
+      },
+      "next": {
+        "paused": "已暂停",
+        "pending": "即将运行",
+        "none": "没有下次运行"
+      },
+      "last": {
+        "never": "从未运行",
+        "unknown": "未知"
+      }
     },
     "oauth": {
       "authentication": "OAuth 认证",

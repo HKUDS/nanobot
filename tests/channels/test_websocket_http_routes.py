@@ -814,6 +814,91 @@ async def test_session_delete_removes_file(
 
 
 @pytest.mark.asyncio
+async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    user_job = cron.add_job(
+        name="Daily repo check",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the repo status",
+        session_key="websocket:abc",
+        origin_channel="websocket",
+        origin_chat_id="abc",
+    )
+    cron.register_system_job(
+        CronJob(
+            id="heartbeat",
+            name="heartbeat",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        cron_service=cron,
+        cron_pending_job_ids=lambda key: {user_job.id} if key == "websocket:abc" else set(),
+        port=29932,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get("http://127.0.0.1:29932/api/webui/automations")
+        assert deny.status_code == 401
+
+        boot = await _http_get("http://127.0.0.1:29932/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        resp = await _http_get(
+            "http://127.0.0.1:29932/api/webui/automations",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        by_id = {job["id"]: job for job in body["jobs"]}
+        assert by_id[user_job.id]["protected"] is False
+        assert by_id[user_job.id]["state"]["pending"] is True
+        assert by_id[user_job.id]["state"]["run_history"] == []
+        assert by_id[user_job.id]["origin"]["session_key"] == "websocket:abc"
+        assert by_id[user_job.id]["origin"]["preview"] == "hi"
+        assert by_id["heartbeat"]["protected"] is True
+
+        disabled = await _http_get(
+            f"http://127.0.0.1:29932/api/webui/automations/disable?id={user_job.id}",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        by_id = {job["id"]: job for job in disabled.json()["jobs"]}
+        assert by_id[user_job.id]["enabled"] is False
+
+        protected_delete = await _http_get(
+            "http://127.0.0.1:29932/api/webui/automations/delete?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_delete.status_code == 403
+
+        enabled = await _http_get(
+            f"http://127.0.0.1:29932/api/webui/automations/enable?id={user_job.id}",
+            headers=auth,
+        )
+        assert enabled.status_code == 200
+        by_id = {job["id"]: job for job in enabled.json()["jobs"]}
+        assert by_id[user_job.id]["enabled"] is True
+
+        deleted = await _http_get(
+            f"http://127.0.0.1:29932/api/webui/automations/delete?id={user_job.id}",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert user_job.id not in {job["id"] for job in deleted.json()["jobs"]}
+        assert "heartbeat" in {job["id"] for job in deleted.json()["jobs"]}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_delete_blocks_when_bound_automation_exists(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

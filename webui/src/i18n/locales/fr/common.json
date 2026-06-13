@@ -55,6 +55,7 @@
       "ariaLabel": "Changer de langue"
     },
     "apps": "Apps",
+    "automations": "Automatisations",
     "skills": {
       "title": "Compétences"
     }
@@ -80,6 +81,7 @@
       "cliApps": "Apps CLI",
       "mcp": "MCP",
       "apps": "Applications",
+      "automations": "Automatisations",
       "skills": "Compétences"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "À la une",
       "loading": "Chargement des apps...",
       "empty": "Aucune app ne correspond."
+    },
+    "automations": {
+      "kicker": "Automatisations de l’espace",
+      "title": "Automatisations",
+      "description": "Passez en revue les rappels cron, tours récurrents de l’agent, automatisations ponctuelles et automatisations système protégées au même endroit.",
+      "refresh": "Actualiser",
+      "newInChat": "Créer dans le chat",
+      "stats": {
+        "active": "Actives",
+        "paused": "En pause",
+        "failed": "Échouées",
+        "system": "Système"
+      },
+      "filters": {
+        "all": "Toutes",
+        "active": "Actives",
+        "paused": "En pause",
+        "failed": "Échouées",
+        "system": "Système"
+      },
+      "search": "Rechercher une tâche, un message, une session ou une expression cron",
+      "queue": "File",
+      "loading": "Chargement des automatisations...",
+      "noMatches": "Aucune automatisation ne correspond à cette vue.",
+      "empty": "Aucune automatisation pour le moment.",
+      "oneShot": "Ponctuelle",
+      "systemTask": "Automatisation gérée par le système",
+      "labels": {
+        "schedule": "Planning",
+        "next": "Prochaine",
+        "last": "Dernière",
+        "origin": "Origine"
+      },
+      "runNow": "Exécuter maintenant",
+      "pause": "Mettre en pause",
+      "resume": "Reprendre",
+      "delete": "Supprimer",
+      "protected": "Protégée",
+      "deleteTitle": "Supprimer l’automatisation",
+      "deleteDescription": "Cela supprime {{name}} du stockage cron. Les anciens messages de chat restent dans la session.",
+      "cancel": "Annuler",
+      "status": {
+        "system": "Système",
+        "pending": "En attente",
+        "paused": "En pause",
+        "failed": "Échouée",
+        "active": "En cours"
+      },
+      "origin": {
+        "system": "Système",
+        "unknown": "Session inconnue"
+      },
+      "schedule": {
+        "at": "À {{time}}",
+        "every": "Toutes les {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "Planning personnalisé"
+      },
+      "next": {
+        "paused": "En pause",
+        "pending": "Exécution prochaine",
+        "none": "Aucune prochaine exécution"
+      },
+      "last": {
+        "never": "Jamais",
+        "unknown": "inconnu"
+      }
     },
     "oauth": {
       "authentication": "Authentification OAuth",

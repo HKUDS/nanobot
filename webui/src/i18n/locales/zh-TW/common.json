@@ -55,6 +55,7 @@
       "ariaLabel": "切換語言"
     },
     "apps": "應用",
+    "automations": "自動任務",
     "skills": {
       "title": "技能"
     }
@@ -80,6 +81,7 @@
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用",
+      "automations": "自動任務",
       "skills": "技能"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "精選",
       "loading": "正在載入應用...",
       "empty": "沒有符合的應用。"
+    },
+    "automations": {
+      "kicker": "工作區自動任務",
+      "title": "自動任務",
+      "description": "集中查看 cron 提醒、週期性 agent 任務、一次性自動任務和受保護的系統自動任務。",
+      "refresh": "重新整理",
+      "newInChat": "在聊天中建立",
+      "stats": {
+        "active": "執行中",
+        "paused": "已暫停",
+        "failed": "失敗",
+        "system": "系統"
+      },
+      "filters": {
+        "all": "全部",
+        "active": "執行中",
+        "paused": "已暫停",
+        "failed": "失敗",
+        "system": "系統"
+      },
+      "search": "搜尋任務、訊息、會話或 cron 表達式",
+      "queue": "任務佇列",
+      "loading": "正在載入自動任務...",
+      "noMatches": "目前檢視沒有符合的自動任務。",
+      "empty": "尚無自動任務。",
+      "oneShot": "一次性",
+      "systemTask": "系統管理的自動任務",
+      "labels": {
+        "schedule": "排程",
+        "next": "下次",
+        "last": "上次",
+        "origin": "來源"
+      },
+      "runNow": "立即執行",
+      "pause": "暫停",
+      "resume": "恢復",
+      "delete": "刪除",
+      "protected": "受保護",
+      "deleteTitle": "刪除自動任務",
+      "deleteDescription": "這會從 cron 儲存中刪除 {{name}}，歷史聊天訊息會保留在會話中。",
+      "cancel": "取消",
+      "status": {
+        "system": "系統",
+        "pending": "等待中",
+        "paused": "已暫停",
+        "failed": "失敗",
+        "active": "執行中"
+      },
+      "origin": {
+        "system": "系統",
+        "unknown": "未知會話"
+      },
+      "schedule": {
+        "at": "於 {{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "自訂排程"
+      },
+      "next": {
+        "paused": "已暫停",
+        "pending": "即將執行",
+        "none": "沒有下次執行"
+      },
+      "last": {
+        "never": "從未執行",
+        "unknown": "未知"
+      }
     },
     "oauth": {
       "authentication": "OAuth 認證",

@@ -55,6 +55,7 @@
       "ariaLabel": "Ganti bahasa"
     },
     "apps": "Aplikasi",
+    "automations": "Otomasi",
     "skills": {
       "title": "Skill"
     }
@@ -80,6 +81,7 @@
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
       "apps": "Aplikasi",
+      "automations": "Otomasi",
       "skills": "Skill"
     },
     "sections": {
@@ -460,6 +462,74 @@
       "featured": "Unggulan",
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok."
+    },
+    "automations": {
+      "kicker": "Otomasi ruang kerja",
+      "title": "Otomasi",
+      "description": "Tinjau pengingat cron, giliran agen berulang, otomasi sekali jalan, dan otomasi sistem terlindungi di satu tempat.",
+      "refresh": "Segarkan",
+      "newInChat": "Buat di chat",
+      "stats": {
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "system": "Sistem"
+      },
+      "filters": {
+        "all": "Semua",
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "system": "Sistem"
+      },
+      "search": "Cari tugas, pesan, sesi, atau ekspresi cron",
+      "queue": "Antrean",
+      "loading": "Memuat otomasi...",
+      "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
+      "empty": "Belum ada otomasi.",
+      "oneShot": "Satu kali",
+      "systemTask": "Automasi yang dikelola sistem",
+      "labels": {
+        "schedule": "Jadwal",
+        "next": "Berikutnya",
+        "last": "Terakhir",
+        "origin": "Asal"
+      },
+      "runNow": "Jalankan sekarang",
+      "pause": "Jeda",
+      "resume": "Lanjutkan",
+      "delete": "Hapus",
+      "protected": "Terlindungi",
+      "deleteTitle": "Hapus otomasi",
+      "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
+      "cancel": "Batal",
+      "status": {
+        "system": "Sistem",
+        "pending": "Menunggu",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "active": "Aktif"
+      },
+      "origin": {
+        "system": "Sistem",
+        "unknown": "Sesi tidak dikenal"
+      },
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "custom": "Jadwal khusus"
+      },
+      "next": {
+        "paused": "Dijeda",
+        "pending": "Segera berjalan",
+        "none": "Tidak ada jadwal berikutnya"
+      },
+      "last": {
+        "never": "Belum pernah",
+        "unknown": "tidak dikenal"
+      }
     },
     "oauth": {
       "authentication": "Autentikasi OAuth",

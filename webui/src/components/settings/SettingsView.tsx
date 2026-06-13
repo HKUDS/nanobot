@@ -13,6 +13,7 @@ import {
   ArrowUpCircle,
   Bot,
   Brain,
+  CalendarClock,
   Check,
   CircleAlert,
   ChevronDown,
@@ -35,6 +36,7 @@ import {
   LogOut,
   Mic,
   Moon,
+  PauseCircle,
   PlayCircle,
   Plus,
   Orbit,
@@ -79,6 +81,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   checkVersion,
   createModelConfiguration,
+  fetchAutomations,
   fetchSettings,
   fetchSettingsUsage,
   fetchCliApps,
@@ -87,6 +90,7 @@ import {
   importMcpConfig,
   loginProviderOAuth,
   logoutProviderOAuth,
+  runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
@@ -102,6 +106,7 @@ import {
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { getHostApi } from "@/lib/runtime";
 import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
+import { fmtDateTime, relativeTime } from "@/lib/format";
 import {
   logoFallbackUrls,
   providerBrand,
@@ -111,6 +116,7 @@ import { cn } from "@/lib/utils";
 import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 import type {
+  AutomationsPayload,
   CliAppInfo,
   CliAppsPayload,
   ImageGenerationSettingsUpdate,
@@ -118,6 +124,7 @@ import type {
   McpPresetsPayload,
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
+  SessionAutomationJob,
   SettingsPayload,
   SkillSummary,
   TranscriptionSettingsUpdate,
@@ -133,6 +140,7 @@ export type SettingsSectionKey =
   | "voice"
   | "browser"
   | "apps"
+  | "automations"
   | "skills"
   | "runtime"
   | "advanced";
@@ -140,6 +148,8 @@ export type SettingsSectionKey =
 type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
 type AppsKindFilter = "all" | "cli" | "mcp";
+type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
+type AutomationAction = "enable" | "disable" | "delete" | "run";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
@@ -509,9 +519,11 @@ export function SettingsView({
   const [settings, setSettings] = useState<SettingsPayload | null>(() => initialSettings);
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [mcpPresets, setMcpPresets] = useState<McpPresetsPayload | null>(null);
+  const [automations, setAutomations] = useState<AutomationsPayload | null>(null);
   const [loading, setLoading] = useState(() => initialSettings === null);
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
+  const [automationsLoading, setAutomationsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modelConfigurationOpen, setModelConfigurationOpen] = useState(false);
   const [modelConfigurationSaving, setModelConfigurationSaving] = useState(false);
@@ -533,12 +545,18 @@ export function SettingsView({
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
   const [appsQuery, setAppsQuery] = useState("");
+  const [automationsQuery, setAutomationsQuery] = useState("");
+  const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
   const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("all");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const [automationsError, setAutomationsError] = useState<string | null>(null);
+  const [automationAction, setAutomationAction] = useState<string | null>(null);
+  const [automationPendingDelete, setAutomationPendingDelete] =
+    useState<SessionAutomationJob | null>(null);
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [customMcpForm, setCustomMcpForm] = useState<CustomMcpForm>(DEFAULT_CUSTOM_MCP_FORM);
   const [mcpConfigImport, setMcpConfigImport] = useState("");
@@ -695,6 +713,28 @@ export function SettingsView({
       })
       .finally(() => {
         if (!cancelled) setMcpPresetsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, token]);
+
+  useEffect(() => {
+    if (activeSection !== "automations") return;
+    let cancelled = false;
+    setAutomationsLoading(true);
+    fetchAutomations(token)
+      .then((payload) => {
+        if (!cancelled) {
+          setAutomations(payload);
+          setAutomationsError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setAutomationsError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setAutomationsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1225,6 +1265,36 @@ export function SettingsView({
     }
   };
 
+  const refreshAutomations = async () => {
+    setAutomationsLoading(true);
+    setAutomationsError(null);
+    try {
+      setAutomations(await fetchAutomations(token));
+    } catch (err) {
+      setAutomationsError((err as Error).message);
+    } finally {
+      setAutomationsLoading(false);
+    }
+  };
+
+  const handleAutomationAction = async (
+    action: AutomationAction,
+    job: SessionAutomationJob,
+  ) => {
+    const key = `${action}:${job.id}`;
+    setAutomationAction(key);
+    setAutomationsError(null);
+    try {
+      const payload = await runAutomationAction(token, action, job.id);
+      setAutomations(payload);
+      if (action === "delete") setAutomationPendingDelete(null);
+    } catch (err) {
+      setAutomationsError((err as Error).message);
+    } finally {
+      setAutomationAction(null);
+    }
+  };
+
   const handleMcpPresetAction = async (
     action: "enable" | "remove" | "test",
     name: string,
@@ -1505,6 +1575,22 @@ export function SettingsView({
             isRestarting={isRestarting || hostEngineApplying}
           />
         );
+      case "automations":
+        return (
+          <AutomationsSettings
+            payload={automations}
+            loading={automationsLoading}
+            query={automationsQuery}
+            filter={automationsFilter}
+            actionKey={automationAction}
+            error={automationsError}
+            onQueryChange={setAutomationsQuery}
+            onFilterChange={setAutomationsFilter}
+            onRefresh={refreshAutomations}
+            onAction={handleAutomationAction}
+            onRequestDelete={setAutomationPendingDelete}
+          />
+        );
       case "skills":
         return <SkillsCatalogSettings skills={skills} />;
       case "runtime":
@@ -1561,6 +1647,15 @@ export function SettingsView({
         onOpenChange={setModelConfigurationOpen}
         onChangeDraft={setModelConfigurationForm}
         onSave={handleCreateModelConfiguration}
+      />
+
+      <AutomationDeleteDialog
+        job={automationPendingDelete}
+        deleting={automationAction === `delete:${automationPendingDelete?.id ?? ""}`}
+        onOpenChange={(open) => {
+          if (!open) setAutomationPendingDelete(null);
+        }}
+        onConfirm={(job) => handleAutomationAction("delete", job)}
       />
 
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
@@ -3245,6 +3340,484 @@ function WebSettings({
       </section>
     </div>
   );
+}
+
+function AutomationsSettings({
+  payload,
+  loading,
+  query,
+  filter,
+  actionKey,
+  error,
+  onQueryChange,
+  onFilterChange,
+  onRefresh,
+  onAction,
+  onRequestDelete,
+}: {
+  payload: AutomationsPayload | null;
+  loading: boolean;
+  query: string;
+  filter: AutomationFilter;
+  actionKey: string | null;
+  error: string | null;
+  onQueryChange: (value: string) => void;
+  onFilterChange: (value: AutomationFilter) => void;
+  onRefresh: () => void;
+  onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
+  onRequestDelete: (job: SessionAutomationJob) => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const jobs = payload?.jobs ?? [];
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = jobs
+    .filter((job) => automationMatchesFilter(job, filter))
+    .filter((job) => !normalizedQuery || automationSearchText(job).includes(normalizedQuery));
+  const activeCount = jobs.filter((job) => job.enabled && !job.protected).length;
+  const pausedCount = jobs.filter((job) => !job.enabled && !job.protected).length;
+  const failedCount = jobs.filter((job) => job.state.last_status === "error").length;
+  const systemCount = jobs.filter((job) => job.protected).length;
+  const filterOptions = [
+    { value: "all", label: tx("settings.automations.filters.all", "All") },
+    { value: "active", label: tx("settings.automations.filters.active", "Active") },
+    { value: "paused", label: tx("settings.automations.filters.paused", "Paused") },
+    { value: "failed", label: tx("settings.automations.filters.failed", "Failed") },
+    { value: "system", label: tx("settings.automations.filters.system", "System") },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-[24px] border border-border/50 bg-card/82 px-4 py-4 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:px-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+              <CalendarClock className="h-4 w-4" aria-hidden />
+              {tx("settings.automations.kicker", "Workspace automations")}
+            </div>
+            <h2 className="mt-2 text-[22px] font-normal leading-tight tracking-normal text-foreground">
+              {tx("settings.automations.title", "Automations")}
+            </h2>
+            <p className="mt-2 max-w-[36rem] text-[13px] leading-6 text-muted-foreground">
+              {tx(
+                "settings.automations.description",
+                "Review cron reminders, recurring agent turns, one-time jobs, and protected system automations in one place.",
+              )}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onRefresh}
+              disabled={loading}
+              className="h-9 rounded-full px-3 text-[13px]"
+            >
+              {loading ? (
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
+              )}
+              {tx("settings.automations.refresh", "Refresh")}
+            </Button>
+            <Button asChild className="h-9 rounded-full px-3 text-[13px]">
+              <a href="#/new">
+                <Plus className="mr-2 h-3.5 w-3.5" aria-hidden />
+                {tx("settings.automations.newInChat", "New in chat")}
+              </a>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-2 sm:grid-cols-4">
+          <AutomationStat label={tx("settings.automations.stats.active", "Active")} value={activeCount} />
+          <AutomationStat label={tx("settings.automations.stats.paused", "Paused")} value={pausedCount} />
+          <AutomationStat label={tx("settings.automations.stats.failed", "Failed")} value={failedCount} />
+          <AutomationStat label={tx("settings.automations.stats.system", "System")} value={systemCount} />
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+            <Input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder={tx("settings.automations.search", "Search automation, message, session, or cron expression")}
+              className="h-9 rounded-full bg-background/85 pl-9 text-[13px]"
+            />
+          </div>
+          <SegmentedControl
+            value={filter}
+            options={filterOptions}
+            onChange={(value) => onFilterChange(value as AutomationFilter)}
+          />
+        </div>
+      </section>
+
+      {error ? (
+        <div className="flex items-center gap-2 rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+          <CircleAlert className="h-4 w-4 shrink-0" aria-hidden />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.automations.queue", "Queue")}</SettingsSectionTitle>
+        {loading && !payload ? (
+          <div className="flex h-40 items-center justify-center rounded-[22px] border border-border/45 bg-card/78 text-[13px] text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            {tx("settings.automations.loading", "Loading automations...")}
+          </div>
+        ) : filtered.length ? (
+          <div className="space-y-2.5">
+            {filtered.map((job) => (
+              <AutomationRow
+                key={job.id}
+                job={job}
+                locale={i18n.resolvedLanguage || i18n.language}
+                actionKey={actionKey}
+                onAction={onAction}
+                onRequestDelete={onRequestDelete}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-[22px] border border-border/45 bg-card/78 px-5 py-10 text-center text-[13px] text-muted-foreground">
+            {jobs.length
+              ? tx("settings.automations.noMatches", "No automations match this view.")
+              : tx("settings.automations.empty", "No automations yet.")}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AutomationStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[16px] border border-border/45 bg-background/65 px-3 py-2.5">
+      <div className="text-[11px] font-medium uppercase leading-none text-muted-foreground">{label}</div>
+      <div className="mt-1.5 text-[20px] font-normal leading-none text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function AutomationRow({
+  job,
+  locale,
+  actionKey,
+  onAction,
+  onRequestDelete,
+}: {
+  job: SessionAutomationJob;
+  locale: string;
+  actionKey: string | null;
+  onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
+  onRequestDelete: (job: SessionAutomationJob) => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const status = automationStatus(job, tx);
+  const origin = automationOriginLabel(job, tx);
+  const history = job.state.run_history ?? [];
+  const canManage = !job.protected;
+  const canRun = canManage && job.enabled && !job.state.pending;
+  const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
+  const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
+
+  return (
+    <article className="rounded-[22px] border border-border/45 bg-card/86 p-4 shadow-[0_18px_65px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-[15px] font-medium leading-6 text-foreground">
+              {job.name || job.id}
+            </span>
+            <StatusPill tone={status.tone}>{status.label}</StatusPill>
+            {job.delete_after_run ? (
+              <StatusPill>{tx("settings.automations.oneShot", "One-time")}</StatusPill>
+            ) : null}
+          </div>
+          <p className="mt-1 line-clamp-2 max-w-[46rem] text-[13px] leading-6 text-muted-foreground">
+            {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
+          </p>
+
+          <div className="mt-3 grid gap-2 text-[12px] text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+            <AutomationDetail label={tx("settings.automations.labels.schedule", "Schedule")}>
+              {formatAutomationSchedule(job, locale, tx)}
+            </AutomationDetail>
+            <AutomationDetail label={tx("settings.automations.labels.next", "Next")}>
+              {formatAutomationNext(job, tx)}
+            </AutomationDetail>
+            <AutomationDetail label={tx("settings.automations.labels.last", "Last")}>
+              {formatAutomationLast(job, locale, tx)}
+            </AutomationDetail>
+            <AutomationDetail label={tx("settings.automations.labels.origin", "Origin")}>
+              {job.origin?.session_key ? (
+                <a
+                  className="inline-flex max-w-full items-center gap-1 text-foreground/80 underline-offset-2 hover:underline"
+                  href={`#/chat/${encodeURIComponent(job.origin.session_key)}`}
+                >
+                  <span className="truncate">{origin}</span>
+                  <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+                </a>
+              ) : (
+                origin
+              )}
+            </AutomationDetail>
+          </div>
+
+          {job.state.last_error ? (
+            <div className="mt-3 rounded-[14px] bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
+              {job.state.last_error}
+            </div>
+          ) : null}
+
+          {history.length ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {history.slice(-4).map((record) => (
+                <span
+                  key={`${record.run_at_ms}:${record.status}`}
+                  className={cn(
+                    "rounded-full px-2 py-1 text-[11px]",
+                    record.status === "error"
+                      ? "bg-destructive/10 text-destructive"
+                      : record.status === "skipped"
+                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                        : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                  )}
+                  title={record.error || fmtDateTime(record.run_at_ms, locale)}
+                >
+                  {record.status} · {formatAutomationRunDuration(record.duration_ms)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          {canManage ? (
+            <>
+              <AppsActionButton
+                ariaLabel={tx("settings.automations.runNow", "Run now")}
+                busy={actionKey === `run:${job.id}`}
+                disabled={!canRun}
+                onClick={() => void onAction("run", job)}
+              >
+                <PlayCircle className="h-4 w-4" aria-hidden />
+              </AppsActionButton>
+              <AppsActionButton
+                ariaLabel={
+                  job.enabled
+                    ? tx("settings.automations.pause", "Pause")
+                    : tx("settings.automations.resume", "Resume")
+                }
+                busy={toggleBusy}
+                onClick={() => void onAction(toggleAction, job)}
+              >
+                {job.enabled ? (
+                  <PauseCircle className="h-4 w-4" aria-hidden />
+                ) : (
+                  <PlayCircle className="h-4 w-4" aria-hidden />
+                )}
+              </AppsActionButton>
+              <AppsActionButton
+                ariaLabel={tx("settings.automations.delete", "Delete")}
+                tone="danger"
+                disabled={Boolean(actionKey)}
+                onClick={() => onRequestDelete(job)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </AppsActionButton>
+            </>
+          ) : (
+            <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
+              {tx("settings.automations.protected", "Protected")}
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AutomationDetail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-[14px] bg-muted/35 px-3 py-2">
+      <div className="text-[10.5px] font-medium uppercase leading-none text-muted-foreground/75">
+        {label}
+      </div>
+      <div className="mt-1.5 truncate text-[12.5px] leading-5 text-foreground/85">{children}</div>
+    </div>
+  );
+}
+
+function AutomationDeleteDialog({
+  job,
+  deleting,
+  onOpenChange,
+  onConfirm,
+}: {
+  job: SessionAutomationJob | null;
+  deleting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (job: SessionAutomationJob) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  return (
+    <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(calc(100vw-2rem),26rem)] rounded-[26px]">
+        <DialogHeader>
+          <DialogTitle>{tx("settings.automations.deleteTitle", "Delete automation")}</DialogTitle>
+          <DialogDescription>
+            {tx(
+              "settings.automations.deleteDescription",
+              "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+              { name: job?.name || job?.id || "" },
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={deleting}
+            className="rounded-full"
+          >
+            {tx("settings.automations.cancel", "Cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => job && void onConfirm(job)}
+            disabled={!job || deleting}
+            className="rounded-full"
+          >
+            {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+            {tx("settings.automations.delete", "Delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function automationSearchText(job: SessionAutomationJob): string {
+  return [
+    job.id,
+    job.name,
+    job.payload.message,
+    job.schedule.kind,
+    job.schedule.expr,
+    job.schedule.tz,
+    job.origin?.session_key,
+    job.origin?.title,
+    job.origin?.preview,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFilter): boolean {
+  if (filter === "active") return job.enabled && !job.protected;
+  if (filter === "paused") return !job.enabled && !job.protected;
+  if (filter === "failed") return job.state.last_status === "error";
+  if (filter === "system") return Boolean(job.protected);
+  return true;
+}
+
+function automationStatus(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): { label: string; tone: "neutral" | "success" | "warning" } {
+  if (job.protected) return { label: tx("settings.automations.status.system", "System"), tone: "neutral" };
+  if (job.state.pending) return { label: tx("settings.automations.status.pending", "Pending"), tone: "warning" };
+  if (!job.enabled) return { label: tx("settings.automations.status.paused", "Paused"), tone: "neutral" };
+  if (job.state.last_status === "error") {
+    return { label: tx("settings.automations.status.failed", "Failed"), tone: "warning" };
+  }
+  return { label: tx("settings.automations.status.active", "Active"), tone: "success" };
+}
+
+function automationOriginLabel(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (job.protected) return tx("settings.automations.origin.system", "System");
+  const origin = job.origin;
+  if (!origin) return tx("settings.automations.origin.unknown", "Unknown session");
+  return origin.title || origin.preview || origin.session_key;
+}
+
+function formatAutomationSchedule(
+  job: SessionAutomationJob,
+  locale: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (job.schedule.kind === "at" && job.schedule.at_ms) {
+    return tx("settings.automations.schedule.at", "At {{time}}", {
+      time: fmtDateTime(job.schedule.at_ms, locale),
+    });
+  }
+  if (job.schedule.kind === "every" && job.schedule.every_ms) {
+    return tx("settings.automations.schedule.every", "Every {{duration}}", {
+      duration: formatAutomationInterval(job.schedule.every_ms),
+    });
+  }
+  if (job.schedule.kind === "cron" && job.schedule.expr) {
+    return job.schedule.tz
+      ? tx("settings.automations.schedule.cronWithTz", "Cron {{expr}} · {{tz}}", {
+          expr: job.schedule.expr,
+          tz: job.schedule.tz,
+        })
+      : tx("settings.automations.schedule.cron", "Cron {{expr}}", { expr: job.schedule.expr });
+  }
+  return tx("settings.automations.schedule.custom", "Custom schedule");
+}
+
+function formatAutomationNext(
+  job: SessionAutomationJob,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
+  if (job.state.pending) return tx("settings.automations.next.pending", "Running soon");
+  if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
+  return relativeTime(job.state.next_run_at_ms);
+}
+
+function formatAutomationLast(
+  job: SessionAutomationJob,
+  locale: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (!job.state.last_run_at_ms) return tx("settings.automations.last.never", "Never");
+  const status = job.state.last_status || tx("settings.automations.last.unknown", "unknown");
+  return `${fmtDateTime(job.state.last_run_at_ms, locale)} · ${status}`;
+}
+
+function formatAutomationInterval(ms: number): string {
+  const units: Array<[string, number]> = [
+    ["d", 86_400_000],
+    ["h", 3_600_000],
+    ["m", 60_000],
+    ["s", 1000],
+  ];
+  for (const [suffix, size] of units) {
+    if (ms >= size && ms % size === 0) return `${ms / size}${suffix}`;
+  }
+  return `${Math.round(ms / 1000)}s`;
+}
+
+function formatAutomationRunDuration(ms: number | undefined): string {
+  if (!ms || ms < 1000) return "<1s";
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60_000)}m`;
 }
 
 function AppsCatalogSettings({
