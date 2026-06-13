@@ -328,12 +328,12 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
     if _provider_requires_api_base(spec):
-        return bool(provider_config.api_base)
+        return bool(_resolve_env_placeholders(provider_config.api_base))
     if _provider_requires_api_key(spec):
-        return bool(provider_config.api_key)
+        return bool(_resolve_env_placeholders(provider_config.api_key))
     return bool(
-        provider_config.api_key
-        or provider_config.api_base
+        _resolve_env_placeholders(provider_config.api_key)
+        or _resolve_env_placeholders(provider_config.api_base)
         or getattr(provider_config, "region", None)
         or getattr(provider_config, "profile", None)
     )
@@ -381,8 +381,8 @@ def _provider_settings_row(
         ),
         "auth_type": "oauth" if spec.is_oauth else "api_key",
         "api_key_required": _provider_requires_api_key(spec),
-        "api_key_hint": _mask_secret_hint(provider_config.api_key),
-        "api_base": provider_config.api_base,
+        "api_key_hint": _mask_secret_hint(_resolve_env_placeholders(provider_config.api_key)),
+        "api_base": _resolve_env_placeholders(provider_config.api_base),
         "default_api_base": spec.default_api_base or None,
         "model_selectable": not spec.is_transcription_only,
     }
