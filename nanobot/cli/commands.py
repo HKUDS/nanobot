@@ -1476,6 +1476,47 @@ def _run_gateway(
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
         import json as _json
+        import hmac as _hmac_mod
+        import hashlib as _hashlib
+        import collections as _collections
+        import time as _time_rl
+
+        # ── Webhook security helpers ──────────────────────────────────────────
+        _rate_buckets: dict = _collections.defaultdict(lambda: _collections.deque())
+        _RATE_LIMIT = 30    # max requests per IP per 60-second window
+        _RATE_WINDOW = 60.0
+
+        def _check_rate_limit(ip: str) -> bool:
+            now = _time_rl.monotonic()
+            bucket = _rate_buckets[ip]
+            while bucket and now - bucket[0] > _RATE_WINDOW:
+                bucket.popleft()
+            if len(bucket) >= _RATE_LIMIT:
+                return False
+            bucket.append(now)
+            return True
+
+        def _parse_http_headers(raw: bytes) -> dict:
+            """Return lowercase header dict from raw HTTP request bytes."""
+            section = raw.split(b"\r\n\r\n", 1)[0]
+            result = {}
+            for line in section.decode("utf-8", errors="replace").splitlines()[1:]:
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    result[k.strip().lower()] = v.strip()
+            return result
+
+        def _verify_hmac(body: bytes, sig_header: str, secret: str) -> bool:
+            """Verify HMAC-SHA256 signature.
+            sig_header may be 'sha256=<hex>' or bare '<hex>'.
+            Returns True (skip verification) if secret is empty."""
+            if not secret:
+                return True
+            if not sig_header:
+                return False
+            expected = _hmac_mod.new(secret.encode(), body, _hashlib.sha256).hexdigest()
+            actual = sig_header.lower().removeprefix("sha256=").strip()
+            return _hmac_mod.compare_digest(expected, actual)
 
         async def handle(reader, writer):
             try:
@@ -1490,6 +1531,20 @@ def _run_gateway(
             if len(parts) >= 2:
                 method, path = parts[0], parts[1]
 
+            peer = writer.get_extra_info("peername")
+            peer_ip = peer[0] if peer else "unknown"
+
+            if method == "POST" and not _check_rate_limit(peer_ip):
+                logger.warning("webhook rate limit exceeded from {}", peer_ip)
+                _rl_body = _json.dumps({"error": "Too Many Requests"})
+                writer.write(
+                    f"HTTP/1.0 429 Too Many Requests\r\nContent-Type: application/json\r\n"
+                    f"Retry-After: 60\r\nContent-Length: {len(_rl_body)}\r\n\r\n{_rl_body}".encode()
+                )
+                await writer.drain()
+                writer.close()
+                return
+
             if method == "GET" and path == "/health":
                 body = _json.dumps({"status": "ok"})
                 resp = (
@@ -1499,9 +1554,22 @@ def _run_gateway(
                     f"\r\n{body}"
                 )
             elif method == "POST" and path == "/hooks/foolish-storefront-order":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _sf_secret = _os.environ.get("FOOLISH_STOREFRONT_WH_SECRET", "")
+                _sf_sig = _parse_http_headers(data).get("x-foolish-signature", "")
+                if not _verify_hmac(body_bytes, _sf_sig, _sf_secret):
+                    logger.warning("foolish-storefront-order: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
                 try:
-                    header_end = data.find(b"\r\n\r\n")
-                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
                     order = _json.loads(body_bytes.decode("utf-8", errors="replace"))
 
                     items = []
@@ -1628,9 +1696,22 @@ def _run_gateway(
                         f"\r\n{body}"
                     )
             elif method == "POST" and path == "/hooks/foolish-pro-register":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _sf_secret = _os.environ.get("FOOLISH_STOREFRONT_WH_SECRET", "")
+                _sf_sig = _parse_http_headers(data).get("x-foolish-signature", "")
+                if not _verify_hmac(body_bytes, _sf_sig, _sf_secret):
+                    logger.warning("foolish-pro-register: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
                 try:
-                    header_end = data.find(b"\r\n\r\n")
-                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
                     pro = _json.loads(body_bytes.decode("utf-8", errors="replace"))
 
                     # Notify Alessandro
@@ -1706,9 +1787,22 @@ def _run_gateway(
                             f"\r\n{body}"
                         )
             elif method == "POST" and path == "/hooks/foolish-storefront-review":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _sf_secret = _os.environ.get("FOOLISH_STOREFRONT_WH_SECRET", "")
+                _sf_sig = _parse_http_headers(data).get("x-foolish-signature", "")
+                if not _verify_hmac(body_bytes, _sf_sig, _sf_secret):
+                    logger.warning("foolish-storefront-review: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
                 try:
-                    header_end = data.find(b"\r\n\r\n")
-                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
                     review = _json.loads(body_bytes.decode("utf-8", errors="replace"))
 
                     telegram_cfg = config.channels.telegram
@@ -1763,9 +1857,22 @@ def _run_gateway(
                         f"\r\n{body}"
                     )
             elif method == "POST" and path == "/hooks/foolish-storefront-cron":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _sf_secret = _os.environ.get("FOOLISH_STOREFRONT_WH_SECRET", "")
+                _sf_sig = _parse_http_headers(data).get("x-foolish-signature", "")
+                if not _verify_hmac(body_bytes, _sf_sig, _sf_secret):
+                    logger.warning("foolish-storefront-cron: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
                 try:
-                    header_end = data.find(b"\r\n\r\n")
-                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
                     cron = _json.loads(body_bytes.decode("utf-8", errors="replace"))
 
                     cron_name = cron.get("cron", "unknown")
@@ -1819,9 +1926,22 @@ def _run_gateway(
                         f"\r\n{body}"
                     )
             elif method == "POST" and path == "/hooks/foolish-push-subscribed":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _sf_secret = _os.environ.get("FOOLISH_STOREFRONT_WH_SECRET", "")
+                _sf_sig = _parse_http_headers(data).get("x-foolish-signature", "")
+                if not _verify_hmac(body_bytes, _sf_sig, _sf_secret):
+                    logger.warning("foolish-push-subscribed: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
                 try:
-                    header_end = data.find(b"\r\n\r\n")
-                    body_bytes = data[header_end + 4:] if header_end != -1 else b""
                     payload = _json.loads(body_bytes.decode("utf-8", errors="replace"))
                     email = payload.get("email", "sconosciuto")
 
@@ -1849,6 +1969,224 @@ def _run_gateway(
                     )
                 except Exception as _exc:
                     logger.exception("foolish-push-subscribed hook error")
+                    body = _json.dumps({"error": str(_exc)})
+                    resp = (
+                        f"HTTP/1.0 500 Internal Server Error\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+            elif method == "POST" and path == "/hooks/zernio-event":
+                import os as _os
+                _hdr_end = data.find(b"\r\n\r\n")
+                body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
+                _zernio_secret = _os.environ.get("ZERNIO_WEBHOOK_SECRET", "")
+                _zh = _parse_http_headers(data)
+                _zernio_sig = _zh.get("x-zernio-signature", "") or _zh.get("x-hub-signature-256", "")
+                if not _verify_hmac(body_bytes, _zernio_sig, _zernio_secret):
+                    logger.warning("zernio-event: invalid signature from {}", peer_ip)
+                    _body401 = _json.dumps({"error": "Unauthorized"})
+                    writer.write(
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(_body401)}\r\n\r\n{_body401}".encode()
+                    )
+                    await writer.drain()
+                    writer.close()
+                    return
+                try:
+                    evt = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+
+                    event_type = evt.get("event") or evt.get("type") or "unknown"
+                    post_id = evt.get("postId") or evt.get("post_id", "")
+                    account_id = evt.get("accountId") or evt.get("account_id", "")
+
+                    telegram_cfg = config.channels.telegram
+                    tg_allow = (telegram_cfg.get("allowFrom") or []) if isinstance(telegram_cfg, dict) else (getattr(telegram_cfg, "allow_from", None) or [])
+                    chat_id = str(tg_allow[0]) if tg_allow else ""
+
+                    # Scribble log
+                    _scribble_dir = _pathlib.Path("/home/ab/.nanobot/memory/scribble")
+                    _scribble_dir.mkdir(parents=True, exist_ok=True)
+                    _today = _datetime.datetime.now().strftime("%Y-%m-%d")
+                    _scribble_path = _scribble_dir / f"zernio-{_today}.md"
+                    try:
+                        with open(_scribble_path, "a") as _f:
+                            _f.write(
+                                f"- [{_datetime.datetime.now().strftime('%H:%M')}] {event_type}"
+                                f" postId={post_id or 'N/A'} accountId={account_id or 'N/A'}\n"
+                            )
+                    except Exception:
+                        pass
+
+                    def _schedule_frank_zernio(_name: str, _msg: str, _delay_s: int = 2) -> None:
+                        from nanobot.cron.types import CronSchedule as _CS
+                        import time as _t
+                        cron.add_job(
+                            name=_name,
+                            schedule=_CS(kind="at", at_ms=int(_t.time() * 1000) + _delay_s * 1000),
+                            message=_msg,
+                            deliver=True,
+                            channel="telegram",
+                            to=chat_id,
+                            channel_meta={
+                                "user_id": int(chat_id) if chat_id.isdigit() else 0,
+                                "username": "ale_boss_live",
+                                "first_name": "Alessandro",
+                                "is_group": False,
+                                "message_thread_id": None,
+                                "is_forum": False,
+                                "reply_to_message_id": None,
+                                "_wants_stream": False,
+                            },
+                            session_key=f"telegram:{chat_id}",
+                            delete_after_run=True,
+                        )
+
+                    # ---- post.published ----
+                    if event_type in ("post.published", "post_published"):
+                        _platform = evt.get("platform", "instagram")
+                        _caption = (evt.get("content") or evt.get("caption") or "")[:80]
+                        _published_at = evt.get("publishedAt") or evt.get("published_at", "")
+                        if chat_id:
+                            asyncio.create_task(_deliver_to_channel(
+                                OutboundMessage(
+                                    channel="telegram",
+                                    chat_id=chat_id,
+                                    content=(
+                                        f"✅ Post pubblicato su {_platform}\n"
+                                        f"ID: {post_id}\n"
+                                        f"Account: {account_id}\n"
+                                        f"Ora: {_published_at}\n"
+                                        + (f'"{_caption}…"' if _caption else "")
+                                    ),
+                                )
+                            ))
+                        logger.info("zernio-event: post.published postId={} account={}", post_id, account_id)
+
+                    # ---- post.failed ----
+                    elif event_type in ("post.failed", "post_failed"):
+                        _error = evt.get("error") or evt.get("errorMessage") or "errore sconosciuto"
+                        _platform = evt.get("platform", "instagram")
+                        if chat_id:
+                            asyncio.create_task(_deliver_to_channel(
+                                OutboundMessage(
+                                    channel="telegram",
+                                    chat_id=chat_id,
+                                    content=(
+                                        f"🚨 Post FALLITO su {_platform}\n"
+                                        f"ID: {post_id}\n"
+                                        f"Account: {account_id}\n"
+                                        f"Errore: {_error[:300]}"
+                                    ),
+                                )
+                            ))
+                        if chat_id:
+                            _schedule_frank_zernio(
+                                f"zernio-post-failed-{post_id}",
+                                (
+                                    f"Il post Zernio {post_id} (account {account_id}) ha fallito la pubblicazione su {_platform}.\n"
+                                    f"Errore: {_error}\n\n"
+                                    f"Usa `posts_get` per recuperare il post, poi `posts_retry` per ritentare la pubblicazione "
+                                    f"oppure `posts_create` per ricrearlo se non recuperabile.\n"
+                                    f"Se il problema persiste, notifica Alessandro con i dettagli tecnici."
+                                ),
+                            )
+                        logger.warning("zernio-event: post.failed postId={} error={}", post_id, _error)
+
+                    # ---- message.received (DM inbound) ----
+                    elif event_type in ("message.received", "message_received", "dm.received", "dm_received"):
+                        _sender = (
+                            evt.get("from") or evt.get("sender") or {}
+                        )
+                        _sender_name = (
+                            _sender.get("name") or _sender.get("username") or
+                            evt.get("fromUsername") or evt.get("senderUsername") or "utente"
+                        )
+                        _sender_username = (
+                            _sender.get("username") or
+                            evt.get("fromUsername") or evt.get("senderUsername") or ""
+                        )
+                        _text = evt.get("text") or evt.get("message") or ""
+                        _conversation_id = evt.get("conversationId") or evt.get("conversation_id") or ""
+                        if chat_id:
+                            _schedule_frank_zernio(
+                                f"zernio-dm-{_conversation_id or _sender_username}",
+                                (
+                                    f"Hai ricevuto un DM su Instagram (Zernio) da @{_sender_username} ({_sender_name}).\n"
+                                    f"Account: {account_id}\n"
+                                    f"Conversation ID: {_conversation_id}\n"
+                                    f"Messaggio: \"{_text}\"\n\n"
+                                    f"Valuta se rispondere. Se sì, usa il tool Zernio MCP per inviare la risposta "
+                                    f"nella conversazione {_conversation_id}. "
+                                    f"Applica la voce Foolish Butcher (informale, diretto, utile). "
+                                    f"Se la richiesta richiede intervento umano (resi, problemi complessi), "
+                                    f"notifica Alessandro con il testo del DM."
+                                ),
+                            )
+                        logger.info("zernio-event: dm received from={} conversation={}", _sender_username, _conversation_id)
+
+                    # ---- comment.received ----
+                    elif event_type in ("comment.received", "comment_received"):
+                        _author = evt.get("authorUsername") or evt.get("author") or "utente"
+                        _comment_text = evt.get("text") or evt.get("comment") or ""
+                        _comment_id = evt.get("commentId") or evt.get("comment_id") or ""
+                        # Keywords standard da frank-ig-playbook.md §3
+                        _keywords = {"PELLE", "SEBO", "ROTOLO"}
+                        _has_keyword = any(kw in (_comment_text or "").upper() for kw in _keywords)
+                        if chat_id:
+                            _schedule_frank_zernio(
+                                f"zernio-comment-{_comment_id or _author}",
+                                (
+                                    f"Nuovo commento Instagram (Zernio) su post {post_id}.\n"
+                                    f"Autore: @{_author}\n"
+                                    f"Commento: \"{_comment_text}\"\n"
+                                    f"Comment ID: {_comment_id}\n"
+                                    f"Account: {account_id}\n"
+                                    + (f"⚠️ Contiene keyword trigger ({', '.join(_keywords & set((_comment_text or '').upper().split()))}).\n" if _has_keyword else "")
+                                    + "\n"
+                                    f"Se il commento contiene una keyword (PELLE/SEBO/ROTOLO) e non c'è già un'automazione attiva per questo post, "
+                                    f"usa `comment_automations_create_comment_automation` per creare il listener. "
+                                    f"Se il commento è una domanda genuina senza keyword, valuta se rispondere con `comments_reply_to_inbox_post`. "
+                                    f"Se è spam o irrilevante, ignora."
+                                ),
+                            )
+                        logger.info("zernio-event: comment received postId={} author={} keyword={}", post_id, _author, _has_keyword)
+
+                    # ---- analytics.ready / post.analytics ----
+                    elif event_type in ("analytics.ready", "analytics_ready", "post.analytics", "post_analytics"):
+                        _reach = evt.get("reach") or evt.get("impressions") or 0
+                        _engagement = evt.get("engagement") or evt.get("engagementRate") or 0
+                        _saves = evt.get("saves") or 0
+                        _shares = evt.get("shares") or 0
+                        if chat_id:
+                            _schedule_frank_zernio(
+                                f"zernio-analytics-{post_id}",
+                                (
+                                    f"Analytics disponibili per il post Zernio {post_id} (account {account_id}).\n"
+                                    f"Dati ricevuti: reach={_reach}, engagement={_engagement}, saves={_saves}, shares={_shares}\n\n"
+                                    f"Fai una valutazione rapida del post: ha performato bene rispetto agli altri? "
+                                    f"Aggiorna il buffer dei format in `SEBO_LAUNCH_KIT.md` o nel tuo contesto se questo format "
+                                    f"ha convertito bene. Usa `analytics_get_analytics` per avere il quadro completo se serve. "
+                                    f"Notifica Alessandro solo se le performance sono eccezionalmente buone o cattive."
+                                ),
+                            )
+                        logger.info("zernio-event: analytics.ready postId={} reach={}", post_id, _reach)
+
+                    elif event_type in ("webhook.test", "webhook_test"):
+                        logger.info("zernio-event: test webhook received OK — Zernio integration active")
+
+                    else:
+                        logger.info("zernio-event: unhandled event type '{}' — logged", event_type)
+
+                    body = _json.dumps({"ok": True})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\n"
+                        f"\r\n{body}"
+                    )
+                except Exception as _exc:
+                    logger.exception("zernio-event hook error")
                     body = _json.dumps({"error": str(_exc)})
                     resp = (
                         f"HTTP/1.0 500 Internal Server Error\r\n"
