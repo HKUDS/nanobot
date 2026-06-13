@@ -669,7 +669,12 @@ class TelegramChannel(BaseChannel):
         # Send media files
         for media_path in (msg.media or []):
             try:
-                media_type = self._get_media_type(media_path)
+                # TTS audio should always be sent as voice messages
+                tts_paths = msg.metadata.get("_tts_audio_paths", [])
+                if media_path in tts_paths:
+                    media_type = "voice"
+                else:
+                    media_type = self._get_media_type(media_path)
                 sender = {
                     "photo": self._app.bot.send_photo,
                     "video": self._app.bot.send_video,

@@ -34,6 +34,7 @@ class TTSProviderSpec:
     default_model: str
     default_voice: str
     adapter: str
+    default_response_format: str = "mp3"
     aliases: tuple[str, ...] = ()
 
     def load_adapter(self) -> type[TTSProviderAdapter]:
@@ -50,12 +51,14 @@ TTS_PROVIDERS: tuple[TTSProviderSpec, ...] = (
         default_model="tts-1",
         default_voice="alloy",
         adapter="nanobot.providers.tts:OpenAITTSProvider",
+        default_response_format="mp3",
     ),
     TTSProviderSpec(
         name="groq",
         default_model="canopylabs/orpheus-v1-english",
         default_voice="autumn",
         adapter="nanobot.providers.tts:GroqTTSProvider",
+        default_response_format="wav",
     ),
     TTSProviderSpec(
         name="elevenlabs",
@@ -63,6 +66,7 @@ TTS_PROVIDERS: tuple[TTSProviderSpec, ...] = (
         default_voice="Matilda",
         adapter="nanobot.providers.tts:ElevenLabsTTSProvider",
         aliases=("eleven",),
+        default_response_format="mp3",
     ),
 )
 

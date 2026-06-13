@@ -160,7 +160,9 @@ async def synthesize_speech(
 
     if output_dir is None:
         output_dir = get_media_dir("tts")
-    out_path = Path(output_dir) / "tts_output.mp3"
+    # Derive file extension from response_format or provider default
+    fmt = config.response_format or spec.default_response_format
+    out_path = Path(output_dir) / f"tts_output.{fmt}"
 
     provider = spec.load_adapter()(
         api_key=config.api_key,

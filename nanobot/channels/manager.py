@@ -373,6 +373,8 @@ class ChannelManager:
             audio_path = await channel.synthesize_speech(msg.content)
             if audio_path:
                 msg.media = list(msg.media or []) + [audio_path]
+                # Mark the audio path so channels know to send it as voice
+                msg.metadata["_tts_audio_paths"] = [audio_path]
                 # Clear the text content so the channel sends voice-only
                 msg.content = ""
             else:
