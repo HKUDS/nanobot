@@ -5,9 +5,12 @@ import os
 import select
 import signal
 import sys
-from collections.abc import Callable, Iterable
+import tempfile
+import uuid
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 # Force UTF-8 encoding for Windows console
@@ -40,20 +43,37 @@ _log_handler_id = logger.add(
 
 from prompt_toolkit import PromptSession, print_formatted_text  # noqa: E402
 from prompt_toolkit.application import run_in_terminal  # noqa: E402
-from prompt_toolkit.formatted_text import ANSI, HTML  # noqa: E402
+from prompt_toolkit.formatted_text import ANSI  # noqa: E402
 from prompt_toolkit.history import FileHistory  # noqa: E402
 from prompt_toolkit.patch_stdout import patch_stdout  # noqa: E402
+from prompt_toolkit.shortcuts.prompt import CompleteStyle  # noqa: E402
+from prompt_toolkit.styles import Style  # noqa: E402
 from rich.console import Console  # noqa: E402
-from rich.markdown import Markdown  # noqa: E402
+from rich.markup import escape  # noqa: E402
 from rich.table import Table  # noqa: E402
-from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
+from nanobot.cli.tui import (  # noqa: E402
+    CliTuiApp,
+    TuiOutput,
+    build_key_bindings,
+    build_prompt_message,
+    build_rprompt,
+    format_activity_rows,
+    should_use_tui,
+    slash_completion_filter,
+)
+from nanobot.cli.tui.attachments import extract_attachments  # noqa: E402
+from nanobot.cli.tui.commands import SlashCommandCompleter, SlashCommandLexer  # noqa: E402
+from nanobot.cli.tui.output import ReasoningBuffer as _ReasoningBuffer  # noqa: E402
+from nanobot.cli.tui.output import render_ansi  # noqa: E402
+from nanobot.cli.tui.output import response_renderable as _response_renderable  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
+from nanobot.security.workspace_access import default_workspace_scope  # noqa: E402
 from nanobot.utils.evaluator import evaluate_response  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
@@ -181,8 +201,6 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
-_REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
-_REASONING_FLUSH_CHARS = 60
 
 _HEARTBEAT_PREAMBLE = (
     "[Your response will be delivered directly to the user's messaging app. "
@@ -246,6 +264,42 @@ def _pick_heartbeat_target_from_sessions(
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_PROMPT_STYLE = Style.from_dict({
+    "prompt": "ansicyan bold",
+    "prompt-divider": "ansibrightblack",
+    "placeholder": "ansibrightblack",
+    "completion-menu": "noinherit noreverse",
+    "completion-menu.completion": "noinherit noreverse",
+    "completion-menu.completion.current": "noinherit noreverse bg:#3a4652 #ffffff",
+    "completion-menu.meta.completion": "noinherit noreverse ansibrightblack",
+    "completion-menu.meta.completion.current": "noinherit noreverse bg:#3a4652 #ffffff",
+    # Render the status line as plain dim text instead of a reverse-video bar.
+    "bottom-toolbar": "noreverse nobold",
+    "bottom-toolbar.text": "noreverse",
+    "toolbar-status": "noreverse ansicyan",
+    "toolbar-hint": "noreverse ansibrightblack",
+    # Slash-command palette: selection shown by a subtle highlight bar
+    # (no leading arrow, so it does not echo the input prompt's "›").
+    "palette-item": "noreverse",
+    "palette-selected": "noreverse bg:#2b3640 ansicyan bold",
+    "palette-desc": "noreverse ansibrightblack",
+    "palette-selected-desc": "noreverse bg:#2b3640 #c9d4df",
+    # Live "nanobot is thinking…" line shown above the input during a turn.
+    "thinking": "ansicyan",
+    # A recognized "/command" typed in the input is colored as a whole.
+    "slash-command": "#7aa2f7 bold",
+})
+
+
+def _terminal_width() -> int:
+    return max(8, console.width)
+
+
+def _prompt_message():
+    return [
+        ("class:prompt-divider", f"{'─' * _terminal_width()}\n"),
+        ("class:prompt", "› "),
+    ]
 
 
 def _flush_pending_tty_input() -> None:
@@ -282,8 +336,20 @@ def _restore_terminal() -> None:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
 
 
-def _init_prompt_session() -> None:
-    """Create the prompt_toolkit session with persistent file history."""
+def _init_prompt_session(
+    *,
+    key_bindings: Any | None = None,
+    rprompt: Any | None = None,
+    refresh_interval: float | None = None,
+) -> None:
+    """Create the inline prompt_toolkit session with persistent file history.
+
+    The TUI passes key bindings + rprompt; the ``--classic`` / ``--no-tui``
+    fallbacks call it plain. The slash-command dropdown is prompt_toolkit's
+    native completion menu: it pops directly under the input (expanding down)
+    and ``complete_while_typing`` is gated to ``/…`` tokens so the reserved
+    menu space — and any gap — only exists while choosing a command.
+    """
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
 
     # Save terminal state so we can restore it on exit
@@ -297,10 +363,26 @@ def _init_prompt_session() -> None:
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
+    extra: dict[str, Any] = {}
+    if key_bindings is not None:
+        extra["key_bindings"] = key_bindings
+    if rprompt is not None:
+        extra["rprompt"] = rprompt
+    if refresh_interval is not None:
+        extra["refresh_interval"] = refresh_interval
+
     _PROMPT_SESSION = PromptSession(
         history=SafeFileHistory(str(history_file)),
+        completer=SlashCommandCompleter(),
+        complete_style=CompleteStyle.COLUMN,
+        complete_while_typing=slash_completion_filter(),
+        lexer=SlashCommandLexer(),
+        style=_PROMPT_STYLE,
+        placeholder=[("class:placeholder", "Message nanobot...")],
         enable_open_in_editor=False,
         multiline=False,  # Enter submits (single line mode)
+        reserve_space_for_menu=12,
+        **extra,
     )
 
 
@@ -310,14 +392,7 @@ def _make_console() -> Console:
 
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
-    ansi_console = Console(
-        force_terminal=sys.stdout.isatty(),
-        color_system=console.color_system or "standard",
-        width=console.width,
-    )
-    with ansi_console.capture() as capture:
-        render_fn(ansi_console)
-    return capture.get()
+    return render_ansi(render_fn, color_system=console.color_system, width=console.width)
 
 
 def _print_agent_response(
@@ -332,18 +407,9 @@ def _print_agent_response(
     body = _response_renderable(content, render_markdown, metadata)
     if show_header:
         console.print()
-        console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+        console.print("[cyan]nanobot[/cyan]")
     console.print(body)
     console.print()
-
-
-def _response_renderable(content: str, render_markdown: bool, metadata: dict | None = None):
-    """Render plain-text command output without markdown collapsing newlines."""
-    if not render_markdown:
-        return Text(content)
-    if (metadata or {}).get("render_as") == "text":
-        return Text(content)
-    return Markdown(content)
 
 
 async def _print_interactive_line(text: str) -> None:
@@ -368,7 +434,7 @@ async def _print_interactive_response(
         ansi = _render_interactive_ansi(
             lambda c: (
                 c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print("[cyan]nanobot[/cyan]"),
                 c.print(_response_renderable(content, render_markdown, metadata)),
                 c.print(),
             )
@@ -390,33 +456,55 @@ def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None, render
         target.print(f"  [dim]↳ {text}[/dim]")
 
 
-class _ReasoningBuffer:
-    def __init__(self) -> None:
-        self._text = ""
+def _print_cli_activity_rows(
+    rows: list[str],
+    thinking: ThinkingSpinner | None,
+    renderer: StreamRenderer | None = None,
+) -> None:
+    """Print structured activity rows, independent of tool-hint visibility settings."""
+    if not rows:
+        return
+    target = renderer.console if renderer else console
+    pause = renderer.pause_spinner() if renderer else (thinking.pause() if thinking else nullcontext())
+    with pause:
+        if renderer:
+            renderer.ensure_header()
+        for row in rows:
+            target.print(row)
 
-    def add(self, text: str) -> str | None:
-        if not text:
-            return None
-        self._text += text
-        if self._should_flush(text):
-            return self.flush()
-        return None
 
-    def flush(self) -> str | None:
-        text = self._text.strip()
-        self._text = ""
-        return text or None
+async def _stream_mcp_startup_log(path: Path, startup_done: asyncio.Event) -> None:
+    """Tail captured MCP stderr during startup, stopping before user input begins."""
+    position = 0
+    pending = ""
+    while not startup_done.is_set():
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(position)
+                chunk = handle.read()
+                position = handle.tell()
+        except OSError:
+            chunk = ""
+        if chunk:
+            pending += chunk
+            *lines, pending = pending.split("\n")
+            for line in lines:
+                if line.strip():
+                    console.print(f"[dim]{escape(line.rstrip())}[/dim]")
+        await asyncio.sleep(0.05)
 
-    def clear(self) -> None:
-        self._text = ""
-
-    def _should_flush(self, text: str) -> bool:
-        stripped = text.rstrip()
-        return (
-            "\n" in text
-            or stripped.endswith(_REASONING_SENTENCE_ENDINGS)
-            or len(self._text) >= _REASONING_FLUSH_CHARS
-        )
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            handle.seek(position)
+            chunk = handle.read()
+    except OSError:
+        chunk = ""
+    if chunk:
+        pending += chunk
+    if pending.strip():
+        for line in pending.splitlines():
+            if line.strip():
+                console.print(f"[dim]{escape(line.rstrip())}[/dim]")
 
 
 def _print_cli_reasoning(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
@@ -462,6 +550,11 @@ async def _maybe_print_interactive_progress(
     reasoning_buffer: _ReasoningBuffer | None = None,
 ) -> bool:
     metadata = msg.metadata or {}
+    activity_rows = format_activity_rows(metadata)
+    if activity_rows:
+        _print_cli_activity_rows(activity_rows, thinking, renderer)
+        return True
+
     if metadata.get("_retry_wait"):
         await _print_interactive_progress_line(msg.content, thinking, renderer)
         return True
@@ -502,20 +595,23 @@ def _is_exit_command(command: str) -> bool:
     return command.lower() in EXIT_COMMANDS
 
 
-async def _read_interactive_input_async() -> str:
+async def _read_interactive_input_async(message: Any | None = None) -> str:
     """Read user input using prompt_toolkit (handles paste, history, display).
 
     prompt_toolkit natively handles:
     - Multiline paste (bracketed paste mode)
     - History navigation (up/down arrows)
     - Clean display (no ghost characters or artifacts)
+
+    *message* may be a callable returning formatted text; prompt_toolkit
+    re-evaluates it on each render so the TUI's live ``thinking`` line animates.
     """
     if _PROMPT_SESSION is None:
         raise RuntimeError("Call _init_prompt_session() first")
     try:
         with patch_stdout():
             return await _PROMPT_SESSION.prompt_async(
-                HTML("<b fg='ansiblue'>You:</b> "),
+                message if message is not None else _prompt_message(),
             )
     except EOFError as exc:
         raise KeyboardInterrupt from exc
@@ -1311,7 +1407,14 @@ def agent(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    logs: bool = typer.Option(
+        False,
+        "--logs/--no-logs",
+        "--show-logs",
+        help="Show nanobot runtime logs during chat",
+    ),
+    classic: bool = typer.Option(False, "--classic", help="Use the legacy prompt/print UI"),
+    no_tui: bool = typer.Option(False, "--no-tui", help="Disable the TUI and use plain text output"),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -1347,6 +1450,15 @@ def agent(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
+    mcp_stdio_errlog = tempfile.NamedTemporaryFile(
+        "w+",
+        encoding="utf-8",
+        prefix="nanobot-mcp-",
+        suffix=".log",
+        delete=False,
+    )
+    mcp_stdio_errlog_path = Path(mcp_stdio_errlog.name)
+    agent_loop._mcp_stdio_errlog = mcp_stdio_errlog
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
@@ -1361,70 +1473,184 @@ def agent(
         reasoning_buffer = _ReasoningBuffer()
 
         async def _cli_progress(content: str, *, tool_hint: bool = False, reasoning: bool = False, **_kwargs: Any) -> None:
-            ch = agent_loop.channels_config
-
-            if _kwargs.get("reasoning_end"):
-                if ch and not ch.show_reasoning:
-                    reasoning_buffer.clear()
-                else:
-                    _flush_cli_reasoning(reasoning_buffer, _thinking, renderer)
-                return
-
-            if reasoning:
-                if ch and not ch.show_reasoning:
-                    reasoning_buffer.clear()
-                    return
-                text = reasoning_buffer.add(content)
-                if text:
-                    _print_cli_reasoning(text, _thinking, renderer)
-                return
-            if ch and tool_hint and not ch.send_tool_hints:
-                return
-            if ch and not tool_hint and not ch.send_progress:
-                return
-            _print_cli_progress_line(content, _thinking, renderer)
+            metadata = {
+                "_progress": True,
+                "_tool_hint": tool_hint,
+                "_reasoning": reasoning,
+                "_reasoning_end": _kwargs.get("reasoning_end", False),
+                "_tool_events": _kwargs.get("tool_events"),
+                "_file_edit_events": _kwargs.get("file_edit_events"),
+            }
+            await _maybe_print_interactive_progress(
+                SimpleNamespace(content=content, metadata=metadata),
+                _thinking,
+                agent_loop.channels_config,
+                renderer,
+                reasoning_buffer,
+            )
         return _cli_progress
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            renderer = StreamRenderer(
-                render_markdown=markdown,
-                bot_name=config.agents.defaults.bot_name,
-                bot_icon=config.agents.defaults.bot_icon,
-            )
-            response = await agent_loop.process_direct(
-                message, session_id,
-                on_progress=_make_progress(renderer),
-                on_stream=renderer.on_delta,
-                on_stream_end=renderer.on_end,
-            )
-            if not renderer.streamed:
-                await renderer.close()
-                print_kwargs: dict[str, Any] = {}
-                if renderer.header_printed:
-                    print_kwargs["show_header"] = False
-                _print_agent_response(
-                    response.content if response else "",
+            try:
+                renderer = StreamRenderer(
                     render_markdown=markdown,
-                    metadata=response.metadata if response else None,
-                    **print_kwargs,
+                    bot_name=config.agents.defaults.bot_name,
+                    bot_icon="",
                 )
-            await agent_loop.close_mcp()
+                response = await agent_loop.process_direct(
+                    message, session_id,
+                    on_progress=_make_progress(renderer),
+                    on_stream=renderer.on_delta,
+                    on_stream_end=renderer.on_end,
+                )
+                if not renderer.streamed:
+                    await renderer.close()
+                    print_kwargs: dict[str, Any] = {}
+                    if renderer.header_printed:
+                        print_kwargs["show_header"] = False
+                    _print_agent_response(
+                        response.content if response else "",
+                        render_markdown=markdown,
+                        metadata=response.metadata if response else None,
+                        **print_kwargs,
+                    )
+            finally:
+                await agent_loop.close_mcp()
+                mcp_stdio_errlog.close()
+                with suppress(OSError):
+                    mcp_stdio_errlog_path.unlink()
 
         asyncio.run(run_once())
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
-        _init_prompt_session()
         _model, _preset_tag = _model_display(config)
-        _icon = config.agents.defaults.bot_icon or __logo__
-        console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        use_tui = should_use_tui(classic=classic, no_tui=no_tui)
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
         else:
             cli_channel, cli_chat_id = "cli", session_id
+
+        async def _publish_user_input(content: str, media: list[str] | None = None) -> None:
+            chat_id = cli_chat_id
+            if use_tui and tui_app is not None and tui_app.state.active_chat_id:
+                chat_id = tui_app.state.active_chat_id
+            await bus.publish_inbound(InboundMessage(
+                channel=cli_channel,
+                sender_id="user",
+                chat_id=chat_id,
+                content=content,
+                media=list(media) if media else [],
+                metadata={"_wants_stream": True},
+            ))
+
+        # Route the message tool's deliveries (e.g. generated images) to the bus
+        # so the inline TUI can surface them; the gateway wires its own callback.
+        if use_tui:
+            from nanobot.agent.tools.message import MessageTool
+
+            _message_tool = getattr(agent_loop, "tools", {}).get("message")
+            if isinstance(_message_tool, MessageTool):
+                async def _cli_deliver(out_msg: Any) -> None:
+                    await bus.publish_outbound(out_msg)
+
+                _message_tool.set_send_callback(_cli_deliver)
+
+        async def _transcribe_cli_audio(paths: list[str]) -> tuple[str, list[str]]:
+            """Transcribe attached audio files; return (combined_text, notices)."""
+            from nanobot.audio.transcription import (
+                resolve_transcription_config,
+                transcribe_audio_file,
+            )
+
+            eff = resolve_transcription_config(config)
+            if not eff.configured:
+                return "", ["transcription is not configured; ignoring audio attachment"]
+            transcripts: list[str] = []
+            notices: list[str] = []
+            for path in paths:
+                try:
+                    text = (await transcribe_audio_file(path, eff) or "").strip()
+                except Exception as exc:  # surface any provider error as a notice
+                    notices.append(f"transcription failed for {Path(path).name}: {exc}")
+                    continue
+                if text:
+                    transcripts.append(text)
+                else:
+                    notices.append(f"no speech transcribed from {Path(path).name}")
+            return "\n".join(transcripts), notices
+
+        async def _prepare_tui_input(user_input: str) -> tuple[str, list[str], list[str]]:
+            """Return text/media/notices for a non-command TUI input line."""
+            text, media, audio = extract_attachments(user_input)
+            if not audio:
+                return text, media, []
+            await tui_output.print_notice(f"transcribing {len(audio)} audio file(s)…")
+            transcript, notices = await _transcribe_cli_audio(audio)
+            if transcript:
+                text = f"{text}\n{transcript}".strip() if text else transcript
+            return text, media, notices
+
+        tui_app: CliTuiApp | None = None
+        tui_output: TuiOutput | None = None
+        tui_prompt_message: Any | None = None
+        if use_tui:
+            default_scope = default_workspace_scope(
+                config.workspace_path,
+                config.tools.restrict_to_workspace,
+                source_channel="cli",
+            )
+            tui_app = CliTuiApp(
+                console=console,
+                model=_model,
+                preset=config.agents.defaults.model_preset or "default",
+                workspace=default_scope.project_path,
+                access_mode=default_scope.access_mode,
+                session_id=session_id,
+                show_logs=logs,
+            )
+            tui_app.state.active_chat_id = cli_chat_id
+            _ch_cfg = agent_loop.channels_config
+            if _ch_cfg is not None:
+                tui_app.state.show_reasoning = bool(_ch_cfg.show_reasoning)
+            tui_app.render_startup()
+            tui_output = TuiOutput(
+                tui_app.state,
+                render_markdown=markdown,
+                bot_name=config.agents.defaults.bot_name,
+            )
+
+            def _on_interrupt() -> None:
+                if not tui_app.state.turn_active:
+                    return
+                with suppress(RuntimeError):
+                    asyncio.get_running_loop().create_task(_publish_user_input("/stop"))
+
+            def _on_toggle_reasoning() -> None:
+                with suppress(RuntimeError):
+                    asyncio.get_running_loop().create_task(tui_output.toggle_reasoning())
+
+            tui_prompt_message = build_prompt_message(
+                tui_app.state,
+                config.agents.defaults.bot_name,
+                width=_terminal_width,
+            )
+            _init_prompt_session(
+                key_bindings=build_key_bindings(
+                    tui_app.state,
+                    on_interrupt=_on_interrupt,
+                    on_toggle_reasoning=_on_toggle_reasoning,
+                ),
+                rprompt=build_rprompt(tui_app.state),
+                refresh_interval=0.5,
+            )
+        else:
+            _init_prompt_session()
+            _icon = config.agents.defaults.bot_icon or __logo__
+            console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         def _handle_signal(signum, frame):
             sig_name = signal.Signals(signum).name
@@ -1442,77 +1668,147 @@ def agent(
         if hasattr(signal, 'SIGPIPE'):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
-        async def run_interactive():
-            bus_task = asyncio.create_task(agent_loop.run())
+        async def _connect_mcp_with_startup_log() -> None:
+            if not getattr(agent_loop, "_mcp_servers", None):
+                return
+            console.print("[dim]Connecting MCP servers...[/dim]")
+            startup_done = asyncio.Event()
+            log_task = asyncio.create_task(
+                _stream_mcp_startup_log(mcp_stdio_errlog_path, startup_done)
+            )
+            try:
+                await agent_loop._connect_mcp()
+            finally:
+                await asyncio.sleep(0.1)
+                startup_done.set()
+                await asyncio.gather(log_task, return_exceptions=True)
+            connected = sorted(getattr(agent_loop, "_mcp_stacks", {}) or {})
+            configured = sorted(getattr(agent_loop, "_mcp_servers", {}) or {})
+            if connected:
+                console.print(f"[green]MCP connected:[/green] {', '.join(connected)}")
+            elif configured:
+                console.print("[yellow]MCP configured, but no servers connected yet.[/yellow]")
+            console.print()
+
+        async def _consume_outbound_forever(handle_msg: Callable[[Any], Awaitable[None]]) -> None:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+                    await handle_msg(msg)
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    break
+
+        async def _run_tui_session() -> None:
+            """Inline Claude-Code-style TUI: the input line stays at the bottom of
+            the terminal flow while answers, activity traces, and reasoning scroll
+            above it in native scrollback. Typing while a turn runs routes the
+            message to the backend's pending queue for mid-turn injection.
+            """
+            async def _handle_outbound(msg: Any) -> None:
+                await tui_output.handle_outbound(msg, agent_loop.channels_config)
+
+            outbound_task = asyncio.create_task(_consume_outbound_forever(_handle_outbound))
+            try:
+                while True:
+                    try:
+                        user_input = _sanitize_surrogates(
+                            await _read_interactive_input_async(tui_prompt_message)
+                        )
+                        command = user_input.strip()
+                        if not command:
+                            continue
+                        if _is_exit_command(command):
+                            _restore_terminal()
+                            console.print("\nGoodbye!")
+                            break
+                        text, media, notices = (
+                            (user_input, [], [])
+                            if command.startswith("/")
+                            else await _prepare_tui_input(user_input)
+                        )
+                        # Nothing to send (e.g. audio-only that didn't transcribe).
+                        if not text and not media:
+                            for notice in notices:
+                                await tui_output.print_notice(notice)
+                            continue
+                        if tui_app.state.turn_active:
+                            # A turn is mid-flight: the backend routes this to the
+                            # session's pending queue for mid-turn injection.
+                            await tui_output.print_queued(user_input)
+                        else:
+                            tui_output.start_user_turn()
+                            tui_app.state.begin_turn()
+                        if media:
+                            await tui_output.print_notice(
+                                "attached " + ", ".join(Path(m).name for m in media)
+                            )
+                        for notice in notices:
+                            await tui_output.print_notice(notice)
+                        await _publish_user_input(text, media)
+                    except KeyboardInterrupt:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+                    except EOFError:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+            finally:
+                outbound_task.cancel()
+                await asyncio.gather(outbound_task, return_exceptions=True)
+
+        async def _run_classic_session() -> None:
+            """Legacy prompt/print loop using Rich Live; serialized per turn."""
             turn_done = asyncio.Event()
             turn_done.set()
             turn_response: list[tuple[str, dict]] = []
             renderer: StreamRenderer | None = None
             reasoning_buffer = _ReasoningBuffer()
 
-            async def _consume_outbound():
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+            async def _handle_outbound(msg: Any) -> None:
+                if msg.metadata.get("_stream_delta"):
+                    if renderer:
+                        await renderer.on_delta(msg.content)
+                    return
+                if msg.metadata.get("_stream_end"):
+                    if renderer:
+                        await renderer.on_end(
+                            resuming=msg.metadata.get("_resuming", False),
+                        )
+                    return
+                if msg.metadata.get("_streamed"):
+                    turn_done.set()
+                    return
+                if await _maybe_print_interactive_progress(
+                    msg, renderer, agent_loop.channels_config, renderer, reasoning_buffer,
+                ):
+                    return
+                if not turn_done.is_set():
+                    if msg.content:
+                        turn_response.append((msg.content, dict(msg.metadata or {})))
+                    turn_done.set()
+                elif msg.content:
+                    await _print_interactive_response(
+                        msg.content, render_markdown=markdown, metadata=msg.metadata,
+                    )
 
-                        if msg.metadata.get("_stream_delta"):
-                            if renderer:
-                                await renderer.on_delta(msg.content)
-                            continue
-                        if msg.metadata.get("_stream_end"):
-                            if renderer:
-                                await renderer.on_end(
-                                    resuming=msg.metadata.get("_resuming", False),
-                                )
-                            continue
-                        if msg.metadata.get("_streamed"):
-                            turn_done.set()
-                            continue
-
-                        if await _maybe_print_interactive_progress(
-                            msg,
-                            renderer,
-                            agent_loop.channels_config,
-                            renderer,
-                            reasoning_buffer,
-                        ):
-                            continue
-
-                        if not turn_done.is_set():
-                            if msg.content:
-                                turn_response.append((msg.content, dict(msg.metadata or {})))
-                            turn_done.set()
-                        elif msg.content:
-                            await _print_interactive_response(
-                                msg.content,
-                                render_markdown=markdown,
-                                metadata=msg.metadata,
-                            )
-
-                    except asyncio.TimeoutError:
-                        continue
-                    except asyncio.CancelledError:
-                        break
-
-            outbound_task = asyncio.create_task(_consume_outbound())
-
+            outbound_task = asyncio.create_task(_consume_outbound_forever(_handle_outbound))
             try:
                 while True:
                     try:
                         _flush_pending_tty_input()
-                        # Stop spinner before user input to avoid prompt_toolkit conflicts
                         if renderer:
                             renderer.stop_for_input()
                         user_input = _sanitize_surrogates(await _read_interactive_input_async())
                         command = user_input.strip()
                         if not command:
                             continue
-
                         if _is_exit_command(command):
                             _restore_terminal()
                             console.print("\nGoodbye!")
                             break
-
                         turn_done.clear()
                         turn_response.clear()
                         reasoning_buffer.clear()
@@ -1521,17 +1817,8 @@ def agent(
                             bot_name=config.agents.defaults.bot_name,
                             bot_icon=config.agents.defaults.bot_icon,
                         )
-
-                        await bus.publish_inbound(InboundMessage(
-                            channel=cli_channel,
-                            sender_id="user",
-                            chat_id=cli_chat_id,
-                            content=user_input,
-                            metadata={"_wants_stream": True},
-                        ))
-
+                        await _publish_user_input(user_input)
                         await turn_done.wait()
-
                         if turn_response:
                             content, meta = turn_response[0]
                             if content and not meta.get("_streamed"):
@@ -1557,10 +1844,24 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                agent_loop.stop()
                 outbound_task.cancel()
-                await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
+                await asyncio.gather(outbound_task, return_exceptions=True)
+
+        async def run_interactive():
+            await _connect_mcp_with_startup_log()
+            bus_task = asyncio.create_task(agent_loop.run())
+            try:
+                if use_tui:
+                    await _run_tui_session()
+                else:
+                    await _run_classic_session()
+            finally:
+                agent_loop.stop()
+                await asyncio.gather(bus_task, return_exceptions=True)
                 await agent_loop.close_mcp()
+                mcp_stdio_errlog.close()
+                with suppress(OSError):
+                    mcp_stdio_errlog_path.unlink()
 
         asyncio.run(run_interactive())
 
