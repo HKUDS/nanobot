@@ -700,7 +700,6 @@ class CliAppManager:
                 "_source": str(entry.get("source") or "local"),
                 "entry_point": str(entry.get("entry_point") or ""),
                 "package_manager": strategy,
-                "install_strategy": strategy,
             }
             rows.append(self._app_payload(app, installed))
         return {

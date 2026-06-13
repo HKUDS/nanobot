@@ -18,6 +18,7 @@ from websockets.http11 import Response
 from blackcat.agent.tools.mcp import request_mcp_reload
 from blackcat.bus.queue import MessageBus
 from blackcat.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from blackcat.webui.http_utils import query_first as _query_first
 from blackcat.webui.mcp_presets_api import mcp_presets_settings_action
 from blackcat.webui.settings_api import (
     WebUISettingsError,
@@ -302,8 +303,7 @@ class WebUISettingsRouter:
     async def _handle_settings_cli_apps(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
-        query = self._query(request)
-        installed_only = (query.get("installed_only") or [""])[0].lower() in {
+        installed_only = (_query_first(self._query(request), "installed_only") or "").lower() in {
             "1",
             "true",
             "yes",
