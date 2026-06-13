@@ -466,7 +466,7 @@
     "automations": {
       "kicker": "작업 공간 자동화",
       "title": "자동화",
-      "description": "cron 알림, 반복 agent 작업, 일회성 자동화, 보호된 시스템 자동화를 한곳에서 확인합니다.",
+      "description": "cron 알림, 반복 agent 작업, 일회성 작업, 보호된 시스템 작업을 확인합니다.",
       "refresh": "새로 고침",
       "newInChat": "채팅에서 만들기",
       "stats": {
@@ -514,6 +514,23 @@
         "system": "시스템",
         "unknown": "연결된 채팅 없음",
         "legacy": "대상 채팅에서 다시 만드세요"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
       },
       "schedule": {
         "at": "{{time}}",

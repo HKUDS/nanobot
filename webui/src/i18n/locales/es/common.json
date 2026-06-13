@@ -466,7 +466,7 @@
     "automations": {
       "kicker": "Automatizaciones del espacio",
       "title": "Automatizaciones",
-      "description": "Revisa recordatorios cron, turnos recurrentes del agente, automatizaciones de una vez y automatizaciones protegidas del sistema en un solo lugar.",
+      "description": "Revisa recordatorios cron, turnos recurrentes del agente, tareas de una vez y tareas protegidas del sistema.",
       "refresh": "Actualizar",
       "newInChat": "Crear en chat",
       "stats": {
@@ -514,6 +514,23 @@
         "system": "Sistema",
         "unknown": "Sin chat vinculado",
         "legacy": "Recréala en el chat de destino"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
       },
       "schedule": {
         "at": "A las {{time}}",

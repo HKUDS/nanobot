@@ -13,7 +13,6 @@ import {
   ArrowUpCircle,
   Bot,
   Brain,
-  CalendarClock,
   Check,
   CircleAlert,
   ChevronDown,
@@ -3390,23 +3389,14 @@ function AutomationsSettings({
   return (
     <div className="space-y-5">
       <section className="rounded-[24px] border border-border/50 bg-card/82 px-4 py-4 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:px-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-              <CalendarClock className="h-4 w-4" aria-hidden />
-              {tx("settings.automations.kicker", "Workspace automations")}
-            </div>
-            <h2 className="mt-2 text-[22px] font-normal leading-tight tracking-normal text-foreground">
-              {tx("settings.automations.title", "Automations")}
-            </h2>
-            <p className="mt-2 max-w-[36rem] text-[13px] leading-6 text-muted-foreground">
-              {tx(
-                "settings.automations.description",
-                "Review cron reminders, recurring agent turns, one-time jobs, and protected system automations in one place.",
-              )}
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-2">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <p className="max-w-[38rem] text-[13px] leading-6 text-muted-foreground">
+            {tx(
+              "settings.automations.description",
+              "Review cron reminders, recurring agent turns, one-time jobs, and protected system jobs.",
+            )}
+          </p>
+          <div className="flex shrink-0 flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
@@ -3711,6 +3701,11 @@ function AutomationDeleteDialog({
 }
 
 function automationSearchText(job: SessionAutomationJob): string {
+  const originText = job.origin
+    ? job.origin.channel === "websocket"
+      ? [job.origin.session_key, job.origin.title, job.origin.preview]
+      : [job.origin.channel]
+    : [];
   return [
     job.id,
     job.name,
@@ -3718,9 +3713,7 @@ function automationSearchText(job: SessionAutomationJob): string {
     job.schedule.kind,
     job.schedule.expr,
     job.schedule.tz,
-    job.origin?.session_key,
-    job.origin?.title,
-    job.origin?.preview,
+    ...originText,
   ]
     .filter(Boolean)
     .join(" ")
@@ -3758,7 +3751,35 @@ function automationOriginLabel(
     return tx("settings.automations.origin.legacy", "Recreate in target chat");
   }
   if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
+  if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, tx);
   return origin.title || origin.preview || origin.session_key;
+}
+
+function automationChannelLabel(
+  channel: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  const key = channel.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    api: "API",
+    cli: "CLI",
+    dingtalk: "DingTalk",
+    discord: "Discord",
+    email: "Email",
+    feishu: "Feishu",
+    matrix: "Matrix",
+    msteams: "Microsoft Teams",
+    qq: "QQ",
+    slack: "Slack",
+    telegram: "Telegram",
+    wechat: "WeChat",
+    wecom: "WeCom",
+    weixin: "WeChat",
+    whatsapp: "WhatsApp",
+  };
+  return labels[key]
+    ? tx(`settings.automations.channels.${key}`, labels[key])
+    : channel;
 }
 
 function formatAutomationSchedule(

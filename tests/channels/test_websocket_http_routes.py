@@ -832,6 +832,14 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         message="Practice English",
         session_key="unified:default",
     )
+    external_job = cron.add_job(
+        name="WeChat quiz",
+        schedule=CronSchedule(kind="every", every_ms=3_600_000),
+        message="Send a quiz",
+        session_key="weixin:wx-chat",
+        origin_channel="weixin",
+        origin_chat_id="wx-chat",
+    )
     cron.register_system_job(
         CronJob(
             id="heartbeat",
@@ -840,9 +848,13 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             payload=CronPayload(kind="system_event"),
         )
     )
+    session_manager = _seed_session(tmp_path, key="websocket:abc")
+    external_session = Session(key="weixin:wx-chat")
+    external_session.add_message("user", "Scheduled cron job triggered")
+    session_manager.save(external_session)
     channel = _ch(
         bus,
-        session_manager=_seed_session(tmp_path, key="websocket:abc"),
+        session_manager=session_manager,
         cron_service=cron,
         cron_pending_job_ids=lambda key: {user_job.id} if key == "websocket:abc" else set(),
         port=29932,
@@ -870,6 +882,8 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["origin"]["preview"] == "hi"
         assert by_id[legacy_job.id]["payload"]["session_key"] == "unified:default"
         assert by_id[legacy_job.id]["origin"] is None
+        assert by_id[external_job.id]["origin"]["session_key"] == "weixin:wx-chat"
+        assert by_id[external_job.id]["origin"]["preview"] == ""
         assert by_id["heartbeat"]["protected"] is True
 
         disabled = await _http_get(

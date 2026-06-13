@@ -386,6 +386,34 @@ describe("App layout", () => {
             origin: null,
           },
           {
+            id: "external-quiz",
+            name: "WeChat quiz",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 3_600_000 },
+            payload: {
+              message: "Send a quiz",
+              kind: "agent_turn",
+              session_key: "weixin:wx-chat",
+              origin_channel: "weixin",
+              origin_chat_id: "wx-chat",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [],
+            },
+            origin: {
+              session_key: "weixin:wx-chat",
+              channel: "weixin",
+              chat_id: "wx-chat",
+              title: "Scheduled cron job triggered",
+              preview: "memory with dream state",
+            },
+          },
+          {
             id: "heartbeat",
             name: "heartbeat",
             enabled: true,
@@ -409,13 +437,17 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    expect(await screen.findByText("Workspace automations")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(screen.getByText("Daily repo check")).toBeInTheDocument();
     expect(screen.getByText("Check the repo status")).toBeInTheDocument();
     expect(screen.getByText("Release prep")).toBeInTheDocument();
     expect(screen.getByText("english-quiz")).toBeInTheDocument();
     expect(screen.getByText("Recreate in target chat")).toBeInTheDocument();
     expect(screen.queryByText("unified:default")).not.toBeInTheDocument();
+    expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
+    expect(screen.getByText("WeChat")).toBeInTheDocument();
+    expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
     expect(screen.getByText("heartbeat")).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
@@ -473,9 +505,8 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
 
-    expect(await screen.findByText("工作区自动任务")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "自动任务" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("统一查看 cron 提醒、周期性 agent 任务、一次性自动任务和受保护的系统自动任务。")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "自动任务" })).toBeInTheDocument();
+    expect(screen.getByText("统一查看 cron 提醒、周期性 agent 任务、一次性任务和系统任务。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     expect(screen.getByText("任务队列")).toBeInTheDocument();
     expect(screen.getByText("每日检查")).toBeInTheDocument();

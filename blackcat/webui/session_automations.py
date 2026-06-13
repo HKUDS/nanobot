@@ -160,7 +160,7 @@ def _origin_payload(
 
     title = ""
     preview = ""
-    if session_manager is not None:
+    if channel == "websocket" and session_manager is not None:
         data = session_manager.read_session_file(session_key)
         if isinstance(data, dict):
             title = str(data.get("title") or "")

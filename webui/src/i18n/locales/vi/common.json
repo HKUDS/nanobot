@@ -466,7 +466,7 @@
     "automations": {
       "kicker": "Tự động hóa không gian làm việc",
       "title": "Tự động hóa",
-      "description": "Xem nhắc nhở cron, lượt agent định kỳ, tự động hóa một lần và tự động hóa hệ thống được bảo vệ tại một nơi.",
+      "description": "Xem nhắc nhở cron, lượt agent định kỳ, tác vụ một lần và tác vụ hệ thống được bảo vệ.",
       "refresh": "Làm mới",
       "newInChat": "Tạo trong chat",
       "stats": {
@@ -514,6 +514,23 @@
         "system": "Hệ thống",
         "unknown": "Chưa liên kết cuộc trò chuyện",
         "legacy": "Tạo lại trong cuộc trò chuyện đích"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
       },
       "schedule": {
         "at": "Vào {{time}}",

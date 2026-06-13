@@ -466,7 +466,7 @@
     "automations": {
       "kicker": "工作區自動任務",
       "title": "自動任務",
-      "description": "集中查看 cron 提醒、週期性 agent 任務、一次性自動任務和受保護的系統自動任務。",
+      "description": "集中查看 cron 提醒、週期性 agent 任務、一次性任務和系統任務。",
       "refresh": "重新整理",
       "newInChat": "在聊天中建立",
       "stats": {
@@ -514,6 +514,23 @@
         "system": "系統",
         "unknown": "未關聯會話",
         "legacy": "請在目標會話中重新建立"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "釘釘",
+        "discord": "Discord",
+        "email": "電子郵件",
+        "feishu": "飛書",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "微信",
+        "wecom": "企業微信",
+        "weixin": "微信",
+        "whatsapp": "WhatsApp"
       },
       "schedule": {
         "at": "於 {{time}}",

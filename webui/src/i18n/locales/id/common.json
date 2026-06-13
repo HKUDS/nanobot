@@ -466,7 +466,7 @@
     "automations": {
       "kicker": "Otomasi ruang kerja",
       "title": "Otomasi",
-      "description": "Tinjau pengingat cron, giliran agen berulang, otomasi sekali jalan, dan otomasi sistem terlindungi di satu tempat.",
+      "description": "Tinjau pengingat cron, giliran agen berulang, tugas sekali jalan, dan tugas sistem terlindungi.",
       "refresh": "Segarkan",
       "newInChat": "Buat di chat",
       "stats": {
@@ -514,6 +514,23 @@
         "system": "Sistem",
         "unknown": "Tidak ada chat tertaut",
         "legacy": "Buat ulang di chat tujuan"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
       },
       "schedule": {
         "at": "Pada {{time}}",
