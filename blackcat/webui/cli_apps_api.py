@@ -73,8 +73,11 @@ def _manager() -> CliAppManager:
     )
 
 
-def cli_apps_payload() -> dict[str, Any]:
-    return _manager().payload()
+def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
+    manager = _manager()
+    if installed_only:
+        return manager.installed_payload()
+    return manager.payload()
 
 
 def cli_apps_action(action: str, query: QueryParams) -> dict[str, Any]:

@@ -29,6 +29,7 @@ import {
   deleteSession,
   fetchFilePreview,
   fetchCliApps,
+  fetchInstalledCliApps,
   fetchMcpPresets,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -404,6 +405,25 @@ describe("webui API helpers", () => {
     await runCliAppAction("tok", "install", "gimp");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/cli-apps/install?name=gimp",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads installed CLI Apps without fetching the full catalog", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        apps: [],
+        installed_count: 0,
+        catalog_updated_at: null,
+      }),
+    } as Response);
+
+    await expect(fetchInstalledCliApps("tok")).resolves.toMatchObject({ apps: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps?installed_only=1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

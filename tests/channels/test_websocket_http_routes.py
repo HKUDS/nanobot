@@ -3,6 +3,8 @@
 import asyncio
 import functools
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -457,6 +459,85 @@ async def test_cli_apps_routes_require_token_and_return_payload(
         )
         assert installed.status_code == 200
         assert installed.json()["last_action"]["message"] == "install:gimp"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_payload() -> dict[str, Any]:
+        entered.set()
+        release.wait(2.0)
+        return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29935)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29935/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        started = time.perf_counter()
+        catalog_task = asyncio.create_task(
+            _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
+        )
+        assert await asyncio.to_thread(entered.wait, 2.0)
+        assert time.perf_counter() - started < 1.0
+
+        workspaces_started = time.perf_counter()
+        workspaces = await _http_get("http://127.0.0.1:29935/api/workspaces", headers=auth)
+        assert time.perf_counter() - workspaces_started < 1.0
+        assert workspaces.status_code == 200
+
+        release.set()
+        catalog = await catalog_task
+        assert catalog.status_code == 200
+        assert catalog.json()["apps"] == []
+    finally:
+        release.set()
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_cli_apps_route_supports_installed_only_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def payload(*, installed_only: bool = False) -> dict[str, Any]:
+        calls.append(installed_only)
+        return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", payload)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29936)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29936/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        resp = await _http_get(
+            "http://127.0.0.1:29936/api/settings/cli-apps?installed_only=1",
+            headers=auth,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["apps"] == []
+        assert calls == [True]
     finally:
         await channel.stop()
         await server_task

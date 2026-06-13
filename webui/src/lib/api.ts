@@ -294,6 +294,18 @@ export async function fetchCliApps(
   );
 }
 
+export async function fetchInstalledCliApps(
+  token: string,
+  base: string = "",
+): Promise<CliAppsPayload> {
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps?installed_only=1`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function runCliAppAction(
   token: string,
   action: "install" | "update" | "uninstall" | "test",

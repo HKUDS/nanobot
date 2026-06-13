@@ -11,7 +11,12 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
+import {
+  fetchInstalledCliApps,
+  fetchMcpPresets,
+  fetchSettings,
+  listSlashCommands,
+} from "@/lib/api";
 import {
   CLI_APPS_CHANGED_EVENT,
   installedCliAppsFromPayload,
@@ -265,7 +270,7 @@ export function ThreadShell({
   const cliApps = useInstalledSettingItems({
     token,
     eventName: CLI_APPS_CHANGED_EVENT,
-    fetchPayload: fetchCliApps,
+    fetchPayload: fetchInstalledCliApps,
     isPayload: isCliAppsPayload,
     selectItems: installedCliAppsFromPayload,
   });
