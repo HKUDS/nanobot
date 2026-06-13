@@ -43,6 +43,36 @@ def _resolve_speech_url(api_base: str | None, default_url: str) -> str:
     return f"{base}/{_SPEECH_PATH}"
 
 
+def _extract_error_detail(response: httpx.Response, provider_label: str) -> str:
+    """Extract a human-readable error detail from a TTS error response.
+
+    ElevenLabs returns structured JSON errors (e.g. model_deprecated_free_tier)
+    that are much more informative than the raw status code. Parse those out
+    so the log message is actionable.
+    """
+    body = response.text[:500]
+    try:
+        data = response.json()
+        # ElevenLabs structured errors
+        if isinstance(data, dict):
+            detail = data.get("detail", {})
+            if isinstance(detail, dict):
+                code = detail.get("code", "")
+                message = detail.get("message", "")
+                if code and message:
+                    return f"{code}: {message} ({body})"
+            # Some endpoints return { "detail": { "status": ..., "message": ... } }
+            if isinstance(detail, dict) and "message" in detail:
+                return f"{detail.get('code', 'error')}: {detail['message']} ({body})"
+            # Flat { "error": { "message": ... } } (OpenAI-style)
+            err = data.get("error", {})
+            if isinstance(err, dict) and "message" in err:
+                return f"{err.get('type', 'error')}: {err['message']} ({body})"
+    except Exception:
+        pass
+    return body
+
+
 async def _request_audio_with_retry(
     client: httpx.AsyncClient,
     url: str,
@@ -90,11 +120,13 @@ async def _request_audio_with_retry(
             continue
 
         if response.status_code >= 400:
+            # Try to extract a structured error message from the response body
+            detail = _extract_error_detail(response, provider_label)
             logger.error(
                 "{} TTS HTTP {}: {}",
                 provider_label,
                 response.status_code,
-                response.text[:500],
+                detail,
             )
             return None
 
@@ -298,6 +330,13 @@ class ElevenLabsTTSProvider:
                     for v in data.get("voices", []):
                         if v.get("name", "").lower() == voice.lower():
                             return v["voice_id"]
+                else:
+                    logger.warning(
+                        "ElevenLabs voice list fetch failed (HTTP {}): {} — "
+                        "ensure your API key has 'Voices Read' permission",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
         except Exception as e:
             logger.warning("ElevenLabs voice lookup failed: {}", e)
 

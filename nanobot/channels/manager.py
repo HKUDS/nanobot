@@ -375,6 +375,11 @@ class ChannelManager:
                 msg.media = list(msg.media or []) + [audio_path]
                 # Clear the text content so the channel sends voice-only
                 msg.content = ""
+            else:
+                logger.warning(
+                    "TTS synthesis failed for message to {}; sending as text instead",
+                    msg.chat_id,
+                )
 
         if msg.metadata.get("_reasoning_end"):
             await channel.send_reasoning_end(msg.chat_id, msg.metadata)

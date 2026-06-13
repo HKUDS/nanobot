@@ -71,9 +71,10 @@ class BaseChannel(ABC):
         """
         try:
             from nanobot.audio.tts import resolve_tts_config, synthesize_speech
-            from nanobot.config.loader import load_config
+            from nanobot.config.loader import load_config, resolve_config_env_vars
 
-            return await synthesize_speech(text, resolve_tts_config(load_config()))
+            config = resolve_config_env_vars(load_config())
+            return await synthesize_speech(text, resolve_tts_config(config))
         except Exception:
             self.logger.exception("TTS synthesis failed")
             return None
