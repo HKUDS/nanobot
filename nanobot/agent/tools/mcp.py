@@ -1126,6 +1126,11 @@ def _unregister_server_tools(state: Any, registry: ToolRegistry, server_name: st
 # See https://github.com/HKUDS/nanobot/issues/4302
 _unclosed_mcp_generators: set = set()
 
+# Set to True when _close_server or close_mcp catches a cancel scope error.
+# The event-loop exception handler checks this flag to suppress the same error
+# during loop.shutdown_asyncgens().  See #4302.
+_cancel_scope_error_in_cleanup: bool = False
+
 
 async def _close_server(state: Any, server_name: str) -> None:
     stack = state._mcp_stacks.pop(server_name, None)
@@ -1150,8 +1155,12 @@ async def _close_server(state: Any, server_name: str) -> None:
         # stack.aclose() already attempted gen.aclose() internally via
         # _AsyncGeneratorContextManager.__aexit__.  The generator received
         # GeneratorExit but its anyio cancel-scope cleanup failed.  Do NOT
-        # call gen.aclose() again (it may succeed silently, leaving the gen
-        # out of the prevention set).  Unconditionally add all tracked
-        # generators to prevent GC finalization crashes.  #4302
+        # call gen.aclose() again -- it was already attempted by stack.aclose().
+        # Unconditionally add all tracked generators to prevent GC finalization
+        # crashes.  #4302
         for gen in getattr(stack, "_tracked_async_generators", []):
             _unclosed_mcp_generators.add(gen)
+        # Signal the event-loop exception handler to suppress the same error
+        # during loop.shutdown_asyncgens().  See #4302.
+        global _cancel_scope_error_in_cleanup
+        _cancel_scope_error_in_cleanup = True

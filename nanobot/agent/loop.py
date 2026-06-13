@@ -1078,7 +1078,10 @@ class AgentLoop:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
         # Lazy import to avoid circular dependency at module level.
-        from nanobot.agent.tools.mcp import _unclosed_mcp_generators
+        from nanobot.agent.tools.mcp import (
+            _cancel_scope_error_in_cleanup,
+            _unclosed_mcp_generators,
+        )
 
         # Snapshot the dict: aclose() can trigger reconnect callbacks that
         # mutate _mcp_stacks, causing "dictionary changed size during iteration".
@@ -1108,6 +1111,28 @@ class AgentLoop:
                 # already attempted by stack.aclose().  #4302
                 for gen in getattr(stack, "_tracked_async_generators", []):
                     _unclosed_mcp_generators.add(gen)
+
+        # After close_mcp, loop.shutdown_asyncgens() will try to close all
+        # remaining async generators.  The half-open MCP generators will hit
+        # the same cancel scope RuntimeError.  Install an event-loop exception
+        # handler that suppresses this specific error.  #4302
+        if _cancel_scope_error_in_cleanup:
+            loop = asyncio.get_running_loop()
+            _original_handler = loop.get_exception_handler()
+
+            def _suppress_cancel_scope_error(loop, context):
+                msg = context.get("message", "")
+                if "cancel scope" in msg and "different task" in msg:
+                    logger.debug(
+                        "Suppressed cancel scope error during async generator shutdown"
+                    )
+                    return
+                if _original_handler is not None:
+                    _original_handler(loop, context)
+                else:
+                    loop.default_exception_handler(context)
+
+            loop.set_exception_handler(_suppress_cancel_scope_error)
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
