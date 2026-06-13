@@ -1520,7 +1520,7 @@ def _run_gateway(
 
         async def handle(reader, writer):
             try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
+                data = await asyncio.wait_for(reader.read(65536), timeout=5)
             except (asyncio.TimeoutError, ConnectionError):
                 writer.close()
                 return
@@ -1982,9 +1982,23 @@ def _run_gateway(
                 body_bytes = data[_hdr_end + 4:] if _hdr_end != -1 else b""
                 _zernio_secret = _os.environ.get("ZERNIO_WEBHOOK_SECRET", "")
                 _zh = _parse_http_headers(data)
-                _zernio_sig = _zh.get("x-zernio-signature", "") or _zh.get("x-hub-signature-256", "")
-                if not _verify_hmac(body_bytes, _zernio_sig, _zernio_secret):
-                    logger.warning("zernio-event: invalid signature from {}", peer_ip)
+                # Log all headers so we can learn Zernio's signing scheme
+                _sig_headers = {k: v for k, v in _zh.items() if any(
+                    kw in k for kw in ("auth", "sign", "token", "secret", "key", "zernio", "hub")
+                )}
+                logger.info("zernio-event: incoming headers (sig-related): {}", _sig_headers)
+                _zernio_sig = (
+                    _zh.get("x-zernio-signature", "")
+                    or _zh.get("x-hub-signature-256", "")
+                    or _zh.get("x-hub-signature", "")
+                    or _zh.get("authorization", "").removeprefix("Bearer ").strip()
+                    or _zh.get("x-webhook-secret", "")
+                    or _zh.get("x-secret", "")
+                )
+                # Plain-token fallback: if secret matches directly (some platforms send raw token)
+                _plain_match = _zernio_secret and (_zernio_sig == _zernio_secret)
+                if not _plain_match and not _verify_hmac(body_bytes, _zernio_sig, _zernio_secret):
+                    logger.warning("zernio-event: auth failed from {} — headers: {}", peer_ip, _sig_headers)
                     _body401 = _json.dumps({"error": "Unauthorized"})
                     writer.write(
                         f"HTTP/1.0 401 Unauthorized\r\nContent-Type: application/json\r\n"
