@@ -529,6 +529,14 @@
       "last": {
         "never": "未実行",
         "unknown": "不明"
+      },
+      "history": {
+        "ok": "完了",
+        "error": "エラー",
+        "skipped": "スキップ"
+      },
+      "duration": {
+        "lessThanSecond": "1 秒未満"
       }
     },
     "oauth": {

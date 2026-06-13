@@ -405,7 +405,43 @@ describe("App layout", () => {
     await i18n.changeLanguage("zh-CN");
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
-      "/api/webui/automations": { jobs: [] },
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "job-zh",
+            name: "每日检查",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: {
+              message: "检查仓库状态",
+              kind: "agent_turn",
+              session_key: "websocket:chat-a",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: [
+                {
+                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  status: "ok",
+                  duration_ms: 500,
+                },
+              ],
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "发布准备",
+              preview: "检查发布阻塞项",
+            },
+          },
+        ],
+      },
     });
 
     render(<App />);
@@ -419,7 +455,10 @@ describe("App layout", () => {
     expect(screen.getByText("统一查看 cron 提醒、周期性 agent 任务、一次性自动任务和受保护的系统自动任务。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     expect(screen.getByText("任务队列")).toBeInTheDocument();
-    expect(screen.getByText("暂无自动任务。")).toBeInTheDocument();
+    expect(screen.getByText("每日检查")).toBeInTheDocument();
+    expect(screen.getByText("检查仓库状态")).toBeInTheDocument();
+    expect(screen.getByText("每 1天")).toBeInTheDocument();
+    expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(document.title).toBe("自动任务 · nanobot");
   });

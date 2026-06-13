@@ -529,6 +529,14 @@
       "last": {
         "never": "Jamais",
         "unknown": "inconnu"
+      },
+      "history": {
+        "ok": "Terminée",
+        "error": "Erreur",
+        "skipped": "Ignorée"
+      },
+      "duration": {
+        "lessThanSecond": "moins de 1 seconde"
       }
     },
     "oauth": {

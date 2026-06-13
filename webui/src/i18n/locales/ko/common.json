@@ -529,6 +529,14 @@
       "last": {
         "never": "실행된 적 없음",
         "unknown": "알 수 없음"
+      },
+      "history": {
+        "ok": "완료",
+        "error": "오류",
+        "skipped": "건너뜀"
+      },
+      "duration": {
+        "lessThanSecond": "1초 미만"
       }
     },
     "oauth": {

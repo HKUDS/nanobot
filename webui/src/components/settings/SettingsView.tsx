@@ -3590,7 +3590,7 @@ function AutomationRow({
                   )}
                   title={record.error || fmtDateTime(record.run_at_ms, locale)}
                 >
-                  {record.status} · {formatAutomationRunDuration(record.duration_ms)}
+                  {automationRunStatusLabel(record.status, tx)} · {formatAutomationRunDuration(record.duration_ms, locale, tx)}
                 </span>
               ))}
             </div>
@@ -3767,7 +3767,7 @@ function formatAutomationSchedule(
   }
   if (job.schedule.kind === "every" && job.schedule.every_ms) {
     return tx("settings.automations.schedule.every", "Every {{duration}}", {
-      duration: formatAutomationInterval(job.schedule.every_ms),
+      duration: formatAutomationInterval(job.schedule.every_ms, locale),
     });
   }
   if (job.schedule.kind === "cron" && job.schedule.expr) {
@@ -3797,27 +3797,59 @@ function formatAutomationLast(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
   if (!job.state.last_run_at_ms) return tx("settings.automations.last.never", "Never");
-  const status = job.state.last_status || tx("settings.automations.last.unknown", "unknown");
+  const status = automationRunStatusLabel(job.state.last_status, tx);
   return `${fmtDateTime(job.state.last_run_at_ms, locale)} · ${status}`;
 }
 
-function formatAutomationInterval(ms: number): string {
-  const units: Array<[string, number]> = [
-    ["d", 86_400_000],
-    ["h", 3_600_000],
-    ["m", 60_000],
-    ["s", 1000],
-  ];
-  for (const [suffix, size] of units) {
-    if (ms >= size && ms % size === 0) return `${ms / size}${suffix}`;
-  }
-  return `${Math.round(ms / 1000)}s`;
+function automationRunStatusLabel(
+  status: string | null | undefined,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (status === "ok") return tx("settings.automations.history.ok", "Completed");
+  if (status === "error") return tx("settings.automations.history.error", "Error");
+  if (status === "skipped") return tx("settings.automations.history.skipped", "Skipped");
+  return status || tx("settings.automations.last.unknown", "unknown");
 }
 
-function formatAutomationRunDuration(ms: number | undefined): string {
-  if (!ms || ms < 1000) return "<1s";
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.round(ms / 60_000)}m`;
+function formatAutomationUnit(
+  value: number,
+  unit: Intl.NumberFormatOptions["unit"],
+  locale: string,
+  maximumFractionDigits = 0,
+): string {
+  return new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit,
+    unitDisplay: "long",
+    maximumFractionDigits,
+  }).format(value);
+}
+
+function formatAutomationInterval(ms: number, locale: string): string {
+  const units: Array<[Intl.NumberFormatOptions["unit"], number]> = [
+    ["day", 86_400_000],
+    ["hour", 3_600_000],
+    ["minute", 60_000],
+    ["second", 1000],
+  ];
+  for (const [unit, size] of units) {
+    if (ms >= size && ms % size === 0) return formatAutomationUnit(ms / size, unit, locale);
+  }
+  const fallbackUnit = ms < 60_000 ? "second" : "minute";
+  const fallbackSize = fallbackUnit === "second" ? 1000 : 60_000;
+  return formatAutomationUnit(ms / fallbackSize, fallbackUnit, locale, 1);
+}
+
+function formatAutomationRunDuration(
+  ms: number | undefined,
+  locale: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (!ms || ms < 1000) {
+    return tx("settings.automations.duration.lessThanSecond", "< 1 second");
+  }
+  if (ms < 60_000) return formatAutomationUnit(ms / 1000, "second", locale, 1);
+  return formatAutomationUnit(ms / 60_000, "minute", locale, 1);
 }
 
 function AppsCatalogSettings({

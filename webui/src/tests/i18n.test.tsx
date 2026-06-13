@@ -58,6 +58,8 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.automations.systemTask",
   "settings.automations.labels.schedule",
   "settings.automations.status.active",
+  "settings.automations.history.ok",
+  "settings.automations.duration.lessThanSecond",
   "settings.automations.deleteTitle",
   "settings.sections.interface",
   "settings.sections.localPreferences",

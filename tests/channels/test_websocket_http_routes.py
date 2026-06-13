@@ -872,11 +872,27 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         by_id = {job["id"]: job for job in disabled.json()["jobs"]}
         assert by_id[user_job.id]["enabled"] is False
 
+        disabled_run = await _http_get(
+            f"http://127.0.0.1:29932/api/webui/automations/run?id={user_job.id}",
+            headers=auth,
+        )
+        assert disabled_run.status_code == 409
+
         protected_delete = await _http_get(
             "http://127.0.0.1:29932/api/webui/automations/delete?id=heartbeat",
             headers=auth,
         )
         assert protected_delete.status_code == 403
+        protected_disable = await _http_get(
+            "http://127.0.0.1:29932/api/webui/automations/disable?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_disable.status_code == 403
+        protected_run = await _http_get(
+            "http://127.0.0.1:29932/api/webui/automations/run?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_run.status_code == 403
 
         enabled = await _http_get(
             f"http://127.0.0.1:29932/api/webui/automations/enable?id={user_job.id}",

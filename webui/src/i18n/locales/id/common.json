@@ -529,6 +529,14 @@
       "last": {
         "never": "Belum pernah",
         "unknown": "tidak dikenal"
+      },
+      "history": {
+        "ok": "Selesai",
+        "error": "Error",
+        "skipped": "Dilewati"
+      },
+      "duration": {
+        "lessThanSecond": "kurang dari 1 detik"
       }
     },
     "oauth": {
