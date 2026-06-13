@@ -19,6 +19,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { getBasePath } from "@/lib/base-path";
 
 interface SidebarProps {
   sessions: ChatSummary[];
@@ -113,7 +114,7 @@ export function Sidebar(props: SidebarProps) {
           )}
         >
           <img
-            src="/brand/nanobot_icon.png"
+            src={`${getBasePath()}/brand/nanobot_icon.png`}
             alt=""
             className="h-8 w-8 select-none object-contain"
             draggable={false}

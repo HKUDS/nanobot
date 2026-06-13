@@ -1,5 +1,6 @@
 import type { BootstrapResponse } from "./types";
 import { fetchWithTimeout } from "./http";
+import { getBasePath } from "./base-path";
 
 const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
 
@@ -44,7 +45,8 @@ export async function fetchBootstrap(
   if (secret) {
     headers["X-Nanobot-Auth"] = secret;
   }
-  const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
+  const root = baseUrl || getBasePath();
+  const res = await fetchWithTimeout(`${root}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
     headers,
@@ -72,7 +74,8 @@ export function deriveWsUrl(
   wsUrl?: string | null,
 ): string {
   const query = `?token=${encodeURIComponent(token)}`;
-  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
+  const base = getBasePath();
+  if (!base && wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
     const join = wsUrl.includes("?") ? "&" : "?";
     return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
   }
@@ -88,5 +91,5 @@ export function deriveWsUrl(
   }
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;
-  return `${scheme}://${host}${path}${query}`;
+  return `${scheme}://${host}${base}${path}${query}`;
 }
