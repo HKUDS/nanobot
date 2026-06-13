@@ -101,17 +101,17 @@ def test_opus_4_8_omits_temperature_none() -> None:
 
 
 def test_fable_omits_temperature_adaptive() -> None:
-    kw = _build(_make_provider("claude-fable-1"), "adaptive")
+    kw = _build(_make_provider("claude-fable-5"), "adaptive")
     assert "temperature" not in kw
 
 
 def test_fable_omits_temperature_enabled() -> None:
-    kw = _build(_make_provider("claude-fable-1"), "high", max_tokens=4096)
+    kw = _build(_make_provider("claude-fable-5"), "high", max_tokens=4096)
     assert "temperature" not in kw
 
 
 def test_fable_omits_temperature_none() -> None:
-    kw = _build(_make_provider("claude-fable-1"), None)
+    kw = _build(_make_provider("claude-fable-5"), None)
     assert "temperature" not in kw
 
 
