@@ -1264,18 +1264,6 @@ export function SettingsView({
     }
   };
 
-  const refreshAutomations = async () => {
-    setAutomationsLoading(true);
-    setAutomationsError(null);
-    try {
-      setAutomations(await fetchAutomations(token));
-    } catch (err) {
-      setAutomationsError((err as Error).message);
-    } finally {
-      setAutomationsLoading(false);
-    }
-  };
-
   const handleAutomationAction = async (
     action: AutomationAction,
     job: SessionAutomationJob,
@@ -1585,7 +1573,6 @@ export function SettingsView({
             error={automationsError}
             onQueryChange={setAutomationsQuery}
             onFilterChange={setAutomationsFilter}
-            onRefresh={refreshAutomations}
             onAction={handleAutomationAction}
             onRequestDelete={setAutomationPendingDelete}
           />
@@ -3350,7 +3337,6 @@ function AutomationsSettings({
   error,
   onQueryChange,
   onFilterChange,
-  onRefresh,
   onAction,
   onRequestDelete,
 }: {
@@ -3362,7 +3348,6 @@ function AutomationsSettings({
   error: string | null;
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AutomationFilter) => void;
-  onRefresh: () => void;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
   onRequestDelete: (job: SessionAutomationJob) => void;
 }) {
@@ -3389,38 +3374,16 @@ function AutomationsSettings({
   return (
     <div className="space-y-5">
       <section className="rounded-[24px] border border-border/50 bg-card/82 px-4 py-4 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:px-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <p className="max-w-[38rem] text-[13px] leading-6 text-muted-foreground">
-            {tx(
-              "settings.automations.description",
-              "Review cron reminders, recurring agent turns, one-time jobs, and protected system jobs.",
-            )}
-          </p>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onRefresh}
-              disabled={loading}
-              className="h-9 rounded-full px-3 text-[13px]"
-            >
-              {loading ? (
-                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCcw className="mr-2 h-3.5 w-3.5" aria-hidden />
-              )}
-              {tx("settings.automations.refresh", "Refresh")}
-            </Button>
-            <Button asChild className="h-9 rounded-full px-3 text-[13px]">
-              <a href="#/new">
-                <Plus className="mr-2 h-3.5 w-3.5" aria-hidden />
-                {tx("settings.automations.newInChat", "New in chat")}
-              </a>
-            </Button>
-          </div>
+        <div className="flex justify-end">
+          <Button asChild className="h-9 rounded-full px-3 text-[13px]">
+            <a href="#/new">
+              <Plus className="mr-2 h-3.5 w-3.5" aria-hidden />
+              {tx("settings.automations.newInChat", "New in chat")}
+            </a>
+          </Button>
         </div>
 
-        <div className="mt-5 grid gap-2 sm:grid-cols-4">
+        <div className="mt-4 grid gap-2 sm:grid-cols-4">
           <AutomationStat label={tx("settings.automations.stats.active", "Active")} value={activeCount} />
           <AutomationStat label={tx("settings.automations.stats.paused", "Paused")} value={pausedCount} />
           <AutomationStat label={tx("settings.automations.stats.failed", "Failed")} value={failedCount} />
@@ -3569,23 +3532,36 @@ function AutomationRow({
           ) : null}
 
           {history.length ? (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {history.slice(-4).map((record) => (
-                <span
-                  key={`${record.run_at_ms}:${record.status}`}
-                  className={cn(
-                    "rounded-full px-2 py-1 text-[11px]",
-                    record.status === "error"
-                      ? "bg-destructive/10 text-destructive"
-                      : record.status === "skipped"
-                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                        : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-                  )}
-                  title={record.error || fmtDateTime(record.run_at_ms, locale)}
-                >
-                  {automationRunStatusLabel(record.status, tx)} · {formatAutomationRunDuration(record.duration_ms, locale, tx)}
-                </span>
-              ))}
+            <div className="mt-3">
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+                {tx("settings.automations.history.recent", "Recent runs")}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {history.slice(-4).map((record) => {
+                  const statusLabel = automationRunStatusLabel(record.status, tx);
+                  const duration = formatAutomationRunDuration(record.duration_ms, locale, tx);
+                  const visibleLabel = record.status === "ok" ? duration : `${statusLabel} · ${duration}`;
+                  const detail = record.error || fmtDateTime(record.run_at_ms, locale);
+                  const accessibleLabel = `${statusLabel} · ${duration} · ${detail}`;
+                  return (
+                    <span
+                      key={`${record.run_at_ms}:${record.status}`}
+                      className={cn(
+                        "rounded-full px-2 py-1 text-[11px]",
+                        record.status === "error"
+                          ? "bg-destructive/10 text-destructive"
+                          : record.status === "skipped"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                      )}
+                      title={accessibleLabel}
+                      aria-label={accessibleLabel}
+                    >
+                      {visibleLabel}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
         </div>

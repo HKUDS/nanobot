@@ -506,14 +506,14 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
 
     expect(await screen.findByRole("heading", { name: "自动任务" })).toBeInTheDocument();
-    expect(screen.getByText("统一查看 cron 提醒、周期性 agent 任务、一次性任务和系统任务。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     expect(screen.getByText("任务队列")).toBeInTheDocument();
     expect(screen.getByText("每日检查")).toBeInTheDocument();
     expect(screen.getByText("检查仓库状态")).toBeInTheDocument();
     expect(screen.getByText("每 1天")).toBeInTheDocument();
-    expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();
+    expect(screen.getByText("最近运行")).toBeInTheDocument();
+    expect(screen.getByText("不到 1 秒")).toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
     expect(document.title).toBe("自动任务 · nanobot");
   });
 

@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "Workspace automations",
       "title": "Automations",
-      "description": "Review cron reminders, recurring agent turns, one-time jobs, and protected system jobs.",
-      "refresh": "Refresh",
       "newInChat": "New in chat",
       "stats": {
         "active": "Active",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "Completed",
         "error": "Error",
-        "skipped": "Skipped"
+        "skipped": "Skipped",
+        "recent": "Recent runs"
       },
       "duration": {
         "lessThanSecond": "< 1 second"

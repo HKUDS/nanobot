@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "Automatizaciones del espacio",
       "title": "Automatizaciones",
-      "description": "Revisa recordatorios cron, turnos recurrentes del agente, tareas de una vez y tareas protegidas del sistema.",
-      "refresh": "Actualizar",
       "newInChat": "Crear en chat",
       "stats": {
         "active": "Activas",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "Completada",
         "error": "Error",
-        "skipped": "Omitida"
+        "skipped": "Omitida",
+        "recent": "Ejecuciones recientes"
       },
       "duration": {
         "lessThanSecond": "menos de 1 segundo"

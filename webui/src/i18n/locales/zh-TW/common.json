@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "工作區自動任務",
       "title": "自動任務",
-      "description": "集中查看 cron 提醒、週期性 agent 任務、一次性任務和系統任務。",
-      "refresh": "重新整理",
       "newInChat": "在聊天中建立",
       "stats": {
         "active": "執行中",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "完成",
         "error": "錯誤",
-        "skipped": "已略過"
+        "skipped": "已略過",
+        "recent": "最近執行"
       },
       "duration": {
         "lessThanSecond": "不到 1 秒"

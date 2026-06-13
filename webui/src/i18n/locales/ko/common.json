@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "작업 공간 자동화",
       "title": "자동화",
-      "description": "cron 알림, 반복 agent 작업, 일회성 작업, 보호된 시스템 작업을 확인합니다.",
-      "refresh": "새로 고침",
       "newInChat": "채팅에서 만들기",
       "stats": {
         "active": "활성",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "완료",
         "error": "오류",
-        "skipped": "건너뜀"
+        "skipped": "건너뜀",
+        "recent": "최근 실행"
       },
       "duration": {
         "lessThanSecond": "1초 미만"

@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "Tự động hóa không gian làm việc",
       "title": "Tự động hóa",
-      "description": "Xem nhắc nhở cron, lượt agent định kỳ, tác vụ một lần và tác vụ hệ thống được bảo vệ.",
-      "refresh": "Làm mới",
       "newInChat": "Tạo trong chat",
       "stats": {
         "active": "Đang chạy",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "Hoàn tất",
         "error": "Lỗi",
-        "skipped": "Đã bỏ qua"
+        "skipped": "Đã bỏ qua",
+        "recent": "Lượt chạy gần đây"
       },
       "duration": {
         "lessThanSecond": "dưới 1 giây"

@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "Automatisations de l’espace",
       "title": "Automatisations",
-      "description": "Passez en revue les rappels cron, tours récurrents de l’agent, tâches ponctuelles et tâches système protégées.",
-      "refresh": "Actualiser",
       "newInChat": "Créer dans le chat",
       "stats": {
         "active": "Actives",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "Terminée",
         "error": "Erreur",
-        "skipped": "Ignorée"
+        "skipped": "Ignorée",
+        "recent": "Exécutions récentes"
       },
       "duration": {
         "lessThanSecond": "moins de 1 seconde"

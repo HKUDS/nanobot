@@ -466,8 +466,6 @@
     "automations": {
       "kicker": "Otomasi ruang kerja",
       "title": "Otomasi",
-      "description": "Tinjau pengingat cron, giliran agen berulang, tugas sekali jalan, dan tugas sistem terlindungi.",
-      "refresh": "Segarkan",
       "newInChat": "Buat di chat",
       "stats": {
         "active": "Aktif",
@@ -551,7 +549,8 @@
       "history": {
         "ok": "Selesai",
         "error": "Error",
-        "skipped": "Dilewati"
+        "skipped": "Dilewati",
+        "recent": "Eksekusi terbaru"
       },
       "duration": {
         "lessThanSecond": "kurang dari 1 detik"
