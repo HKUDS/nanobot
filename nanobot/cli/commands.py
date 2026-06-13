@@ -1282,7 +1282,8 @@ def agent(
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
         _model, _preset_tag = _model_display(config)
-        console.print(f"{__logo__} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        _icon = config.agents.defaults.bot_icon or __logo__
+        console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
