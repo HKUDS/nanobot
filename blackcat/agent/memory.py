@@ -799,15 +799,23 @@ class Consolidator:
         messages: list[dict],
         *,
         session_key: str | None = None,
+        summary_context: list[dict] | None = None,
     ) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
+
+        ``messages`` are the messages being archived (removed from the live
+        session); they are what gets raw-dumped if the LLM call fails.
+        ``summary_context``, when given, is fed to the summarizer in place of
+        ``messages`` so a caller can summarize over a wider window (e.g. the
+        full conversation tail) while still only archiving ``messages``.
 
         Returns the summary text on success, None if nothing to archive.
         """
         if not messages:
             return None
+        context = summary_context if summary_context is not None else messages
         try:
-            formatted = MemoryStore._format_messages(messages)
+            formatted = MemoryStore._format_messages(context)
             formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
                 model=self.model,
@@ -990,7 +998,17 @@ class Consolidator:
             last_active = session.updated_at
             summary: str | None = ""
             if archive_msgs:
-                summary = await self.archive(archive_msgs, session_key=session_key)
+                # Summarize over the full unconsolidated tail — including the
+                # recent suffix we retain — not just the dropped prefix. Idle
+                # compaction usually runs on a finished conversation, so a late
+                # user correction or final result that landed in the kept suffix
+                # must still reach the persisted summary; otherwise history keeps
+                # the stale pre-correction conclusion that never gets fixed
+                # (#4264). Only archive_msgs are removed/raw-dumped; kept stays
+                # in the session.
+                summary = await self.archive(
+                    archive_msgs, session_key=session_key, summary_context=tail
+                )
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {
