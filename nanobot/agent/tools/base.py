@@ -84,9 +84,16 @@ class Schema(ABC):
             for k in schema.get("required", []):
                 if k not in val:
                     errors.append(f"missing required {Schema.subpath(path, k)}")
+            additional = schema.get("additionalProperties", True)
             for k, v in val.items():
                 if k in props:
                     errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
+                elif additional is False:
+                    errors.append(f"unexpected parameter {Schema.subpath(path, k)}")
+                elif isinstance(additional, dict):
+                    errors.extend(
+                        Schema.validate_json_schema_value(v, additional, Schema.subpath(path, k))
+                    )
         if t == "array":
             if "minItems" in schema and len(val) < schema["minItems"]:
                 errors.append(f"{label} must have at least {schema['minItems']} items")
@@ -193,7 +200,16 @@ class Tool(ABC):
         if not isinstance(obj, dict):
             return obj
         props = schema.get("properties", {})
-        return {k: self._cast_value(v, props[k]) if k in props else v for k, v in obj.items()}
+        additional = schema.get("additionalProperties")
+        casted: dict[str, Any] = {}
+        for k, v in obj.items():
+            if k in props:
+                casted[k] = self._cast_value(v, props[k])
+            elif isinstance(additional, dict):
+                casted[k] = self._cast_value(v, additional)
+            else:
+                casted[k] = v
+        return casted
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Apply safe schema-driven casts before validation."""
