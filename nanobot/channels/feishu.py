@@ -103,6 +103,18 @@ def _extract_interactive_content(content: dict) -> list[str]:
     if not isinstance(content, dict):
         return parts
 
+    # user_dsl: original card definition (richest source for rendered cards)
+    user_dsl = content.get("user_dsl")
+    if isinstance(user_dsl, str) and user_dsl.strip():
+        try:
+            dsl = json.loads(user_dsl)
+            if isinstance(dsl, dict):
+                parts.extend(_extract_interactive_content(dsl))
+                if parts:
+                    return parts
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     if "title" in content:
         title = content["title"]
         if isinstance(title, dict):
@@ -112,11 +124,27 @@ def _extract_interactive_content(content: dict) -> list[str]:
         elif isinstance(title, str):
             parts.append(f"title: {title}")
 
-    for elements in (
-        content.get("elements", []) if isinstance(content.get("elements"), list) else []
-    ):
-        for element in elements:
-            parts.extend(_extract_element_content(element))
+    # Top-level elements: flat list or nested list format
+    elements = content.get("elements")
+    if isinstance(elements, list):
+        if elements and isinstance(elements[0], list):
+            # Nested list: [[{tag:"text",text:"..."}], ...]
+            for row in elements:
+                if isinstance(row, list):
+                    for element in row:
+                        parts.extend(_extract_element_content(element))
+        else:
+            # Flat list: [{tag:"markdown",content:"..."}, ...]
+            for element in elements:
+                parts.extend(_extract_element_content(element))
+
+    # Body elements (schema 2.0)
+    body = content.get("body", {})
+    if isinstance(body, dict):
+        body_elements = body.get("elements")
+        if isinstance(body_elements, list):
+            for element in body_elements:
+                parts.extend(_extract_element_content(element))
 
     card = content.get("card", {})
     if card:
@@ -146,6 +174,11 @@ def _extract_element_content(element: dict) -> list[str]:
         content = element.get("content", "")
         if content:
             parts.append(content)
+
+    elif tag == "text":
+        text = element.get("text", "")
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
 
     elif tag == "div":
         text = element.get("text", {})
