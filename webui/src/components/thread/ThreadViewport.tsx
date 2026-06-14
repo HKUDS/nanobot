@@ -282,9 +282,29 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   }, [messages, atBottom, scrollToBottom]);
 
   useLayoutEffect(() => {
+    if (keyboardInsetBottom > 0) {
+      userReadingHistoryRef.current = false;
+      scrollToBottom(false, 8, { force: true });
+      return;
+    }
     if (userReadingHistoryRef.current) return;
     scrollToBottom(false, 4);
   }, [keyboardInsetBottom, scrollToBottom]);
+
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const onComposerFocus = () => {
+      const active = document.activeElement;
+      if (!hasMessages || !isKeyboardEditableElement(active) || !scrollEl.contains(active)) return;
+      userReadingHistoryRef.current = false;
+      scrollToBottom(false, 8, { force: true });
+    };
+
+    document.addEventListener("focusin", onComposerFocus);
+    return () => document.removeEventListener("focusin", onComposerFocus);
+  }, [hasMessages, scrollToBottom]);
 
   useEffect(() => {
     if (scrollToBottomSignal <= 0) return;

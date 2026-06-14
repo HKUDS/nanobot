@@ -210,8 +210,7 @@ describe("ThreadViewport", () => {
       });
 
       await waitFor(() => expect(scroller).toHaveStyle({ bottom: "320px" }));
-      const button = screen.getByRole("button", { name: "Scroll to bottom" });
-      expect(button.parentElement).toHaveStyle({ bottom: "512px" });
+      expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
 
       act(() => {
         visualViewport.viewport.dispatchEvent(new Event("resize"));
@@ -219,6 +218,48 @@ describe("ThreadViewport", () => {
       expect(scroller).toHaveStyle({ bottom: "320px" });
     } finally {
       visualViewport.restore();
+    }
+  });
+
+  it("scrolls recent messages into view when the composer receives focus", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={messages}
+          isStreaming={false}
+          composer={<textarea aria-label="Message input" />}
+        />,
+      );
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2400 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, value: 0 },
+      });
+
+      act(() => {
+        scroller.dispatchEvent(new Event("scroll"));
+      });
+      scrollIntoView.mockClear();
+
+      const input = screen.getByLabelText("Message input");
+      act(() => {
+        input.focus();
+        fireEvent.focusIn(input);
+      });
+
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "end",
+          behavior: "auto",
+        }),
+      );
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
   });
 
