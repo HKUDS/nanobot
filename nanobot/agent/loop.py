@@ -1392,7 +1392,68 @@ class AgentLoop:
         ctx.pending_summary = pending
         return "ok"
 
+    _IMAGE_EXTENSIONS: frozenset[str] = frozenset({
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif",
+    })
+
+    def _try_strip_model_prefix(self, ctx: TurnContext) -> bool:
+        """If the message starts with @<preset>, switch model and strip the prefix.
+
+        Returns True when a switch occurred (message content is updated on ctx.msg).
+        E.g. "@sonnet /path/to/image" → switch to 'sonnet' preset, inject image as media.
+
+        If the remaining content after stripping @word consists entirely of local image
+        file paths, those paths are added to ctx.msg.media so the provider receives the
+        actual image bytes rather than just text, and the content is replaced with a
+        generic "describe this image" prompt.
+        """
+        if not self.model_presets:
+            return False
+        raw = ctx.msg.content.lstrip()
+        if not raw.startswith("@"):
+            return False
+        # Extract the word after @
+        rest = raw[1:]
+        word = rest.split()[0] if rest.split() else ""
+        if not word:
+            return False
+        # Check if this word (case-insensitive) matches a known model preset
+        word_lower = word.lower()
+        matched_preset = next(
+            (k for k in self.model_presets if k.lower() == word_lower),
+            None,
+        )
+        if matched_preset is None:
+            return False
+        # Switch model preset
+        try:
+            self.set_model_preset(matched_preset)
+            logger.info("@{} shortcut: switched model preset to '{}'", word, matched_preset)
+        except Exception:
+            logger.exception("@{} shortcut: failed to switch to preset '{}'", word, matched_preset)
+            return False
+        # Strip the @word prefix
+        remaining = rest[len(word):].lstrip()
+        # Check if the remaining text is purely local image file paths
+        tokens = remaining.split()
+        image_paths = [
+            t for t in tokens
+            if t.startswith("/") and Path(t).suffix.lower() in self._IMAGE_EXTENSIONS and Path(t).is_file()
+        ]
+        if image_paths and len(image_paths) == len(tokens):
+            # All tokens are image paths — inject as media, replace text with describe prompt
+            existing_media = list(ctx.msg.media or [])
+            ctx.msg = dataclasses.replace(
+                ctx.msg,
+                content="Descrivi quest'immagine.",
+                media=existing_media + image_paths,
+            )
+        else:
+            ctx.msg = dataclasses.replace(ctx.msg, content=remaining)
+        return True
+
     async def _state_command(self, ctx: TurnContext) -> str:
+        self._try_strip_model_prefix(ctx)
         raw = ctx.msg.content.strip()
         cmd_ctx = CommandContext(
             msg=ctx.msg, session=ctx.session, key=ctx.session_key, raw=raw, loop=self
