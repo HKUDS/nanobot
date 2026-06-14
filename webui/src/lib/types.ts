@@ -132,9 +132,9 @@ export interface SessionAutomationJob {
     }>;
   };
   origin?: {
-    session_key: string;
+    session_key?: string;
     channel: string;
-    chat_id: string;
+    chat_id?: string;
     title?: string;
     preview?: string;
   } | null;

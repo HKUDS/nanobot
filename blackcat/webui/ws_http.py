@@ -789,12 +789,18 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
 def _parse_automation_update(values: dict[str, Any]) -> dict[str, Any] | str:
     update: dict[str, Any] = {}
     if "name" in values:
-        name = str(values.get("name") or "").strip()
+        raw_name = values.get("name")
+        if not isinstance(raw_name, str):
+            return "name must be a string"
+        name = raw_name.strip()
         if not name:
             return "name cannot be empty"
         update["name"] = name
     if "message" in values:
-        message = str(values.get("message") or "").strip()
+        raw_message = values.get("message")
+        if not isinstance(raw_message, str):
+            return "message must be a string"
+        message = raw_message.strip()
         if not message:
             return "message cannot be empty"
         update["message"] = message
@@ -805,24 +811,36 @@ def _parse_automation_update(values: dict[str, Any]) -> dict[str, Any] | str:
         parsed_schedule = _parse_automation_schedule(raw_schedule)
         if isinstance(parsed_schedule, str):
             return parsed_schedule
+        schedule_error = _validate_automation_schedule(parsed_schedule)
+        if schedule_error:
+            return schedule_error
         update["schedule"] = parsed_schedule
         update["delete_after_run"] = parsed_schedule.kind == "at"
     return update
 
 
 def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
-    kind = str(values.get("kind") or "").strip()
+    raw_kind = values.get("kind")
+    if not isinstance(raw_kind, str):
+        return "schedule kind must be a string"
+    kind = raw_kind.strip()
     if kind == "every":
         every_ms = _positive_int(values.get("every_ms"))
         if every_ms is None:
             return "every schedule requires positive every_ms"
         return CronSchedule(kind="every", every_ms=every_ms)
     if kind == "cron":
-        expr = str(values.get("expr") or "").strip()
+        raw_expr = values.get("expr")
+        if not isinstance(raw_expr, str):
+            return "cron schedule requires expr"
+        expr = raw_expr.strip()
         if not expr:
             return "cron schedule requires expr"
-        tz = str(values.get("tz") or "").strip() or None
-        return CronSchedule(kind="cron", expr=expr, tz=tz)
+        raw_tz = values.get("tz")
+        if raw_tz is not None and not isinstance(raw_tz, str):
+            return "cron schedule timezone must be a string"
+        tz = raw_tz.strip() if isinstance(raw_tz, str) else ""
+        return CronSchedule(kind="cron", expr=expr, tz=tz or None)
     if kind == "at":
         at_ms = _positive_int(values.get("at_ms"))
         if at_ms is None:
@@ -831,14 +849,32 @@ def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
     return "unknown schedule kind"
 
 
-def _positive_int(value: Any) -> int | None:
-    if isinstance(value, bool):
+def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
+    if schedule.kind == "at":
+        if not schedule.at_ms or schedule.at_ms <= int(time.time() * 1000):
+            return "one-time schedule must be in the future"
         return None
+    if schedule.kind != "cron":
+        return None
+
     try:
-        parsed = int(value)
-    except (TypeError, ValueError):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from croniter import croniter
+
+        tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
+        base = datetime.now(tz=tz)
+        croniter(schedule.expr, base).get_next(datetime)
+    except Exception:
+        return "cron schedule is invalid"
+    return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return parsed if parsed > 0 else None
+    return value if value > 0 else None
 
 
 def _is_websocket_channel_session_key(key: str) -> bool:

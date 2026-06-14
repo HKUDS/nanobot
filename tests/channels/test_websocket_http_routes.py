@@ -889,6 +889,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             headers=auth,
         )
         assert resp.status_code == 200
+        assert "wx-chat" not in resp.text
         body = resp.json()
         by_id = {job["id"]: job for job in body["jobs"]}
         assert by_id[user_job.id]["protected"] is False
@@ -898,7 +899,12 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["origin"]["preview"] == "hi"
         assert by_id[legacy_job.id]["payload"]["session_key"] == "unified:default"
         assert by_id[legacy_job.id]["origin"] is None
-        assert by_id[external_job.id]["origin"]["session_key"] == "weixin:wx-chat"
+        assert by_id[external_job.id]["payload"]["origin_channel"] == "weixin"
+        assert "session_key" not in by_id[external_job.id]["payload"]
+        assert "origin_chat_id" not in by_id[external_job.id]["payload"]
+        assert by_id[external_job.id]["origin"]["channel"] == "weixin"
+        assert "session_key" not in by_id[external_job.id]["origin"]
+        assert "chat_id" not in by_id[external_job.id]["origin"]
         assert by_id[external_job.id]["origin"]["preview"] == ""
         assert by_id["heartbeat"]["protected"] is True
 
@@ -926,6 +932,28 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["schedule"]["kind"] == "cron"
         assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
         assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
+
+        malformed_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"message": ["bad"]}),
+            },
+        )
+        assert malformed_update.status_code == 400
+        assert cron.get_job(user_job.id).payload.message == "Ask the daily quiz"
+
+        invalid_cron_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {"schedule": {"kind": "cron", "expr": "not a cron", "tz": "UTC"}}
+                ),
+            },
+        )
+        assert invalid_cron_update.status_code == 400
+        assert cron.get_job(user_job.id).schedule.expr == "0 9 * * *"
 
         protected_update = await _http_get(
             f"{base_url}/api/webui/automations/update?id=heartbeat",

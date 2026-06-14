@@ -3586,7 +3586,7 @@ function AutomationRow({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const status = automationStatus(job, tx);
   const origin = automationOriginLabel(job, tx);
-  const originHref = job.origin?.channel === "websocket"
+  const originHref = job.origin?.channel === "websocket" && job.origin.session_key
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
   const history = job.state.run_history ?? [];
@@ -4260,7 +4260,7 @@ function automationOriginLabel(
   }
   if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
   if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, tx);
-  return origin.title || origin.preview || origin.session_key;
+  return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, tx);
 }
 
 function automationChannelLabel(

@@ -395,9 +395,7 @@ describe("App layout", () => {
             payload: {
               message: "Send a quiz",
               kind: "agent_turn",
-              session_key: "weixin:wx-chat",
               origin_channel: "weixin",
-              origin_chat_id: "wx-chat",
             },
             state: {
               next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
@@ -406,11 +404,9 @@ describe("App layout", () => {
               run_history: [],
             },
             origin: {
-              session_key: "weixin:wx-chat",
               channel: "weixin",
-              chat_id: "wx-chat",
-              title: "Scheduled cron job triggered",
-              preview: "memory with dream state",
+              title: "",
+              preview: "",
             },
           },
           {

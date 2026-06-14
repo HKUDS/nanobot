@@ -121,14 +121,17 @@ def _serialize_job(
     payload["delete_after_run"] = job.delete_after_run
     payload["created_at_ms"] = job.created_at_ms
     payload["updated_at_ms"] = job.updated_at_ms
-    payload["payload"].update(
-        {
-            "kind": job.payload.kind,
-            "session_key": job.payload.session_key,
-            "origin_channel": job.payload.origin_channel,
-            "origin_chat_id": job.payload.origin_chat_id,
-        }
-    )
+    payload["payload"].update({"kind": job.payload.kind})
+    if _expose_origin_identifiers(job):
+        payload["payload"].update(
+            {
+                "session_key": job.payload.session_key,
+                "origin_channel": job.payload.origin_channel,
+                "origin_chat_id": job.payload.origin_chat_id,
+            }
+        )
+    elif job.payload.origin_channel:
+        payload["payload"]["origin_channel"] = job.payload.origin_channel
     payload["state"].update(
         {
             "last_run_at_ms": job.state.last_run_at_ms,
@@ -156,11 +159,17 @@ def _origin_payload(
     chat_id = job.payload.origin_chat_id
     if not channel or not chat_id:
         return None
-    session_key = f"{channel}:{chat_id}"
-
     title = ""
     preview = ""
-    if channel == "websocket" and session_manager is not None:
+    if channel != "websocket":
+        return {
+            "channel": channel,
+            "title": title,
+            "preview": preview,
+        }
+
+    session_key = f"{channel}:{chat_id}"
+    if session_manager is not None:
         data = session_manager.read_session_file(session_key)
         if isinstance(data, dict):
             title = str(data.get("title") or "")
@@ -173,6 +182,11 @@ def _origin_payload(
         "title": title,
         "preview": preview,
     }
+
+
+def _expose_origin_identifiers(job: CronJob) -> bool:
+    channel = job.payload.origin_channel
+    return not channel or channel == "websocket"
 
 
 def _session_preview(messages: Any) -> str:
