@@ -222,9 +222,44 @@ describe("ThreadViewport", () => {
   });
 
   it("scrolls recent messages into view when the composer receives focus", async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    const { container } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<textarea aria-label="Message input" />}
+      />,
+    );
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    scrollTo.mockClear();
+
+    const input = screen.getByLabelText("Message input");
+    act(() => {
+      input.focus();
+      fireEvent.focusIn(input);
+    });
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
+        behavior: "auto",
+      }),
+    );
+  });
+
+  it("scrolls recent messages into view when the focused composer resizes the visual viewport without an inset", async () => {
+    const visualViewport = stubVisualViewport({ innerHeight: 500, height: 500 });
+    const scrollTo = vi.fn();
 
     try {
       const { container } = render(
@@ -238,28 +273,30 @@ describe("ThreadViewport", () => {
       Object.defineProperties(scroller, {
         scrollHeight: { configurable: true, value: 2400 },
         clientHeight: { configurable: true, value: 600 },
-        scrollTop: { configurable: true, value: 0 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+        scrollTo: { configurable: true, value: scrollTo },
       });
-
-      act(() => {
-        scroller.dispatchEvent(new Event("scroll"));
-      });
-      scrollIntoView.mockClear();
 
       const input = screen.getByLabelText("Message input");
+      Object.defineProperty(document, "activeElement", {
+        configurable: true,
+        get: () => input,
+      });
+
       act(() => {
-        input.focus();
-        fireEvent.focusIn(input);
+        visualViewport.viewport.dispatchEvent(new Event("resize"));
       });
 
       await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
+        expect(scrollTo).toHaveBeenCalledWith({
+          top: 1800,
           behavior: "auto",
         }),
       );
+      expect(scroller).not.toHaveStyle({ bottom: "320px" });
     } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      Reflect.deleteProperty(document, "activeElement");
+      visualViewport.restore();
     }
   });
 
@@ -589,148 +626,132 @@ describe("ThreadViewport", () => {
   });
 
   it("resets to the bottom when opening a different conversation", async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        conversationKey="chat-a"
+      />,
+    );
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    scrollTo.mockClear();
 
-    try {
-      const { container, rerender } = render(
-        <ThreadViewport
-          messages={messages}
-          isStreaming={false}
-          composer={<div />}
-          conversationKey="chat-a"
-        />,
-      );
-      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
-      Object.defineProperties(scroller, {
-        scrollHeight: { configurable: true, value: 2400 },
-        clientHeight: { configurable: true, value: 600 },
-        scrollTop: { configurable: true, value: 0 },
-      });
-      act(() => {
-        scroller.dispatchEvent(new Event("scroll"));
-      });
-      scrollIntoView.mockClear();
+    rerender(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        conversationKey="chat-b"
+      />,
+    );
 
-      rerender(
-        <ThreadViewport
-          messages={messages}
-          isStreaming={false}
-          composer={<div />}
-          conversationKey="chat-b"
-        />,
-      );
-
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
-          behavior: "auto",
-        }),
-      );
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
+        behavior: "auto",
+      }),
+    );
   });
 
   it("waits for hydrated messages before fulfilling open-chat bottom scroll", async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={emptyMessages}
+        isStreaming={false}
+        composer={<div />}
+        conversationKey={null}
+      />,
+    );
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 0 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    scrollTo.mockClear();
 
-    try {
-      const { container, rerender } = render(
-        <ThreadViewport
-          messages={emptyMessages}
-          isStreaming={false}
-          composer={<div />}
-          conversationKey={null}
-        />,
-      );
-      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
-      Object.defineProperty(scroller, "scrollHeight", {
-        configurable: true,
-        value: 0,
-      });
-      scrollIntoView.mockClear();
+    rerender(
+      <ThreadViewport
+        messages={emptyMessages}
+        isStreaming={false}
+        composer={<div />}
+        conversationKey="chat-a"
+      />,
+    );
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 0,
+      behavior: "auto",
+    });
 
-      rerender(
-        <ThreadViewport
-          messages={emptyMessages}
-          isStreaming={false}
-          composer={<div />}
-          conversationKey="chat-a"
-        />,
-      );
-      expect(scrollIntoView).toHaveBeenCalledWith({
-        block: "end",
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 2400,
+    });
+    scrollTo.mockClear();
+
+    rerender(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        conversationKey="chat-a"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
         behavior: "auto",
-      });
-
-      Object.defineProperty(scroller, "scrollHeight", {
-        configurable: true,
-        value: 2400,
-      });
-      scrollIntoView.mockClear();
-
-      rerender(
-        <ThreadViewport
-          messages={messages}
-          isStreaming={false}
-          composer={<div />}
-          conversationKey="chat-a"
-        />,
-      );
-
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
-          behavior: "auto",
-        }),
-      );
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
+      }),
+    );
   });
 
   it("scrolls to the bottom when explicitly signalled after send", async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        scrollToBottomSignal={0}
+      />,
+    );
+    const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    scrollTo.mockClear();
 
-    try {
-      const { container, rerender } = render(
-        <ThreadViewport
-          messages={messages}
-          isStreaming={false}
-          composer={<div />}
-          scrollToBottomSignal={0}
-        />,
-      );
-      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
-      Object.defineProperty(scroller, "scrollHeight", {
-        configurable: true,
-        value: 2400,
-      });
-      scrollIntoView.mockClear();
+    rerender(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        scrollToBottomSignal={1}
+      />,
+    );
 
-      rerender(
-        <ThreadViewport
-          messages={messages}
-          isStreaming={false}
-          composer={<div />}
-          scrollToBottomSignal={1}
-        />,
-      );
-
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
-          behavior: "auto",
-        }),
-      );
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
+        behavior: "auto",
+      }),
+    );
   });
 });
