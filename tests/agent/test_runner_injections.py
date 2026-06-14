@@ -153,6 +153,70 @@ async def test_drain_injections_skips_empty_content():
 
 
 @pytest.mark.asyncio
+async def test_drain_injections_filters_empty_dict_payloads():
+    """Pre-normalized dict injections should obey the same empty-content guard."""
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+    runner = AgentRunner(provider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    multimodal = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]
+    msgs = [
+        {"role": "user", "content": ""},
+        {"role": "user", "content": "   "},
+        {"role": "user", "content": None},
+        {"role": "assistant", "content": "should not be re-injected as user"},
+        None,
+        {"role": "user", "content": "valid"},
+        {"role": "user", "content": multimodal},
+    ]
+
+    async def cb():
+        return msgs
+
+    spec = AgentRunSpec(
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [
+        {"role": "user", "content": "valid"},
+        {"role": "user", "content": multimodal},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_skips_objects_with_none_content():
+    """Objects exposing content=None should be skipped rather than stringified."""
+    from types import SimpleNamespace
+
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+    runner = AgentRunner(provider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def cb():
+        return [
+            SimpleNamespace(content=None),
+            SimpleNamespace(content=""),
+            SimpleNamespace(content="valid"),
+        ]
+
+    spec = AgentRunSpec(
+        initial_messages=[], tools=tools, model="m",
+        max_iterations=1, max_tool_result_chars=1000,
+        injection_callback=cb,
+    )
+    result = await runner._drain_injections(spec)
+    assert result == [{"role": "user", "content": "valid"}]
+
+
+@pytest.mark.asyncio
 async def test_drain_injections_handles_callback_exception():
     """If the callback raises, return empty list (error is logged)."""
     from nanobot.agent.runner import AgentRunner, AgentRunSpec
@@ -1155,4 +1219,3 @@ async def test_injection_cycle_cap_on_error_path():
     assert result.had_injections is True
     # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
     assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
-
