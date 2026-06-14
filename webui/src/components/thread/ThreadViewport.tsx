@@ -335,7 +335,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       >
         {hasMessages ? (
           <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
-            <div className="flex-1 px-4 pb-20 pt-4">
+            <div className="flex-1 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4">
               <div className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
@@ -355,16 +355,16 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-composer-dock"
               className="sticky bottom-0 z-10 mt-auto bg-background"
             >
-              <div className="px-4 pb-3">
+              <div className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
                 {composer}
               </div>
             </div>
           </div>
         ) : (
-          <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[72rem] flex-col px-4">
-            <div className="flex w-full flex-1 items-center justify-center py-10 sm:py-12">
-              <div className="relative w-full max-w-[58rem]">
-                <div className="absolute inset-x-0 bottom-[calc(100%+1.5rem)] flex justify-center">
+          <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[72rem] flex-col px-3 sm:px-4">
+            <div className="flex w-full flex-1 items-center justify-center py-6 sm:py-12">
+              <div className="relative flex w-full max-w-[58rem] flex-col items-center gap-5 sm:block">
+                <div className="flex justify-center sm:absolute sm:inset-x-0 sm:bottom-[calc(100%+1.5rem)]">
                   {emptyState}
                 </div>
                 <div className="w-full">{composer}</div>

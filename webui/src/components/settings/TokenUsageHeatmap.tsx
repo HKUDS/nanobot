@@ -177,7 +177,7 @@ export function TokenUsageHeatmap({
 
   return (
     <div className="overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="mx-auto w-full min-w-[760px] max-w-[1054px] px-0.5">
+      <div className="mx-auto w-full min-w-0 max-w-[1054px] px-0.5 sm:min-w-[760px]">
         <div className="mb-2 flex justify-end">
           <span className="text-[11px] font-normal leading-none text-muted-foreground/64">
             {tx("settings.usage.shortTitle", "Token Usage")}
@@ -195,7 +195,7 @@ export function TokenUsageHeatmap({
           ))}
         </div>
         <div
-          className="grid grid-flow-col grid-rows-7 gap-1.5"
+          className="grid grid-flow-col grid-rows-7 gap-[3px] sm:gap-1.5"
           style={{ gridTemplateColumns: `repeat(${TOKEN_HEATMAP_COLUMNS}, minmax(0, 1fr))` }}
           aria-label={tx("settings.usage.title", "Token activity")}
         >
@@ -224,7 +224,7 @@ export function TokenUsageHeatmap({
                     <span
                       aria-label={ariaLabel}
                       className={cn(
-                        "aspect-square w-full rounded-[4px] transition-transform hover:scale-110",
+                        "aspect-square w-full rounded-[2px] transition-transform hover:scale-110 sm:rounded-[4px]",
                         tokenUsageCellClass(level, cell.future),
                       )}
                     />
