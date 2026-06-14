@@ -8,10 +8,16 @@ from typing import Any
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import ArraySchema, BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.agent.tools.schema import (
+    ArraySchema,
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config_base import Base
+from nanobot.security.workspace_access import current_tool_workspace
 
 
 class CliAppsToolConfig(Base):
@@ -114,6 +120,10 @@ class CliAppsTool(Tool):
         working_dir: str | None = None,
         timeout: int | None = None,
     ) -> str:
+        if args is not None and (
+            not isinstance(args, list) or any(not isinstance(arg, str) for arg in args)
+        ):
+            return "Error: args must be a list of strings"
         access = current_tool_workspace(
             self.workspace,
             restrict_to_workspace=self.restrict_to_workspace,

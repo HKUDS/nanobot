@@ -112,6 +112,18 @@ def test_run_cli_app_rejects_uninstalled_app(tmp_path: Path, monkeypatch) -> Non
     assert "not installed" in result
 
 
+def test_run_cli_app_rejects_malformed_args(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = CliAppsTool(workspace=workspace, restrict_to_workspace=True)
+
+    string_args = asyncio.run(tool.execute(name="gimp", args="project list"))  # type: ignore[arg-type]
+    non_string_arg = asyncio.run(tool.execute(name="gimp", args=["project", 3]))  # type: ignore[list-item]
+
+    assert string_args == "Error: args must be a list of strings"
+    assert non_string_arg == "Error: args must be a list of strings"
+
+
 def test_run_cli_app_description_names_only_settings_installed_apps(tmp_path: Path, monkeypatch) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
