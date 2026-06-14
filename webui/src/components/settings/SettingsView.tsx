@@ -1715,7 +1715,7 @@ export function SettingsView({
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto w-full max-w-[920px] px-5 py-8 sm:px-8 lg:py-12",
+            "mx-auto w-full max-w-[920px] px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1801,7 +1801,7 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-4 pb-3 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
+        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
         hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
       )}
     >
@@ -6782,7 +6782,7 @@ function SettingsRow({
           </div>
         ) : null}
       </div>
-      {children ? <div className="shrink-0 sm:ml-6">{children}</div> : null}
+      {children ? <div className="min-w-0 sm:ml-6 sm:shrink-0">{children}</div> : null}
     </div>
   );
 }
@@ -6798,7 +6798,7 @@ function ReadOnlyRow({
 }) {
   return (
     <SettingsRow title={title} description={description}>
-      <span className="block max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
+      <span className="block max-w-full truncate text-left text-[13px] text-muted-foreground sm:max-w-[320px] sm:text-right">
         {value}
       </span>
     </SettingsRow>
@@ -7244,7 +7244,7 @@ function NumberInput({
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-8 w-24 rounded-full text-[13px]"
+        className="h-8 w-24 max-w-full rounded-full text-[13px]"
       />
       {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>

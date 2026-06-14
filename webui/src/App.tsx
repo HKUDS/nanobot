@@ -69,6 +69,7 @@ const COMPLETED_RUNS_STORAGE_KEY = "blackcat-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "blackcat-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
+const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
@@ -1515,7 +1516,7 @@ function Shell({
                 showCloseButton={false}
                 aria-describedby={undefined}
                 className="p-0 lg:hidden"
-                style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
+                style={{ width: MOBILE_SIDEBAR_WIDTH, maxWidth: MOBILE_SIDEBAR_WIDTH }}
               >
                 <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
                 <Sidebar
@@ -1621,7 +1622,7 @@ function Shell({
         {restartToast ? (
           <div
             role="status"
-            className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
+            className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
           >
             {restartToast}
           </div>
