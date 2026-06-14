@@ -17,6 +17,8 @@ from nanobot.channels.telegram import (
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
     TelegramChannel,
     TelegramConfig,
+    _markdown_to_telegram_html,
+    _split_telegram_markdown,
     _StreamBuf,
 )
 
@@ -177,6 +179,67 @@ def _make_telegram_update(
         message_id=1,
     )
     return SimpleNamespace(message=message, effective_user=user)
+
+
+def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
+    for chunk in chunks:
+        html = _markdown_to_telegram_html(chunk)
+        assert html.count("<pre><code>") == html.count("</code></pre>")
+
+
+def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
+    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=35)
+
+    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[1].startswith("```python\nprint('a')")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_long_code_block_closes_and_reopens() -> None:
+    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    assert chunks[0].endswith("\n```")
+    assert chunks[1].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_multiple_code_blocks() -> None:
+    content = (
+        "First\n"
+        "```js\n"
+        "one();\n"
+        "```\n"
+        "Middle paragraph here\n"
+        "```py\n"
+        "two()\n"
+        "three()\n"
+        "```\n"
+        "End"
+    )
+
+    chunks = _split_telegram_markdown(content, max_len=55)
+
+    assert chunks[0].endswith("Middle paragraph here\n")
+    assert chunks[1].startswith("```py\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
+    content = "\n```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert chunks
+    assert all(chunk.strip() for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
 
 
 @pytest.mark.asyncio
@@ -653,6 +716,36 @@ async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
     )
 
     channel._app.bot.send_message.assert_called_once()
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering() -> None:
+    """Final streamed replies must not split Telegram HTML inside <pre><code>."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    raw_text = "```python\n" + ("print(\"line\")\n" * 450) + "```\nDone"
+    channel._stream_bufs["123"] = _StreamBuf(text=raw_text, message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    html_chunks = [
+        channel._app.bot.edit_message_text.call_args.kwargs.get("text", ""),
+        *[
+            call.kwargs.get("text", "")
+            for call in channel._app.bot.send_message.call_args_list
+        ],
+    ]
+    assert len(html_chunks) > 1
+    for html in html_chunks:
+        assert len(html) <= 4096
+        assert html.count("<pre><code>") == html.count("</code></pre>")
     assert "123" not in channel._stream_bufs
 
 

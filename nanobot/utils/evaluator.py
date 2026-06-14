@@ -1,6 +1,6 @@
-"""Post-run evaluation for background tasks (heartbeat & cron).
+"""Post-run notification evaluation for heartbeat checks.
 
-After the agent executes a background task, this module makes a lightweight
+After heartbeat executes an internal check, this module makes a lightweight
 LLM call to decide whether the result warrants notifying the user.
 """
 
@@ -46,10 +46,10 @@ async def evaluate_response(
     model: str,
     default_notify: bool = True,
 ) -> bool:
-    """Decide whether a background-task result should be delivered to the user.
+    """Decide whether a heartbeat result should be delivered to the user.
 
-    On any failure, falls back to ``default_notify`` (cron reminders fail open;
-    heartbeat passes ``False`` to fail closed).
+    On any failure, falls back to ``default_notify``. Heartbeat passes
+    ``False`` to fail closed.
     """
     try:
         llm_response = await provider.chat_with_retry(

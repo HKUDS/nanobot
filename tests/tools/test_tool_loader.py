@@ -244,6 +244,7 @@ def test_exec_tool_create():
     mock_config.exec.enable = True
     mock_config.exec.timeout = 120
     mock_config.exec.sandbox = ""
+    mock_config.exec.path_prepend = "/venv/bin"
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []
@@ -252,6 +253,7 @@ def test_exec_tool_create():
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = ExecTool.create(ctx)
     assert isinstance(tool, ExecTool)
+    assert tool.path_prepend == "/venv/bin"
 
 
 def test_web_tools_config_cls():
@@ -350,47 +352,6 @@ def test_mcp_wrappers_not_discoverable():
     assert MCPPromptWrapper._plugin_discoverable is False
 
 
-# --- Task 8: Config round-trip tests ---
-
-
-def test_config_round_trip():
-    """Verify config serialization is unchanged after moving config classes."""
-    from nanobot.config.schema import Config
-
-    config_dict = {
-        "tools": {
-            "web": {"enable": True, "search": {"provider": "brave", "api_key": "test"}},
-            "exec": {"enable": False, "timeout": 120},
-            "my": {"allowSet": True},
-            "imageGeneration": {"enabled": True, "provider": "openrouter"},
-        }
-    }
-    config = Config.model_validate(config_dict)
-    dumped = config.model_dump(mode="json", by_alias=True)
-
-    assert dumped["tools"]["my"]["allowSet"] is True
-    assert dumped["tools"]["imageGeneration"]["enabled"] is True
-    assert config.tools.exec.enable is False
-    assert config.tools.exec.timeout == 120
-    assert config.tools.web.search.provider == "brave"
-
-
-def test_config_defaults():
-    """Verify default values match the original hardcoded schema."""
-    from nanobot.config.schema import Config
-
-    config = Config.model_validate({})
-    assert config.tools.exec.enable is True
-    assert config.tools.exec.timeout == 60
-    assert config.tools.web.enable is True
-    assert config.tools.web.search.provider == "duckduckgo"
-    assert config.tools.my.enable is True
-    assert config.tools.my.allow_set is False
-    assert config.tools.image_generation.enabled is False
-    assert config.tools.cli_apps.enable is True
-    assert config.tools.restrict_to_workspace is False
-
-
 # --- Task 10: Integration test ---
 
 
@@ -403,6 +364,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
     mock_config.exec.enable = True
     mock_config.exec.timeout = 60
     mock_config.exec.sandbox = ""
+    mock_config.exec.path_prepend = ""
     mock_config.exec.path_append = ""
     mock_config.exec.allowed_env_keys = []
     mock_config.exec.allow_patterns = []

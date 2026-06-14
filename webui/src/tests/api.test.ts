@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createModelConfiguration,
   deleteSession,
+  fetchFilePreview,
   fetchCliApps,
+  fetchInstalledCliApps,
   fetchMcpPresets,
   fetchProviderModels,
+  fetchSessionAutomations,
+  fetchSettingsUsage,
   fetchSidebarState,
+  fetchSkillDetail,
+  fetchSkills,
   fetchWebuiThread,
   fetchWorkspaces,
   importMcpConfig,
@@ -55,11 +61,82 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("passes pagination params when fetching a WebUI thread page", async () => {
+    await fetchWebuiThread("tok", "websocket:chat-1", {
+      limit: 120,
+      before: "abc+/=",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys and paths when fetching file previews", async () => {
+    await fetchFilePreview("tok", "websocket:chat-1", "/tmp/project/hook.py:12");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/file-preview?path=%2Ftmp%2Fproject%2Fhook.py%3A12",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys when fetching session automations", async () => {
+    await fetchSessionAutomations("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches the WebUI skill summary", async () => {
+    await fetchSkills("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("percent-encodes skill names when fetching skill details", async () => {
+    await fetchSkillDetail("tok", "current web");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/skills/current%20web",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("percent-encodes websocket keys when deleting a session", async () => {
     await deleteSession("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Achat-1/delete",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("passes the automation cascade flag when deleting a session", async () => {
+    await deleteSession("tok", "websocket:chat-1", { deleteAutomations: true });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/delete?delete_automations=true",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -80,6 +157,17 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("fetches token usage through the lightweight settings endpoint", async () => {
+    await fetchSettingsUsage("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/usage",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -282,6 +370,25 @@ describe("webui API helpers", () => {
     await runCliAppAction("tok", "install", "gimp");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/cli-apps/install?name=gimp",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads installed CLI Apps without fetching the full catalog", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        apps: [],
+        installed_count: 0,
+        catalog_updated_at: null,
+      }),
+    } as Response);
+
+    await expect(fetchInstalledCliApps("tok")).resolves.toMatchObject({ apps: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps?installed_only=1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

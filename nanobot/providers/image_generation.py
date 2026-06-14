@@ -996,6 +996,8 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
             body["size"] = size
 
         body.update(self.extra_body)
+        # Drop null-valued params so extraBody can opt out of defaults like response_format.
+        body = {key: value for key, value in body.items() if value is not None}
 
         logger.info("OpenAI Images API request: POST {}/images/generations body={}", self.api_base, body)
 
@@ -1368,6 +1370,8 @@ async def _parse_codex_sse_images(
                         logger.error("Codex SSE failure: {}", raw[:2000])
                     _collect_images_from_sse_event(event, images)
                     _collect_text_from_sse_event(event, text_parts)
+                    if ev_type == "response.completed":
+                        break
             continue
         buffer.append(line)
 

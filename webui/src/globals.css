@@ -5,6 +5,7 @@
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 240 3% 12%;
     --card: 0 0% 100%;
@@ -30,9 +31,12 @@
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 0 0% 89.8%;
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
   .dark {
+    color-scheme: dark;
     --background: 0 0% 10%;
     --foreground: 240 4% 96%;
     --card: 0 0% 12%;
@@ -57,6 +61,8 @@
     --sidebar-accent: 0 0% 15.5%;
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
+    --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
+    --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
 }
 
@@ -73,6 +79,33 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  * {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   ::selection {
@@ -121,10 +154,13 @@
   }
 
   .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.94);
+    -webkit-backdrop-filter: saturate(145%) blur(18px);
+    backdrop-filter: saturate(145%) blur(18px);
     box-shadow:
-      inset -1px 0 0 hsl(var(--border) / 0.36),
-      inset 1px 0 0 hsl(var(--background) / 0.34),
-      18px 0 44px -42px rgb(0 0 0 / 0.42);
+      inset -1px 0 0 hsl(var(--border) / 0.32),
+      inset 1px 0 0 hsl(var(--background) / 0.52),
+      14px 0 32px -30px rgb(0 0 0 / 0.22);
   }
 
   .dark .host-window-shell,
@@ -135,10 +171,11 @@
   }
 
   .dark .host-sidebar-glass {
+    background: hsl(var(--sidebar) / 0.96);
     box-shadow:
       inset -1px 0 0 hsl(var(--border) / 0.42),
       inset 1px 0 0 hsl(var(--foreground) / 0.05),
-      18px 0 46px -42px rgb(0 0 0 / 0.72);
+      14px 0 34px -30px rgb(0 0 0 / 0.62);
   }
 
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

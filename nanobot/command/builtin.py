@@ -212,7 +212,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot))
+        loop._schedule_background(loop.consolidator.archive(snapshot, session_key=ctx.key))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -350,6 +350,13 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
             elapsed = time.monotonic() - t0
             content = f"Dream failed after {elapsed:.1f}s: {e}"
         finally:
+            from nanobot.webui.token_usage import record_response_token_usage
+
+            record_response_token_usage(
+                resp,
+                source="dream",
+                timezone_name=getattr(loop.context, "timezone", None),
+            )
             if store.git.is_initialized():
                 commit_msg = build_dream_commit_message("dream: manual run", resp)
                 sha = store.git.auto_commit(commit_msg)

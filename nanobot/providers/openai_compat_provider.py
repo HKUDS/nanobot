@@ -17,10 +17,16 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-import json_repair
 from loguru import logger
+from pydantic.alias_generators import to_snake
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    parse_tool_arguments,
+    tool_arguments_json_for_replay,
+)
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -86,6 +92,18 @@ _MODEL_THINKING_STYLES: dict[str, str] = {
 
 def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
+
+
+def _provider_prefix_key(name: str) -> str:
+    return to_snake(name.replace("-", "_")).lower()
+
+
+def _requires_max_completion_tokens(model_name: str) -> bool:
+    """Return True for models that reject ``max_tokens`` (GPT-5 family, o-series)."""
+    slug = _model_slug(model_name)
+    return "gpt-5" in slug or any(
+        slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
+    )
 
 
 def _model_thinking_style(model_name: str) -> str:
@@ -331,6 +349,7 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
+        extra_query: dict[str, str] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -338,6 +357,7 @@ class OpenAICompatProvider(LLMProvider):
         self._spec = spec
         self._extra_body = extra_body or {}
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
+        self._extra_query = extra_query or {}
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -386,6 +406,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
             default_headers=self._default_headers,
+            default_query=self._extra_query or None,
             max_retries=0,
             timeout=timeout_s,
             http_client=http_client,
@@ -476,24 +497,6 @@ class OpenAICompatProvider(LLMProvider):
         return bool(self._spec and self._spec.name == "mistral")
 
     @staticmethod
-    def _normalize_tool_call_arguments(arguments: Any) -> str:
-        """Force function.arguments into a valid JSON object string."""
-        if isinstance(arguments, str):
-            stripped = arguments.strip()
-            if not stripped:
-                return "{}"
-            try:
-                parsed = json_repair.loads(stripped)
-            except Exception:
-                return "{}"
-            if isinstance(parsed, dict):
-                return json.dumps(parsed, ensure_ascii=False)
-            return "{}"
-        if isinstance(arguments, dict):
-            return json.dumps(arguments, ensure_ascii=False)
-        return "{}"
-
-    @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
         """Coerce block/list content into plain text for strict string-only APIs."""
         if content is None or isinstance(content, str):
@@ -569,7 +572,7 @@ class OpenAICompatProvider(LLMProvider):
                     if isinstance(function, dict):
                         function_clean = dict(function)
                         if "arguments" in function_clean:
-                            function_clean["arguments"] = self._normalize_tool_call_arguments(
+                            function_clean["arguments"] = tool_arguments_json_for_replay(
                                 function_clean.get("arguments")
                             )
                         else:
@@ -593,6 +596,22 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Build kwargs
     # ------------------------------------------------------------------
+
+    def _request_model_name(self, model_name: str) -> str:
+        spec = self._spec
+        if not spec or "/" not in model_name:
+            return model_name
+        if spec.strip_model_prefix:
+            return model_name.split("/")[-1]
+
+        route_prefixes = getattr(spec, "strip_model_prefixes", ())
+        if not isinstance(route_prefixes, tuple) or not route_prefixes:
+            return model_name
+        model_prefix, routed_model = model_name.split("/", 1)
+        model_prefix_key = _provider_prefix_key(model_prefix)
+        if any(_provider_prefix_key(prefix) == model_prefix_key for prefix in route_prefixes):
+            return routed_model
+        return model_name
 
     @staticmethod
     def _supports_temperature(
@@ -627,8 +646,7 @@ class OpenAICompatProvider(LLMProvider):
             if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
                 messages, tools = self._apply_cache_control(messages, tools)
 
-        if spec and spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -640,7 +658,9 @@ class OpenAICompatProvider(LLMProvider):
         if self._supports_temperature(model_name, reasoning_effort):
             kwargs["temperature"] = temperature
 
-        if spec and getattr(spec, "supports_max_completion_tokens", False):
+        if (
+            spec and getattr(spec, "supports_max_completion_tokens", False)
+        ) or _requires_max_completion_tokens(model_name):
             kwargs["max_completion_tokens"] = max(1, max_tokens)
         else:
             kwargs["max_tokens"] = max(1, max_tokens)
@@ -830,8 +850,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
-        if self._spec and self._spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         instructions, input_items = convert_messages(sanitized_messages)
 
@@ -999,7 +1018,7 @@ class OpenAICompatProvider(LLMProvider):
             if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
-            if not reasoning_content and msg0.get("reasoning"):
+            if reasoning_content is None and msg0.get("reasoning"):
                 reasoning_content = self._extract_text_content(msg0.get("reasoning"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
@@ -1011,21 +1030,19 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason = str(ch_map["finish_reason"])
                 if not content:
                     content = self._extract_text_content(m.get("content"))
-                if not reasoning_content:
+                if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
 
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
-                args = fn.get("arguments", {})
-                if isinstance(args, str):
-                    args = json_repair.loads(args)
+                args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=str(tc_map.get("id") or _short_tool_id()),
                     name=str(fn.get("name") or ""),
-                    arguments=args if isinstance(args, dict) else {},
+                    arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
@@ -1061,9 +1078,7 @@ class OpenAICompatProvider(LLMProvider):
 
         tool_calls = []
         for tc in raw_tool_calls:
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = json_repair.loads(args)
+            args = parse_tool_arguments(tc.function.arguments)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=str(getattr(tc, "id", None) or _short_tool_id()),
@@ -1074,8 +1089,8 @@ class OpenAICompatProvider(LLMProvider):
                 function_provider_specific_fields=fn_prov,
             ))
 
-        reasoning_content = getattr(msg, "reasoning_content", None) or None
-        if not reasoning_content and getattr(msg, "reasoning", None):
+        reasoning_content = getattr(msg, "reasoning_content", None)
+        if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
 
         return LLMResponse(
@@ -1204,7 +1219,7 @@ class OpenAICompatProvider(LLMProvider):
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
                     name=b["name"],
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
+                    arguments=parse_tool_arguments(b["arguments"]),
                     extra_content=b.get("extra_content"),
                     provider_specific_fields=b.get("prov"),
                     function_provider_specific_fields=b.get("fn_prov"),

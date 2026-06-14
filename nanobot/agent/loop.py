@@ -9,6 +9,7 @@ import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -18,6 +19,7 @@ from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, CompositeHook
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
@@ -38,6 +40,9 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.cron.session_turns import (
+    cron_history_overrides,
+)
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.security.workspace_access import (
@@ -51,6 +56,7 @@ from nanobot.session.goal_state import (
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
+from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
@@ -70,8 +76,6 @@ if TYPE_CHECKING:
     )
     from nanobot.cron.service import CronService
 
-
-UNIFIED_SESSION_KEY = "unified:default"
 
 class TurnState(Enum):
     RESTORE = auto()
@@ -311,6 +315,11 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        self._cron_turns = CronTurnCoordinator(
+            publish_inbound=self.bus.publish_inbound,
+            dispatch=self._dispatch,
+            is_running=lambda: self._running,
+        )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -326,6 +335,7 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
+            unified_session=unified_session,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -522,13 +532,11 @@ class AgentLoop:
         """Update context for all tools that need routing info."""
         from nanobot.agent.tools.context import ContextAware
 
-        if session_key is not None:
-            effective_key = session_key
-        elif self._unified_session:
-            effective_key = UNIFIED_SESSION_KEY
-        else:
-            effective_key = f"{channel}:{chat_id}"
-
+        effective_key = session_key or session_key_for_channel(
+            channel,
+            chat_id,
+            unified_session=self._unified_session,
+        )
         request_ctx = RequestContext(
             channel=channel,
             chat_id=chat_id,
@@ -603,6 +611,12 @@ class AgentLoop:
         if isinstance(provider, FallbackProvider):
             provider.on_fallback = callback
 
+    async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
+        return await self._cron_turns.submit(msg)
+
+    def pending_cron_job_ids_for_session(self, session_key: str) -> set[str]:
+        return self._cron_turns.pending_job_ids_for_session(session_key)
+
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -621,6 +635,10 @@ class AgentLoop:
             extra: dict[str, Any] = ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             text = msg.content if isinstance(msg.content, str) else ""
+            text_override, cron_extra = cron_history_overrides(msg.metadata)
+            if text_override is not None:
+                text = text_override
+            extra.update(cron_extra)
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
@@ -650,6 +668,8 @@ class AgentLoop:
             runtime_state=self,
             inbound_message=msg,
             include_memory_recent_history=include_memory_recent_history,
+            session_key=session.key,
+            unified_session=self._unified_session,
         )
 
     async def _dispatch_command_inline(
@@ -856,6 +876,11 @@ class AgentLoop:
                 ),
                 goal_active_predicate=lambda: sustained_goal_active(session.metadata) if session is not None else False,
                 goal_continue_message=_goal_continue,
+                finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
+                    pending_queue_available=pending_queue is not None and session is not None,
+                    session_metadata=session_metadata,
+                    message_metadata=metadata,
+                ),
             ))
         finally:
             reset_workspace_scope(workspace_token)
@@ -912,6 +937,16 @@ class AgentLoop:
                 await self._dispatch_command_inline(
                     msg, effective_key, raw,
                     self.commands.dispatch_priority,
+                )
+                continue
+            if self._cron_turns.defer_if_active(
+                msg,
+                session_key=effective_key,
+                active_session_keys=self._pending_queues.keys(),
+            ):
+                logger.info(
+                    "Deferred cron turn for active session {}",
+                    effective_key,
                 )
                 continue
             # If this session already has an active pending queue (i.e. a task
@@ -1027,7 +1062,12 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
+                    self._cron_turns.complete(msg, response=response)
                 except asyncio.CancelledError:
+                    self._cron_turns.complete(
+                        msg,
+                        error=asyncio.CancelledError(),
+                    )
                     logger.info("Task cancelled for session {}", session_key)
                     # Preserve partial context from the interrupted turn so
                     # the user does not lose tool results and assistant
@@ -1053,7 +1093,7 @@ class AgentLoop:
                             exc_info=True,
                         )
                     raise
-                except Exception:
+                except Exception as exc:
                     logger.exception("Error processing message for session {}", session_key)
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
@@ -1066,6 +1106,7 @@ class AgentLoop:
                             session_key=session_key,
                             metadata=msg.metadata,
                         )
+                    self._cron_turns.complete(msg, error=exc)
                 finally:
                     # Drain any messages still in the pending queue and re-publish
                     # them to the bus so they are processed as fresh inbound messages
@@ -1096,12 +1137,14 @@ class AgentLoop:
                             msg, session_key, "idle"
                         )
                         self._runtime_events().clear_turn(session_key)
+                    await self._cron_turns.publish_next_deferred(session_key)
         finally:
             if pending is None:
                 await self._runtime_events().run_status_changed(
                     msg, session_key, "idle"
                 )
                 self._runtime_events().clear_turn(session_key)
+                await self._cron_turns.publish_next_deferred(session_key)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -1185,6 +1228,8 @@ class AgentLoop:
             runtime_state=self,
             inbound_message=msg,
             skip_runtime_lines=is_subagent,
+            session_key=key,
+            unified_session=self._unified_session,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
@@ -1198,7 +1243,9 @@ class AgentLoop:
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
         self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
-        session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+        session.enforce_file_cap(
+            on_archive=partial(self.context.memory.raw_archive, session_key=key)
+        )
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(
@@ -1585,7 +1632,9 @@ class AgentLoop:
             ctx.turn_latency_ms,
         )
         if not ctx.ephemeral:
-            ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
+            ctx.session.enforce_file_cap(
+                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
+            )
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
@@ -1665,6 +1714,13 @@ class AgentLoop:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        declared_tool_call_ids = {
+            str(tc["id"])
+            for m in session.messages
+            if m.get("role") == "assistant"
+            for tc in m.get("tool_calls") or []
+            if isinstance(tc, dict) and tc.get("id")
+        }
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
@@ -1672,12 +1728,24 @@ class AgentLoop:
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
+                tool_call_id = entry.get("tool_call_id")
+                if not tool_call_id or str(tool_call_id) not in declared_tool_call_ids:
+                    # Undeclared tool results corrupt future provider requests.
+                    logger.warning(
+                        "Dropping orphaned tool result {} from session {} during persistence",
+                        tool_call_id or "(missing id)",
+                        session.key,
+                    )
+                    continue
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
                     if not filtered:
-                        continue
+                        # Preserve the tool_call/result pair after block filtering.
+                        filtered = [
+                            {"type": "text", "text": "[tool result omitted during persistence]"}
+                        ]
                     entry["content"] = filtered
             elif role == "user":
                 if isinstance(content, str) and ContextBuilder._RUNTIME_CONTEXT_TAG in content:
@@ -1697,6 +1765,11 @@ class AgentLoop:
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
+                declared_tool_call_ids.update(
+                    str(tc["id"])
+                    for tc in entry.get("tool_calls") or []
+                    if isinstance(tc, dict) and tc.get("id")
+                )
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()

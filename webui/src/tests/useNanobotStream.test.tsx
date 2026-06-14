@@ -60,6 +60,7 @@ function fakeClient() {
       },
       sendMessage: vi.fn(),
       newChat: vi.fn(),
+      forkChat: vi.fn(),
       attach: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
@@ -154,6 +155,58 @@ describe("useNanobotStream", () => {
       content: "final chunk",
       isStreaming: false,
     });
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("preserves proactive automation source metadata on complete assistant messages", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-cron", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-cron", {
+        event: "message",
+        chat_id: "chat-cron",
+        text: "Time to drink water.",
+        source: { kind: "cron", label: "drink water" },
+      });
+    });
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Time to drink water.",
+      source: { kind: "cron", label: "drink water" },
+    });
+  });
+
+  it("does not start streaming from completed trailing activity after an answer", () => {
+    const fake = fakeClient();
+    const initialMessages = [
+      {
+        id: "a1",
+        role: "assistant" as const,
+        content: "Cron test",
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t1",
+        role: "tool" as const,
+        kind: "trace" as const,
+        content: "message({})",
+        traces: ["message({})"],
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+    ];
+
+    const { result } = renderHook(
+      () => useNanobotStream("chat-cron-done", initialMessages),
+      { wrapper: wrap(fake.client) },
+    );
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
     expect(result.current.isStreaming).toBe(false);
   });
 
@@ -1342,6 +1395,8 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe("user");
     expect(result.current.messages[0].content).toBe("fine");
+    expect(result.current.messages[0].turnId).toEqual(expect.any(String));
+    expect(result.current.messages[0].turnPhase).toBe("user");
   });
 
   it("attaches assistant media_urls to complete messages", () => {
@@ -1482,7 +1537,10 @@ describe("useNanobotStream", () => {
       "chat-img",
       "draw a square icon",
       undefined,
-      { imageGeneration: { enabled: true, aspect_ratio: "1:1" } },
+      expect.objectContaining({
+        imageGeneration: { enabled: true, aspect_ratio: "1:1" },
+        turnId: expect.any(String),
+      }),
     );
   });
 

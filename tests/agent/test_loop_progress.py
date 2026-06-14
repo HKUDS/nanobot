@@ -493,6 +493,61 @@ class TestToolEventProgress:
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_stream_timeout_recovery_continues_in_new_segment(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Recovered streaming output should use a new stream segment."""
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "openai-codex/gpt-5.5"
+
+        async def chat_stream_with_retry(*, on_content_delta, on_stream_recover, **kwargs):
+            await on_content_delta("partial")
+            await on_stream_recover()
+            await on_content_delta("full retry response")
+            return LLMResponse(content="full retry response", tool_calls=[])
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        deltas = [m for m in outbound if m.metadata.get("_stream_delta")]
+        stream_end = [m for m in outbound if m.metadata.get("_stream_end")]
+        final = [
+            m for m in outbound
+            if not m.metadata.get("_stream_delta")
+            and not m.metadata.get("_stream_end")
+            and not m.metadata.get("_turn_end")
+            and not m.metadata.get("_goal_status")
+        ]
+
+        assert [m.content for m in deltas] == ["partial", "full retry response"]
+        assert [m.metadata.get("_resuming") for m in stream_end] == [True, False]
+        assert deltas[0].metadata.get("_stream_id") == stream_end[0].metadata.get("_stream_id")
+        assert deltas[1].metadata.get("_stream_id") == stream_end[1].metadata.get("_stream_id")
+        assert deltas[0].metadata.get("_stream_id") != deltas[1].metadata.get("_stream_id")
+        assert final[-1].content == "full retry response"
+        assert final[-1].metadata.get("_streamed") is True
+        provider.chat_with_retry.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_streamed_progress_is_not_repeated_before_tool_execution(
         self,
         tmp_path: Path,

@@ -34,6 +34,7 @@ function fakeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
@@ -102,7 +103,7 @@ describe("useSessions", () => {
         preview: "Beta",
       },
     ]);
-    vi.mocked(api.deleteSession).mockResolvedValue(true);
+    vi.mocked(api.deleteSession).mockResolvedValue({ deleted: true });
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(fakeClient()),
@@ -114,8 +115,40 @@ describe("useSessions", () => {
       await result.current.deleteChat("websocket:chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a");
+    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a", undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
+  });
+
+  it("keeps a session when delete is blocked by bound automations", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Alpha",
+      },
+    ]);
+    vi.mocked(api.deleteSession).mockResolvedValue({
+      deleted: false,
+      blocked_by_automations: true,
+      automations: [],
+    });
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    let deleteResult: Awaited<ReturnType<typeof result.current.deleteChat>> | undefined;
+    await act(async () => {
+      deleteResult = await result.current.deleteChat("websocket:chat-a");
+    });
+
+    expect(deleteResult?.blocked_by_automations).toBe(true);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
 
   it("refreshes sessions when the websocket reports a session update", async () => {
@@ -186,7 +219,7 @@ describe("useSessions", () => {
       await result.current.createChat();
     });
 
-    expect(client.newChat).toHaveBeenCalledWith(5000, undefined);
+    expect(client.newChat).toHaveBeenCalledWith(60_000, undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
 
     await act(async () => {
@@ -225,7 +258,7 @@ describe("useSessions", () => {
       await result.current.createChat(workspaceScope);
     });
 
-    expect(client.newChat).toHaveBeenCalledWith(5000, workspaceScope);
+    expect(client.newChat).toHaveBeenCalledWith(60_000, workspaceScope);
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
@@ -383,6 +416,40 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(true);
   });
 
+  it("uses the server pending flag for completed tails that still end with trace rows", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      has_pending_tool_calls: false,
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content: "Cron test",
+          turnId: "cron:run",
+          createdAt: 1,
+        },
+        {
+          id: "t1",
+          role: "tool",
+          kind: "trace",
+          content: "message({})",
+          traces: ["message({})"],
+          turnId: "cron:run",
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-cron-done"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
+    expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
   it("does not flag transcript as pending when last row is not a trace", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,
@@ -411,6 +478,65 @@ describe("useSessions", () => {
 
     expect(result.current.messages).toEqual([]);
     expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
+  it("loads older transcript pages before the current history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "new question", createdAt: 2 },
+          { id: "a2", role: "assistant", content: "new answer", createdAt: 3 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 2,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
+      limit: 160,
+      direction: "latest",
+    });
+    expect(result.current.hasMoreBefore).toBe(true);
+    expect(result.current.userMessageOffset).toBe(1);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:paged", {
+      limit: 120,
+      before: "cursor-2",
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "old question",
+      "old answer",
+      "new question",
+      "new answer",
+    ]);
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.userMessageOffset).toBe(0);
   });
 
   it("keeps the session in the list when delete fails", async () => {

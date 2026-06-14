@@ -10,9 +10,12 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import json_repair
-
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    tool_arguments_object_for_replay,
+)
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -207,13 +210,11 @@ class AnthropicProvider(LLMProvider):
                 continue
             func = tc.get("function", {})
             args = func.get("arguments", "{}")
-            if isinstance(args, str):
-                args = json_repair.loads(args)
             blocks.append({
                 "type": "tool_use",
                 "id": tc.get("id") or _gen_tool_id(),
                 "name": func.get("name", ""),
-                "input": args,
+                "input": tool_arguments_object_for_replay(args),
             })
 
         return blocks or [{"type": "text", "text": ""}]
@@ -451,9 +452,10 @@ class AnthropicProvider(LLMProvider):
         max_tokens = max(1, max_tokens)
         thinking_enabled = bool(reasoning_effort) and reasoning_effort.lower() != "none"
 
-        # claude-opus-4-7 deprecated the `temperature` parameter entirely — the
-        # API returns 400 if it is present, on any code path.
-        omit_temperature = "opus-4-7" in model_name
+        # Several Anthropic models (opus-4-7, opus-4-8, fable) deprecated the
+        # `temperature` parameter — the API returns 400 if it is present.
+        _model_lower = model_name.lower()
+        omit_temperature = any(m in _model_lower for m in ("opus-4-7", "opus-4-8", "fable"))
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -509,7 +511,7 @@ class AnthropicProvider(LLMProvider):
                 tool_calls.append(ToolCallRequest(
                     id=block.id,
                     name=block.name,
-                    arguments=block.input if isinstance(block.input, dict) else {},
+                    arguments=block.input,
                 ))
             elif block.type == "thinking":
                 thinking_blocks.append({

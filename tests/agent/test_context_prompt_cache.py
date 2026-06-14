@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 import re
 from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
-import datetime as datetime_module
 
 from nanobot.agent.context import ContextBuilder
 
@@ -156,6 +156,58 @@ def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
     assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
 
 
+def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("legacy entry without session")
+    builder.memory.append_history("telegram history", session_key="telegram:chat-1")
+    builder.memory.append_history("slack history", session_key="slack:chat-2")
+
+    prompt = builder.build_system_prompt(session_key="telegram:chat-1")
+
+    assert "# Recent History" in prompt
+    assert "telegram history" in prompt
+    assert "slack history" not in prompt
+    assert "legacy entry without session" not in prompt
+
+
+def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("unified user history", session_key="unified:default")
+    builder.memory.append_history("channel user history", session_key="telegram:chat-1")
+    builder.memory.append_history("cron internal history", session_key="cron:job-1")
+
+    prompt = builder.build_system_prompt(
+        session_key="unified:default",
+        unified_session=True,
+    )
+
+    assert "unified user history" in prompt
+    assert "channel user history" in prompt
+    assert "cron internal history" not in prompt
+
+
+def test_cron_recent_history_can_see_own_history_and_unified_context(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("unified user history", session_key="unified:default")
+    builder.memory.append_history("own cron history", session_key="cron:job-1")
+    builder.memory.append_history("other cron history", session_key="cron:job-2")
+
+    prompt = builder.build_system_prompt(
+        session_key="cron:job-1",
+        unified_session=True,
+    )
+
+    assert "unified user history" in prompt
+    assert "own cron history" in prompt
+    assert "other cron history" not in prompt
+
+
 def test_recent_history_capped_at_max(tmp_path) -> None:
     """Only the most recent _MAX_RECENT_HISTORY entries are injected."""
     workspace = _make_workspace(tmp_path)
@@ -201,7 +253,7 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    c1 = builder.memory.append_history("old conversation about Python")
+    builder.memory.append_history("old conversation about Python")
     c2 = builder.memory.append_history("old conversation about Rust")
     builder.memory.append_history("recent question about Docker")
     builder.memory.append_history("recent question about K8s")

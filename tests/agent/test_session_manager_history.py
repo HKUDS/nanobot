@@ -426,6 +426,87 @@ def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
     }]
 
 
+def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.metadata["title"] = "Old title"
+    source.metadata["goal_state"] = {"status": "active", "objective": "do not inherit"}
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2 fork me")
+    source.add_message("assistant", "answer2")
+    source.add_message("user", "round3 must not appear")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+    assert forked.metadata["webui"] is True
+    assert "title" not in forked.metadata
+    assert "goal_state" not in forked.metadata
+    saved = manager.read_session_file("websocket:fork")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+
+
+def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    manager.save(source)
+
+    assert manager.fork_session_before_user_index("websocket:source", "websocket:x", -1) is None
+    assert manager.fork_session_before_user_index("websocket:missing", "websocket:x", 0) is None
+    assert manager.fork_session_before_user_index("websocket:source", "websocket:x", 2) is None
+
+
+def test_fork_session_allows_index_equal_to_user_count(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+
+
+def test_fork_session_drops_summary_when_fork_point_is_inside_consolidated_prefix(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.messages = [
+        {"role": "user", "content": "round1"},
+        {"role": "assistant", "content": "answer1"},
+        {"role": "user", "content": "round2 fork me"},
+        {"role": "assistant", "content": "answer2"},
+    ]
+    source.last_consolidated = 4
+    source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+    assert forked.last_consolidated == 0
+    assert "_last_summary" not in forked.metadata
+
+
 def test_get_history_ignores_media_kwarg_on_non_user_rows():
     """``media`` only ever appears on user entries in practice, but the
     synthesizer must be defensive: assistants / tools with list content

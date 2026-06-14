@@ -5,6 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
@@ -484,6 +485,124 @@ async def test_connect_mcp_servers_logs_stdio_pollution_hint(
     assert "stdio protocol pollution" in messages[-1]
     assert "stdout" in messages[-1]
     assert "stderr" in messages[-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        MCPServerConfig(url="http://127.0.0.1:9/sse"),
+        MCPServerConfig(type="streamableHttp", url="http://127.0.0.1:9/mcp"),
+    ],
+)
+async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
+    config: MCPServerConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempted_connections: list[tuple[object, ...]] = []
+    warnings: list[str] = []
+
+    async def _open_connection(*args: object, **_kwargs: object):
+        attempted_connections.append(args)
+        raise AssertionError("unsafe MCP URL should be rejected before TCP probe")
+
+    def _warning(message: str, *args: object) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _open_connection)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"local": config}, registry)
+
+    assert stacks == {}
+    assert registry.tool_names == []
+    assert attempted_connections == []
+    assert any("blocked unsafe URL" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "expected_transport"),
+    [
+        (MCPServerConfig(type="sse", url="https://mcp.example.com/sse"), "sse"),
+        (
+            MCPServerConfig(type="streamableHttp", url="https://mcp.example.com/mcp"),
+            "streamableHttp",
+        ),
+    ],
+)
+async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
+    config: MCPServerConfig,
+    expected_transport: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_urls: list[str] = []
+    sent_urls: list[str] = []
+    used_transports: list[str] = []
+
+    def _validate(url: str) -> tuple[bool, str]:
+        checked_urls.append(url)
+        if url == "http://127.0.0.1/private":
+            return False, "loopback blocked"
+        return True, ""
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        sent_urls.append(str(request.url))
+        if str(request.url) == "https://example.com/start":
+            return httpx.Response(
+                302,
+                headers={"Location": "http://127.0.0.1/private"},
+                request=request,
+            )
+        raise AssertionError("unsafe redirect target should be blocked before transport")
+
+    original_async_client = httpx.AsyncClient
+
+    def _async_client_with_mock_transport(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        kwargs.setdefault("transport", httpx.MockTransport(_handler))
+        return original_async_client(*args, **kwargs)
+
+    @asynccontextmanager
+    async def _fake_sse_client(_url: str, httpx_client_factory=None):
+        assert httpx_client_factory is not None
+        used_transports.append("sse")
+        async with httpx_client_factory() as client:
+            await client.get("https://example.com/start")
+        yield object(), object()
+
+    @asynccontextmanager
+    async def _fake_streamable_http_client(_url: str, http_client=None):
+        assert http_client is not None
+        used_transports.append("streamableHttp")
+        await http_client.get("https://example.com/start")
+        yield object(), object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _fake_streamable_http_client,
+    )
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"remote": config}, registry)
+
+    assert stacks == {}
+    assert registry.tool_names == []
+    assert used_transports == [expected_transport]
+    assert checked_urls == [
+        config.url,
+        "https://example.com/start",
+        "http://127.0.0.1/private",
+    ]
+    assert sent_urls == ["https://example.com/start"]
 
 
 @pytest.mark.asyncio

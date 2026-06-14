@@ -75,6 +75,18 @@ def _line_diff_stats(before: str, after: str) -> tuple[int, int]:
     return added, deleted
 
 
+def _append_text(content: str, addition: str) -> str:
+    """Append text without merging it into an unterminated final line."""
+    base = content.replace("\r\n", "\n")
+    extra = addition.replace("\r\n", "\n")
+    if base and extra and not base.endswith("\n") and not extra.startswith("\n"):
+        base += "\n"
+    combined = base + extra
+    if combined and not combined.endswith("\n"):
+        combined += "\n"
+    return combined
+
+
 def _format_summary(summary: _PatchSummary) -> str:
     stats = ""
     if summary.added or summary.deleted:
@@ -177,9 +189,7 @@ class ApplyPatchTool(_FsTool):
 
                     if exists:
                         uses_crlf = "\r\n" in content
-                        new_norm = content.replace("\r\n", "\n") + new_text.replace("\r\n", "\n")
-                        if new_norm and not new_norm.endswith("\n"):
-                            new_norm += "\n"
+                        new_norm = _append_text(content, new_text)
                         if uses_crlf:
                             new_norm = new_norm.replace("\n", "\r\n")
                         writes[source] = new_norm

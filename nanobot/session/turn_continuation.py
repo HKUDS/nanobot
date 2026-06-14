@@ -70,11 +70,33 @@ def should_stream_budget_response(
     message_metadata: Mapping[str, Any] | None = None,
 ) -> bool:
     """Return whether the budget-boundary response should be sent to the user."""
-    return not _continuation_available(
-        stop_reason=stop_reason,
+    if stop_reason != "max_iterations":
+        return True
+    return should_finalize_on_max_iterations(
         pending_queue_available=pending_queue_available,
         session_metadata=session_metadata,
         message_metadata=message_metadata,
+    )
+
+
+def should_finalize_on_max_iterations(
+    *,
+    pending_queue_available: bool,
+    session_metadata: Mapping[str, Any] | None,
+    message_metadata: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether a max-iteration boundary should produce a final response.
+
+    When a sustained goal can continue internally, the current runner slice
+    should stop without spending an extra no-tools finalization call. The next
+    queued continuation slice owns the eventual user-visible response.
+    """
+    return not (
+        pending_queue_available
+        and _goal_continuation_available(
+            session_metadata,
+            message_metadata=message_metadata,
+        )
     )
 
 
@@ -160,7 +182,12 @@ def _save_skip_for_turn(
     """Return the persisted-message append boundary for this turn."""
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
-    return 1 + history_count + (1 if user_persisted_early else 0)
+    # build_messages may merge the current message into a same-role history tail.
+    # Runner-appended messages start at initial_message_count in either shape.
+    has_standalone_current = initial_message_count > 1 + history_count
+    if has_standalone_current and not user_persisted_early:
+        return initial_message_count - 1
+    return initial_message_count
 
 
 def _goal_continuation_available(

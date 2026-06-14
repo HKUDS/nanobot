@@ -16,7 +16,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
     ImageGenerationError,
     ImageGenerationProvider,

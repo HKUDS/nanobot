@@ -49,6 +49,7 @@ class ProviderSpec:
 
     # gateway behavior
     strip_model_prefix: bool = False  # strip "provider/" before sending to gateway
+    strip_model_prefixes: tuple[str, ...] = ()  # strip only when the first model segment matches
     supports_max_completion_tokens: bool = False
 
     # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
@@ -59,6 +60,9 @@ class ProviderSpec:
 
     # Direct providers skip API-key validation (user supplies everything)
     is_direct: bool = False
+
+    # Provider is listed for shared credentials but cannot serve chat completions.
+    is_transcription_only: bool = False
 
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
@@ -513,6 +517,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
     ),
+    # AssemblyAI: voice transcription only. It appears in provider settings so
+    # users can manage credentials, but WebUI excludes it from chat model pickers.
+    ProviderSpec(
+        name="assemblyai",
+        keywords=("assemblyai",),
+        env_key="ASSEMBLYAI_API_KEY",
+        display_name="AssemblyAI",
+        backend="openai_compat",
+        default_api_base="https://api.assemblyai.com/v2",
+        is_transcription_only=True,
+    ),
     # Qianfan (百度千帆): OpenAI-compatible API
     ProviderSpec(
         name="qianfan",
@@ -537,3 +552,18 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == normalized:
             return spec
     return None
+
+
+def create_dynamic_spec(name: str) -> ProviderSpec:
+    """Create a dynamic ProviderSpec for custom user-defined providers."""
+    normalized = to_snake(name.replace("-", "_"))
+    strip_prefixes = tuple(dict.fromkeys((name, normalized)))
+    return ProviderSpec(
+        name=normalized,
+        keywords=(),
+        env_key="",
+        display_name=name.title(),
+        backend="openai_compat",
+        is_direct=True,
+        strip_model_prefixes=strip_prefixes,
+    )
