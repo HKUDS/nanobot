@@ -533,6 +533,7 @@ async def test_spawn_with_model_preset_uses_different_model(tmp_path):
         seen["model"] = spec.model
         seen["temperature"] = spec.temperature
         seen["max_tokens"] = spec.max_tokens
+        seen["context_window_tokens"] = spec.context_window_tokens
         return SimpleNamespace(
             stop_reason="done", final_content="done", error=None, tool_events=[],
         )
@@ -544,6 +545,7 @@ async def test_spawn_with_model_preset_uses_different_model(tmp_path):
     assert seen["model"] == "preset-model"
     assert seen["temperature"] == 0.5
     assert seen["max_tokens"] == 4096
+    assert seen["context_window_tokens"] == 32768
 
 
 @pytest.mark.asyncio
@@ -723,3 +725,89 @@ async def test_spawn_with_preset_temperature_override(tmp_path):
         await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     assert seen["temperature"] == 0.9
+
+
+@pytest.mark.asyncio
+async def test_spawn_preset_rebuilds_runner_on_signature_change(tmp_path):
+    """A changed preset snapshot (config hot reload) must rebuild the runner,
+    not reuse a cached AgentRunner bound to the stale provider/model."""
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ModelPresetConfig
+    from nanobot.providers.factory import ProviderSnapshot
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "default-model"
+
+    preset_cfg = ModelPresetConfig(model="preset-model", provider="auto")
+
+    old_provider = MagicMock()
+    old_provider.generation = SimpleNamespace(
+        temperature=0.5, max_tokens=4096, reasoning_effort=None,
+    )
+    old_snapshot = ProviderSnapshot(
+        provider=old_provider,
+        model="old-model",
+        context_window_tokens=32768,
+        signature=("model_preset", "fast", "v1"),
+    )
+    new_provider = MagicMock()
+    new_provider.generation = SimpleNamespace(
+        temperature=0.7, max_tokens=8192, reasoning_effort=None,
+    )
+    new_snapshot = ProviderSnapshot(
+        provider=new_provider,
+        model="new-model",
+        context_window_tokens=65536,
+        signature=("model_preset", "fast", "v2"),
+    )
+
+    snapshots = iter([old_snapshot, new_snapshot])
+
+    def fake_loader(name):
+        assert name == "fast"
+        return next(snapshots)
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        spawn_presets={"fast": preset_cfg},
+        preset_snapshot_loader=fake_loader,
+    )
+    mgr._announce_result = AsyncMock()
+
+    captured = []
+
+    async def fake_run(spec):
+        captured.append({
+            "model": spec.model,
+            "max_tokens": spec.max_tokens,
+            "context_window_tokens": spec.context_window_tokens,
+        })
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    with patch.object(AgentRunner, "run", AsyncMock(side_effect=fake_run)):
+        await mgr.spawn(task="first", model_preset="fast")
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+        first_runner = mgr._preset_cache["fast"][1]
+        assert first_runner.provider is old_provider
+
+        await mgr.spawn(task="second", model_preset="fast")
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+        second_runner = mgr._preset_cache["fast"][1]
+        assert second_runner.provider is new_provider
+        assert second_runner is not first_runner
+
+    assert len(captured) == 2
+    assert captured[0]["model"] == "old-model"
+    assert captured[1]["model"] == "new-model"
+    assert captured[1]["max_tokens"] == 8192
+    assert captured[1]["context_window_tokens"] == 65536
+    assert len(mgr._preset_cache) == 1
+    assert mgr._preset_cache["fast"][0] == new_snapshot.signature

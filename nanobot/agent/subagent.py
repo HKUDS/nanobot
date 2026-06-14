@@ -112,7 +112,7 @@ class SubagentManager:
         )
         self.spawn_presets: dict[str, ModelPresetConfig] = spawn_presets or {}
         self._preset_snapshot_loader = preset_snapshot_loader
-        self._preset_cache: dict[str, AgentRunner] = {}
+        self._preset_cache: dict[str, tuple[tuple[object, ...], AgentRunner]] = {}
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -261,21 +261,25 @@ class SubagentManager:
             try:
                 if model_preset is not None and self._preset_snapshot_loader is not None:
                     snapshot = self._preset_snapshot_loader(model_preset)
-                    run_runner = self._preset_cache.get(model_preset)
-                    if run_runner is None:
+                    cached = self._preset_cache.get(model_preset)
+                    if cached is None or cached[0] != snapshot.signature:
                         run_runner = AgentRunner(snapshot.provider)
-                        self._preset_cache[model_preset] = run_runner
+                        self._preset_cache[model_preset] = (snapshot.signature, run_runner)
+                    else:
+                        run_runner = cached[1]
                     run_model = snapshot.model
                     gen = snapshot.provider.generation
                     run_temperature = temperature if temperature is not None else gen.temperature
                     run_max_tokens = gen.max_tokens
                     run_reasoning = gen.reasoning_effort
+                    run_context_window = snapshot.context_window_tokens
                 else:
                     run_runner = self.runner
                     run_model = self.model
                     run_temperature = temperature
                     run_max_tokens = None
                     run_reasoning = None
+                    run_context_window = None
                 result = await run_runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -294,6 +298,7 @@ class SubagentManager:
                     llm_timeout_s=llm_timeout,
                     max_tokens=run_max_tokens,
                     reasoning_effort=run_reasoning,
+                    context_window_tokens=run_context_window,
                 ))
             finally:
                 if token is not None:
