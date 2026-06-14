@@ -368,9 +368,61 @@ def maybe_persist_tool_result(
     )
 
 
+_MARKDOWN_FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,})([^`\n]*)?$")
+
+
+def _open_markdown_fence(text: str) -> tuple[str, str] | None:
+    """Return the active backtick fence marker and info string, if any."""
+    open_marker: str | None = None
+    open_info = ""
+    for line in text.splitlines():
+        if open_marker is None:
+            match = _MARKDOWN_FENCE_RE.match(line)
+            if match:
+                open_marker = match.group(1)
+                open_info = (match.group(2) or "").strip()
+            continue
+
+        stripped = line.strip()
+        if stripped.startswith("`") and set(stripped) == {"`"} and len(stripped) >= len(open_marker):
+            open_marker = None
+            open_info = ""
+
+    if open_marker is None:
+        return None
+    return open_marker, open_info
+
+
+def _find_split_position(content: str, limit: int) -> int:
+    cut = content[:limit]
+    pos = cut.rfind("\n")
+    if pos <= 0:
+        pos = cut.rfind(" ")
+    if pos <= 0:
+        pos = limit
+    return pos
+
+
+def _closing_fence_suffix(chunk: str, marker: str) -> str:
+    return marker if chunk.endswith("\n") else f"\n{marker}"
+
+
+def _consume_leading_closing_fence(content: str, marker: str) -> str | None:
+    remainder = content[1:] if content.startswith("\n") else content
+    line, separator, tail = remainder.partition("\n")
+    stripped = line.strip()
+    if stripped.startswith("`") and set(stripped) == {"`"} and len(stripped) >= len(marker):
+        return tail.lstrip() if separator else ""
+    return None
+
+
 def split_message(content: str, max_len: int = 2000) -> list[str]:
     """
     Split content into chunks within max_len, preferring line breaks.
+
+    When a split falls inside a Markdown fenced code block, close the block in
+    the current chunk and reopen it in the next chunk so each chunk renders on
+    its own.
 
     Args:
         content: The text content to split.
@@ -384,19 +436,56 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
     if len(content) <= max_len:
         return [content]
     chunks: list[str] = []
+    prefix = ""
     while content:
-        if len(content) <= max_len:
-            chunks.append(content)
+        if len(prefix) + len(content) <= max_len:
+            chunks.append(f"{prefix}{content}")
             break
-        cut = content[:max_len]
-        # Try to break at newline first, then space, then hard break
-        pos = cut.rfind("\n")
-        if pos <= 0:
-            pos = cut.rfind(" ")
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
+        limit = max_len - len(prefix)
+        if limit <= 0:
+            chunks.append(prefix[:max_len])
+            prefix = prefix[max_len:]
+            continue
+
+        pos = _find_split_position(content, limit)
+        chunk = f"{prefix}{content[:pos]}"
+        fence = _open_markdown_fence(chunk)
+        close_suffix = ""
+        reopen_prefix = ""
+        if fence is not None:
+            marker, info = fence
+            close_suffix = _closing_fence_suffix(chunk, marker)
+            if len(chunk) + len(close_suffix) > max_len:
+                adjusted_limit = max_len - len(prefix) - len(close_suffix)
+                if adjusted_limit > 0:
+                    pos = _find_split_position(content, adjusted_limit)
+                    chunk = f"{prefix}{content[:pos]}"
+                    fence = _open_markdown_fence(chunk)
+                    if fence is not None:
+                        marker, info = fence
+                        close_suffix = _closing_fence_suffix(chunk, marker)
+                    else:
+                        close_suffix = ""
+                if len(chunk) + len(close_suffix) > max_len:
+                    fence = None
+                    close_suffix = ""
+            if fence is not None:
+                marker, info = fence
+                reopen_prefix = f"{marker}{info}\n"
+
+        chunks.append(f"{chunk}{close_suffix}")
+        if fence is not None:
+            marker, _ = fence
+            remainder = content[pos:]
+            if (tail := _consume_leading_closing_fence(remainder, marker)) is not None:
+                prefix = ""
+                content = tail
+            else:
+                prefix = reopen_prefix
+                content = remainder[1:] if remainder.startswith("\n") else remainder
+        else:
+            prefix = ""
+            content = content[pos:].lstrip()
     return chunks
 
 
