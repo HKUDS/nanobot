@@ -29,6 +29,59 @@ interface ResizeObserverInstance {
   disconnect: ReturnType<typeof vi.fn>;
 }
 
+function stubVisualViewport({
+  height,
+  innerHeight,
+  offsetTop = 0,
+}: {
+  height: number;
+  innerHeight: number;
+  offsetTop?: number;
+}) {
+  const originalInnerHeight = window.innerHeight;
+  const originalVisualViewport = window.visualViewport;
+  const target = new EventTarget();
+  const viewport = {
+    width: 390,
+    height,
+    offsetTop,
+    offsetLeft: 0,
+    pageTop: offsetTop,
+    pageLeft: 0,
+    scale: 1,
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+  } as unknown as VisualViewport;
+
+  Object.defineProperty(window, "innerHeight", {
+    configurable: true,
+    value: innerHeight,
+  });
+  Object.defineProperty(window, "visualViewport", {
+    configurable: true,
+    value: viewport,
+  });
+
+  return {
+    viewport,
+    restore: () => {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+      if (originalVisualViewport) {
+        Object.defineProperty(window, "visualViewport", {
+          configurable: true,
+          value: originalVisualViewport,
+        });
+      } else {
+        Reflect.deleteProperty(window, "visualViewport");
+      }
+    },
+  };
+}
+
 function makeLongMessages(count: number): UIMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `m${index}`,
@@ -126,6 +179,46 @@ describe("ThreadViewport", () => {
       expect(buttonPositioner).toHaveStyle({ bottom: "256px" });
     } finally {
       vi.stubGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps the thread scrollport above a mobile soft keyboard", async () => {
+    const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={messages}
+          isStreaming={false}
+          composer={<textarea aria-label="Message input" />}
+        />,
+      );
+      const scroller = container.firstElementChild?.firstElementChild as HTMLElement;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 2400 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, value: 0 },
+      });
+
+      act(() => {
+        scroller.dispatchEvent(new Event("scroll"));
+      });
+
+      const input = screen.getByLabelText("Message input");
+      act(() => {
+        input.focus();
+        fireEvent.focusIn(input);
+      });
+
+      await waitFor(() => expect(scroller).toHaveStyle({ bottom: "320px" }));
+      const button = screen.getByRole("button", { name: "Scroll to bottom" });
+      expect(button.parentElement).toHaveStyle({ bottom: "512px" });
+
+      act(() => {
+        visualViewport.viewport.dispatchEvent(new Event("resize"));
+      });
+      expect(scroller).toHaveStyle({ bottom: "320px" });
+    } finally {
+      visualViewport.restore();
     }
   });
 

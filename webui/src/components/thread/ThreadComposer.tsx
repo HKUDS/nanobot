@@ -419,9 +419,20 @@ function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
   window.setTimeout(() => ghost.remove(), 0);
 }
 
+function visualViewportBounds(): { top: number; bottom: number; height: number } {
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    return { top: 0, bottom: window.innerHeight, height: window.innerHeight };
+  }
+  const top = Math.max(0, viewport.offsetTop);
+  const height = Math.max(0, viewport.height);
+  return { top, bottom: top + height, height };
+}
+
 function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
-  let top = 0;
-  let bottom = window.innerHeight;
+  const viewport = visualViewportBounds();
+  let top = viewport.top;
+  let bottom = viewport.bottom;
   let parent = el.parentElement;
 
   while (parent) {
@@ -455,11 +466,12 @@ const GOAL_PANEL_MIN_HEIGHT_PX = 112;
 const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
 
 function measureGoalPanelMaxCssHeight(stripTopY: number): number {
+  const viewport = visualViewportBounds();
   const spaceAboveStrip =
-    stripTopY - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
+    stripTopY - viewport.top - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
   return Math.min(
     Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
-    Math.floor(window.innerHeight * GOAL_PANEL_MAX_VIEWPORT_RATIO),
+    Math.floor(viewport.height * GOAL_PANEL_MAX_VIEWPORT_RATIO),
   );
 }
 
@@ -593,10 +605,15 @@ function RunElapsedStrip({
     if (stripWrapperRef.current && ro) {
       ro.observe(stripWrapperRef.current);
     }
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", relayout);
+    viewport?.addEventListener("scroll", relayout);
     window.addEventListener("resize", relayout);
     window.addEventListener("scroll", relayout, true);
     return () => {
       ro?.disconnect();
+      viewport?.removeEventListener("resize", relayout);
+      viewport?.removeEventListener("scroll", relayout);
       window.removeEventListener("resize", relayout);
       window.removeEventListener("scroll", relayout, true);
     };
@@ -1111,9 +1128,14 @@ export function ThreadComposer({
     };
 
     updateLayout();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", updateLayout);
+    viewport?.addEventListener("scroll", updateLayout);
     window.addEventListener("resize", updateLayout);
     document.addEventListener("scroll", updateLayout, true);
     return () => {
+      viewport?.removeEventListener("resize", updateLayout);
+      viewport?.removeEventListener("scroll", updateLayout);
       window.removeEventListener("resize", updateLayout);
       document.removeEventListener("scroll", updateLayout, true);
     };
