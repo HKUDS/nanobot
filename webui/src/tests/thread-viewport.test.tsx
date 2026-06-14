@@ -110,6 +110,21 @@ function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
 }
 
 describe("ThreadViewport", () => {
+  it("bottom-aligns short history near the composer", () => {
+    render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+
+    const messageRegion = screen.getByTestId("thread-message-region");
+    expect(messageRegion).toHaveClass("justify-end");
+    expect(messageRegion).toHaveClass("pb-4");
+    expect(messageRegion.className).not.toContain("5rem");
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const resizeObservers: ResizeObserverInstance[] = [];

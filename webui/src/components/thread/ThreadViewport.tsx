@@ -442,7 +442,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       >
         {hasMessages ? (
           <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
-            <div className="flex-1 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4">
+            <div
+              data-testid="thread-message-region"
+              className="flex min-h-0 flex-1 flex-col justify-end px-3 pb-4 pt-4 sm:px-4"
+            >
               <div className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
                   messages={visibleMessages}
