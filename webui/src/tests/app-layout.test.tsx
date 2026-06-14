@@ -452,6 +452,78 @@ describe("App layout", () => {
     expect(document.title).toBe("Automations · nanobot");
   });
 
+  it("edits a past one-time automation without resubmitting its old schedule", async () => {
+    const pastOneShot = {
+      id: "past-one-shot",
+      name: "Past one-shot",
+      enabled: true,
+      protected: false,
+      delete_after_run: true,
+      schedule: { kind: "at", at_ms: 1 },
+      payload: {
+        message: "Old one-shot message",
+        kind: "agent_turn",
+        session_key: "websocket:chat-a",
+      },
+      state: {
+        next_run_at_ms: null,
+        last_status: "ok",
+        pending: false,
+        run_history: [],
+      },
+      origin: {
+        session_key: "websocket:chat-a",
+        channel: "websocket",
+        chat_id: "chat-a",
+        title: "Release prep",
+        preview: "Check release blockers",
+      },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": { jobs: [pastOneShot] },
+      "/api/webui/automations/update?id=past-one-shot": {
+        jobs: [
+          {
+            ...pastOneShot,
+            payload: { ...pastOneShot.payload, message: "Updated one-shot message" },
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+
+    expect(await screen.findByText("Past one-shot")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue("Old one-shot message"), {
+      target: { value: "Updated one-shot message" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/webui/automations/update?id=past-one-shot",
+        expect.any(Object),
+      );
+    });
+    const updateCall = vi.mocked(fetch).mock.calls.find(
+      ([url]) => String(url) === "/api/webui/automations/update?id=past-one-shot",
+    );
+    expect(updateCall).toBeTruthy();
+    const headers = updateCall?.[1]?.headers as Record<string, string>;
+    expect(JSON.parse(headers["X-Nanobot-Automation-Values"])).toEqual({
+      name: "Past one-shot",
+      message: "Updated one-shot message",
+    });
+  });
+
   it("localizes the Automations surface", async () => {
     await i18n.changeLanguage("zh-CN");
     mockFetchRoutes({

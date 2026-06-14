@@ -856,6 +856,15 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         origin_channel="weixin",
         origin_chat_id="wx-chat",
     )
+    past_one_shot_job = cron.add_job(
+        name="Past one-shot",
+        schedule=CronSchedule(kind="at", at_ms=1),
+        message="Old one-shot message",
+        session_key="websocket:abc",
+        origin_channel="websocket",
+        origin_chat_id="abc",
+        delete_after_run=True,
+    )
     cron.register_system_job(
         CronJob(
             id="heartbeat",
@@ -954,6 +963,22 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         )
         assert invalid_cron_update.status_code == 400
         assert cron.get_job(user_job.id).schedule.expr == "0 9 * * *"
+
+        past_one_shot_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={past_one_shot_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {
+                        "message": "Updated one-shot message",
+                        "schedule": {"kind": "at", "at_ms": 1},
+                    }
+                ),
+            },
+        )
+        assert past_one_shot_update.status_code == 200
+        assert cron.get_job(past_one_shot_job.id).payload.message == "Updated one-shot message"
+        assert cron.get_job(past_one_shot_job.id).schedule.at_ms == 1
 
         protected_update = await _http_get(
             f"{base_url}/api/webui/automations/update?id=heartbeat",

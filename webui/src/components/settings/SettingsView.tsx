@@ -3805,6 +3805,7 @@ type AutomationEditDraft = {
   tz: string;
   atLocal: string;
 };
+type AutomationScheduleUpdate = NonNullable<AutomationUpdatePayload["schedule"]>;
 
 const AUTOMATION_EVERY_UNITS: Array<{ value: AutomationEveryUnit; ms: number }> = [
   { value: "second", ms: 1000 },
@@ -3833,7 +3834,7 @@ function AutomationEditDialog({
     setDraft(automationDraftFromJob(job));
   }, [job]);
 
-  const validation = automationEditDraftError(draft, tx);
+  const validation = automationEditDraftError(draft, job, tx);
   const scheduleOptions = [
     { value: "every", label: tx("settings.automations.scheduleTypes.every", "Interval") },
     { value: "cron", label: tx("settings.automations.scheduleTypes.cron", "Cron") },
@@ -3848,7 +3849,7 @@ function AutomationEditDialog({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const payload = automationUpdatePayloadFromDraft(draft);
+    const payload = automationUpdatePayloadFromDraft(draft, job);
     if (!job || typeof payload === "string") return;
     void onSave(job, payload);
   };
@@ -4146,6 +4147,7 @@ function formatLocalDateTimeInput(ms: number): string {
 
 function automationEditDraftError(
   draft: AutomationEditDraft,
+  job: SessionAutomationJob | null,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
@@ -4166,33 +4168,58 @@ function automationEditDraftError(
     if (!Number.isFinite(atMs)) {
       return tx("settings.automations.validation.timeRequired", "Run time is required.");
     }
-    if (atMs <= Date.now()) {
+    if (atMs <= Date.now() && automationScheduleChanged(draft, job)) {
       return tx("settings.automations.validation.futureRequired", "Run time must be in the future.");
     }
   }
   return null;
 }
 
-function automationUpdatePayloadFromDraft(draft: AutomationEditDraft): AutomationUpdatePayload | string {
+function automationUpdatePayloadFromDraft(
+  draft: AutomationEditDraft,
+  job: SessionAutomationJob | null,
+): AutomationUpdatePayload | string {
   const name = draft.name.trim();
   const message = draft.message.trim();
   if (!name || !message) return "invalid";
   const payload: AutomationUpdatePayload = { name, message };
+  const schedule = automationSchedulePayloadFromDraft(draft);
+  if (typeof schedule === "string") return schedule;
+  if (automationScheduleChanged(draft, job, schedule)) {
+    payload.schedule = schedule;
+  }
+  return payload;
+}
+
+function automationSchedulePayloadFromDraft(draft: AutomationEditDraft): AutomationScheduleUpdate | string {
   if (draft.scheduleKind === "every") {
     const unit = AUTOMATION_EVERY_UNITS.find((candidate) => candidate.value === draft.everyUnit);
     const value = Number(draft.everyValue);
     if (!unit || !Number.isInteger(value) || value <= 0) return "invalid";
-    payload.schedule = { kind: "every", every_ms: value * unit.ms };
+    return { kind: "every", every_ms: value * unit.ms };
   } else if (draft.scheduleKind === "cron") {
     const expr = draft.cronExpr.trim();
     if (!expr) return "invalid";
-    payload.schedule = { kind: "cron", expr, ...(draft.tz.trim() ? { tz: draft.tz.trim() } : {}) };
+    return { kind: "cron", expr, ...(draft.tz.trim() ? { tz: draft.tz.trim() } : {}) };
   } else {
     const atMs = new Date(draft.atLocal).getTime();
     if (!Number.isFinite(atMs)) return "invalid";
-    payload.schedule = { kind: "at", at_ms: atMs };
+    return { kind: "at", at_ms: atMs };
   }
-  return payload;
+}
+
+function automationScheduleChanged(
+  draft: AutomationEditDraft,
+  job: SessionAutomationJob | null,
+  schedule: AutomationScheduleUpdate | string = automationSchedulePayloadFromDraft(draft),
+): boolean {
+  if (!job || typeof schedule === "string") return true;
+  if (schedule.kind !== job.schedule.kind) return true;
+  if (schedule.kind === "every") return schedule.every_ms !== job.schedule.every_ms;
+  if (schedule.kind === "cron") {
+    return schedule.expr !== (job.schedule.expr ?? "") || (schedule.tz ?? null) !== (job.schedule.tz ?? null);
+  }
+  return draft.atLocal !== formatLocalDateTimeInput(job.schedule.at_ms ?? NaN);
 }
 
 function automationSearchText(job: SessionAutomationJob): string {

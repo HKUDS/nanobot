@@ -23,7 +23,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from blackcat.command.builtin import builtin_command_palette
-from blackcat.cron.types import CronSchedule
+from blackcat.cron.types import CronJob, CronSchedule
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
@@ -600,7 +600,7 @@ class GatewayHTTPHandler:
             values = _automation_values_from_request(request)
             if values is None:
                 return _http_error(400, "invalid automation update payload")
-            parsed = _parse_automation_update(values)
+            parsed = _parse_automation_update(values, current_job=job)
             if isinstance(parsed, str):
                 return _http_error(400, parsed)
             try:
@@ -786,7 +786,11 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
     return values if isinstance(values, dict) else None
 
 
-def _parse_automation_update(values: dict[str, Any]) -> dict[str, Any] | str:
+def _parse_automation_update(
+    values: dict[str, Any],
+    *,
+    current_job: CronJob | None = None,
+) -> dict[str, Any] | str:
     update: dict[str, Any] = {}
     if "name" in values:
         raw_name = values.get("name")
@@ -811,6 +815,8 @@ def _parse_automation_update(values: dict[str, Any]) -> dict[str, Any] | str:
         parsed_schedule = _parse_automation_schedule(raw_schedule)
         if isinstance(parsed_schedule, str):
             return parsed_schedule
+        if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
+            return update
         schedule_error = _validate_automation_schedule(parsed_schedule)
         if schedule_error:
             return schedule_error
@@ -847,6 +853,21 @@ def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
             return "one-time schedule requires positive at_ms"
         return CronSchedule(kind="at", at_ms=at_ms)
     return "unknown schedule kind"
+
+
+def _schedule_matches_job(schedule: CronSchedule, job: CronJob) -> bool:
+    current = job.schedule
+    if schedule.kind != current.kind:
+        return False
+    if schedule.kind == "at":
+        return schedule.at_ms == current.at_ms
+    if schedule.kind == "every":
+        return schedule.every_ms == current.every_ms
+    if schedule.kind == "cron":
+        return (schedule.expr or "") == (current.expr or "") and (
+            schedule.tz or None
+        ) == (current.tz or None)
+    return False
 
 
 def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
