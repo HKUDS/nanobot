@@ -142,6 +142,17 @@ export interface SessionAutomationJob {
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
 export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationUpdatePayload {
+  name?: string;
+  message?: string;
+  schedule?: {
+    kind: "at" | "every" | "cron";
+    at_ms?: number;
+    every_ms?: number;
+    expr?: string;
+    tz?: string;
+  };
+}
 
 export interface SessionDeleteResult {
   deleted: boolean;

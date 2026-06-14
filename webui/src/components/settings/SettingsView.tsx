@@ -5,12 +5,14 @@ import {
   useMemo,
   useState,
   type Dispatch,
+  type FormEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
 import {
   Activity,
   ArrowUpCircle,
+  ArrowUpDown,
   Bot,
   Brain,
   Check,
@@ -93,6 +95,7 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  updateAutomation,
   updateImageGenerationSettings,
   updateMcpServerTools,
   updateModelConfiguration,
@@ -116,6 +119,7 @@ import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 import type {
   AutomationsPayload,
+  AutomationUpdatePayload,
   CliAppInfo,
   CliAppsPayload,
   ImageGenerationSettingsUpdate,
@@ -148,6 +152,7 @@ type LocalDensity = "comfortable" | "compact";
 type LocalActivityMode = "auto" | "expanded";
 type AppsKindFilter = "all" | "cli" | "mcp";
 type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
+type AutomationSort = "next" | "last" | "updated" | "name";
 type AutomationAction = "enable" | "disable" | "delete" | "run";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
@@ -546,6 +551,7 @@ export function SettingsView({
   const [appsQuery, setAppsQuery] = useState("");
   const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
+  const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
@@ -555,6 +561,8 @@ export function SettingsView({
   const [automationsError, setAutomationsError] = useState<string | null>(null);
   const [automationAction, setAutomationAction] = useState<string | null>(null);
   const [automationPendingDelete, setAutomationPendingDelete] =
+    useState<SessionAutomationJob | null>(null);
+  const [automationPendingEdit, setAutomationPendingEdit] =
     useState<SessionAutomationJob | null>(null);
   const [mcpFieldValues, setMcpFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [customMcpForm, setCustomMcpForm] = useState<CustomMcpForm>(DEFAULT_CUSTOM_MCP_FORM);
@@ -718,25 +726,51 @@ export function SettingsView({
     };
   }, [activeSection, token]);
 
+  const refreshAutomations = useCallback(
+    async (showLoading = false) => {
+      if (showLoading) setAutomationsLoading(true);
+      try {
+        const payload = await fetchAutomations(token);
+        setAutomations(payload);
+        setAutomationsError(null);
+      } catch (err) {
+        setAutomationsError((err as Error).message);
+      } finally {
+        if (showLoading) setAutomationsLoading(false);
+      }
+    },
+    [token],
+  );
+
   useEffect(() => {
     if (activeSection !== "automations") return;
     let cancelled = false;
-    setAutomationsLoading(true);
-    fetchAutomations(token)
-      .then((payload) => {
-        if (!cancelled) {
-          setAutomations(payload);
-          setAutomationsError(null);
-        }
-      })
-      .catch((err) => {
+    const refresh = async (showLoading = false) => {
+      if (cancelled) return;
+      if (showLoading) setAutomationsLoading(true);
+      try {
+        const payload = await fetchAutomations(token);
+        if (cancelled) return;
+        setAutomations(payload);
+        setAutomationsError(null);
+      } catch (err) {
         if (!cancelled) setAutomationsError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setAutomationsLoading(false);
-      });
+      } finally {
+        if (!cancelled && showLoading) setAutomationsLoading(false);
+      }
+    };
+    void refresh(true);
+    const interval = window.setInterval(() => void refresh(false), 5000);
+    const refreshOnFocus = () => {
+      if (document.visibilityState !== "hidden") void refresh(false);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
     };
   }, [activeSection, token]);
 
@@ -1275,6 +1309,28 @@ export function SettingsView({
       const payload = await runAutomationAction(token, action, job.id);
       setAutomations(payload);
       if (action === "delete") setAutomationPendingDelete(null);
+      if (action === "run") {
+        window.setTimeout(() => void refreshAutomations(false), 1200);
+        window.setTimeout(() => void refreshAutomations(false), 4000);
+      }
+    } catch (err) {
+      setAutomationsError((err as Error).message);
+    } finally {
+      setAutomationAction(null);
+    }
+  };
+
+  const handleAutomationEdit = async (
+    job: SessionAutomationJob,
+    values: AutomationUpdatePayload,
+  ) => {
+    const key = `update:${job.id}`;
+    setAutomationAction(key);
+    setAutomationsError(null);
+    try {
+      const payload = await updateAutomation(token, job.id, values);
+      setAutomations(payload);
+      setAutomationPendingEdit(null);
     } catch (err) {
       setAutomationsError((err as Error).message);
     } finally {
@@ -1569,11 +1625,14 @@ export function SettingsView({
             loading={automationsLoading}
             query={automationsQuery}
             filter={automationsFilter}
+            sort={automationsSort}
             actionKey={automationAction}
             error={automationsError}
             onQueryChange={setAutomationsQuery}
             onFilterChange={setAutomationsFilter}
+            onSortChange={setAutomationsSort}
             onAction={handleAutomationAction}
+            onRequestEdit={setAutomationPendingEdit}
             onRequestDelete={setAutomationPendingDelete}
           />
         );
@@ -1642,6 +1701,15 @@ export function SettingsView({
           if (!open) setAutomationPendingDelete(null);
         }}
         onConfirm={(job) => handleAutomationAction("delete", job)}
+      />
+
+      <AutomationEditDialog
+        job={automationPendingEdit}
+        saving={automationAction === `update:${automationPendingEdit?.id ?? ""}`}
+        onOpenChange={(open) => {
+          if (!open) setAutomationPendingEdit(null);
+        }}
+        onSave={handleAutomationEdit}
       />
 
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
@@ -3336,22 +3404,28 @@ function AutomationsSettings({
   loading,
   query,
   filter,
+  sort,
   actionKey,
   error,
   onQueryChange,
   onFilterChange,
+  onSortChange,
   onAction,
+  onRequestEdit,
   onRequestDelete,
 }: {
   payload: AutomationsPayload | null;
   loading: boolean;
   query: string;
   filter: AutomationFilter;
+  sort: AutomationSort;
   actionKey: string | null;
   error: string | null;
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AutomationFilter) => void;
+  onSortChange: (value: AutomationSort) => void;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
+  onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -3359,20 +3433,29 @@ function AutomationsSettings({
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const jobs = payload?.jobs ?? [];
   const normalizedQuery = query.trim().toLowerCase();
-  const filtered = jobs
+  const filtered = sortAutomationJobs(jobs, sort)
     .filter((job) => automationMatchesFilter(job, filter))
     .filter((job) => !normalizedQuery || automationSearchText(job).includes(normalizedQuery));
-  const activeCount = jobs.filter((job) => job.enabled && !job.protected).length;
-  const pausedCount = jobs.filter((job) => !job.enabled && !job.protected).length;
-  const failedCount = jobs.filter((job) => job.state.last_status === "error").length;
+  const activeCount = jobs.filter((job) => {
+    const key = automationStatusKey(job);
+    return key === "active" || key === "running";
+  }).length;
+  const pausedCount = jobs.filter((job) => automationStatusKey(job) === "paused").length;
+  const failedCount = jobs.filter(automationNeedsAttention).length;
   const systemCount = jobs.filter((job) => job.protected).length;
   const filterOptions = [
     { value: "all", label: tx("settings.automations.filters.all", "All") },
     { value: "active", label: tx("settings.automations.filters.active", "Active") },
     { value: "paused", label: tx("settings.automations.filters.paused", "Paused") },
-    { value: "failed", label: tx("settings.automations.filters.failed", "Failed") },
+    { value: "failed", label: tx("settings.automations.filters.failed", "Needs attention") },
     { value: "system", label: tx("settings.automations.filters.system", "System") },
   ];
+  const sortLabel = {
+    next: tx("settings.automations.sort.next", "Next run"),
+    last: tx("settings.automations.sort.last", "Last run"),
+    updated: tx("settings.automations.sort.updated", "Updated"),
+    name: tx("settings.automations.sort.name", "Name"),
+  } satisfies Record<AutomationSort, string>;
 
   return (
     <div className="space-y-5">
@@ -3380,7 +3463,7 @@ function AutomationsSettings({
         <div className="grid gap-2 sm:grid-cols-4">
           <AutomationStat label={tx("settings.automations.stats.active", "Active")} value={activeCount} />
           <AutomationStat label={tx("settings.automations.stats.paused", "Paused")} value={pausedCount} />
-          <AutomationStat label={tx("settings.automations.stats.failed", "Failed")} value={failedCount} />
+          <AutomationStat label={tx("settings.automations.stats.failed", "Needs attention")} value={failedCount} />
           <AutomationStat label={tx("settings.automations.stats.system", "System")} value={systemCount} />
         </div>
 
@@ -3394,11 +3477,33 @@ function AutomationsSettings({
               className="h-9 rounded-full bg-background/85 pl-9 text-[13px]"
             />
           </div>
-          <SegmentedControl
-            value={filter}
-            options={filterOptions}
-            onChange={(value) => onFilterChange(value as AutomationFilter)}
-          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full border border-border/55 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground"
+                >
+                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                  <span>{sortLabel[sort]}</span>
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-40">
+                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                    <span>{sortLabel[value]}</span>
+                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <SegmentedControl
+              value={filter}
+              options={filterOptions}
+              onChange={(value) => onFilterChange(value as AutomationFilter)}
+            />
+          </div>
         </div>
       </section>
 
@@ -3425,15 +3530,26 @@ function AutomationsSettings({
                 locale={i18n.resolvedLanguage || i18n.language}
                 actionKey={actionKey}
                 onAction={onAction}
+                onRequestEdit={onRequestEdit}
                 onRequestDelete={onRequestDelete}
               />
             ))}
           </div>
         ) : (
           <div className="rounded-[22px] border border-border/45 bg-card/78 px-5 py-10 text-center text-[13px] text-muted-foreground">
-            {jobs.length
-              ? tx("settings.automations.noMatches", "No automations match this view.")
-              : tx("settings.automations.empty", "No automations yet.")}
+            <div>
+              {jobs.length
+                ? tx("settings.automations.noMatches", "No automations match this view.")
+                : tx("settings.automations.empty", "No automations yet.")}
+            </div>
+            {!jobs.length ? (
+              <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
+                {tx(
+                  "settings.automations.emptyHint",
+                  "Create one from the chat or channel where it should run so nanobot keeps the right context.",
+                )}
+              </div>
+            ) : null}
           </div>
         )}
       </section>
@@ -3455,12 +3571,14 @@ function AutomationRow({
   locale,
   actionKey,
   onAction,
+  onRequestEdit,
   onRequestDelete,
 }: {
   job: SessionAutomationJob;
   locale: string;
   actionKey: string | null;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
+  onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
 }) {
   const { t } = useTranslation();
@@ -3476,6 +3594,7 @@ function AutomationRow({
   const canRun = canManage && job.enabled && !job.state.pending;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
+  const needsRecreation = automationNeedsRecreation(job);
 
   return (
     <article className="rounded-[22px] border border-border/45 bg-card/86 p-4 shadow-[0_18px_65px_rgba(15,23,42,0.06)] backdrop-blur-xl">
@@ -3495,16 +3614,25 @@ function AutomationRow({
           </p>
 
           <div className="mt-3 grid gap-2 text-[12px] text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
-            <AutomationDetail label={tx("settings.automations.labels.schedule", "Schedule")}>
+            <AutomationDetail
+              label={tx("settings.automations.labels.schedule", "Schedule")}
+              title={formatAutomationSchedule(job, locale, tx)}
+            >
               {formatAutomationSchedule(job, locale, tx)}
             </AutomationDetail>
-            <AutomationDetail label={tx("settings.automations.labels.next", "Next")}>
+            <AutomationDetail
+              label={tx("settings.automations.labels.next", "Next")}
+              title={formatAutomationNextTitle(job, locale, tx)}
+            >
               {formatAutomationNext(job, tx)}
             </AutomationDetail>
-            <AutomationDetail label={tx("settings.automations.labels.last", "Last")}>
+            <AutomationDetail
+              label={tx("settings.automations.labels.last", "Last")}
+              title={formatAutomationLast(job, locale, tx)}
+            >
               {formatAutomationLast(job, locale, tx)}
             </AutomationDetail>
-            <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
+            <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")} title={origin}>
               {originHref ? (
                 <a
                   className="inline-flex max-w-full items-center gap-1 text-foreground/80 underline-offset-2 hover:underline"
@@ -3518,6 +3646,15 @@ function AutomationRow({
               )}
             </AutomationDetail>
           </div>
+
+          {needsRecreation ? (
+            <div className="mt-3 rounded-[14px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+              {tx(
+                "settings.automations.legacyWarning",
+                "This older automation is missing its target chat. Recreate it from the chat or channel where it should run.",
+              )}
+            </div>
+          ) : null}
 
           {job.state.last_error ? (
             <div className="mt-3 rounded-[14px] bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
@@ -3534,7 +3671,12 @@ function AutomationRow({
                 {history.slice(-4).map((record) => {
                   const statusLabel = automationRunStatusLabel(record.status, tx);
                   const duration = formatAutomationRunDuration(record.duration_ms, locale, tx);
-                  const visibleLabel = record.status === "ok" ? duration : `${statusLabel} · ${duration}`;
+                  const visibleLabel = record.status === "ok"
+                    ? duration
+                    : tx("settings.automations.history.statusWithDuration", "{{status}} · {{duration}}", {
+                        status: statusLabel,
+                        duration,
+                      });
                   const detail = record.error || fmtDateTime(record.run_at_ms, locale);
                   const accessibleLabel = `${statusLabel} · ${duration} · ${detail}`;
                   return (
@@ -3558,11 +3700,35 @@ function AutomationRow({
               </div>
             </div>
           ) : null}
+
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] leading-5 text-muted-foreground">
+            {job.created_at_ms ? (
+              <span>
+                {tx("settings.automations.meta.created", "Created {{time}}", {
+                  time: fmtDateTime(job.created_at_ms, locale),
+                })}
+              </span>
+            ) : null}
+            {job.updated_at_ms ? (
+              <span>
+                {tx("settings.automations.meta.updated", "Updated {{time}}", {
+                  time: fmtDateTime(job.updated_at_ms, locale),
+                })}
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
           {canManage ? (
             <>
+              <AppsActionButton
+                ariaLabel={tx("settings.automations.edit", "Edit")}
+                disabled={Boolean(actionKey)}
+                onClick={() => onRequestEdit(job)}
+              >
+                <Pencil className="h-4 w-4" aria-hidden />
+              </AppsActionButton>
               <AppsActionButton
                 ariaLabel={tx("settings.automations.runNow", "Run now")}
                 busy={actionKey === `run:${job.id}`}
@@ -3606,14 +3772,249 @@ function AutomationRow({
   );
 }
 
-function AutomationDetail({ label, children }: { label: string; children: ReactNode }) {
+function AutomationDetail({
+  label,
+  title,
+  children,
+}: {
+  label: string;
+  title?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="min-w-0 rounded-[14px] bg-muted/35 px-3 py-2">
       <div className="text-[10.5px] font-medium uppercase leading-none text-muted-foreground/75">
         {label}
       </div>
-      <div className="mt-1.5 truncate text-[12.5px] leading-5 text-foreground/85">{children}</div>
+      <div className="mt-1.5 truncate text-[12.5px] leading-5 text-foreground/85" title={title}>
+        {children}
+      </div>
     </div>
+  );
+}
+
+type AutomationEveryUnit = "second" | "minute" | "hour" | "day";
+
+type AutomationEditDraft = {
+  name: string;
+  message: string;
+  scheduleKind: "at" | "every" | "cron";
+  everyValue: string;
+  everyUnit: AutomationEveryUnit;
+  cronExpr: string;
+  tz: string;
+  atLocal: string;
+};
+
+const AUTOMATION_EVERY_UNITS: Array<{ value: AutomationEveryUnit; ms: number }> = [
+  { value: "second", ms: 1000 },
+  { value: "minute", ms: 60_000 },
+  { value: "hour", ms: 3_600_000 },
+  { value: "day", ms: 86_400_000 },
+];
+
+function AutomationEditDialog({
+  job,
+  saving,
+  onOpenChange,
+  onSave,
+}: {
+  job: SessionAutomationJob | null;
+  saving: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (job: SessionAutomationJob, values: AutomationUpdatePayload) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
+    t(key, { defaultValue: fallback, ...(values ?? {}) });
+  const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
+
+  useEffect(() => {
+    setDraft(automationDraftFromJob(job));
+  }, [job]);
+
+  const validation = automationEditDraftError(draft, tx);
+  const scheduleOptions = [
+    { value: "every", label: tx("settings.automations.scheduleTypes.every", "Interval") },
+    { value: "cron", label: tx("settings.automations.scheduleTypes.cron", "Cron") },
+    { value: "at", label: tx("settings.automations.scheduleTypes.at", "Once") },
+  ];
+  const unitLabels: Record<AutomationEveryUnit, string> = {
+    second: tx("settings.automations.everyUnits.second", "Seconds"),
+    minute: tx("settings.automations.everyUnits.minute", "Minutes"),
+    hour: tx("settings.automations.everyUnits.hour", "Hours"),
+    day: tx("settings.automations.everyUnits.day", "Days"),
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const payload = automationUpdatePayloadFromDraft(draft);
+    if (!job || typeof payload === "string") return;
+    void onSave(job, payload);
+  };
+
+  return (
+    <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
+      {job ? (
+        <DialogContent className="w-[min(calc(100vw-2rem),34rem)] rounded-[26px]">
+          <form className="space-y-5" onSubmit={submit}>
+            <DialogHeader>
+              <DialogTitle>{tx("settings.automations.editTitle", "Edit automation")}</DialogTitle>
+              <DialogDescription>
+                {tx(
+                  "settings.automations.editDescription",
+                  "Update the prompt and schedule. The linked chat stays unchanged.",
+                )}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <label className="block space-y-1.5">
+                <span className="text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.automations.fields.name", "Name")}
+                </span>
+                <Input
+                  value={draft.name}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
+                  className="h-10 rounded-[12px]"
+                />
+              </label>
+
+              <label className="block space-y-1.5">
+                <span className="text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.automations.fields.message", "Message")}
+                </span>
+                <Textarea
+                  value={draft.message}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
+                  className="min-h-24 resize-y rounded-[12px] text-[13px] leading-5"
+                />
+              </label>
+
+              <div className="space-y-2">
+                <span className="text-[12px] font-medium text-muted-foreground">
+                  {tx("settings.automations.fields.scheduleType", "Schedule type")}
+                </span>
+                <SegmentedControl
+                  value={draft.scheduleKind}
+                  options={scheduleOptions}
+                  onChange={(value) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      scheduleKind: value as AutomationEditDraft["scheduleKind"],
+                    }))
+                  }
+                />
+              </div>
+
+              {draft.scheduleKind === "every" ? (
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                  <label className="block space-y-1.5">
+                    <span className="text-[12px] font-medium text-muted-foreground">
+                      {tx("settings.automations.fields.every", "Every")}
+                    </span>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={draft.everyValue}
+                      onChange={(event) =>
+                        setDraft((prev) => ({ ...prev, everyValue: event.target.value }))
+                      }
+                      className="h-10 rounded-[12px]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-[12px] font-medium text-muted-foreground">
+                      {tx("settings.automations.fields.unit", "Unit")}
+                    </span>
+                    <select
+                      value={draft.everyUnit}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          everyUnit: event.target.value as AutomationEveryUnit,
+                        }))
+                      }
+                      className="h-10 w-full rounded-[12px] border border-input bg-background px-3 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {AUTOMATION_EVERY_UNITS.map((unit) => (
+                        <option key={unit.value} value={unit.value}>
+                          {unitLabels[unit.value]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+
+              {draft.scheduleKind === "cron" ? (
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                  <label className="block space-y-1.5">
+                    <span className="text-[12px] font-medium text-muted-foreground">
+                      {tx("settings.automations.fields.cronExpression", "Cron expression")}
+                    </span>
+                    <Input
+                      value={draft.cronExpr}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, cronExpr: event.target.value }))}
+                      placeholder="0 9 * * *"
+                      className="h-10 rounded-[12px] font-mono text-[13px]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-[12px] font-medium text-muted-foreground">
+                      {tx("settings.automations.fields.timezone", "Timezone")}
+                    </span>
+                    <Input
+                      value={draft.tz}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, tz: event.target.value }))}
+                      placeholder="Asia/Shanghai"
+                      className="h-10 rounded-[12px] text-[13px]"
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              {draft.scheduleKind === "at" ? (
+                <label className="block space-y-1.5">
+                  <span className="text-[12px] font-medium text-muted-foreground">
+                    {tx("settings.automations.fields.runAt", "Run at")}
+                  </span>
+                  <Input
+                    type="datetime-local"
+                    value={draft.atLocal}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, atLocal: event.target.value }))}
+                    className="h-10 rounded-[12px]"
+                  />
+                </label>
+              ) : null}
+
+              {validation ? (
+                <div className="rounded-[12px] bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
+                  {validation}
+                </div>
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => onOpenChange(false)}
+                disabled={saving}
+                className="rounded-full"
+              >
+                {tx("settings.automations.cancel", "Cancel")}
+              </Button>
+              <Button type="submit" disabled={Boolean(validation) || saving} className="rounded-full">
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
+                {tx("settings.automations.save", "Save")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -3670,6 +4071,130 @@ function AutomationDeleteDialog({
   );
 }
 
+function automationNeedsRecreation(job: SessionAutomationJob): boolean {
+  return !job.protected && !job.origin && job.payload.kind === "agent_turn";
+}
+
+function automationNeedsAttention(job: SessionAutomationJob): boolean {
+  return automationNeedsRecreation(job) || job.state.last_status === "error";
+}
+
+function automationStatusKey(
+  job: SessionAutomationJob,
+): "active" | "running" | "paused" | "failed" | "system" | "needs_setup" | "completed" | "idle" {
+  if (job.protected) return "system";
+  if (automationNeedsRecreation(job)) return "needs_setup";
+  if (job.state.pending) return "running";
+  if (!job.enabled) return "paused";
+  if (job.state.last_status === "error") return "failed";
+  if (job.delete_after_run && !job.state.next_run_at_ms && job.state.last_status === "ok") {
+    return "completed";
+  }
+  if (!job.state.next_run_at_ms) return "idle";
+  return "active";
+}
+
+function sortAutomationJobs(jobs: SessionAutomationJob[], sort: AutomationSort): SessionAutomationJob[] {
+  const byName = (left: SessionAutomationJob, right: SessionAutomationJob) =>
+    (left.name || left.id).localeCompare(right.name || right.id);
+  return [...jobs].sort((left, right) => {
+    if (sort === "name") return byName(left, right);
+    if (sort === "last") {
+      return (right.state.last_run_at_ms ?? 0) - (left.state.last_run_at_ms ?? 0) || byName(left, right);
+    }
+    if (sort === "updated") {
+      return (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0) || byName(left, right);
+    }
+    const leftNext = left.state.next_run_at_ms ?? Number.MAX_SAFE_INTEGER;
+    const rightNext = right.state.next_run_at_ms ?? Number.MAX_SAFE_INTEGER;
+    return leftNext - rightNext || byName(left, right);
+  });
+}
+
+function automationDraftFromJob(job: SessionAutomationJob | null): AutomationEditDraft {
+  const every = automationIntervalDraft(job?.schedule.every_ms ?? 3_600_000);
+  const scheduleKind = job?.schedule.kind === "at" || job?.schedule.kind === "cron"
+    ? job.schedule.kind
+    : "every";
+  return {
+    name: job?.name ?? "",
+    message: job?.payload.message ?? "",
+    scheduleKind,
+    everyValue: every.value,
+    everyUnit: every.unit,
+    cronExpr: job?.schedule.expr ?? "0 9 * * *",
+    tz: job?.schedule.tz ?? "",
+    atLocal: formatLocalDateTimeInput(job?.schedule.at_ms ?? Date.now() + 3_600_000),
+  };
+}
+
+function automationIntervalDraft(ms: number): { value: string; unit: AutomationEveryUnit } {
+  for (const unit of [...AUTOMATION_EVERY_UNITS].reverse()) {
+    if (ms >= unit.ms && ms % unit.ms === 0) {
+      return { value: String(ms / unit.ms), unit: unit.value };
+    }
+  }
+  return { value: String(Math.max(1, Math.round(ms / 60_000))), unit: "minute" };
+}
+
+function formatLocalDateTimeInput(ms: number): string {
+  const date = new Date(ms);
+  if (!Number.isFinite(date.getTime())) return "";
+  const local = new Date(ms - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function automationEditDraftError(
+  draft: AutomationEditDraft,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string | null {
+  if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (!draft.message.trim()) {
+    return tx("settings.automations.validation.messageRequired", "Message is required.");
+  }
+  if (draft.scheduleKind === "every") {
+    const value = Number(draft.everyValue);
+    if (!Number.isInteger(value) || value <= 0) {
+      return tx("settings.automations.validation.intervalRequired", "Interval must be a positive number.");
+    }
+  }
+  if (draft.scheduleKind === "cron" && !draft.cronExpr.trim()) {
+    return tx("settings.automations.validation.cronRequired", "Cron expression is required.");
+  }
+  if (draft.scheduleKind === "at") {
+    const atMs = new Date(draft.atLocal).getTime();
+    if (!Number.isFinite(atMs)) {
+      return tx("settings.automations.validation.timeRequired", "Run time is required.");
+    }
+    if (atMs <= Date.now()) {
+      return tx("settings.automations.validation.futureRequired", "Run time must be in the future.");
+    }
+  }
+  return null;
+}
+
+function automationUpdatePayloadFromDraft(draft: AutomationEditDraft): AutomationUpdatePayload | string {
+  const name = draft.name.trim();
+  const message = draft.message.trim();
+  if (!name || !message) return "invalid";
+  const payload: AutomationUpdatePayload = { name, message };
+  if (draft.scheduleKind === "every") {
+    const unit = AUTOMATION_EVERY_UNITS.find((candidate) => candidate.value === draft.everyUnit);
+    const value = Number(draft.everyValue);
+    if (!unit || !Number.isInteger(value) || value <= 0) return "invalid";
+    payload.schedule = { kind: "every", every_ms: value * unit.ms };
+  } else if (draft.scheduleKind === "cron") {
+    const expr = draft.cronExpr.trim();
+    if (!expr) return "invalid";
+    payload.schedule = { kind: "cron", expr, ...(draft.tz.trim() ? { tz: draft.tz.trim() } : {}) };
+  } else {
+    const atMs = new Date(draft.atLocal).getTime();
+    if (!Number.isFinite(atMs)) return "invalid";
+    payload.schedule = { kind: "at", at_ms: atMs };
+  }
+  return payload;
+}
+
 function automationSearchText(job: SessionAutomationJob): string {
   const originText = job.origin
     ? job.origin.channel === "websocket"
@@ -3691,9 +4216,10 @@ function automationSearchText(job: SessionAutomationJob): string {
 }
 
 function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFilter): boolean {
-  if (filter === "active") return job.enabled && !job.protected;
-  if (filter === "paused") return !job.enabled && !job.protected;
-  if (filter === "failed") return job.state.last_status === "error";
+  const status = automationStatusKey(job);
+  if (filter === "active") return status === "active" || status === "running";
+  if (filter === "paused") return status === "paused";
+  if (filter === "failed") return automationNeedsAttention(job);
   if (filter === "system") return Boolean(job.protected);
   return true;
 }
@@ -3702,11 +4228,23 @@ function automationStatus(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): { label: string; tone: "neutral" | "success" | "warning" } {
-  if (job.protected) return { label: tx("settings.automations.status.system", "System"), tone: "neutral" };
-  if (job.state.pending) return { label: tx("settings.automations.status.pending", "Pending"), tone: "warning" };
-  if (!job.enabled) return { label: tx("settings.automations.status.paused", "Paused"), tone: "neutral" };
-  if (job.state.last_status === "error") {
+  const status = automationStatusKey(job);
+  if (status === "system") return { label: tx("settings.automations.status.system", "System"), tone: "neutral" };
+  if (status === "needs_setup") {
+    return { label: tx("settings.automations.status.needsSetup", "Needs setup"), tone: "warning" };
+  }
+  if (status === "running") {
+    return { label: tx("settings.automations.status.running", "Running now"), tone: "warning" };
+  }
+  if (status === "paused") return { label: tx("settings.automations.status.paused", "Paused"), tone: "neutral" };
+  if (status === "failed") {
     return { label: tx("settings.automations.status.failed", "Failed"), tone: "warning" };
+  }
+  if (status === "completed") {
+    return { label: tx("settings.automations.status.completed", "Completed"), tone: "neutral" };
+  }
+  if (status === "idle") {
+    return { label: tx("settings.automations.status.noSchedule", "No schedule"), tone: "neutral" };
   }
   return { label: tx("settings.automations.status.active", "Active"), tone: "success" };
 }
@@ -3768,6 +4306,15 @@ function formatAutomationSchedule(
     });
   }
   if (job.schedule.kind === "cron" && job.schedule.expr) {
+    const summary = formatCronScheduleSummary(job.schedule.expr, tx);
+    if (summary) {
+      return job.schedule.tz
+        ? tx("settings.automations.schedule.withTz", "{{summary}} · {{tz}}", {
+            summary,
+            tz: job.schedule.tz,
+          })
+        : summary;
+    }
     return job.schedule.tz
       ? tx("settings.automations.schedule.cronWithTz", "Cron {{expr}} · {{tz}}", {
           expr: job.schedule.expr,
@@ -3778,14 +4325,68 @@ function formatAutomationSchedule(
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
 
+function formatCronScheduleSummary(
+  expr: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string | null {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  const numericMinute = cronNumericToken(minute, 59);
+  const numericHour = cronNumericToken(hour, 23);
+  const everyDay = dayOfMonth === "*" && month === "*" && dayOfWeek === "*";
+  const workdays = dayOfMonth === "*" && month === "*" && ["1-5", "MON-FRI", "mon-fri"].includes(dayOfWeek);
+
+  if (numericMinute !== null && numericHour !== null) {
+    const time = `${String(numericHour).padStart(2, "0")}:${String(numericMinute).padStart(2, "0")}`;
+    if (everyDay) return tx("settings.automations.schedule.dailyAt", "Daily at {{time}}", { time });
+    if (workdays) return tx("settings.automations.schedule.weekdaysAt", "Weekdays at {{time}}", { time });
+  }
+
+  if (everyDay && numericMinute !== null && hour === "*") {
+    return tx("settings.automations.schedule.hourlyAt", "Hourly at :{{minute}}", {
+      minute: String(numericMinute).padStart(2, "0"),
+    });
+  }
+
+  const range = /^(\d{1,2})-(\d{1,2})$/.exec(hour);
+  if (everyDay && numericMinute !== null && range) {
+    const start = Number(range[1]);
+    const end = Number(range[2]);
+    if (start > 23 || end > 23) return null;
+    return tx("settings.automations.schedule.hourlyWindow", "Hourly {{start}}-{{end}} at :{{minute}}", {
+      start: String(start).padStart(2, "0"),
+      end: String(end).padStart(2, "0"),
+      minute: String(numericMinute).padStart(2, "0"),
+    });
+  }
+
+  return null;
+}
+
+function cronNumericToken(value: string, max: number): number | null {
+  if (!/^\d{1,2}$/.test(value)) return null;
+  const parsed = Number(value);
+  return parsed <= max ? parsed : null;
+}
+
 function formatAutomationNext(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
   if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
-  if (job.state.pending) return tx("settings.automations.next.pending", "Running soon");
+  if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
   if (!job.state.next_run_at_ms) return tx("settings.automations.next.none", "No next run");
   return relativeTime(job.state.next_run_at_ms);
+}
+
+function formatAutomationNextTitle(
+  job: SessionAutomationJob,
+  locale: string,
+  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+): string {
+  if (!job.state.next_run_at_ms) return formatAutomationNext(job, tx);
+  return fmtDateTime(job.state.next_run_at_ms, locale);
 }
 
 function formatAutomationLast(

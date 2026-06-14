@@ -23,6 +23,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from blackcat.command.builtin import builtin_command_palette
+from blackcat.cron.types import CronSchedule
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from blackcat.webui.gateway_tokens import GatewayTokenStore, token_response_payload
@@ -80,6 +81,7 @@ from blackcat.webui.transcript import build_webui_thread_response
 from blackcat.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
+_AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 
 if TYPE_CHECKING:
     from blackcat.bus.queue import MessageBus
@@ -529,7 +531,7 @@ class GatewayHTTPHandler:
     ) -> Response | None:
         if got == "/api/webui/automations":
             return self._handle_webui_automations(request)
-        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run)$", got)
+        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", got)
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
         return None
@@ -594,6 +596,21 @@ class GatewayHTTPHandler:
                 return _http_error(409, "automation is disabled")
             task = asyncio.create_task(self.cron_service.run_job(job_id, force=False))
             task.add_done_callback(self._log_automation_run_result)
+        elif action == "update":
+            values = _automation_values_from_request(request)
+            if values is None:
+                return _http_error(400, "invalid automation update payload")
+            parsed = _parse_automation_update(values)
+            if isinstance(parsed, str):
+                return _http_error(400, parsed)
+            try:
+                result = self.cron_service.update_job(job_id, **parsed)
+            except ValueError as exc:
+                return _http_error(400, str(exc))
+            if result == "not_found":
+                return _http_error(404, "automation not found")
+            if result == "protected":
+                return _http_error(403, "system automation is protected")
         else:
             return _http_error(404, "unknown automation action")
 
@@ -756,6 +773,73 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache)],
         )
+
+
+def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None:
+    raw = _case_insensitive_header(request.headers, _AUTOMATION_VALUES_HEADER)
+    if not raw:
+        return {}
+    try:
+        values = json.loads(raw)
+    except Exception:
+        return None
+    return values if isinstance(values, dict) else None
+
+
+def _parse_automation_update(values: dict[str, Any]) -> dict[str, Any] | str:
+    update: dict[str, Any] = {}
+    if "name" in values:
+        name = str(values.get("name") or "").strip()
+        if not name:
+            return "name cannot be empty"
+        update["name"] = name
+    if "message" in values:
+        message = str(values.get("message") or "").strip()
+        if not message:
+            return "message cannot be empty"
+        update["message"] = message
+    if "schedule" in values:
+        raw_schedule = values.get("schedule")
+        if not isinstance(raw_schedule, dict):
+            return "schedule must be an object"
+        parsed_schedule = _parse_automation_schedule(raw_schedule)
+        if isinstance(parsed_schedule, str):
+            return parsed_schedule
+        update["schedule"] = parsed_schedule
+        update["delete_after_run"] = parsed_schedule.kind == "at"
+    return update
+
+
+def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
+    kind = str(values.get("kind") or "").strip()
+    if kind == "every":
+        every_ms = _positive_int(values.get("every_ms"))
+        if every_ms is None:
+            return "every schedule requires positive every_ms"
+        return CronSchedule(kind="every", every_ms=every_ms)
+    if kind == "cron":
+        expr = str(values.get("expr") or "").strip()
+        if not expr:
+            return "cron schedule requires expr"
+        tz = str(values.get("tz") or "").strip() or None
+        return CronSchedule(kind="cron", expr=expr, tz=tz)
+    if kind == "at":
+        at_ms = _positive_int(values.get("at_ms"))
+        if at_ms is None:
+            return "one-time schedule requires positive at_ms"
+        return CronSchedule(kind="at", at_ms=at_ms)
+    return "unknown schedule kind"
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
 
 def _is_websocket_channel_session_key(key: str) -> bool:
     return key.startswith("websocket:")

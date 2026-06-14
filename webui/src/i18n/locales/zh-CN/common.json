@@ -477,21 +477,28 @@
       "stats": {
         "active": "运行中",
         "paused": "已暂停",
-        "failed": "失败",
+        "failed": "需处理",
         "system": "系统"
       },
       "filters": {
         "all": "全部",
         "active": "运行中",
         "paused": "已暂停",
-        "failed": "失败",
+        "failed": "需处理",
         "system": "系统"
+      },
+      "sort": {
+        "next": "下次运行",
+        "last": "上次运行",
+        "updated": "更新时间",
+        "name": "名称"
       },
       "search": "搜索任务、消息、会话或 cron 表达式",
       "queue": "任务队列",
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",
       "empty": "暂无自动任务。",
+      "emptyHint": "请从它应该运行的聊天或外部 channel 中创建，这样 nanobot 才能保留正确上下文。",
       "oneShot": "一次性",
       "systemTask": "系统管理的自动任务",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "立即运行",
       "pause": "暂停",
       "resume": "恢复",
+      "edit": "编辑",
       "delete": "删除",
       "protected": "受保护",
+      "editTitle": "编辑自动任务",
+      "editDescription": "更新提示词和计划；关联会话不会改变。",
+      "save": "保存",
       "deleteTitle": "删除自动任务",
       "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
       "cancel": "取消",
       "status": {
         "system": "系统",
         "pending": "等待中",
+        "running": "正在运行",
+        "needsSetup": "需重新设置",
         "paused": "已暂停",
         "failed": "失败",
+        "completed": "已完成",
+        "noSchedule": "无计划",
         "active": "运行中"
       },
+      "legacyWarning": "这个旧版自动任务缺少目标会话。请从它应该运行的聊天或外部 channel 中重新创建。",
       "origin": {
         "system": "系统",
         "unknown": "未关联会话",
@@ -542,11 +558,16 @@
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "工作日 {{time}}",
+        "hourlyAt": "每小时第 {{minute}} 分钟",
+        "hourlyWindow": "{{start}}-{{end}} 点每小时第 {{minute}} 分钟",
         "custom": "自定义计划"
       },
       "next": {
         "paused": "已暂停",
-        "pending": "即将运行",
+        "pending": "正在运行",
         "none": "没有下次运行"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "完成",
         "error": "错误",
         "skipped": "已跳过",
-        "recent": "最近运行"
+        "recent": "最近运行",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "创建于 {{time}}",
+        "updated": "更新于 {{time}}"
+      },
+      "fields": {
+        "name": "名称",
+        "message": "消息",
+        "scheduleType": "计划类型",
+        "every": "每隔",
+        "unit": "单位",
+        "cronExpression": "Cron 表达式",
+        "timezone": "时区",
+        "runAt": "运行时间"
+      },
+      "scheduleTypes": {
+        "every": "间隔",
+        "cron": "Cron",
+        "at": "一次性"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分钟",
+        "hour": "小时",
+        "day": "天"
+      },
+      "validation": {
+        "nameRequired": "名称不能为空。",
+        "messageRequired": "消息不能为空。",
+        "intervalRequired": "间隔必须是正整数。",
+        "cronRequired": "Cron 表达式不能为空。",
+        "timeRequired": "运行时间不能为空。",
+        "futureRequired": "运行时间必须晚于当前时间。"
       },
       "duration": {
         "lessThanSecond": "不到 1 秒"

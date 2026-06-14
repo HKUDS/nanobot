@@ -3,6 +3,8 @@
 import asyncio
 import functools
 import json
+import random
+import socket
 import threading
 import time
 from pathlib import Path
@@ -21,6 +23,18 @@ from blackcat.session.manager import Session, SessionManager
 from blackcat.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
+
+
+def _free_port() -> int:
+    for _ in range(100):
+        port = random.randint(30_000, 60_000)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("could not find a free localhost port")
 
 
 def _make_handler(
@@ -817,6 +831,8 @@ async def test_session_delete_removes_file(
 async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     bus: MagicMock, tmp_path: Path
 ) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
     cron = CronService(tmp_path / "cron" / "jobs.json")
     user_job = cron.add_job(
         name="Daily repo check",
@@ -857,19 +873,19 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         session_manager=session_manager,
         cron_service=cron,
         cron_pending_job_ids=lambda key: {user_job.id} if key == "websocket:abc" else set(),
-        port=29932,
+        port=port,
     )
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     try:
-        deny = await _http_get("http://127.0.0.1:29932/api/webui/automations")
-        assert deny.status_code == 401
+        deny = await _http_get(f"{base_url}/api/webui/automations")
+        assert deny.status_code == 401, deny.text
 
-        boot = await _http_get("http://127.0.0.1:29932/webui/bootstrap")
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
         token = boot.json()["token"]
         auth = {"Authorization": f"Bearer {token}"}
         resp = await _http_get(
-            "http://127.0.0.1:29932/api/webui/automations",
+            f"{base_url}/api/webui/automations",
             headers=auth,
         )
         assert resp.status_code == 200
@@ -886,8 +902,42 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[external_job.id]["origin"]["preview"] == ""
         assert by_id["heartbeat"]["protected"] is True
 
+        updated = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {
+                        "name": "Daily quiz",
+                        "message": "Ask the daily quiz",
+                        "schedule": {
+                            "kind": "cron",
+                            "expr": "0 9 * * *",
+                            "tz": "UTC",
+                        },
+                    }
+                ),
+            },
+        )
+        assert updated.status_code == 200
+        by_id = {job["id"]: job for job in updated.json()["jobs"]}
+        assert by_id[user_job.id]["name"] == "Daily quiz"
+        assert by_id[user_job.id]["payload"]["message"] == "Ask the daily quiz"
+        assert by_id[user_job.id]["schedule"]["kind"] == "cron"
+        assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
+        assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
+
+        protected_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id=heartbeat",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"name": "bad"}),
+            },
+        )
+        assert protected_update.status_code == 403
+
         disabled = await _http_get(
-            f"http://127.0.0.1:29932/api/webui/automations/disable?id={user_job.id}",
+            f"{base_url}/api/webui/automations/disable?id={user_job.id}",
             headers=auth,
         )
         assert disabled.status_code == 200
@@ -895,29 +945,29 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["enabled"] is False
 
         disabled_run = await _http_get(
-            f"http://127.0.0.1:29932/api/webui/automations/run?id={user_job.id}",
+            f"{base_url}/api/webui/automations/run?id={user_job.id}",
             headers=auth,
         )
         assert disabled_run.status_code == 409
 
         protected_delete = await _http_get(
-            "http://127.0.0.1:29932/api/webui/automations/delete?id=heartbeat",
+            f"{base_url}/api/webui/automations/delete?id=heartbeat",
             headers=auth,
         )
         assert protected_delete.status_code == 403
         protected_disable = await _http_get(
-            "http://127.0.0.1:29932/api/webui/automations/disable?id=heartbeat",
+            f"{base_url}/api/webui/automations/disable?id=heartbeat",
             headers=auth,
         )
         assert protected_disable.status_code == 403
         protected_run = await _http_get(
-            "http://127.0.0.1:29932/api/webui/automations/run?id=heartbeat",
+            f"{base_url}/api/webui/automations/run?id=heartbeat",
             headers=auth,
         )
         assert protected_run.status_code == 403
 
         enabled = await _http_get(
-            f"http://127.0.0.1:29932/api/webui/automations/enable?id={user_job.id}",
+            f"{base_url}/api/webui/automations/enable?id={user_job.id}",
             headers=auth,
         )
         assert enabled.status_code == 200
@@ -925,7 +975,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["enabled"] is True
 
         deleted = await _http_get(
-            f"http://127.0.0.1:29932/api/webui/automations/delete?id={user_job.id}",
+            f"{base_url}/api/webui/automations/delete?id={user_job.id}",
             headers=auth,
         )
         assert deleted.status_code == 200

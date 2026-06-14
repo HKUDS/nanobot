@@ -477,21 +477,28 @@
       "stats": {
         "active": "Active",
         "paused": "Paused",
-        "failed": "Failed",
+        "failed": "Needs attention",
         "system": "System"
       },
       "filters": {
         "all": "All",
         "active": "Active",
         "paused": "Paused",
-        "failed": "Failed",
+        "failed": "Needs attention",
         "system": "System"
+      },
+      "sort": {
+        "next": "Next run",
+        "last": "Last run",
+        "updated": "Updated",
+        "name": "Name"
       },
       "search": "Search automation, message, session, or cron expression",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
       "empty": "No automations yet.",
+      "emptyHint": "Create one from the chat or channel where it should run so nanobot keeps the right context.",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "Run now",
       "pause": "Pause",
       "resume": "Resume",
+      "edit": "Edit",
       "delete": "Delete",
       "protected": "Protected",
+      "editTitle": "Edit automation",
+      "editDescription": "Update the prompt and schedule. The linked chat stays unchanged.",
+      "save": "Save",
       "deleteTitle": "Delete automation",
       "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
       "cancel": "Cancel",
       "status": {
         "system": "System",
         "pending": "Pending",
+        "running": "Running now",
+        "needsSetup": "Needs setup",
         "paused": "Paused",
         "failed": "Failed",
+        "completed": "Completed",
+        "noSchedule": "No schedule",
         "active": "Active"
       },
+      "legacyWarning": "This older automation is missing its target chat. Recreate it from the chat or channel where it should run.",
       "origin": {
         "system": "System",
         "unknown": "No linked chat",
@@ -542,11 +558,16 @@
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Daily at {{time}}",
+        "weekdaysAt": "Weekdays at {{time}}",
+        "hourlyAt": "Hourly at :{{minute}}",
+        "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
         "custom": "Custom schedule"
       },
       "next": {
         "paused": "Paused",
-        "pending": "Running soon",
+        "pending": "Running now",
         "none": "No next run"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "Completed",
         "error": "Error",
         "skipped": "Skipped",
-        "recent": "Recent runs"
+        "recent": "Recent runs",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "Created {{time}}",
+        "updated": "Updated {{time}}"
+      },
+      "fields": {
+        "name": "Name",
+        "message": "Message",
+        "scheduleType": "Schedule type",
+        "every": "Every",
+        "unit": "Unit",
+        "cronExpression": "Cron expression",
+        "timezone": "Timezone",
+        "runAt": "Run at"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Once"
+      },
+      "everyUnits": {
+        "second": "Seconds",
+        "minute": "Minutes",
+        "hour": "Hours",
+        "day": "Days"
+      },
+      "validation": {
+        "nameRequired": "Name is required.",
+        "messageRequired": "Message is required.",
+        "intervalRequired": "Interval must be a positive number.",
+        "cronRequired": "Cron expression is required.",
+        "timeRequired": "Run time is required.",
+        "futureRequired": "Run time must be in the future."
       },
       "duration": {
         "lessThanSecond": "< 1 second"

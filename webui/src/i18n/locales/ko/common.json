@@ -477,21 +477,28 @@
       "stats": {
         "active": "활성",
         "paused": "일시 중지",
-        "failed": "실패",
+        "failed": "확인 필요",
         "system": "시스템"
       },
       "filters": {
         "all": "전체",
         "active": "활성",
         "paused": "일시 중지",
-        "failed": "실패",
+        "failed": "확인 필요",
         "system": "시스템"
+      },
+      "sort": {
+        "next": "다음 실행",
+        "last": "마지막 실행",
+        "updated": "업데이트",
+        "name": "이름"
       },
       "search": "작업, 메시지, 세션 또는 cron 식 검색",
       "queue": "대기열",
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
       "empty": "아직 자동화가 없습니다.",
+      "emptyHint": "실행되어야 하는 채팅 또는 외부 channel에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
       "oneShot": "일회성",
       "systemTask": "시스템 관리 자동화",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "지금 실행",
       "pause": "일시 중지",
       "resume": "재개",
+      "edit": "편집",
       "delete": "삭제",
       "protected": "보호됨",
+      "editTitle": "자동화 편집",
+      "editDescription": "프롬프트와 일정을 업데이트합니다. 연결된 채팅은 변경되지 않습니다.",
+      "save": "저장",
       "deleteTitle": "자동화 삭제",
       "deleteDescription": "{{name}}을 cron 저장소에서 삭제합니다. 이전 채팅 메시지는 세션에 남습니다.",
       "cancel": "취소",
       "status": {
         "system": "시스템",
         "pending": "대기 중",
+        "running": "실행 중",
+        "needsSetup": "설정 필요",
         "paused": "일시 중지",
         "failed": "실패",
+        "completed": "완료",
+        "noSchedule": "일정 없음",
         "active": "활성"
       },
+      "legacyWarning": "이전 자동화에 대상 채팅이 없습니다. 실행되어야 하는 채팅 또는 외부 channel에서 다시 만드세요.",
       "origin": {
         "system": "시스템",
         "unknown": "연결된 채팅 없음",
@@ -542,11 +558,16 @@
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "매일 {{time}}",
+        "weekdaysAt": "평일 {{time}}",
+        "hourlyAt": "매시간 :{{minute}}",
+        "hourlyWindow": "{{start}}-{{end}} 사이 매시간 :{{minute}}",
         "custom": "사용자 지정 일정"
       },
       "next": {
         "paused": "일시 중지",
-        "pending": "곧 실행",
+        "pending": "실행 중",
         "none": "다음 실행 없음"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "완료",
         "error": "오류",
         "skipped": "건너뜀",
-        "recent": "최근 실행"
+        "recent": "최근 실행",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "{{time}} 생성",
+        "updated": "{{time}} 업데이트"
+      },
+      "fields": {
+        "name": "이름",
+        "message": "메시지",
+        "scheduleType": "일정 유형",
+        "every": "간격",
+        "unit": "단위",
+        "cronExpression": "Cron 식",
+        "timezone": "시간대",
+        "runAt": "실행 시간"
+      },
+      "scheduleTypes": {
+        "every": "간격",
+        "cron": "Cron",
+        "at": "일회성"
+      },
+      "everyUnits": {
+        "second": "초",
+        "minute": "분",
+        "hour": "시간",
+        "day": "일"
+      },
+      "validation": {
+        "nameRequired": "이름은 필수입니다.",
+        "messageRequired": "메시지는 필수입니다.",
+        "intervalRequired": "간격은 양수여야 합니다.",
+        "cronRequired": "Cron 식은 필수입니다.",
+        "timeRequired": "실행 시간은 필수입니다.",
+        "futureRequired": "실행 시간은 현재보다 이후여야 합니다."
       },
       "duration": {
         "lessThanSecond": "1초 미만"

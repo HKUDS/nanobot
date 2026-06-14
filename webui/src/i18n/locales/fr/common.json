@@ -477,21 +477,28 @@
       "stats": {
         "active": "Actives",
         "paused": "En pause",
-        "failed": "Échouées",
+        "failed": "À traiter",
         "system": "Système"
       },
       "filters": {
         "all": "Toutes",
         "active": "Actives",
         "paused": "En pause",
-        "failed": "Échouées",
+        "failed": "À traiter",
         "system": "Système"
+      },
+      "sort": {
+        "next": "Prochaine exécution",
+        "last": "Dernière exécution",
+        "updated": "Mise à jour",
+        "name": "Nom"
       },
       "search": "Rechercher une tâche, un message, une session ou une expression cron",
       "queue": "File",
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",
       "empty": "Aucune automatisation pour le moment.",
+      "emptyHint": "Créez-en une depuis la discussion ou le canal où elle doit s’exécuter afin que nanobot conserve le bon contexte.",
       "oneShot": "Ponctuelle",
       "systemTask": "Automatisation gérée par le système",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "Exécuter maintenant",
       "pause": "Mettre en pause",
       "resume": "Reprendre",
+      "edit": "Modifier",
       "delete": "Supprimer",
       "protected": "Protégée",
+      "editTitle": "Modifier l’automatisation",
+      "editDescription": "Modifiez le prompt et le planning. La discussion liée ne change pas.",
+      "save": "Enregistrer",
       "deleteTitle": "Supprimer l’automatisation",
       "deleteDescription": "Cela supprime {{name}} du stockage cron. Les anciens messages de chat restent dans la session.",
       "cancel": "Annuler",
       "status": {
         "system": "Système",
         "pending": "En attente",
+        "running": "En cours d’exécution",
+        "needsSetup": "Configuration requise",
         "paused": "En pause",
         "failed": "Échouée",
+        "completed": "Terminée",
+        "noSchedule": "Aucun planning",
         "active": "En cours"
       },
+      "legacyWarning": "Cette ancienne automatisation n’a pas de discussion cible. Recréez-la depuis la discussion ou le canal où elle doit s’exécuter.",
       "origin": {
         "system": "Système",
         "unknown": "Aucune discussion liée",
@@ -542,11 +558,16 @@
         "every": "Toutes les {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Chaque jour à {{time}}",
+        "weekdaysAt": "Jours ouvrés à {{time}}",
+        "hourlyAt": "Toutes les heures à :{{minute}}",
+        "hourlyWindow": "Toutes les heures {{start}}-{{end}} à :{{minute}}",
         "custom": "Planning personnalisé"
       },
       "next": {
         "paused": "En pause",
-        "pending": "Exécution prochaine",
+        "pending": "En cours d’exécution",
         "none": "Aucune prochaine exécution"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "Terminée",
         "error": "Erreur",
         "skipped": "Ignorée",
-        "recent": "Exécutions récentes"
+        "recent": "Exécutions récentes",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "Créée {{time}}",
+        "updated": "Mise à jour {{time}}"
+      },
+      "fields": {
+        "name": "Nom",
+        "message": "Message",
+        "scheduleType": "Type de planning",
+        "every": "Toutes les",
+        "unit": "Unité",
+        "cronExpression": "Expression cron",
+        "timezone": "Fuseau horaire",
+        "runAt": "Exécuter à"
+      },
+      "scheduleTypes": {
+        "every": "Intervalle",
+        "cron": "Cron",
+        "at": "Une fois"
+      },
+      "everyUnits": {
+        "second": "Secondes",
+        "minute": "Minutes",
+        "hour": "Heures",
+        "day": "Jours"
+      },
+      "validation": {
+        "nameRequired": "Le nom est obligatoire.",
+        "messageRequired": "Le message est obligatoire.",
+        "intervalRequired": "L’intervalle doit être un nombre positif.",
+        "cronRequired": "L’expression cron est obligatoire.",
+        "timeRequired": "L’heure d’exécution est obligatoire.",
+        "futureRequired": "L’heure d’exécution doit être dans le futur."
       },
       "duration": {
         "lessThanSecond": "moins de 1 seconde"

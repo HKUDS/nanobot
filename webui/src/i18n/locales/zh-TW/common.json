@@ -477,21 +477,28 @@
       "stats": {
         "active": "執行中",
         "paused": "已暫停",
-        "failed": "失敗",
+        "failed": "需處理",
         "system": "系統"
       },
       "filters": {
         "all": "全部",
         "active": "執行中",
         "paused": "已暫停",
-        "failed": "失敗",
+        "failed": "需處理",
         "system": "系統"
+      },
+      "sort": {
+        "next": "下次執行",
+        "last": "上次執行",
+        "updated": "更新時間",
+        "name": "名稱"
       },
       "search": "搜尋任務、訊息、會話或 cron 表達式",
       "queue": "任務佇列",
       "loading": "正在載入自動任務...",
       "noMatches": "目前檢視沒有符合的自動任務。",
       "empty": "尚無自動任務。",
+      "emptyHint": "請從它應該執行的聊天或外部 channel 中建立，這樣 nanobot 才能保留正確上下文。",
       "oneShot": "一次性",
       "systemTask": "系統管理的自動任務",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "立即執行",
       "pause": "暫停",
       "resume": "恢復",
+      "edit": "編輯",
       "delete": "刪除",
       "protected": "受保護",
+      "editTitle": "編輯自動任務",
+      "editDescription": "更新提示詞和排程；關聯會話不會改變。",
+      "save": "儲存",
       "deleteTitle": "刪除自動任務",
       "deleteDescription": "這會從 cron 儲存中刪除 {{name}}，歷史聊天訊息會保留在會話中。",
       "cancel": "取消",
       "status": {
         "system": "系統",
         "pending": "等待中",
+        "running": "正在執行",
+        "needsSetup": "需重新設定",
         "paused": "已暫停",
         "failed": "失敗",
+        "completed": "已完成",
+        "noSchedule": "無排程",
         "active": "執行中"
       },
+      "legacyWarning": "這個舊版自動任務缺少目標會話。請從它應該執行的聊天或外部 channel 中重新建立。",
       "origin": {
         "system": "系統",
         "unknown": "未關聯會話",
@@ -542,11 +558,16 @@
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "工作日 {{time}}",
+        "hourlyAt": "每小時第 {{minute}} 分鐘",
+        "hourlyWindow": "{{start}}-{{end}} 點每小時第 {{minute}} 分鐘",
         "custom": "自訂排程"
       },
       "next": {
         "paused": "已暫停",
-        "pending": "即將執行",
+        "pending": "正在執行",
         "none": "沒有下次執行"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "完成",
         "error": "錯誤",
         "skipped": "已略過",
-        "recent": "最近執行"
+        "recent": "最近執行",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "建立於 {{time}}",
+        "updated": "更新於 {{time}}"
+      },
+      "fields": {
+        "name": "名稱",
+        "message": "訊息",
+        "scheduleType": "排程類型",
+        "every": "每隔",
+        "unit": "單位",
+        "cronExpression": "Cron 表達式",
+        "timezone": "時區",
+        "runAt": "執行時間"
+      },
+      "scheduleTypes": {
+        "every": "間隔",
+        "cron": "Cron",
+        "at": "一次性"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分鐘",
+        "hour": "小時",
+        "day": "天"
+      },
+      "validation": {
+        "nameRequired": "名稱不能為空。",
+        "messageRequired": "訊息不能為空。",
+        "intervalRequired": "間隔必須是正整數。",
+        "cronRequired": "Cron 表達式不能為空。",
+        "timeRequired": "執行時間不能為空。",
+        "futureRequired": "執行時間必須晚於目前時間。"
       },
       "duration": {
         "lessThanSecond": "不到 1 秒"

@@ -477,21 +477,28 @@
       "stats": {
         "active": "Activas",
         "paused": "Pausadas",
-        "failed": "Fallidas",
+        "failed": "Requieren atención",
         "system": "Sistema"
       },
       "filters": {
         "all": "Todas",
         "active": "Activas",
         "paused": "Pausadas",
-        "failed": "Fallidas",
+        "failed": "Requieren atención",
         "system": "Sistema"
+      },
+      "sort": {
+        "next": "Próxima ejecución",
+        "last": "Última ejecución",
+        "updated": "Actualizada",
+        "name": "Nombre"
       },
       "search": "Buscar tarea, mensaje, sesión o expresión cron",
       "queue": "Cola",
       "loading": "Cargando automatizaciones...",
       "noMatches": "No hay automatizaciones que coincidan con esta vista.",
       "empty": "Aún no hay automatizaciones.",
+      "emptyHint": "Crea una desde el chat o canal donde debe ejecutarse para que nanobot conserve el contexto correcto.",
       "oneShot": "Una vez",
       "systemTask": "Automatización administrada por el sistema",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "Ejecutar ahora",
       "pause": "Pausar",
       "resume": "Reanudar",
+      "edit": "Editar",
       "delete": "Eliminar",
       "protected": "Protegida",
+      "editTitle": "Editar automatización",
+      "editDescription": "Actualiza el prompt y la programación. El chat vinculado no cambia.",
+      "save": "Guardar",
       "deleteTitle": "Eliminar automatización",
       "deleteDescription": "Esto elimina {{name}} del almacén cron. Los mensajes de chat anteriores permanecen en la sesión.",
       "cancel": "Cancelar",
       "status": {
         "system": "Sistema",
         "pending": "Pendiente",
+        "running": "Ejecutándose ahora",
+        "needsSetup": "Requiere configuración",
         "paused": "Pausada",
         "failed": "Fallida",
+        "completed": "Completada",
+        "noSchedule": "Sin programación",
         "active": "Activa"
       },
+      "legacyWarning": "Esta automatización antigua no tiene chat de destino. Vuelve a crearla desde el chat o canal donde debe ejecutarse.",
       "origin": {
         "system": "Sistema",
         "unknown": "Sin chat vinculado",
@@ -542,11 +558,16 @@
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Diaria a las {{time}}",
+        "weekdaysAt": "Días laborables a las {{time}}",
+        "hourlyAt": "Cada hora en :{{minute}}",
+        "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
         "custom": "Programación personalizada"
       },
       "next": {
         "paused": "Pausada",
-        "pending": "Se ejecutará pronto",
+        "pending": "Ejecutándose ahora",
         "none": "Sin próxima ejecución"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "Completada",
         "error": "Error",
         "skipped": "Omitida",
-        "recent": "Ejecuciones recientes"
+        "recent": "Ejecuciones recientes",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "Creada {{time}}",
+        "updated": "Actualizada {{time}}"
+      },
+      "fields": {
+        "name": "Nombre",
+        "message": "Mensaje",
+        "scheduleType": "Tipo de programación",
+        "every": "Cada",
+        "unit": "Unidad",
+        "cronExpression": "Expresión cron",
+        "timezone": "Zona horaria",
+        "runAt": "Ejecutar a las"
+      },
+      "scheduleTypes": {
+        "every": "Intervalo",
+        "cron": "Cron",
+        "at": "Una vez"
+      },
+      "everyUnits": {
+        "second": "Segundos",
+        "minute": "Minutos",
+        "hour": "Horas",
+        "day": "Días"
+      },
+      "validation": {
+        "nameRequired": "El nombre es obligatorio.",
+        "messageRequired": "El mensaje es obligatorio.",
+        "intervalRequired": "El intervalo debe ser un número positivo.",
+        "cronRequired": "La expresión cron es obligatoria.",
+        "timeRequired": "La hora de ejecución es obligatoria.",
+        "futureRequired": "La hora de ejecución debe estar en el futuro."
       },
       "duration": {
         "lessThanSecond": "menos de 1 segundo"

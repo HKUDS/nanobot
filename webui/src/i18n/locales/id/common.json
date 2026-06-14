@@ -477,21 +477,28 @@
       "stats": {
         "active": "Aktif",
         "paused": "Dijeda",
-        "failed": "Gagal",
+        "failed": "Perlu ditangani",
         "system": "Sistem"
       },
       "filters": {
         "all": "Semua",
         "active": "Aktif",
         "paused": "Dijeda",
-        "failed": "Gagal",
+        "failed": "Perlu ditangani",
         "system": "Sistem"
+      },
+      "sort": {
+        "next": "Jalankan berikutnya",
+        "last": "Jalankan terakhir",
+        "updated": "Diperbarui",
+        "name": "Nama"
       },
       "search": "Cari tugas, pesan, sesi, atau ekspresi cron",
       "queue": "Antrean",
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
       "empty": "Belum ada otomasi.",
+      "emptyHint": "Buat dari chat atau channel tempat otomasi akan berjalan agar nanobot menyimpan konteks yang benar.",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "Jalankan sekarang",
       "pause": "Jeda",
       "resume": "Lanjutkan",
+      "edit": "Edit",
       "delete": "Hapus",
       "protected": "Terlindungi",
+      "editTitle": "Edit otomasi",
+      "editDescription": "Perbarui prompt dan jadwal. Chat tertaut tidak berubah.",
+      "save": "Simpan",
       "deleteTitle": "Hapus otomasi",
       "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
       "cancel": "Batal",
       "status": {
         "system": "Sistem",
         "pending": "Menunggu",
+        "running": "Sedang berjalan",
+        "needsSetup": "Perlu disiapkan",
         "paused": "Dijeda",
         "failed": "Gagal",
+        "completed": "Selesai",
+        "noSchedule": "Tanpa jadwal",
         "active": "Aktif"
       },
+      "legacyWarning": "Otomasi lama ini tidak memiliki chat tujuan. Buat ulang dari chat atau channel tempat otomasi akan berjalan.",
       "origin": {
         "system": "Sistem",
         "unknown": "Tidak ada chat tertaut",
@@ -542,11 +558,16 @@
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Setiap hari pukul {{time}}",
+        "weekdaysAt": "Hari kerja pukul {{time}}",
+        "hourlyAt": "Setiap jam pada :{{minute}}",
+        "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
         "custom": "Jadwal khusus"
       },
       "next": {
         "paused": "Dijeda",
-        "pending": "Segera berjalan",
+        "pending": "Sedang berjalan",
         "none": "Tidak ada jadwal berikutnya"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "Selesai",
         "error": "Error",
         "skipped": "Dilewati",
-        "recent": "Eksekusi terbaru"
+        "recent": "Eksekusi terbaru",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "Dibuat {{time}}",
+        "updated": "Diperbarui {{time}}"
+      },
+      "fields": {
+        "name": "Nama",
+        "message": "Pesan",
+        "scheduleType": "Jenis jadwal",
+        "every": "Setiap",
+        "unit": "Unit",
+        "cronExpression": "Ekspresi cron",
+        "timezone": "Zona waktu",
+        "runAt": "Jalankan pada"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Sekali"
+      },
+      "everyUnits": {
+        "second": "Detik",
+        "minute": "Menit",
+        "hour": "Jam",
+        "day": "Hari"
+      },
+      "validation": {
+        "nameRequired": "Nama wajib diisi.",
+        "messageRequired": "Pesan wajib diisi.",
+        "intervalRequired": "Interval harus berupa angka positif.",
+        "cronRequired": "Ekspresi cron wajib diisi.",
+        "timeRequired": "Waktu eksekusi wajib diisi.",
+        "futureRequired": "Waktu eksekusi harus berada di masa depan."
       },
       "duration": {
         "lessThanSecond": "kurang dari 1 detik"

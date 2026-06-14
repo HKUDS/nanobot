@@ -477,21 +477,28 @@
       "stats": {
         "active": "実行中",
         "paused": "一時停止",
-        "failed": "失敗",
+        "failed": "要対応",
         "system": "システム"
       },
       "filters": {
         "all": "すべて",
         "active": "実行中",
         "paused": "一時停止",
-        "failed": "失敗",
+        "failed": "要対応",
         "system": "システム"
+      },
+      "sort": {
+        "next": "次回実行",
+        "last": "前回実行",
+        "updated": "更新日時",
+        "name": "名前"
       },
       "search": "タスク、メッセージ、セッション、cron 式を検索",
       "queue": "キュー",
       "loading": "自動タスクを読み込み中...",
       "noMatches": "この表示に一致する自動タスクはありません。",
       "empty": "自動タスクはまだありません。",
+      "emptyHint": "実行先のチャットまたは外部 channel から作成すると、nanobot が正しいコンテキストを保持できます。",
       "oneShot": "一回限り",
       "systemTask": "システム管理の自動タスク",
       "labels": {
@@ -503,18 +510,27 @@
       "runNow": "今すぐ実行",
       "pause": "一時停止",
       "resume": "再開",
+      "edit": "編集",
       "delete": "削除",
       "protected": "保護済み",
+      "editTitle": "自動タスクを編集",
+      "editDescription": "プロンプトとスケジュールを更新します。関連チャットは変更されません。",
+      "save": "保存",
       "deleteTitle": "自動タスクを削除",
       "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
       "cancel": "キャンセル",
       "status": {
         "system": "システム",
         "pending": "待機中",
+        "running": "実行中",
+        "needsSetup": "再設定が必要",
         "paused": "一時停止",
         "failed": "失敗",
+        "completed": "完了",
+        "noSchedule": "スケジュールなし",
         "active": "実行中"
       },
+      "legacyWarning": "この古い自動タスクには対象チャットがありません。実行先のチャットまたは外部 channel から作り直してください。",
       "origin": {
         "system": "システム",
         "unknown": "関連チャットなし",
@@ -542,11 +558,16 @@
         "every": "{{duration}} ごと",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "毎日 {{time}}",
+        "weekdaysAt": "平日 {{time}}",
+        "hourlyAt": "毎時 :{{minute}}",
+        "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
         "custom": "カスタムスケジュール"
       },
       "next": {
         "paused": "一時停止",
-        "pending": "まもなく実行",
+        "pending": "実行中",
         "none": "次回実行なし"
       },
       "last": {
@@ -557,7 +578,41 @@
         "ok": "完了",
         "error": "エラー",
         "skipped": "スキップ",
-        "recent": "最近の実行"
+        "recent": "最近の実行",
+        "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "meta": {
+        "created": "{{time}} 作成",
+        "updated": "{{time}} 更新"
+      },
+      "fields": {
+        "name": "名前",
+        "message": "メッセージ",
+        "scheduleType": "スケジュール種別",
+        "every": "間隔",
+        "unit": "単位",
+        "cronExpression": "Cron 式",
+        "timezone": "タイムゾーン",
+        "runAt": "実行日時"
+      },
+      "scheduleTypes": {
+        "every": "間隔",
+        "cron": "Cron",
+        "at": "一回限り"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分",
+        "hour": "時間",
+        "day": "日"
+      },
+      "validation": {
+        "nameRequired": "名前は必須です。",
+        "messageRequired": "メッセージは必須です。",
+        "intervalRequired": "間隔は正の数で指定してください。",
+        "cronRequired": "Cron 式は必須です。",
+        "timeRequired": "実行日時は必須です。",
+        "futureRequired": "実行日時は現在より後にしてください。"
       },
       "duration": {
         "lessThanSecond": "1 秒未満"

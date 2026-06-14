@@ -1,5 +1,6 @@
 import type {
   AutomationsPayload,
+  AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -209,6 +210,26 @@ export async function runAutomationAction(
     `${base}/api/webui/automations/${action}?${query}`,
     token,
     undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateAutomation(
+  token: string,
+  id: string,
+  values: AutomationUpdatePayload,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/update?${query}`,
+    token,
+    {
+      headers: {
+        "X-Nanobot-Automation-Values": JSON.stringify(values),
+      },
+    },
     API_READ_TIMEOUT_MS,
   );
 }
