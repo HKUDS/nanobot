@@ -135,6 +135,13 @@ def _resolve_fallback_presets(config: Config, primary: ModelPresetConfig) -> lis
     return presets
 
 
+def _needs_vision_augmentation(config: Config, resolved: ModelPresetConfig, model: str) -> bool:
+    """Return True when the resolved model is text-only and needs image→text conversion."""
+    provider_name = config.get_provider_name(model, preset=resolved)
+    spec = find_by_name(provider_name) if provider_name else None
+    return spec is not None and not spec.supports_vision
+
+
 def make_provider(
     config: Config,
     *,
@@ -146,8 +153,14 @@ def make_provider(
 
     When *model* is given, it overrides the resolved/preset model — used by
     the failover path to create providers for fallback models.
+
+    Text-only providers (supports_vision=False) are automatically wrapped in
+    VisionAugmentedProvider so that image_url blocks from user messages and
+    tool results (e.g. read_file on images) are converted to text descriptions
+    before reaching the underlying LLM.
     """
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
+    effective_model = model or resolved.model
     provider = _make_provider_core(config, preset_name=preset_name, preset=preset, model=model)
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
@@ -159,6 +172,10 @@ def make_provider(
                 config, preset_name=preset_name, preset=fb
             ),
         )
+
+    if _needs_vision_augmentation(config, resolved, effective_model):
+        from nanobot.providers.vision_augmented_provider import VisionAugmentedProvider
+        provider = VisionAugmentedProvider(provider)
 
     return provider
 

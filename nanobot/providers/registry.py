@@ -63,6 +63,11 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Provider natively handles image_url blocks in messages / tool results.
+    # Set False for text-only providers (e.g. DeepSeek) so the framework
+    # wraps them with VisionAugmentedProvider to convert images to text.
+    supports_vision: bool = True
+
     # How to inject the thinking on/off toggle into extra_body.
     # ""              — no extra_body needed (default)
     # "thinking_type" — {"thinking": {"type": "enabled"/"disabled"}}
@@ -309,7 +314,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,
         supports_max_completion_tokens=True,
     ),
-    # DeepSeek: OpenAI-compatible at api.deepseek.com
+    # DeepSeek: OpenAI-compatible at api.deepseek.com (text-only, no vision)
     ProviderSpec(
         name="deepseek",
         keywords=("deepseek",),
@@ -318,6 +323,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
+        supports_vision=False,
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(

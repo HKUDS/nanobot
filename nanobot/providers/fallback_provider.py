@@ -287,11 +287,17 @@ class FallbackProvider(LLMProvider):
         text = (response.content or "").lower()
 
         if status in {400, 401, 403, 404, 422}:
-            return False
+            # Even on 400-class, if the message signals a billing/quota issue, fall back.
+            if not any(token in text for token in _FALLBACK_ERROR_TOKENS):
+                return False
         if kind in _NON_FALLBACK_ERROR_KINDS:
-            return False
+            # Allow fallback if the error text signals a recoverable billing/quota issue.
+            if not any(token in text for token in _FALLBACK_ERROR_TOKENS):
+                return False
         if any(token in value for value in (kind, error_type, code) for token in _NON_FALLBACK_ERROR_KINDS):
-            return False
+            # Same override: billing/quota messages take priority over the code classification.
+            if not any(token in text for token in _FALLBACK_ERROR_TOKENS):
+                return False
         if response.error_should_retry is True:
             return True
         if status is not None and (status in {408, 409, 429} or 500 <= status <= 599):

@@ -731,7 +731,9 @@ async def connect_mcp_servers(
             )
             return name, server_stack
 
-        except Exception as e:
+        except (Exception, BaseExceptionGroup) as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
             hint = ""
             text = str(e).lower()
             if any(
@@ -758,7 +760,9 @@ async def connect_mcp_servers(
     for name, cfg in mcp_servers.items():
         try:
             result = await connect_single_server(name, cfg)
-        except Exception as e:
+        except (Exception, BaseExceptionGroup) as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
             logger.exception("MCP server '{}' connection failed: {}", name, e)
             continue
         if result is not None and result[1] is not None:

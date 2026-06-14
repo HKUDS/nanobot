@@ -21,6 +21,58 @@ from nanobot.utils.helpers import (
     safe_filename,
     strip_think,
 )
+
+# Regex that matches the placeholder written by image_placeholder_text()
+_IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image: (.+?)\]$")
+
+
+def _rehydrate_image_block(path: str) -> dict[str, Any] | None:
+    """Load *path* from disk and return an image_url block, or None on failure."""
+    import base64
+    import mimetypes
+    from nanobot.utils.helpers import detect_image_mime
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        raw = p.read_bytes()
+    except OSError:
+        return None
+    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+    if not mime or not mime.startswith("image/"):
+        return None
+    b64 = base64.b64encode(raw).decode()
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime};base64,{b64}"},
+        "_meta": {"path": str(p)},
+    }
+
+
+def _rehydrate_content(content: Any) -> Any:
+    """Replace ``[image: path]`` text blocks with real image_url blocks where possible.
+
+    Operates on list content (tool results, multipart user messages).
+    Leaves string content unchanged — the caller handles the string→list
+    conversion needed for user messages with inline image breadcrumbs.
+    """
+    if not isinstance(content, list):
+        return content
+    out: list[dict[str, Any]] = []
+    for block in content:
+        if not isinstance(block, dict):
+            out.append(block)
+            continue
+        if block.get("type") == "text":
+            text = block.get("text", "")
+            m = _IMAGE_PLACEHOLDER_RE.match(text.strip())
+            if m:
+                image_block = _rehydrate_image_block(m.group(1))
+                if image_block:
+                    out.append(image_block)
+                    continue
+        out.append(block)
+    return out
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 FILE_MAX_MESSAGES = 2000
@@ -144,6 +196,7 @@ class Session:
         *,
         max_tokens: int = 0,
         include_timestamps: bool = False,
+        rehydrate_images: bool = False,
     ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input.
 
@@ -177,17 +230,44 @@ class Session:
             role = message.get("role")
             if role == "assistant" and isinstance(content, str):
                 content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
+            # Rehydrate / synthesize image content from the persisted ``media`` kwarg.
+            # Without this, an image-only user turn replays as an empty message —
+            # the assistant's reply then looks like it's responding to nothing.
             media = message.get("media")
-            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
-                breadcrumbs = "\n".join(
-                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
-                )
-                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            if role == "user" and isinstance(media, list) and media:
+                if rehydrate_images:
+                    # Build real image_url blocks for files that still exist on disk;
+                    # fall back to text placeholder for missing files.
+                    image_blocks: list[dict[str, Any]] = []
+                    fallback_lines: list[str] = []
+                    for p in media:
+                        if not isinstance(p, str) or not p:
+                            continue
+                        block = _rehydrate_image_block(p)
+                        if block:
+                            image_blocks.append(block)
+                        else:
+                            fallback_lines.append(image_placeholder_text(p))
+                    if image_blocks or fallback_lines:
+                        text_part = content if isinstance(content, str) else ""
+                        if fallback_lines:
+                            text_part = (
+                                f"{text_part}\n{chr(10).join(fallback_lines)}"
+                                if text_part else chr(10).join(fallback_lines)
+                            )
+                        parts: list[dict[str, Any]] = image_blocks
+                        if text_part:
+                            parts = parts + [{"type": "text", "text": text_part}]
+                        content = parts if parts else content
+                elif isinstance(content, str):
+                    breadcrumbs = "\n".join(
+                        image_placeholder_text(p) for p in media if isinstance(p, str) and p
+                    )
+                    content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+
+            # Rehydrate [image: path] placeholders in tool results.
+            if rehydrate_images and role == "tool" and isinstance(content, list):
+                content = _rehydrate_content(content)
             cli_apps = message.get("cli_apps")
             if role == "user" and isinstance(cli_apps, list) and cli_apps and isinstance(content, str):
                 cli_lines: list[str] = []
