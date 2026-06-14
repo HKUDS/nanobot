@@ -57,9 +57,16 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        vault_path: Path | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        self.vault_path = vault_path
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -108,7 +115,52 @@ class ContextBuilder:
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")
 
+        briefing = self._load_subconscious_briefing(self.vault_path)
+        if briefing:
+            parts.append(f"# Subconscious\n\n{briefing}")
+
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _load_subconscious_briefing(vault_path: Path | None, max_chars: int = 6000) -> str:
+        """Load recent vault memory for proactive injection into the system prompt.
+
+        Reads _nanobot/MEMORY.md (capped at 3000 chars) and the last 2 daily digests
+        (capped at 1500 chars each), returning a combined markdown section.
+        """
+        if vault_path is None:
+            return ""
+        nanobot_dir = vault_path / "_nanobot"
+        if not nanobot_dir.is_dir():
+            return ""
+
+        sections: list[str] = []
+
+        # Core operational memory
+        memory_file = nanobot_dir / "MEMORY.md"
+        if memory_file.exists():
+            try:
+                content = memory_file.read_text(encoding="utf-8").strip()
+                if content:
+                    sections.append(truncate_text(content, 3000))
+            except OSError:
+                pass
+
+        # Last 2 daily digests
+        digest_dir = nanobot_dir / "daily-digest"
+        if digest_dir.is_dir():
+            digests = sorted(digest_dir.glob("*.md"))[-2:]
+            for digest in digests:
+                try:
+                    content = digest.read_text(encoding="utf-8").strip()
+                    if content:
+                        sections.append(f"### {digest.stem}\n\n{truncate_text(content, 1500)}")
+                except OSError:
+                    pass
+
+        if not sections:
+            return ""
+        return truncate_text("\n\n".join(sections), max_chars)
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
         """Get the core identity section."""

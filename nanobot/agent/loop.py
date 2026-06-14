@@ -265,7 +265,19 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        _vault_path: Path | None = None
+        _vault_env = os.environ.get("NANOBOT_OBSIDIAN_VAULT", "")
+        if _vault_env:
+            _vp = Path(_vault_env)
+            if _vp.is_dir():
+                _vault_path = _vp
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, vault_path=_vault_path)
+        if _vault_path is not None:
+            try:
+                from nanobot.agent.tools.subconscious import start_daemon as _start_subconscious
+                _start_subconscious(_vault_path, workspace)
+            except Exception:
+                pass
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
