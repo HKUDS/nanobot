@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sign up</title></head>
+<body>
+<h1>Create your account</h1>
+<form id="f" onsubmit="return submitForm(event)">
+  <p><input id="name" placeholder="Full name"></p>
+  <p><input id="email" type="email" placeholder="Email address"></p>
+  <p>
+    <select id="country" aria-label="Country">
+      <option value="">-- choose country --</option>
+      <option value="us">United States</option>
+      <option value="cn">China</option>
+      <option value="de">Germany</option>
+    </select>
+  </p>
+  <fieldset>
+    <legend>Plan</legend>
+    <label><input type="radio" name="plan" value="free" aria-label="Free plan"> Free</label>
+    <label><input type="radio" name="plan" value="pro" aria-label="Pro plan"> Pro</label>
+    <label><input type="radio" name="plan" value="team" aria-label="Team plan"> Team</label>
+  </fieldset>
+  <p><label><input type="checkbox" id="agree" aria-label="Accept terms"> I accept the terms</label></p>
+  <button id="submit" type="submit">Create account</button>
+</form>
+<div id="result"></div>
+<script>
+function submitForm(e){
+  e.preventDefault();
+  var plan = (document.querySelector('input[name=plan]:checked') || {}).value || '';
+  var parts = [
+    document.getElementById('name').value,
+    document.getElementById('email').value,
+    document.getElementById('country').value,
+    plan,
+    document.getElementById('agree').checked ? 'agreed' : 'no'
+  ];
+  document.getElementById('result').textContent = parts.join('|');
+  return false;
+}
+</script>
+</body></html>

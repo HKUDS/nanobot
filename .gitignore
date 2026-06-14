@@ -99,3 +99,6 @@ temp/
 *.tmp
 exp/
 .playwright-mcp/
+
+# computer-use e2e run artifacts (screenshots / traces)
+tests/e2e/runs/

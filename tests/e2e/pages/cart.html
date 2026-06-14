@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Cart</title></head>
+<body>
+<h1>Your Cart</h1>
+<ul id="items"></ul>
+<div id="total">Total: $0</div>
+<p><a href="shop.html">Back to shop</a></p>
+<script>
+var cart = JSON.parse(localStorage.getItem('cart') || '[]');
+document.getElementById('items').innerHTML =
+  cart.map(function(i){ return '<li>' + i.n + ' $' + i.p + '</li>'; }).join('');
+var total = cart.reduce(function(s, i){ return s + i.p; }, 0);
+document.getElementById('total').textContent = 'Total: $' + total;
+</script>
+</body></html>
