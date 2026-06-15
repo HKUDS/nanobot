@@ -92,6 +92,14 @@ def test_chat_completion_response_with_usage() -> None:
     assert result["usage"]["total_tokens"] == 192
 
 
+def test_chat_completion_response_preserves_provider_total_usage() -> None:
+    usage = {"total_tokens": 77}
+    result = _chat_completion_response("hello world", "test-model", usage)
+    assert result["usage"]["prompt_tokens"] == 0
+    assert result["usage"]["completion_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 77
+
+
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_missing_messages_returns_400(aiohttp_client, app) -> None:

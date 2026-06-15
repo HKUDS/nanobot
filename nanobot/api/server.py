@@ -61,6 +61,7 @@ def _chat_completion_response(
 ) -> dict[str, Any]:
     prompt = (usage or {}).get("prompt_tokens", 0)
     completion = (usage or {}).get("completion_tokens", 0)
+    total = (usage or {}).get("total_tokens", 0) or prompt + completion
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
@@ -76,7 +77,7 @@ def _chat_completion_response(
         "usage": {
             "prompt_tokens": prompt,
             "completion_tokens": completion,
-            "total_tokens": prompt + completion,
+            "total_tokens": total,
         },
     }
 
