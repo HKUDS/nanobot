@@ -1715,10 +1715,8 @@ export function SettingsView({
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto w-full px-5 py-8 sm:px-8 lg:py-12",
-            activeSection === "automations"
-              ? "max-w-[1220px] 2xl:max-w-[1320px]"
-              : "max-w-[920px]",
+            "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            "max-w-[920px]",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1806,7 +1804,7 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-4 pb-3 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
+        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
         hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
       )}
     >
@@ -2096,7 +2094,10 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
         {result?.type === "update" ? (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-blue-600 dark:text-blue-300">
             <ArrowUpCircle className="h-3 w-3" aria-hidden />
-            {tx("settings.about.updateAvailable", "Update available")}{result.latestVersion && ` v${result.latestVersion}`}
+            {t("settings.about.updateAvailable", {
+              defaultValue: "Update available v{{version}}",
+              version: result.latestVersion,
+            })}
             {result.pypiUrl ? (
               <a
                 href={result.pypiUrl}
@@ -3544,7 +3545,7 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+        <section className="grid items-start gap-4 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)]">
           <aside className="overflow-hidden rounded-[24px] border border-border/45 bg-card/80 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
             <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
@@ -3599,8 +3600,6 @@ function AutomationsSettings({
     </div>
   );
 }
-
-type AutomationRunRecord = NonNullable<SessionAutomationJob["state"]["run_history"]>[number];
 
 function AutomationListItem({
   job,
@@ -3699,20 +3698,16 @@ function AutomationDetailPanel({
   const originHref = job.origin?.channel === "websocket" && job.origin.session_key
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
-  const history = job.state.run_history ?? [];
-  const runSummary = automationRunSummary(job, history, locale, tx);
   const needsRecreation = automationNeedsRecreation(job);
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
   const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
   const schedule = formatAutomationSchedule(job, locale, tx);
   const [messageExpanded, setMessageExpanded] = useState(false);
-  const [historyExpanded, setHistoryExpanded] = useState(false);
   const messageNeedsExpansion = automationMessageNeedsExpansion(message);
 
   useEffect(() => {
     setMessageExpanded(false);
-    setHistoryExpanded(false);
   }, [job.id]);
 
   return (
@@ -3743,7 +3738,7 @@ function AutomationDetailPanel({
         </div>
       </div>
 
-      <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="grid min-w-0">
         <div className="min-w-0 space-y-4 p-4 sm:p-5">
           <section className="rounded-[20px] border border-border/35 bg-background/60 px-4 py-3.5">
             <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
@@ -3770,25 +3765,12 @@ function AutomationDetailPanel({
             ) : null}
           </section>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             <AutomationDetail
               label={tx("settings.automations.labels.next", "Next")}
               title={formatAutomationNextTitle(job, locale, tx)}
             >
               {formatAutomationNext(job, tx)}
-            </AutomationDetail>
-            <AutomationDetail
-              label={tx("settings.automations.history.health", "Recent health")}
-              title={runSummary.title}
-              secondary={runSummary.secondary}
-            >
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span
-                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", automationResultDotClass(runSummary.tone))}
-                  aria-hidden
-                />
-                <span>{runSummary.primary}</span>
-              </span>
             </AutomationDetail>
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")} title={origin}>
               {originHref ? (
@@ -3819,17 +3801,9 @@ function AutomationDetailPanel({
               {job.state.last_error}
             </div>
           ) : null}
-
-          <AutomationRunHistory
-            expanded={historyExpanded}
-            history={history}
-            locale={locale}
-            onExpandedChange={setHistoryExpanded}
-            tx={tx}
-          />
         </div>
 
-        <aside className="border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground sm:p-5 xl:border-l xl:border-t-0">
+        <aside className="border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground sm:p-5">
           <div className="space-y-4">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
@@ -3945,106 +3919,6 @@ function AutomationActionGroup({
 
 function automationMessageNeedsExpansion(message: string): boolean {
   return message.length > 360 || message.split(/\r?\n/).length > 6;
-}
-
-function AutomationRunHistory({
-  expanded,
-  history,
-  locale,
-  onExpandedChange,
-  tx,
-}: {
-  expanded: boolean;
-  history: AutomationRunRecord[];
-  locale: string;
-  onExpandedChange: (value: boolean) => void;
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string;
-}) {
-  if (!history.length) return null;
-  const visible = [...history].reverse();
-  const issueCount = history.filter((run) => automationRunNeedsAttention(run.status)).length;
-  const summary = tx("settings.automations.history.summary", "Runs: {{total}} · Issues: {{issues}}", {
-    total: history.length,
-    issues: issueCount,
-  });
-
-  return (
-    <section className="rounded-[18px] bg-muted/32 px-3 py-3">
-      <button
-        type="button"
-        className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
-        aria-expanded={expanded}
-        onClick={() => onExpandedChange(!expanded)}
-      >
-        <span className="shrink-0 text-[12px] font-medium leading-none text-foreground">
-          {tx("settings.automations.history.timeline", "Run history")}
-        </span>
-        <span
-          className={cn(
-            "inline-flex min-w-0 items-center gap-2 text-[11px] leading-none",
-            issueCount ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
-          )}
-        >
-          <span className="truncate tabular-nums">{summary}</span>
-          <ChevronDown
-            className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
-            aria-hidden
-          />
-        </span>
-      </button>
-      {expanded ? (
-        <div className="mt-3 space-y-2">
-          {visible.map((run) => {
-            const status = automationRunStatusLabel(run.status, tx);
-            const needsAttention = automationRunNeedsAttention(run.status);
-            const duration = run.duration_ms === undefined
-              ? null
-              : formatAutomationRunDuration(run.duration_ms, locale, tx);
-            const runTime = fmtDateTime(run.run_at_ms, locale);
-            const runMeta = duration
-              ? tx("settings.automations.history.runMetaWithDuration", "{{time}} · {{duration}}", {
-                  time: runTime,
-                  duration,
-                })
-              : runTime;
-            const primary = needsAttention
-              ? run.error || status
-              : tx("settings.automations.history.noError", "No error recorded");
-            const secondary = needsAttention ? `${status} · ${runMeta}` : runMeta;
-            return (
-              <div
-                key={`${run.run_at_ms}:${run.status}:${run.duration_ms ?? "none"}`}
-                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-[14px] bg-background/62 px-3 py-2"
-              >
-                <span
-                  className={cn("mt-1.5 h-1.5 w-1.5 rounded-full", automationRunDotClass(run.status))}
-                  aria-hidden
-                />
-                <span className="min-w-0">
-                  <span
-                    className="block line-clamp-2 text-[12.5px] leading-5 text-foreground/82"
-                    title={run.error ?? undefined}
-                  >
-                    {primary}
-                  </span>
-                  <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
-                    {secondary}
-                  </span>
-                </span>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                  {status}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function automationRunNeedsAttention(status: string | null | undefined): boolean {
-  return Boolean(status) && status !== "ok";
 }
 
 function AutomationDetail({
@@ -4697,122 +4571,12 @@ function formatAutomationNextTitle(
   return fmtDateTime(job.state.next_run_at_ms, locale);
 }
 
-function automationRunSummary(
-  job: SessionAutomationJob,
-  history: NonNullable<SessionAutomationJob["state"]["run_history"]>,
-  locale: string,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): {
-  primary: string;
-  secondary?: string;
-  title: string;
-  tone: "neutral" | "success" | "warning" | "danger";
-} {
-  if (job.state.pending) {
-    const secondary = job.state.last_run_at_ms
-      ? fmtDateTime(job.state.last_run_at_ms, locale)
-      : undefined;
-    return {
-      primary: tx("settings.automations.next.pending", "Running now"),
-      secondary,
-      title: secondary ?? tx("settings.automations.next.pending", "Running now"),
-      tone: "warning",
-    };
-  }
-  const latestRun = history[history.length - 1];
-  const issueRuns = history.filter((run) => automationRunNeedsAttention(run.status));
-  const latestIssue = issueRuns[issueRuns.length - 1];
-  if (latestIssue) {
-    const status = automationRunStatusLabel(latestIssue.status, tx);
-    const runTime = fmtDateTime(latestIssue.run_at_ms, locale);
-    const primary = tx("settings.automations.history.issueCount", "Issues: {{count}}", {
-      count: issueRuns.length,
-    });
-    const secondary = latestIssue.error
-      ? `${latestIssue.error} · ${runTime}`
-      : `${status} · ${runTime}`;
-    return {
-      primary,
-      secondary,
-      title: secondary,
-      tone: latestIssue.status === "error" ? "danger" : "warning",
-    };
-  }
-  if (latestRun) {
-    const duration = latestRun.duration_ms === undefined
-      ? null
-      : formatAutomationRunDuration(latestRun.duration_ms, locale, tx);
-    const runTime = fmtDateTime(latestRun.run_at_ms, locale);
-    const secondary = duration
-      ? tx("settings.automations.history.lastRanWithDuration", "Last ran {{time}} · {{duration}}", {
-          time: runTime,
-          duration,
-        })
-      : tx("settings.automations.history.lastRan", "Last ran {{time}}", { time: runTime });
-    return {
-      primary: tx("settings.automations.history.noRecentIssues", "No recent issues"),
-      secondary,
-      title: secondary,
-      tone: "success",
-    };
-  }
-  if (job.state.last_run_at_ms) {
-    const status = automationRunStatusLabel(job.state.last_status, tx);
-    const runTime = fmtDateTime(job.state.last_run_at_ms, locale);
-    if (!automationRunNeedsAttention(job.state.last_status)) {
-      return {
-        primary: tx("settings.automations.history.noRecentIssues", "No recent issues"),
-        secondary: tx("settings.automations.history.lastRan", "Last ran {{time}}", {
-          time: runTime,
-        }),
-        title: runTime,
-        tone: "success",
-      };
-    }
-    const secondary = job.state.last_error ? `${job.state.last_error} · ${runTime}` : `${status} · ${runTime}`;
-    return {
-      primary: tx("settings.automations.history.issueCount", "Issues: {{count}}", {
-        count: 1,
-      }),
-      secondary,
-      title: secondary,
-      tone: job.state.last_status === "error" ? "danger" : "warning",
-    };
-  }
-  const never = tx("settings.automations.last.never", "Never");
-  return { primary: never, title: never, tone: "neutral" };
-}
-
-function automationResultDotClass(tone: "neutral" | "success" | "warning" | "danger"): string {
-  if (tone === "success") return "bg-emerald-500";
-  if (tone === "warning") return "bg-amber-500";
-  if (tone === "danger") return "bg-destructive";
-  return "bg-muted-foreground/45";
-}
-
 function automationStatusDotClass(job: SessionAutomationJob): string {
   const status = automationStatusKey(job);
   if (status === "active" || status === "running") return "bg-emerald-500";
   if (status === "failed" || status === "needs_setup") return "bg-amber-500";
   if (status === "system") return "bg-blue-500";
   return "bg-muted-foreground/45";
-}
-
-function automationRunDotClass(status: string): string {
-  if (status === "ok") return "bg-emerald-500";
-  if (status === "error") return "bg-destructive";
-  if (status === "skipped") return "bg-amber-500";
-  return "bg-muted-foreground/45";
-}
-
-function automationRunStatusLabel(
-  status: string | null | undefined,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): string {
-  if (status === "ok") return tx("settings.automations.history.ok", "Healthy");
-  if (status === "error") return tx("settings.automations.history.error", "Error");
-  if (status === "skipped") return tx("settings.automations.history.skipped", "Skipped");
-  return status || tx("settings.automations.last.unknown", "unknown");
 }
 
 function formatAutomationUnit(
@@ -4842,18 +4606,6 @@ function formatAutomationInterval(ms: number, locale: string): string {
   const fallbackUnit = ms < 60_000 ? "second" : "minute";
   const fallbackSize = fallbackUnit === "second" ? 1000 : 60_000;
   return formatAutomationUnit(ms / fallbackSize, fallbackUnit, locale, 1);
-}
-
-function formatAutomationRunDuration(
-  ms: number | undefined,
-  locale: string,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): string {
-  if (!ms || ms < 1000) {
-    return tx("settings.automations.duration.lessThanSecond", "< 1 second");
-  }
-  if (ms < 60_000) return formatAutomationUnit(ms / 1000, "second", locale, 1);
-  return formatAutomationUnit(ms / 60_000, "minute", locale, 1);
 }
 
 function AppsCatalogSettings({
@@ -7162,7 +6914,7 @@ function SettingsRow({
           </div>
         ) : null}
       </div>
-      {children ? <div className="shrink-0 sm:ml-6">{children}</div> : null}
+      {children ? <div className="min-w-0 sm:ml-6 sm:shrink-0">{children}</div> : null}
     </div>
   );
 }
@@ -7178,7 +6930,7 @@ function ReadOnlyRow({
 }) {
   return (
     <SettingsRow title={title} description={description}>
-      <span className="block max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
+      <span className="block max-w-full truncate text-left text-[13px] text-muted-foreground sm:max-w-[320px] sm:text-right">
         {value}
       </span>
     </SettingsRow>
@@ -7624,7 +7376,7 @@ function NumberInput({
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-8 w-24 rounded-full text-[13px]"
+        className="h-8 w-24 max-w-full rounded-full text-[13px]"
       />
       {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>

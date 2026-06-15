@@ -576,20 +576,6 @@
         "never": "Nunca",
         "unknown": "desconocido"
       },
-      "history": {
-        "ok": "Sin errores",
-        "error": "Error",
-        "skipped": "Omitida",
-        "health": "Estado reciente",
-        "timeline": "Historial de ejecuciones",
-        "summary": "Ejecuciones: {{total}} · Problemas: {{issues}}",
-        "issueCount": "Problemas: {{count}}",
-        "noRecentIssues": "Sin problemas recientes",
-        "lastRan": "Última ejecución: {{time}}",
-        "lastRanWithDuration": "Última ejecución: {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "No se registraron errores"
-      },
       "message": {
         "showMore": "Mostrar mensaje completo",
         "showLess": "Mostrar menos"
@@ -626,9 +612,6 @@
         "cronRequired": "La expresión cron es obligatoria.",
         "timeRequired": "La hora de ejecución es obligatoria.",
         "futureRequired": "La hora de ejecución debe estar en el futuro."
-      },
-      "duration": {
-        "lessThanSecond": "menos de 1 segundo"
       }
     },
     "oauth": {

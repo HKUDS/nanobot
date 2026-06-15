@@ -576,20 +576,6 @@
         "never": "Chưa từng chạy",
         "unknown": "không xác định"
       },
-      "history": {
-        "ok": "Ổn",
-        "error": "Lỗi",
-        "skipped": "Đã bỏ qua",
-        "health": "Tình trạng gần đây",
-        "timeline": "Lịch sử chạy",
-        "summary": "Lượt chạy: {{total}} · Vấn đề: {{issues}}",
-        "issueCount": "Vấn đề: {{count}}",
-        "noRecentIssues": "Không có vấn đề gần đây",
-        "lastRan": "Chạy lần cuối {{time}}",
-        "lastRanWithDuration": "Chạy lần cuối {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "Không ghi nhận lỗi"
-      },
       "message": {
         "showMore": "Hiển thị toàn bộ tin nhắn",
         "showLess": "Thu gọn"
@@ -626,9 +612,6 @@
         "cronRequired": "Biểu thức cron là bắt buộc.",
         "timeRequired": "Thời gian chạy là bắt buộc.",
         "futureRequired": "Thời gian chạy phải ở tương lai."
-      },
-      "duration": {
-        "lessThanSecond": "dưới 1 giây"
       }
     },
     "oauth": {

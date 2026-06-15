@@ -576,20 +576,6 @@
         "never": "실행된 적 없음",
         "unknown": "알 수 없음"
       },
-      "history": {
-        "ok": "정상",
-        "error": "오류",
-        "skipped": "건너뜀",
-        "health": "최근 상태",
-        "timeline": "실행 기록",
-        "summary": "실행: {{total}} · 문제: {{issues}}",
-        "issueCount": "문제: {{count}}",
-        "noRecentIssues": "최근 문제 없음",
-        "lastRan": "마지막 실행: {{time}}",
-        "lastRanWithDuration": "마지막 실행: {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "기록된 오류 없음"
-      },
       "message": {
         "showMore": "전체 메시지 보기",
         "showLess": "접기"
@@ -626,9 +612,6 @@
         "cronRequired": "Cron 식은 필수입니다.",
         "timeRequired": "실행 시간은 필수입니다.",
         "futureRequired": "실행 시간은 현재보다 이후여야 합니다."
-      },
-      "duration": {
-        "lessThanSecond": "1초 미만"
       }
     },
     "oauth": {

@@ -576,20 +576,6 @@
         "never": "從未執行",
         "unknown": "未知"
       },
-      "history": {
-        "ok": "正常",
-        "error": "錯誤",
-        "skipped": "已略過",
-        "health": "最近健康狀態",
-        "timeline": "執行記錄",
-        "summary": "執行：{{total}} · 問題：{{issues}}",
-        "issueCount": "問題：{{count}}",
-        "noRecentIssues": "近期無問題",
-        "lastRan": "最後執行於 {{time}}",
-        "lastRanWithDuration": "最後執行於 {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "未記錄錯誤"
-      },
       "message": {
         "showMore": "查看完整訊息",
         "showLess": "收起訊息"
@@ -626,9 +612,6 @@
         "cronRequired": "Cron 表達式不能為空。",
         "timeRequired": "執行時間不能為空。",
         "futureRequired": "執行時間必須晚於目前時間。"
-      },
-      "duration": {
-        "lessThanSecond": "不到 1 秒"
       }
     },
     "oauth": {

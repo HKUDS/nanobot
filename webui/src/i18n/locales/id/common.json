@@ -576,20 +576,6 @@
         "never": "Belum pernah",
         "unknown": "tidak dikenal"
       },
-      "history": {
-        "ok": "Tanpa error",
-        "error": "Error",
-        "skipped": "Dilewati",
-        "health": "Status terbaru",
-        "timeline": "Riwayat eksekusi",
-        "summary": "Eksekusi: {{total}} · Masalah: {{issues}}",
-        "issueCount": "Masalah: {{count}}",
-        "noRecentIssues": "Tidak ada masalah terbaru",
-        "lastRan": "Terakhir berjalan {{time}}",
-        "lastRanWithDuration": "Terakhir berjalan {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "Tidak ada error tercatat"
-      },
       "message": {
         "showMore": "Tampilkan pesan lengkap",
         "showLess": "Tampilkan lebih sedikit"
@@ -626,9 +612,6 @@
         "cronRequired": "Ekspresi cron wajib diisi.",
         "timeRequired": "Waktu eksekusi wajib diisi.",
         "futureRequired": "Waktu eksekusi harus berada di masa depan."
-      },
-      "duration": {
-        "lessThanSecond": "kurang dari 1 detik"
       }
     },
     "oauth": {

@@ -576,20 +576,6 @@
         "never": "未実行",
         "unknown": "不明"
       },
-      "history": {
-        "ok": "正常",
-        "error": "エラー",
-        "skipped": "スキップ",
-        "health": "最近の状態",
-        "timeline": "実行履歴",
-        "summary": "実行: {{total}} · 問題: {{issues}}",
-        "issueCount": "問題: {{count}}",
-        "noRecentIssues": "最近の問題なし",
-        "lastRan": "最終実行: {{time}}",
-        "lastRanWithDuration": "最終実行: {{time}} · {{duration}}",
-        "runMetaWithDuration": "{{time}} · {{duration}}",
-        "noError": "エラー記録なし"
-      },
       "message": {
         "showMore": "メッセージ全文を表示",
         "showLess": "折りたたむ"
@@ -626,9 +612,6 @@
         "cronRequired": "Cron 式は必須です。",
         "timeRequired": "実行日時は必須です。",
         "futureRequired": "実行日時は現在より後にしてください。"
-      },
-      "duration": {
-        "lessThanSecond": "1 秒未満"
       }
     },
     "oauth": {
