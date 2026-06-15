@@ -87,7 +87,7 @@ async def run_bound_cron_job(
         "job_name": job.name,
         "run_id": run_id,
         "prompt_ref": prompt_ref,
-        "silent": job.payload.silent,
+        "deliver": job.payload.deliver,
         "persist_content": (
             f"Scheduled cron job triggered: {job.name}\n\n{job.payload.message}"
         ),

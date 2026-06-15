@@ -42,8 +42,8 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.cron.session_turns import (
     cron_history_overrides,
+    cron_trigger,
     is_cron_turn,
-    is_silent_cron_turn,
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
@@ -1612,16 +1612,19 @@ class AgentLoop:
     async def _state_save(self, ctx: TurnContext) -> str:
         turn_continuation.prepare_save_boundary(ctx)
 
-        if not ctx.suppress_response and is_silent_cron_turn(ctx.msg.metadata):
-            ctx.suppress_response = True
-        elif (
+        if not ctx.suppress_response and is_cron_turn(ctx.msg.metadata):
+            # Cron turns are silent by default: the agent uses the `message` tool
+            # to proactively notify the user. Only jobs with deliver=True in their
+            # payload bypass this and send the text response directly.
+            trigger = cron_trigger(ctx.msg.metadata)
+            deliver = bool(trigger and trigger.get("deliver"))
+            if not deliver:
+                ctx.suppress_response = True
+        if (
             (ctx.final_content is None or not ctx.final_content.strip())
             and not ctx.suppress_response
         ):
-            if is_cron_turn(ctx.msg.metadata):
-                ctx.suppress_response = True
-            else:
-                ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+            ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         latency_started_at = (
             ctx.visible_run_started_at
