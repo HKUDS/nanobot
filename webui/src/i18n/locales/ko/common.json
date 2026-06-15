@@ -577,12 +577,18 @@
         "unknown": "알 수 없음"
       },
       "history": {
-        "ok": "완료",
+        "ok": "정상",
         "error": "오류",
         "skipped": "건너뜀",
-        "recent": "최근 결과",
+        "health": "최근 상태",
         "timeline": "실행 기록",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "실행: {{total}} · 문제: {{issues}}",
+        "issueCount": "문제: {{count}}",
+        "noRecentIssues": "최근 문제 없음",
+        "lastRan": "마지막 실행: {{time}}",
+        "lastRanWithDuration": "마지막 실행: {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "기록된 오류 없음"
       },
       "message": {
         "showMore": "전체 메시지 보기",

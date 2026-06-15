@@ -577,12 +577,18 @@
         "unknown": "未知"
       },
       "history": {
-        "ok": "完成",
+        "ok": "正常",
         "error": "错误",
         "skipped": "已跳过",
-        "recent": "最近结果",
+        "health": "最近健康状态",
         "timeline": "运行记录",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "运行：{{total}} · 问题：{{issues}}",
+        "issueCount": "问题：{{count}}",
+        "noRecentIssues": "近期无问题",
+        "lastRan": "最后运行于 {{time}}",
+        "lastRanWithDuration": "最后运行于 {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "未记录错误"
       },
       "message": {
         "showMore": "查看完整消息",

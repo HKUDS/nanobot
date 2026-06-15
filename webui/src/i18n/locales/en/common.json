@@ -577,12 +577,18 @@
         "unknown": "unknown"
       },
       "history": {
-        "ok": "Completed",
+        "ok": "Healthy",
         "error": "Error",
         "skipped": "Skipped",
-        "recent": "Last result",
+        "health": "Recent health",
         "timeline": "Run history",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "Runs: {{total}} · Issues: {{issues}}",
+        "issueCount": "Issues: {{count}}",
+        "noRecentIssues": "No recent issues",
+        "lastRan": "Last ran {{time}}",
+        "lastRanWithDuration": "Last ran {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "No error recorded"
       },
       "message": {
         "showMore": "Show full message",
