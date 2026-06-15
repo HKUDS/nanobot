@@ -94,20 +94,34 @@ Verify after merge: all 4 skill directories exist.
 
 ---
 
+## Architettura cron di Frank
+
+**REGOLA FONDAMENTALE — non modificare il codice se arriva spam da cron.**
+
+Frank usa due meccanismi distinti per i job periodici:
+
+| Meccanismo | Quando usarlo | Come si configura |
+|---|---|---|
+| **Cron Telegram** (`~/.nanobot/cron/jobs.json`) | Job che devono mandare una notifica all'utente | Frank lo crea con il tool `cron` |
+| **Heartbeat** (task list interna) | Job silenti, check periodici, manutenzione | Frank lo aggiunge alla sua task list interna |
+
+Se un job nel cron Telegram non ha nulla da comunicare ma viene eseguito comunque, il problema è che **quel job sta nel posto sbagliato** — va spostato nell'heartbeat. Non serve toccare `loop.py` o aggiungere flag `silent`.
+
+**Se arriva spam**: dire a Frank su Telegram "sposta X nell'heartbeat" — lui sa già come farlo.
+
+**Non fare mai**: aggiungere logica di soppressione in `loop.py` per silenziare cron turn. È stato fatto per errore il 2026-06-15 e poi revertito (vedi P01).
+
+---
+
 ## Jobs config (`~/.nanobot/cron/jobs.json`)
 
-After any Frank restart or config wipe, verify these job-level settings:
+Tutti i job qui sotto devono stare nel cron Telegram perché **consegnano sempre qualcosa** all'utente. Se un job smette di avere senso come notifica, va rimosso da qui e aggiunto all'heartbeat.
 
-| job name | deliver | notes |
-|---|---|---|
-| `railway-log-health-check` | `false` | silent check, uses `message` tool on real errors only |
-| `email-polling-foolish` | `false` | silent check, uses `message` tool on new emails only |
-| `umami-daily-analytics` | `false` | silent |
-| `obsidian-nightly-check` | `false` | silent |
-| `nanobot-upstream-check` | `false` | silent |
-| `foolish-weekly-research` | `true` | delivers digest |
-| `scribacchino-digest` | `true` | delivers daily summary |
-| `cms-packlink-check` | `true` | delivers tracking status |
-| `sebo-concept-8am` | `true` | delivers concepts |
-| `sebo-concept-4pm` | `true` | delivers concepts |
-| `📸 promemoria foto prodotti` | `true` | delivers reminder |
+| job name | note |
+|---|---|
+| `foolish-weekly-research` | digest settimanale |
+| `scribacchino-digest` | riassunto giornaliero |
+| `cms-packlink-check` | stato spedizioni |
+| `sebo-concept-8am` | concepts mattina |
+| `sebo-concept-4pm` | concepts pomeriggio |
+| `📸 promemoria foto prodotti` | promemoria |
