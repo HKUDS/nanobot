@@ -318,7 +318,8 @@ class WebSearchTool(Tool):
             )
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
-            return "keenable"  # free tier works without a key; never fall back
+            api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
+            return "keenable" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -490,13 +491,15 @@ class WebSearchTool(Tool):
 
     async def _search_keenable(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
+        if not api_key:
+            logger.warning("KEENABLE_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
         headers = {
             "Content-Type": "application/json",
             "User-Agent": self.user_agent,
             "X-Keenable-Title": "nanobot",
+            "X-API-Key": api_key,
         }
-        if api_key:
-            headers["X-API-Key"] = api_key
         try:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.post(

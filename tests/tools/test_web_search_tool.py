@@ -131,11 +131,12 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
-def test_keenable_without_api_key_stays_on_provider(monkeypatch):
+def test_keenable_without_api_key_is_treated_as_duckduckgo(monkeypatch):
+    # The REST API requires a key; without one we fall back to DuckDuckGo.
     monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
     tool = _tool(provider="keenable", api_key="")
-    assert tool.exclusive is False
-    assert tool.concurrency_safe is True
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
 
 
 @pytest.mark.asyncio
@@ -158,20 +159,20 @@ async def test_keenable_search(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_keenable_search_without_key_omits_header(monkeypatch):
+async def test_keenable_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
     monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
 
-    async def mock_post(self, url, **kw):
-        assert "keenable" in url
-        assert "X-API-Key" not in kw["headers"]
-        return _response(json={
-            "results": [{"title": "Anon", "url": "https://keenable.ai", "description": "ok"}]
-        })
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
     tool = _tool(provider="keenable", api_key="")
     result = await tool.execute(query="keenable", count=1)
-    assert "Anon" in result
+    assert "DuckDuckGo fallback" in result
 
 
 @pytest.mark.asyncio
