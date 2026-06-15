@@ -501,7 +501,7 @@ class WebSearchTool(Tool):
                     "https://api.keenable.ai/v1/search",
                     headers=headers,
                     json={"query": query},
-                    timeout=15.0,
+                    timeout=float(self.config.timeout),
                 )
                 r.raise_for_status()
             items = [
@@ -513,8 +513,12 @@ class WebSearchTool(Tool):
                 for x in r.json().get("results", [])
             ]
             return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return "Error: Keenable search rate limited. Try again later or reduce search frequency."
+            return f"Error: Keenable search failed ({e.response.status_code}): {e}"
         except Exception as e:
-            return f"Error: {e}"
+            return f"Error: Keenable search failed: {e}"
 
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()

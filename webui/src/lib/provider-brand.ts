@@ -129,6 +129,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   huggingface: brand("huggingface.co", "#FF9D00", "HF"),
   jina: brand("jina.ai", "#7C3AED", "J"),
   kagi: brand("kagi.com", "#FFB319", "K"),
+  keenable: brand("keenable.ai", "#0EA5E9", "K"),
   lm_studio: brand("lmstudio.ai", "#111827", "LM"),
   longcat: brand("longcatai.org", "#4F8CFF", "LC", [
     "https://www.longcatai.org/favicon.svg",
