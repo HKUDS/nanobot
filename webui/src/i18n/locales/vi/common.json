@@ -577,12 +577,18 @@
         "unknown": "không xác định"
       },
       "history": {
-        "ok": "Hoàn tất",
+        "ok": "Ổn",
         "error": "Lỗi",
         "skipped": "Đã bỏ qua",
-        "recent": "Kết quả gần nhất",
+        "health": "Tình trạng gần đây",
         "timeline": "Lịch sử chạy",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "Lượt chạy: {{total}} · Vấn đề: {{issues}}",
+        "issueCount": "Vấn đề: {{count}}",
+        "noRecentIssues": "Không có vấn đề gần đây",
+        "lastRan": "Chạy lần cuối {{time}}",
+        "lastRanWithDuration": "Chạy lần cuối {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "Không ghi nhận lỗi"
       },
       "message": {
         "showMore": "Hiển thị toàn bộ tin nhắn",

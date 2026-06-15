@@ -577,12 +577,18 @@
         "unknown": "desconocido"
       },
       "history": {
-        "ok": "Completada",
+        "ok": "Sin errores",
         "error": "Error",
         "skipped": "Omitida",
-        "recent": "Último resultado",
+        "health": "Estado reciente",
         "timeline": "Historial de ejecuciones",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "Ejecuciones: {{total}} · Problemas: {{issues}}",
+        "issueCount": "Problemas: {{count}}",
+        "noRecentIssues": "Sin problemas recientes",
+        "lastRan": "Última ejecución: {{time}}",
+        "lastRanWithDuration": "Última ejecución: {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "No se registraron errores"
       },
       "message": {
         "showMore": "Mostrar mensaje completo",

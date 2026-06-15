@@ -577,12 +577,18 @@
         "unknown": "不明"
       },
       "history": {
-        "ok": "完了",
+        "ok": "正常",
         "error": "エラー",
         "skipped": "スキップ",
-        "recent": "最新結果",
+        "health": "最近の状態",
         "timeline": "実行履歴",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "実行: {{total}} · 問題: {{issues}}",
+        "issueCount": "問題: {{count}}",
+        "noRecentIssues": "最近の問題なし",
+        "lastRan": "最終実行: {{time}}",
+        "lastRanWithDuration": "最終実行: {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "エラー記録なし"
       },
       "message": {
         "showMore": "メッセージ全文を表示",

@@ -577,12 +577,18 @@
         "unknown": "tidak dikenal"
       },
       "history": {
-        "ok": "Selesai",
+        "ok": "Tanpa error",
         "error": "Error",
         "skipped": "Dilewati",
-        "recent": "Hasil terakhir",
+        "health": "Status terbaru",
         "timeline": "Riwayat eksekusi",
-        "statusWithDuration": "{{status}} · {{duration}}"
+        "summary": "Eksekusi: {{total}} · Masalah: {{issues}}",
+        "issueCount": "Masalah: {{count}}",
+        "noRecentIssues": "Tidak ada masalah terbaru",
+        "lastRan": "Terakhir berjalan {{time}}",
+        "lastRanWithDuration": "Terakhir berjalan {{time}} · {{duration}}",
+        "runMetaWithDuration": "{{time}} · {{duration}}",
+        "noError": "Tidak ada error tercatat"
       },
       "message": {
         "showMore": "Tampilkan pesan lengkap",

@@ -3700,8 +3700,7 @@ function AutomationDetailPanel({
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
   const history = job.state.run_history ?? [];
-  const latestRun = history[history.length - 1];
-  const lastResult = automationLastResult(job, latestRun, locale, tx);
+  const runSummary = automationRunSummary(job, history, locale, tx);
   const needsRecreation = automationNeedsRecreation(job);
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
@@ -3779,16 +3778,16 @@ function AutomationDetailPanel({
               {formatAutomationNext(job, tx)}
             </AutomationDetail>
             <AutomationDetail
-              label={tx("settings.automations.history.recent", "Last result")}
-              title={lastResult.title}
-              secondary={lastResult.secondary}
+              label={tx("settings.automations.history.health", "Recent health")}
+              title={runSummary.title}
+              secondary={runSummary.secondary}
             >
               <span className="inline-flex min-w-0 items-center gap-1.5">
                 <span
-                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", automationResultDotClass(lastResult.tone))}
+                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", automationResultDotClass(runSummary.tone))}
                   aria-hidden
                 />
-                <span>{lastResult.primary}</span>
+                <span>{runSummary.primary}</span>
               </span>
             </AutomationDetail>
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")} title={origin}>
@@ -3963,20 +3962,30 @@ function AutomationRunHistory({
 }) {
   if (!history.length) return null;
   const visible = [...history].reverse();
+  const issueCount = history.filter((run) => automationRunNeedsAttention(run.status)).length;
+  const summary = tx("settings.automations.history.summary", "Runs: {{total}} · Issues: {{issues}}", {
+    total: history.length,
+    issues: issueCount,
+  });
 
   return (
     <section className="rounded-[18px] bg-muted/32 px-3 py-3">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-3 text-left"
+        className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
         aria-expanded={expanded}
         onClick={() => onExpandedChange(!expanded)}
       >
-        <span className="text-[12px] font-medium leading-none text-foreground">
+        <span className="shrink-0 text-[12px] font-medium leading-none text-foreground">
           {tx("settings.automations.history.timeline", "Run history")}
         </span>
-        <span className="inline-flex items-center gap-2 text-[11px] leading-none text-muted-foreground">
-          <span className="tabular-nums">{history.length}</span>
+        <span
+          className={cn(
+            "inline-flex min-w-0 items-center gap-2 text-[11px] leading-none",
+            issueCount ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+          )}
+        >
+          <span className="truncate tabular-nums">{summary}</span>
           <ChevronDown
             className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
             aria-hidden
@@ -3987,9 +3996,21 @@ function AutomationRunHistory({
         <div className="mt-3 space-y-2">
           {visible.map((run) => {
             const status = automationRunStatusLabel(run.status, tx);
+            const needsAttention = automationRunNeedsAttention(run.status);
             const duration = run.duration_ms === undefined
               ? null
               : formatAutomationRunDuration(run.duration_ms, locale, tx);
+            const runTime = fmtDateTime(run.run_at_ms, locale);
+            const runMeta = duration
+              ? tx("settings.automations.history.runMetaWithDuration", "{{time}} · {{duration}}", {
+                  time: runTime,
+                  duration,
+                })
+              : runTime;
+            const primary = needsAttention
+              ? run.error || status
+              : tx("settings.automations.history.noError", "No error recorded");
+            const secondary = needsAttention ? `${status} · ${runMeta}` : runMeta;
             return (
               <div
                 key={`${run.run_at_ms}:${run.status}:${run.duration_ms ?? "none"}`}
@@ -4004,18 +4025,15 @@ function AutomationRunHistory({
                     className="block line-clamp-2 text-[12.5px] leading-5 text-foreground/82"
                     title={run.error ?? undefined}
                   >
-                    {status}
-                    {run.error ? ` · ${run.error}` : ""}
+                    {primary}
                   </span>
                   <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
-                    {fmtDateTime(run.run_at_ms, locale)}
+                    {secondary}
                   </span>
                 </span>
-                {duration ? (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                    {duration}
-                  </span>
-                ) : null}
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
+                  {status}
+                </span>
               </div>
             );
           })}
@@ -4023,6 +4041,10 @@ function AutomationRunHistory({
       ) : null}
     </section>
   );
+}
+
+function automationRunNeedsAttention(status: string | null | undefined): boolean {
+  return Boolean(status) && status !== "ok";
 }
 
 function AutomationDetail({
@@ -4675,9 +4697,9 @@ function formatAutomationNextTitle(
   return fmtDateTime(job.state.next_run_at_ms, locale);
 }
 
-function automationLastResult(
+function automationRunSummary(
   job: SessionAutomationJob,
-  latestRun: NonNullable<SessionAutomationJob["state"]["run_history"]>[number] | undefined,
+  history: NonNullable<SessionAutomationJob["state"]["run_history"]>,
   locale: string,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): {
@@ -4697,37 +4719,64 @@ function automationLastResult(
       tone: "warning",
     };
   }
-  if (latestRun) {
-    const status = automationRunStatusLabel(latestRun.status, tx);
-    const duration = latestRun.duration_ms === undefined
-      ? null
-      : formatAutomationRunDuration(latestRun.duration_ms, locale, tx);
-    const primary = duration
-      ? tx("settings.automations.history.statusWithDuration", "{{status}} · {{duration}}", {
-          status,
-          duration,
-        })
-      : status;
-    const secondary = fmtDateTime(latestRun.run_at_ms, locale);
+  const latestRun = history[history.length - 1];
+  const issueRuns = history.filter((run) => automationRunNeedsAttention(run.status));
+  const latestIssue = issueRuns[issueRuns.length - 1];
+  if (latestIssue) {
+    const status = automationRunStatusLabel(latestIssue.status, tx);
+    const runTime = fmtDateTime(latestIssue.run_at_ms, locale);
+    const primary = tx("settings.automations.history.issueCount", "Issues: {{count}}", {
+      count: issueRuns.length,
+    });
+    const secondary = latestIssue.error
+      ? `${latestIssue.error} · ${runTime}`
+      : `${status} · ${runTime}`;
     return {
       primary,
       secondary,
-      title: latestRun.error ? `${secondary} · ${latestRun.error}` : secondary,
-      tone: latestRun.status === "error"
-        ? "danger"
-        : latestRun.status === "skipped"
-          ? "warning"
-          : "success",
+      title: secondary,
+      tone: latestIssue.status === "error" ? "danger" : "warning",
+    };
+  }
+  if (latestRun) {
+    const duration = latestRun.duration_ms === undefined
+      ? null
+      : formatAutomationRunDuration(latestRun.duration_ms, locale, tx);
+    const runTime = fmtDateTime(latestRun.run_at_ms, locale);
+    const secondary = duration
+      ? tx("settings.automations.history.lastRanWithDuration", "Last ran {{time}} · {{duration}}", {
+          time: runTime,
+          duration,
+        })
+      : tx("settings.automations.history.lastRan", "Last ran {{time}}", { time: runTime });
+    return {
+      primary: tx("settings.automations.history.noRecentIssues", "No recent issues"),
+      secondary,
+      title: secondary,
+      tone: "success",
     };
   }
   if (job.state.last_run_at_ms) {
     const status = automationRunStatusLabel(job.state.last_status, tx);
-    const secondary = fmtDateTime(job.state.last_run_at_ms, locale);
+    const runTime = fmtDateTime(job.state.last_run_at_ms, locale);
+    if (!automationRunNeedsAttention(job.state.last_status)) {
+      return {
+        primary: tx("settings.automations.history.noRecentIssues", "No recent issues"),
+        secondary: tx("settings.automations.history.lastRan", "Last ran {{time}}", {
+          time: runTime,
+        }),
+        title: runTime,
+        tone: "success",
+      };
+    }
+    const secondary = job.state.last_error ? `${job.state.last_error} · ${runTime}` : `${status} · ${runTime}`;
     return {
-      primary: status,
+      primary: tx("settings.automations.history.issueCount", "Issues: {{count}}", {
+        count: 1,
+      }),
       secondary,
       title: secondary,
-      tone: job.state.last_status === "error" ? "danger" : "success",
+      tone: job.state.last_status === "error" ? "danger" : "warning",
     };
   }
   const never = tx("settings.automations.last.never", "Never");
@@ -4760,7 +4809,7 @@ function automationRunStatusLabel(
   status: string | null | undefined,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
-  if (status === "ok") return tx("settings.automations.history.ok", "Completed");
+  if (status === "ok") return tx("settings.automations.history.ok", "Healthy");
   if (status === "error") return tx("settings.automations.history.error", "Error");
   if (status === "skipped") return tx("settings.automations.history.skipped", "Skipped");
   return status || tx("settings.automations.last.unknown", "unknown");

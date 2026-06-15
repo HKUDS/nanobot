@@ -628,15 +628,21 @@ describe("App layout", () => {
     expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
     expect(message!).not.toHaveClass("line-clamp-6");
 
-    expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
+    expect(within(detailPanel).getByText("Recent health")).toBeInTheDocument();
+    expect(within(detailPanel).getByText("Issues: 2")).toBeInTheDocument();
     const historyToggle = within(detailPanel).getByRole("button", { name: /Run history/ });
+    const historySection = historyToggle.closest("section") as HTMLElement;
+    expect(historySection).not.toBeNull();
+    expect(within(historySection).queryByText(/oldest failure/)).not.toBeInTheDocument();
     expect(historyToggle).toHaveAttribute("aria-expanded", "false");
+    expect(historyToggle).toHaveTextContent("Runs: 6 · Issues: 2");
     fireEvent.click(historyToggle);
     expect(historyToggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByText(/oldest failure/)).toHaveLength(2);
+    expect(within(historySection).getAllByText(/oldest failure/)).toHaveLength(2);
+    expect(within(detailPanel).getAllByText("No error recorded").length).toBeGreaterThanOrEqual(1);
     fireEvent.click(historyToggle);
     expect(historyToggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
+    expect(within(historySection).queryByText(/oldest failure/)).not.toBeInTheDocument();
   });
 
   it("localizes the Automations surface", async () => {
@@ -697,8 +703,9 @@ describe("App layout", () => {
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("每 1天")).toBeInTheDocument();
-    expect(screen.getByText("最近结果")).toBeInTheDocument();
-    expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();
+    expect(screen.getByText("最近健康状态")).toBeInTheDocument();
+    expect(screen.getByText("近期无问题")).toBeInTheDocument();
+    expect(screen.getByText(/最后运行于/)).toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
     expect(document.title).toBe("自动任务 · blackcat");
