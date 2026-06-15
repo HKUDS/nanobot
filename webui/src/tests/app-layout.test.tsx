@@ -501,6 +501,13 @@ describe("App layout", () => {
     expect(await screen.findByText("Past one-shot")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Old one-shot message")).toHaveClass(
+      "min-h-[160px]",
+      "resize-none",
+    );
 
     fireEvent.change(screen.getByDisplayValue("Old one-shot message"), {
       target: { value: "Updated one-shot message" },

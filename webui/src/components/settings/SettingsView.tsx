@@ -3857,16 +3857,13 @@ function AutomationEditDialog({
   return (
     <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
       {job ? (
-        <DialogContent className="w-[min(calc(100vw-2rem),34rem)] rounded-[26px]">
+        <DialogContent
+          aria-describedby={undefined}
+          className="w-[min(calc(100vw-2rem),34rem)] rounded-[26px]"
+        >
           <form className="space-y-5" onSubmit={submit}>
             <DialogHeader>
               <DialogTitle>{tx("settings.automations.editTitle", "Edit automation")}</DialogTitle>
-              <DialogDescription>
-                {tx(
-                  "settings.automations.editDescription",
-                  "Update the prompt and schedule. The linked chat stays unchanged.",
-                )}
-              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
@@ -3888,7 +3885,7 @@ function AutomationEditDialog({
                 <Textarea
                   value={draft.message}
                   onChange={(event) => setDraft((prev) => ({ ...prev, message: event.target.value }))}
-                  className="min-h-24 resize-y rounded-[12px] text-[13px] leading-5"
+                  className="min-h-[160px] resize-none rounded-[12px] text-[13px] leading-5"
                 />
               </label>
 
