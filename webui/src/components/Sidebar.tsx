@@ -51,7 +51,7 @@ interface SidebarProps {
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
-  completedChatIds?: string[];
+  updatedChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
@@ -210,7 +210,7 @@ export function Sidebar(props: SidebarProps) {
             projectNameOverrides={props.projectNameOverrides}
             collapsedGroups={props.collapsedGroups}
             runningChatIds={props.runningChatIds}
-            completedChatIds={props.completedChatIds}
+            updatedChatIds={props.updatedChatIds}
             density={props.viewState?.density}
             showPreviews={props.viewState?.show_previews}
             showTimestamps={props.viewState?.show_timestamps}

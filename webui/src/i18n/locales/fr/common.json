@@ -679,7 +679,8 @@
     "newInProject": "Démarrer une nouvelle discussion dans {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",

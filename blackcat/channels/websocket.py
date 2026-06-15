@@ -846,6 +846,19 @@ class WebSocketChannel(BaseChannel):
             self.logger.exception("send failed{}", label)
             raise
 
+    def _all_subscribed_connections(self) -> list[Any]:
+        """Return every live WebUI connection that is subscribed to at least one chat."""
+        seen: set[int] = set()
+        conns: list[Any] = []
+        for subscribers in self._subs.values():
+            for connection in subscribers:
+                marker = id(connection)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                conns.append(connection)
+        return conns
+
     async def send(self, msg: OutboundMessage) -> None:
         if msg.metadata.get("_runtime_model_updated"):
             await self.send_runtime_model_updated(
@@ -896,6 +909,7 @@ class WebSocketChannel(BaseChannel):
                 goal_state=gs_blob,
                 metadata=msg.metadata,
             )
+            await self.send_session_updated(msg.chat_id, scope="thread")
             return
         if msg.metadata.get("_session_updated"):
             if conns:
@@ -1146,8 +1160,8 @@ class WebSocketChannel(BaseChannel):
             await self._safe_send_to(connection, raw, label=" goal_status ")
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
-        """Notify clients that session metadata changed outside the main turn."""
-        conns = list(self._subs.get(chat_id, ()))
+        """Notify WebUI clients that a session row should refresh."""
+        conns = self._all_subscribed_connections()
         if not conns:
             return
         body: dict[str, Any] = {"event": "session_updated", "chat_id": chat_id}

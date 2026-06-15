@@ -119,6 +119,46 @@ async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Re
     )
 
 
+@pytest.mark.asyncio
+async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -> None:
+    class Conn:
+        remote_address = None
+
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(raw)
+
+    channel = _ch(bus)
+    active_conn = Conn()
+    other_conn = Conn()
+    channel._attach(active_conn, "chat-a")
+    channel._attach(other_conn, "chat-b")
+    assert sorted(channel._subs) == ["chat-a", "chat-b"]
+    assert sum(len(conns) for conns in channel._subs.values()) == 2
+    assert {id(conn) for conn in channel._all_subscribed_connections()} == {
+        id(active_conn),
+        id(other_conn),
+    }
+
+    await channel.send_session_updated("chat-a", scope="thread")
+
+    active_events = [json.loads(raw)["event"] for raw in active_conn.sent]
+    other_events = [json.loads(raw)["event"] for raw in other_conn.sent]
+
+    assert (active_events, other_events) == (
+        ["session_updated"],
+        ["session_updated"],
+    )
+    payload = json.loads(other_conn.sent[0])
+    assert payload == {
+        "event": "session_updated",
+        "chat_id": "chat-a",
+        "scope": "thread",
+    }
+
+
 async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
     """Receive until a specific websocket event appears."""
     for _ in range(10):

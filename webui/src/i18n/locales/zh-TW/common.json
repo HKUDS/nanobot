@@ -679,7 +679,8 @@
     "newInProject": "在 {{project}} 中開始新對話",
     "activity": {
       "running": "Agent 正在執行",
-      "complete": "Agent 已完成"
+      "complete": "Agent 已完成",
+      "updated": "有新內容"
     },
     "pin": "置頂",
     "unpin": "取消置頂",

@@ -1715,7 +1715,10 @@ export function SettingsView({
       <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto w-full max-w-[920px] px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
+            "mx-auto w-full px-5 py-8 sm:px-8 lg:py-12",
+            activeSection === "automations"
+              ? "max-w-[1220px] 2xl:max-w-[1320px]"
+              : "max-w-[920px]",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -1801,7 +1804,7 @@ function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-3 pb-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
+        "flex w-full shrink-0 flex-col border-b border-border/55 bg-card/62 px-4 pb-3 shadow-[inset_0_-1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-card/45 dark:shadow-none md:w-[17rem] md:border-b-0 md:border-r md:px-3 md:pb-4 md:shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]",
         hostChromeInset ? "pt-[4.25rem] md:pt-[4.25rem]" : "pt-4 md:pt-4",
       )}
     >
@@ -2062,7 +2065,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-          {currentVersion ? `v${currentVersion}` : "nanobot"}
+          {currentVersion ? `v${currentVersion}` : "blackcat"}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
@@ -2091,10 +2094,7 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
         {result?.type === "update" ? (
           <span className="inline-flex items-center gap-1.5 text-[12px] text-blue-600 dark:text-blue-300">
             <ArrowUpCircle className="h-3 w-3" aria-hidden />
-            {t("settings.about.updateAvailable", {
-              defaultValue: "Update available v{{version}}",
-              version: result.latestVersion,
-            })}
+            {tx("settings.about.updateAvailable", "Update available")}{result.latestVersion && ` v${result.latestVersion}`}
             {result.pypiUrl ? (
               <a
                 href={result.pypiUrl}
@@ -3473,10 +3473,10 @@ function AutomationsSettings({
   }, [filtered, selectedJobId]);
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-[22px] border border-border/45 bg-card/80 px-3 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.045)] backdrop-blur-xl sm:px-4">
+    <div className="space-y-4">
+      <section className="rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 flex-wrap gap-1 rounded-[16px] bg-muted/55 p-1">
+          <div className="flex min-w-0 flex-wrap gap-1 rounded-[16px] bg-muted/50 p-1">
             {summaryOptions.map((option) => (
               <button
                 key={option.value}
@@ -3488,7 +3488,7 @@ function AutomationsSettings({
                 )}
               >
                 <span>{option.label}</span>
-                <span className="min-w-5 rounded-full bg-muted px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground">
+                <span className="min-w-5 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground">
                   {option.count}
                 </span>
               </button>
@@ -3496,20 +3496,20 @@ function AutomationsSettings({
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <div className="relative min-w-0 sm:w-[22rem]">
+            <div className="relative min-w-0 sm:w-[24rem]">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
               <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder={tx("settings.automations.search", "Search automation, message, session, or cron expression")}
-                className="h-9 rounded-full bg-background/85 pl-9 text-[13px]"
+                className="h-9 rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground"
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                   <span>{sortLabel[sort]}</span>
@@ -3536,55 +3536,64 @@ function AutomationsSettings({
         </div>
       ) : null}
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.automations.queue", "Queue")}</SettingsSectionTitle>
-        {loading && !payload ? (
-          <div className="flex h-40 items-center justify-center rounded-[22px] border border-border/45 bg-card/78 text-[13px] text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {tx("settings.automations.loading", "Loading automations...")}
-          </div>
-        ) : filtered.length && selectedJob ? (
-          <div className="grid gap-3 xl:grid-cols-[minmax(18rem,23rem)_minmax(0,1fr)]">
-            <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/78 p-1.5 shadow-[0_18px_55px_rgba(15,23,42,0.045)] backdrop-blur-xl">
-              <div className="space-y-1" role="list" aria-label={tx("settings.automations.queue", "Queue")}>
-                {filtered.map((job) => (
-                  <AutomationListItem
-                    key={job.id}
-                    job={job}
-                    locale={locale}
-                    selected={job.id === selectedJob.id}
-                    onSelect={() => setSelectedJobId(job.id)}
-                  />
-                ))}
-              </div>
+      {loading && !payload ? (
+        <div className="flex h-44 items-center justify-center rounded-[24px] border border-border/45 bg-card/80 text-[13px] text-muted-foreground shadow-[0_22px_70px_rgba(15,23,42,0.055)]">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+          {tx("settings.automations.loading", "Loading automations...")}
+        </div>
+      ) : filtered.length && selectedJob ? (
+        <section className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+          <aside className="overflow-hidden rounded-[24px] border border-border/45 bg-card/80 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+              <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+                {tx("settings.automations.queue", "Queue")}
+              </h2>
+              <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums">
+                {filtered.length}
+              </span>
             </div>
-            <AutomationDetailPanel
-              job={selectedJob}
-              locale={locale}
-              actionKey={actionKey}
-              onAction={onAction}
-              onRequestEdit={onRequestEdit}
-              onRequestDelete={onRequestDelete}
-            />
-          </div>
-        ) : (
-          <div className="rounded-[22px] border border-border/45 bg-card/78 px-5 py-10 text-center text-[13px] text-muted-foreground">
-            <div>
-              {jobs.length
-                ? tx("settings.automations.noMatches", "No automations match this view.")
-                : tx("settings.automations.empty", "No automations yet.")}
+            <div
+              className="max-h-[26rem] space-y-1 overflow-y-auto p-2 lg:max-h-[calc(100dvh-17rem)]"
+              role="list"
+              aria-label={tx("settings.automations.queue", "Queue")}
+            >
+              {filtered.map((job) => (
+                <AutomationListItem
+                  key={job.id}
+                  job={job}
+                  locale={locale}
+                  selected={job.id === selectedJob.id}
+                  onSelect={() => setSelectedJobId(job.id)}
+                />
+              ))}
             </div>
-            {!jobs.length ? (
-              <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
-                {tx(
-                  "settings.automations.emptyHint",
-                  "Create one from the chat or channel where it should run so nanobot keeps the right context.",
-                )}
-              </div>
-            ) : null}
+          </aside>
+          <AutomationDetailPanel
+            job={selectedJob}
+            locale={locale}
+            actionKey={actionKey}
+            onAction={onAction}
+            onRequestEdit={onRequestEdit}
+            onRequestDelete={onRequestDelete}
+          />
+        </section>
+      ) : (
+        <div className="rounded-[24px] border border-border/45 bg-card/80 px-5 py-12 text-center text-[13px] text-muted-foreground shadow-[0_22px_70px_rgba(15,23,42,0.055)]">
+          <div>
+            {jobs.length
+              ? tx("settings.automations.noMatches", "No automations match this view.")
+              : tx("settings.automations.empty", "No automations yet.")}
           </div>
-        )}
-      </section>
+          {!jobs.length ? (
+            <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
+              {tx(
+                "settings.automations.emptyHint",
+                "Create one from the chat or channel where it should run so blackcat keeps the right context.",
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -3616,14 +3625,14 @@ function AutomationListItem({
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
-          "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3 text-left transition-colors",
+          "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3.5 text-left transition-colors",
           selected
             ? "bg-background text-foreground shadow-sm ring-1 ring-border/45"
-            : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+            : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
         )}
       >
         <span className="min-w-0">
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 items-center gap-2.5">
             <span
               className={cn("h-2 w-2 shrink-0 rounded-full", automationStatusDotClass(job))}
               aria-hidden
@@ -3632,10 +3641,10 @@ function AutomationListItem({
               {job.name || job.id}
             </span>
           </span>
-          <span className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
+          <span className="mt-1.5 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
             {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
           </span>
-          <span className="mt-2 flex min-w-0 items-center gap-2 text-[11.5px] leading-none text-muted-foreground">
+          <span className="mt-2.5 flex min-w-0 items-center gap-2 text-[11.5px] leading-none text-muted-foreground">
             <span className="truncate" title={formatAutomationNextTitle(job, locale, tx)}>
               {nextRun}
             </span>
@@ -3694,14 +3703,16 @@ function AutomationDetailPanel({
   const needsRecreation = automationNeedsRecreation(job);
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
+  const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
+  const schedule = formatAutomationSchedule(job, locale, tx);
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-[24px] border border-border/45 bg-card/82 shadow-[0_24px_70px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+    <article className="min-w-0 overflow-hidden rounded-[24px] border border-border/45 bg-card/90 shadow-[0_24px_80px_rgba(15,23,42,0.065)] backdrop-blur-xl">
       <div className="border-b border-border/35 px-4 py-4 sm:px-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h3 className="min-w-0 truncate text-[17px] font-medium leading-7 text-foreground">
+              <h3 className="min-w-0 truncate text-[18px] font-medium leading-7 text-foreground">
                 {job.name || job.id}
               </h3>
               <StatusPill tone={status.tone}>{status.label}</StatusPill>
@@ -3709,8 +3720,8 @@ function AutomationDetailPanel({
                 <StatusPill>{tx("settings.automations.oneShot", "One-time")}</StatusPill>
               ) : null}
             </div>
-            <p className="mt-1 max-w-[62rem] text-[13px] leading-6 text-muted-foreground">
-              {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
+            <p className="mt-1 truncate text-[12.5px] leading-5 text-muted-foreground">
+              {schedule} · {origin}
             </p>
           </div>
           <AutomationActionGroup
@@ -3723,15 +3734,18 @@ function AutomationDetailPanel({
         </div>
       </div>
 
-      <div className="grid gap-4 p-4 2xl:grid-cols-[minmax(0,1fr)_14rem]">
-        <div className="min-w-0 space-y-4">
-          <div className="grid gap-2 md:grid-cols-2">
-            <AutomationDetail
-              label={tx("settings.automations.labels.schedule", "Schedule")}
-              title={formatAutomationSchedule(job, locale, tx)}
-            >
-              {formatAutomationSchedule(job, locale, tx)}
-            </AutomationDetail>
+      <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="min-w-0 space-y-4 p-4 sm:p-5">
+          <section className="rounded-[20px] border border-border/35 bg-background/60 px-4 py-3.5">
+            <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
+              {tx("settings.automations.fields.message", "Message")}
+            </div>
+            <div className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85">
+              {message}
+            </div>
+          </section>
+
+          <div className="grid gap-3 md:grid-cols-3">
             <AutomationDetail
               label={tx("settings.automations.labels.next", "Next")}
               title={formatAutomationNextTitle(job, locale, tx)}
@@ -3767,7 +3781,7 @@ function AutomationDetailPanel({
           </div>
 
           {needsRecreation ? (
-            <div className="mt-3 rounded-[14px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+            <div className="rounded-[16px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
               {tx(
                 "settings.automations.legacyWarning",
                 "This older automation is missing its target chat. Recreate it from the chat or channel where it should run.",
@@ -3776,7 +3790,7 @@ function AutomationDetailPanel({
           ) : null}
 
           {job.state.last_error ? (
-            <div className="mt-3 rounded-[14px] bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
+            <div className="rounded-[16px] border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
               {job.state.last_error}
             </div>
           ) : null}
@@ -3784,28 +3798,38 @@ function AutomationDetailPanel({
           <AutomationRunHistory history={history} locale={locale} tx={tx} />
         </div>
 
-        <aside className="rounded-[18px] bg-muted/32 p-3 text-[12px] text-muted-foreground">
-          <div className="space-y-3">
-            {created ? (
-              <div>
-                <div className="text-[11px] leading-none text-muted-foreground/75">
-                  {tx("settings.automations.labels.created", "Created")}
+        <aside className="border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground sm:p-5 xl:border-l xl:border-t-0">
+          <div className="space-y-4">
+            <AutomationDetail
+              label={tx("settings.automations.labels.schedule", "Schedule")}
+              title={schedule}
+            >
+              {schedule}
+            </AutomationDetail>
+            <div className="rounded-[18px] bg-background/55 p-3">
+              <div className="space-y-3">
+                {created ? (
+                  <div>
+                    <div className="text-[11px] leading-none text-muted-foreground/75">
+                      {tx("settings.automations.labels.created", "Created")}
+                    </div>
+                    <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{created}</div>
+                  </div>
+                ) : null}
+                {updated ? (
+                  <div>
+                    <div className="text-[11px] leading-none text-muted-foreground/75">
+                      {tx("settings.automations.labels.updated", "Updated")}
+                    </div>
+                    <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{updated}</div>
+                  </div>
+                ) : null}
+                <div>
+                  <div className="text-[11px] leading-none text-muted-foreground/75">ID</div>
+                  <div className="mt-1.5 break-all font-mono text-[11.5px] leading-5 text-foreground/70">
+                    {job.id}
+                  </div>
                 </div>
-                <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{created}</div>
-              </div>
-            ) : null}
-            {updated ? (
-              <div>
-                <div className="text-[11px] leading-none text-muted-foreground/75">
-                  {tx("settings.automations.labels.updated", "Updated")}
-                </div>
-                <div className="mt-1.5 text-[12.5px] leading-5 text-foreground/80">{updated}</div>
-              </div>
-            ) : null}
-            <div>
-              <div className="text-[11px] leading-none text-muted-foreground/75">ID</div>
-              <div className="mt-1.5 break-all font-mono text-[11.5px] leading-5 text-foreground/70">
-                {job.id}
               </div>
             </div>
           </div>
@@ -6838,6 +6862,7 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   ant_ling: Sparkles,
   azure_openai: Cloud,
   bedrock: Database,
+  bocha: Search,
   brave: Search,
   duckduckgo: Search,
   exa: Search,
@@ -7037,7 +7062,7 @@ function SettingsRow({
           </div>
         ) : null}
       </div>
-      {children ? <div className="min-w-0 sm:ml-6 sm:shrink-0">{children}</div> : null}
+      {children ? <div className="shrink-0 sm:ml-6">{children}</div> : null}
     </div>
   );
 }
@@ -7053,7 +7078,7 @@ function ReadOnlyRow({
 }) {
   return (
     <SettingsRow title={title} description={description}>
-      <span className="block max-w-full truncate text-left text-[13px] text-muted-foreground sm:max-w-[320px] sm:text-right">
+      <span className="block max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
         {value}
       </span>
     </SettingsRow>
@@ -7499,7 +7524,7 @@ function NumberInput({
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-8 w-24 max-w-full rounded-full text-[13px]"
+        className="h-8 w-24 rounded-full text-[13px]"
       />
       {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>

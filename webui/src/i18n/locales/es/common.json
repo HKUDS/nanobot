@@ -679,7 +679,8 @@
     "newInProject": "Iniciar un chat nuevo en {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",

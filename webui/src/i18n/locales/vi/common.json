@@ -679,7 +679,8 @@
     "newInProject": "Bắt đầu cuộc trò chuyện mới trong {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",

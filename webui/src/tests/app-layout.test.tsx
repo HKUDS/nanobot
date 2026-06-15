@@ -13,6 +13,7 @@ const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
+const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -194,7 +195,10 @@ vi.mock("@/lib/blackcat-client", () => {
     onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
-    onSessionUpdate = () => () => {};
+    onSessionUpdate = (handler: (chatId: string, scope?: string) => void) => {
+      sessionUpdateHandlers.add(handler);
+      return () => sessionUpdateHandlers.delete(handler);
+    };
     onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
       runStatusHandlers.add(handler);
       return () => runStatusHandlers.delete(handler);
@@ -227,10 +231,12 @@ describe("App layout", () => {
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
     runStatusHandlers.clear();
+    sessionUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
     setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("blackcat-webui.sidebar");
     localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
+    localStorage.removeItem("blackcat-webui.sidebar.session-updates.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -449,7 +455,7 @@ describe("App layout", () => {
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Automations · nanobot");
+    expect(document.title).toBe("Automations · blackcat");
   });
 
   it("edits a past one-time automation without resubmitting its old schedule", async () => {
@@ -589,7 +595,7 @@ describe("App layout", () => {
     expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
-    expect(document.title).toBe("自动任务 · nanobot");
+    expect(document.title).toBe("自动任务 · blackcat");
   });
 
   it("fully collapses the native host sidebar and previews it on hover", async () => {
@@ -1012,15 +1018,15 @@ describe("App layout", () => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
   });
 
-  it("does not show a completed dot later when the active session finishes", async () => {
+  it("does not show an updated dot later when the active session finishes", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -1064,12 +1070,53 @@ describe("App layout", () => {
       for (const handler of runStatusHandlers) handler("chat-a", null);
     });
     expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
-    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
+  });
+
+  it("marks inactive sessions when a thread update arrives", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Open chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Scheduled update target",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Open chat$/ }));
+    });
+
+    act(() => {
+      for (const handler of sessionUpdateHandlers) handler("chat-b", "thread");
+    });
+
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Scheduled update target$/ }));
+    });
+
+    expect(within(sidebar).queryByTitle("New activity")).not.toBeInTheDocument();
   });
 
   it("restores sidebar run indicators after a page reload", async () => {
@@ -1093,7 +1140,7 @@ describe("App layout", () => {
       },
     ];
     localStorage.setItem(
-      "blackcat-webui.sidebar.completed-runs.v1",
+      "blackcat-webui.sidebar.session-updates.v1",
       JSON.stringify(["chat-b"]),
     );
 
@@ -1104,7 +1151,7 @@ describe("App layout", () => {
     await waitFor(() =>
       expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
     );
-    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(within(sidebar).getByTitle("New activity")).toBeInTheDocument();
     expect(attachSpy).toHaveBeenCalledWith("chat-a");
   });
 

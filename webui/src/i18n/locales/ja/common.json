@@ -679,7 +679,8 @@
     "newInProject": "「{{project}}」で新しいチャットを開始",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
