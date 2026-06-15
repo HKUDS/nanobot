@@ -582,7 +582,13 @@
         "skipped": "已略過",
         "recent": "最近結果",
         "timeline": "執行記錄",
+        "showMore": "再顯示 {{count}} 筆",
+        "showRecent": "只看最近記錄",
         "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "message": {
+        "showMore": "查看完整訊息",
+        "showLess": "收起訊息"
       },
       "meta": {
         "created": "建立於 {{time}}",

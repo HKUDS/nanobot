@@ -582,7 +582,13 @@
         "skipped": "건너뜀",
         "recent": "최근 결과",
         "timeline": "실행 기록",
+        "showMore": "{{count}}개 더 보기",
+        "showRecent": "최근 실행만 보기",
         "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "message": {
+        "showMore": "전체 메시지 보기",
+        "showLess": "접기"
       },
       "meta": {
         "created": "{{time}} 생성",

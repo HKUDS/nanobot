@@ -558,6 +558,83 @@ describe("App layout", () => {
     });
   });
 
+  it("keeps long automation details expandable without nested scrolling", async () => {
+    const longMessage = [
+      "Review the release plan and prepare a concise status update for the channel.",
+      "Include blockers, owners, follow-up dates, and any risky assumptions that changed since yesterday.",
+      "Keep the output actionable and avoid repeating context that the team already confirmed in the thread.",
+      "If a dependency looks stale, call it out explicitly and ask for a fresh owner update.",
+      "This message is intentionally long enough to require progressive disclosure in the automation details panel.",
+      "The full content should remain available without forcing the user into a small nested scroll area.",
+    ].join("\n");
+    const history = [
+      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
+      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
+      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
+      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+    ];
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/automations": {
+        jobs: [
+          {
+            id: "long-details",
+            name: "Long detail automation",
+            enabled: true,
+            protected: false,
+            delete_after_run: false,
+            schedule: { kind: "every", every_ms: 3_600_000 },
+            payload: {
+              message: longMessage,
+              kind: "agent_turn",
+              session_key: "websocket:chat-a",
+            },
+            state: {
+              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              last_status: "ok",
+              pending: false,
+              run_history: history,
+            },
+            origin: {
+              session_key: "websocket:chat-a",
+              channel: "websocket",
+              chat_id: "chat-a",
+              title: "Release prep",
+              preview: "Check release blockers",
+            },
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+
+    const detailHeading = await screen.findByRole("heading", { name: "Long detail automation" });
+    const detailPanel = detailHeading.closest("article") as HTMLElement;
+    expect(detailPanel).not.toBeNull();
+    const message = Array.from(detailPanel.querySelectorAll("section div")).find(
+      (node) => node.textContent === longMessage,
+    ) as HTMLElement | undefined;
+    expect(message).toBeTruthy();
+    expect(message!).toHaveClass("line-clamp-6");
+
+    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show full message" }));
+    expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(message!).not.toHaveClass("line-clamp-6");
+
+    expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
+    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show 2 more" }));
+    expect(screen.getAllByText(/oldest failure/)).toHaveLength(2);
+    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show recent runs" }));
+    expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
+  });
+
   it("localizes the Automations surface", async () => {
     await i18n.changeLanguage("zh-CN");
     mockFetchRoutes({

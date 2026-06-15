@@ -582,7 +582,13 @@
         "skipped": "Ignorée",
         "recent": "Dernier résultat",
         "timeline": "Historique d’exécution",
+        "showMore": "Afficher {{count}} de plus",
+        "showRecent": "Afficher les exécutions récentes",
         "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "message": {
+        "showMore": "Afficher le message complet",
+        "showLess": "Afficher moins"
       },
       "meta": {
         "created": "Créée {{time}}",

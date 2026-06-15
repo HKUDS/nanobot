@@ -582,7 +582,13 @@
         "skipped": "Dilewati",
         "recent": "Hasil terakhir",
         "timeline": "Riwayat eksekusi",
+        "showMore": "Tampilkan {{count}} lagi",
+        "showRecent": "Tampilkan eksekusi terbaru",
         "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "message": {
+        "showMore": "Tampilkan pesan lengkap",
+        "showLess": "Tampilkan lebih sedikit"
       },
       "meta": {
         "created": "Dibuat {{time}}",

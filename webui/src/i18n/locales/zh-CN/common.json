@@ -582,7 +582,13 @@
         "skipped": "已跳过",
         "recent": "最近结果",
         "timeline": "运行记录",
+        "showMore": "再显示 {{count}} 条",
+        "showRecent": "只看最近记录",
         "statusWithDuration": "{{status}} · {{duration}}"
+      },
+      "message": {
+        "showMore": "查看完整消息",
+        "showLess": "收起消息"
       },
       "meta": {
         "created": "创建于 {{time}}",

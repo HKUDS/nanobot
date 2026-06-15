@@ -3707,6 +3707,14 @@ function AutomationDetailPanel({
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
   const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
   const schedule = formatAutomationSchedule(job, locale, tx);
+  const [messageExpanded, setMessageExpanded] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const messageNeedsExpansion = automationMessageNeedsExpansion(message);
+
+  useEffect(() => {
+    setMessageExpanded(false);
+    setHistoryExpanded(false);
+  }, [job.id]);
 
   return (
     <article className="min-w-0 overflow-hidden rounded-[24px] border border-border/45 bg-card/90 shadow-[0_24px_80px_rgba(15,23,42,0.065)] backdrop-blur-xl">
@@ -3742,9 +3750,25 @@ function AutomationDetailPanel({
             <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
               {tx("settings.automations.fields.message", "Message")}
             </div>
-            <div className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85">
+            <div
+              className={cn(
+                "mt-3 whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/85",
+                !messageExpanded && messageNeedsExpansion && "line-clamp-6",
+              )}
+            >
               {message}
             </div>
+            {messageNeedsExpansion ? (
+              <button
+                type="button"
+                className="mt-3 inline-flex text-[12px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => setMessageExpanded((value) => !value)}
+              >
+                {messageExpanded
+                  ? tx("settings.automations.message.showLess", "Show less")
+                  : tx("settings.automations.message.showMore", "Show full message")}
+              </button>
+            ) : null}
           </section>
 
           <div className="grid gap-3 md:grid-cols-3">
@@ -3797,7 +3821,13 @@ function AutomationDetailPanel({
             </div>
           ) : null}
 
-          <AutomationRunHistory history={history} locale={locale} tx={tx} />
+          <AutomationRunHistory
+            expanded={historyExpanded}
+            history={history}
+            locale={locale}
+            onExpandedChange={setHistoryExpanded}
+            tx={tx}
+          />
         </div>
 
         <aside className="border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground sm:p-5 xl:border-l xl:border-t-0">
@@ -3914,17 +3944,26 @@ function AutomationActionGroup({
   );
 }
 
+function automationMessageNeedsExpansion(message: string): boolean {
+  return message.length > 360 || message.split(/\r?\n/).length > 6;
+}
+
 function AutomationRunHistory({
+  expanded,
   history,
   locale,
+  onExpandedChange,
   tx,
 }: {
+  expanded: boolean;
   history: AutomationRunRecord[];
   locale: string;
+  onExpandedChange: (value: boolean) => void;
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string;
 }) {
   if (!history.length) return null;
-  const recent = history.slice(-4).reverse();
+  const visible = expanded ? [...history].reverse() : history.slice(-4).reverse();
+  const hiddenCount = history.length - visible.length;
 
   return (
     <section className="rounded-[18px] bg-muted/32 px-3 py-3">
@@ -3933,11 +3972,11 @@ function AutomationRunHistory({
           {tx("settings.automations.history.timeline", "Run history")}
         </h4>
         <span className="text-[11px] leading-none text-muted-foreground tabular-nums">
-          {recent.length}
+          {history.length}
         </span>
       </div>
       <div className="space-y-2">
-        {recent.map((run) => {
+        {visible.map((run) => {
           const status = automationRunStatusLabel(run.status, tx);
           const duration = run.duration_ms === undefined
             ? null
@@ -3972,6 +4011,19 @@ function AutomationRunHistory({
           );
         })}
       </div>
+      {history.length > 4 ? (
+        <button
+          type="button"
+          className="mt-3 inline-flex text-[12px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          onClick={() => onExpandedChange(!expanded)}
+        >
+          {expanded
+            ? tx("settings.automations.history.showRecent", "Show recent runs")
+            : tx("settings.automations.history.showMore", "Show {{count}} more", {
+                count: hiddenCount,
+              })}
+        </button>
+      ) : null}
     </section>
   );
 }
