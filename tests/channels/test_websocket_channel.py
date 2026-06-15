@@ -168,6 +168,10 @@ async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
     raise AssertionError(f"websocket event {event!r} was not received")
 
 
+def _sent_ws_payloads(mock_ws: AsyncMock) -> list[dict[str, Any]]:
+    return [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
+
+
 def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
     assert _normalize_http_path("/chat/") == "/chat"
     assert _normalize_http_path("/chat?x=1") == "/chat"
@@ -1274,9 +1278,10 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         metadata={"_turn_end": True},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1"},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1293,9 +1298,10 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         metadata={"_turn_end": True, "latency_ms": 1500},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1313,9 +1319,10 @@ async def test_send_turn_end_includes_goal_state_when_present() -> None:
         metadata={"_turn_end": True, "goal_state": blob},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
