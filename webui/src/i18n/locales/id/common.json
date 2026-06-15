@@ -582,8 +582,6 @@
         "skipped": "Dilewati",
         "recent": "Hasil terakhir",
         "timeline": "Riwayat eksekusi",
-        "showMore": "Tampilkan {{count}} lagi",
-        "showRecent": "Tampilkan eksekusi terbaru",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "message": {

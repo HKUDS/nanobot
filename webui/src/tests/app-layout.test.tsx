@@ -629,9 +629,13 @@ describe("App layout", () => {
     expect(message!).not.toHaveClass("line-clamp-6");
 
     expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
-    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show 2 more" }));
+    const historyToggle = within(detailPanel).getByRole("button", { name: /Run history/ });
+    expect(historyToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(historyToggle);
+    expect(historyToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByText(/oldest failure/)).toHaveLength(2);
-    fireEvent.click(within(detailPanel).getByRole("button", { name: "Show recent runs" }));
+    fireEvent.click(historyToggle);
+    expect(historyToggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/oldest failure/)).not.toBeInTheDocument();
   });
 

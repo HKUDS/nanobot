@@ -582,8 +582,6 @@
         "skipped": "Skipped",
         "recent": "Last result",
         "timeline": "Run history",
-        "showMore": "Show {{count}} more",
-        "showRecent": "Show recent runs",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "message": {

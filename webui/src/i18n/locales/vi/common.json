@@ -582,8 +582,6 @@
         "skipped": "Đã bỏ qua",
         "recent": "Kết quả gần nhất",
         "timeline": "Lịch sử chạy",
-        "showMore": "Hiển thị thêm {{count}}",
-        "showRecent": "Chỉ hiển thị lần chạy gần đây",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "message": {

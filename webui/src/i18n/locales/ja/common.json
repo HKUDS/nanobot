@@ -582,8 +582,6 @@
         "skipped": "スキップ",
         "recent": "最新結果",
         "timeline": "実行履歴",
-        "showMore": "さらに {{count}} 件表示",
-        "showRecent": "最近の実行のみ表示",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "message": {

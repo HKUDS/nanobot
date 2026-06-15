@@ -3962,67 +3962,64 @@ function AutomationRunHistory({
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string;
 }) {
   if (!history.length) return null;
-  const visible = expanded ? [...history].reverse() : history.slice(-4).reverse();
-  const hiddenCount = history.length - visible.length;
+  const visible = [...history].reverse();
 
   return (
     <section className="rounded-[18px] bg-muted/32 px-3 py-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h4 className="text-[12px] font-medium leading-none text-foreground">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 text-left"
+        aria-expanded={expanded}
+        onClick={() => onExpandedChange(!expanded)}
+      >
+        <span className="text-[12px] font-medium leading-none text-foreground">
           {tx("settings.automations.history.timeline", "Run history")}
-        </h4>
-        <span className="text-[11px] leading-none text-muted-foreground tabular-nums">
-          {history.length}
         </span>
-      </div>
-      <div className="space-y-2">
-        {visible.map((run) => {
-          const status = automationRunStatusLabel(run.status, tx);
-          const duration = run.duration_ms === undefined
-            ? null
-            : formatAutomationRunDuration(run.duration_ms, locale, tx);
-          return (
-            <div
-              key={`${run.run_at_ms}:${run.status}:${run.duration_ms ?? "none"}`}
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-[14px] bg-background/62 px-3 py-2"
-            >
-              <span
-                className={cn("mt-1.5 h-1.5 w-1.5 rounded-full", automationRunDotClass(run.status))}
-                aria-hidden
-              />
-              <span className="min-w-0">
+        <span className="inline-flex items-center gap-2 text-[11px] leading-none text-muted-foreground">
+          <span className="tabular-nums">{history.length}</span>
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
+            aria-hidden
+          />
+        </span>
+      </button>
+      {expanded ? (
+        <div className="mt-3 space-y-2">
+          {visible.map((run) => {
+            const status = automationRunStatusLabel(run.status, tx);
+            const duration = run.duration_ms === undefined
+              ? null
+              : formatAutomationRunDuration(run.duration_ms, locale, tx);
+            return (
+              <div
+                key={`${run.run_at_ms}:${run.status}:${run.duration_ms ?? "none"}`}
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-[14px] bg-background/62 px-3 py-2"
+              >
                 <span
-                  className="block line-clamp-2 text-[12.5px] leading-5 text-foreground/82"
-                  title={run.error ?? undefined}
-                >
-                  {status}
-                  {run.error ? ` · ${run.error}` : ""}
+                  className={cn("mt-1.5 h-1.5 w-1.5 rounded-full", automationRunDotClass(run.status))}
+                  aria-hidden
+                />
+                <span className="min-w-0">
+                  <span
+                    className="block line-clamp-2 text-[12.5px] leading-5 text-foreground/82"
+                    title={run.error ?? undefined}
+                  >
+                    {status}
+                    {run.error ? ` · ${run.error}` : ""}
+                  </span>
+                  <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
+                    {fmtDateTime(run.run_at_ms, locale)}
+                  </span>
                 </span>
-                <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
-                  {fmtDateTime(run.run_at_ms, locale)}
-                </span>
-              </span>
-              {duration ? (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                  {duration}
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {history.length > 4 ? (
-        <button
-          type="button"
-          className="mt-3 inline-flex text-[12px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          onClick={() => onExpandedChange(!expanded)}
-        >
-          {expanded
-            ? tx("settings.automations.history.showRecent", "Show recent runs")
-            : tx("settings.automations.history.showMore", "Show {{count}} more", {
-                count: hiddenCount,
-              })}
-        </button>
+                {duration ? (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
+                    {duration}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </section>
   );
