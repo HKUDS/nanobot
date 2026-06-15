@@ -257,12 +257,17 @@ class AgentRunner:
             return []
         injected_messages: list[dict[str, Any]] = []
         for item in items:
-            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
-                injected_messages.append(item)
+            if item is None:
                 continue
-            text = getattr(item, "content", str(item))
-            if text.strip():
-                injected_messages.append({"role": "user", "content": text})
+            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
+                if self._has_injection_content(item.get("content")):
+                    injected_messages.append(item)
+                continue
+            if isinstance(item, dict):
+                continue
+            content = getattr(item, "content") if hasattr(item, "content") else str(item)
+            if self._has_injection_content(content):
+                injected_messages.append({"role": "user", "content": content})
         if len(injected_messages) > _MAX_INJECTIONS_PER_TURN:
             dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
@@ -271,6 +276,16 @@ class AgentRunner:
             )
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
+
+    @staticmethod
+    def _has_injection_content(content: Any) -> bool:
+        if content is None:
+            return False
+        if isinstance(content, str):
+            return bool(content.strip())
+        if isinstance(content, list):
+            return bool(content)
+        return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
