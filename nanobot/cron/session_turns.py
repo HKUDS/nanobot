@@ -21,6 +21,11 @@ def is_cron_turn(metadata: Mapping[str, Any] | None) -> bool:
     return cron_trigger(metadata) is not None
 
 
+def is_silent_cron_turn(metadata: Mapping[str, Any] | None) -> bool:
+    trigger = cron_trigger(metadata)
+    return bool(trigger and trigger.get("silent"))
+
+
 def defer_cron_until_session_idle(metadata: Mapping[str, Any] | None) -> bool:
     return bool(
         is_cron_turn(metadata)

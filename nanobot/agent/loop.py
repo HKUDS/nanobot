@@ -42,6 +42,8 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.cron.session_turns import (
     cron_history_overrides,
+    is_cron_turn,
+    is_silent_cron_turn,
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
@@ -1610,11 +1612,16 @@ class AgentLoop:
     async def _state_save(self, ctx: TurnContext) -> str:
         turn_continuation.prepare_save_boundary(ctx)
 
-        if (
+        if not ctx.suppress_response and is_silent_cron_turn(ctx.msg.metadata):
+            ctx.suppress_response = True
+        elif (
             (ctx.final_content is None or not ctx.final_content.strip())
             and not ctx.suppress_response
         ):
-            ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+            if is_cron_turn(ctx.msg.metadata):
+                ctx.suppress_response = True
+            else:
+                ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         latency_started_at = (
             ctx.visible_run_started_at

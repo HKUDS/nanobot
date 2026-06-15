@@ -23,6 +23,8 @@ class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
+    # Suppress the text response delivered to the user (agent can still use send tools).
+    silent: bool = False
     # Legacy delivery fields used by pre-session-bound cron jobs.
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
