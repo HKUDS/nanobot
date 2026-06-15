@@ -10,8 +10,7 @@ import httpx
 import pytest
 
 from nanobot.agent.tools import web as web_module
-from nanobot.agent.tools.web import WebFetchTool
-from nanobot.config.schema import WebFetchConfig
+from nanobot.agent.tools.web import WebFetchConfig, WebFetchTool
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     build_workspace_scope,

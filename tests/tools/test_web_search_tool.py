@@ -3,8 +3,7 @@
 import httpx
 import pytest
 
-from nanobot.agent.tools.web import WebSearchTool
-from nanobot.config.schema import WebSearchConfig
+from nanobot.agent.tools.web import WebSearchConfig, WebSearchTool
 
 
 def _tool(
