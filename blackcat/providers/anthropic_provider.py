@@ -24,6 +24,22 @@ def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
 
 
+_VALID_TOOL_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _sanitize_tool_id(tid: str) -> str:
+    """Ensure tool_use/tool_result IDs match Anthropic's required pattern.
+
+    The Anthropic API rejects tool IDs that don't match ``^[a-zA-Z0-9_-]+$``
+    with a 400 ("String should match pattern") error. IDs coming from other
+    providers or restored sessions can contain pipes, dots or other invalid
+    characters, so coerce them to the allowed charset.
+    """
+    if not tid or _VALID_TOOL_ID.match(tid):
+        return tid
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", tid)
+
+
 class AnthropicProvider(LLMProvider):
     """LLM provider using the native Anthropic SDK for Claude models.
 
@@ -176,7 +192,7 @@ class AnthropicProvider(LLMProvider):
         content = msg.get("content")
         block: dict[str, Any] = {
             "type": "tool_result",
-            "tool_use_id": msg.get("tool_call_id", ""),
+            "tool_use_id": _sanitize_tool_id(msg.get("tool_call_id", "")),
         }
         if isinstance(content, list):
             block["content"] = AnthropicProvider._convert_user_content(content)
@@ -212,7 +228,7 @@ class AnthropicProvider(LLMProvider):
             args = func.get("arguments", "{}")
             blocks.append({
                 "type": "tool_use",
-                "id": tc.get("id") or _gen_tool_id(),
+                "id": _sanitize_tool_id(tc.get("id") or _gen_tool_id()),
                 "name": func.get("name", ""),
                 "input": tool_arguments_object_for_replay(args),
             })
