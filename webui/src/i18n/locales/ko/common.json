@@ -493,7 +493,7 @@
         "updated": "업데이트",
         "name": "이름"
       },
-      "search": "자동화 검색",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "대기열",
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",

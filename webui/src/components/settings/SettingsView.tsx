@@ -3438,10 +3438,10 @@ function AutomationsSettings({
   const locale = i18n.resolvedLanguage || i18n.language;
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const searchTokens = parseAutomationSearchQuery(query);
     return sortAutomationJobs(jobs, sort)
       .filter((job) => automationMatchesFilter(job, filter))
-      .filter((job) => !normalizedQuery || automationSearchText(job).includes(normalizedQuery));
+      .filter((job) => !searchTokens.length || automationMatchesSearch(job, searchTokens));
   }, [filter, jobs, query, sort]);
   const activeCount = jobs.filter((job) => {
     const key = automationStatusKey(job);
@@ -3478,16 +3478,16 @@ function AutomationsSettings({
   return (
     <div className="space-y-4">
       <section className="rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl sm:p-4">
-        <div className="flex flex-col gap-3">
+        <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-            <div className="inline-flex min-w-max items-center gap-1 rounded-[16px] bg-muted/50 p-1">
+            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[16px] bg-muted/50 p-1">
               {summaryOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   onClick={() => onFilterChange(option.value)}
                   className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-[12px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+                    "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[12px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
                     filter === option.value && "bg-background text-foreground shadow-sm",
                   )}
                 >
@@ -3506,7 +3506,7 @@ function AutomationsSettings({
               <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                placeholder={tx("settings.automations.search", "Search automations")}
+                placeholder={tx("settings.automations.search", "name:quiz chat:WeChat cron:09-23")}
                 className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
               />
             </div>
@@ -4364,24 +4364,156 @@ function automationScheduleChanged(
   return draft.atLocal !== formatLocalDateTimeInput(job.schedule.at_ms ?? NaN);
 }
 
-function automationSearchText(job: SessionAutomationJob): string {
-  const originText = job.origin
-    ? job.origin.channel === "websocket"
-      ? [job.origin.session_key, job.origin.title, job.origin.preview]
-      : [job.origin.channel]
-    : [];
+type AutomationSearchField = "id" | "name" | "message" | "chat" | "cron" | "schedule" | "status";
+
+interface AutomationSearchToken {
+  field: AutomationSearchField | null;
+  value: string;
+}
+
+const AUTOMATION_SEARCH_FIELDS = new Set<AutomationSearchField>([
+  "id",
+  "name",
+  "message",
+  "chat",
+  "cron",
+  "schedule",
+  "status",
+]);
+
+const AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
+  api: "API",
+  cli: "CLI",
+  dingtalk: "DingTalk",
+  discord: "Discord",
+  email: "Email",
+  feishu: "Feishu",
+  matrix: "Matrix",
+  msteams: "Microsoft Teams",
+  qq: "QQ",
+  slack: "Slack",
+  telegram: "Telegram",
+  wechat: "WeChat",
+  wecom: "WeCom",
+  weixin: "WeChat",
+  whatsapp: "WhatsApp",
+};
+
+function parseAutomationSearchQuery(query: string): AutomationSearchToken[] {
+  return (query.match(/[^\s:]+:"[^"]+"|"[^"]+"|\S+/g) ?? [])
+    .map((rawPart): AutomationSearchToken | null => {
+      const part = trimAutomationSearchValue(rawPart);
+      if (!part) return null;
+      const fieldMatch = part.match(/^([A-Za-z]+):(.*)$/);
+      if (!fieldMatch) return { field: null, value: part.toLowerCase() };
+      const field = fieldMatch[1].toLowerCase() as AutomationSearchField;
+      const value = trimAutomationSearchValue(fieldMatch[2]).toLowerCase();
+      if (!value) return null;
+      return AUTOMATION_SEARCH_FIELDS.has(field)
+        ? { field, value }
+        : { field: null, value: part.toLowerCase() };
+    })
+    .filter((token): token is AutomationSearchToken => Boolean(token));
+}
+
+function trimAutomationSearchValue(value: string): string {
+  return value.trim().replace(/^"|"$/g, "").trim();
+}
+
+function automationMatchesSearch(job: SessionAutomationJob, tokens: AutomationSearchToken[]): boolean {
+  return tokens.every((token) => automationSearchText(job, token.field).includes(token.value));
+}
+
+function automationSearchText(job: SessionAutomationJob, field: AutomationSearchField | null = null): string {
+  return automationSearchParts(job, field)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function automationSearchParts(
+  job: SessionAutomationJob,
+  field: AutomationSearchField | null,
+): Array<string | number | null | undefined> {
+  const originParts = automationOriginSearchParts(job);
+  const scheduleParts = automationScheduleSearchParts(job);
+  if (field === "id") return [job.id];
+  if (field === "name") return [job.name, job.id];
+  if (field === "message") return [job.payload.message];
+  if (field === "chat") return originParts;
+  if (field === "cron" || field === "schedule") return scheduleParts;
+  if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
   return [
     job.id,
     job.name,
     job.payload.message,
-    job.schedule.kind,
-    job.schedule.expr,
-    job.schedule.tz,
-    ...originText,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+    ...scheduleParts,
+    automationStatusKey(job),
+    ...originParts,
+  ];
+}
+
+function automationOriginSearchParts(job: SessionAutomationJob): Array<string | null | undefined> {
+  const origin = job.origin;
+  if (!origin) return [];
+  const channel = origin.channel.trim().toLowerCase();
+  return [
+    origin.session_key,
+    origin.title,
+    origin.preview,
+    origin.channel,
+    AUTOMATION_CHANNEL_LABELS[channel],
+  ];
+}
+
+function automationScheduleSearchParts(job: SessionAutomationJob): Array<string | number | null | undefined> {
+  const schedule = job.schedule;
+  const parts: Array<string | number | null | undefined> = [
+    schedule.kind,
+    schedule.expr,
+    schedule.tz,
+    schedule.every_ms,
+    schedule.at_ms,
+  ];
+  if (schedule.kind === "cron" && schedule.expr) {
+    parts.push(...automationCronSearchParts(schedule.expr));
+  }
+  return parts;
+}
+
+function automationCronSearchParts(expr: string): string[] {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return [];
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  const everyDay = dayOfMonth === "*" && month === "*" && dayOfWeek === "*";
+  const numericMinute = cronNumericToken(minute, 59);
+  const numericHour = cronNumericToken(hour, 23);
+  if (numericMinute === null) return [];
+  const paddedMinute = String(numericMinute).padStart(2, "0");
+
+  if (numericHour !== null) {
+    const time = `${String(numericHour).padStart(2, "0")}:${paddedMinute}`;
+    return [time, `:${paddedMinute}`];
+  }
+
+  if (everyDay && hour === "*") {
+    return [`:${paddedMinute}`, `hourly at :${paddedMinute}`];
+  }
+
+  const range = /^(\d{1,2})-(\d{1,2})$/.exec(hour);
+  if (!everyDay || !range) return [];
+  const start = Number(range[1]);
+  const end = Number(range[2]);
+  if (start > 23 || end > 23) return [];
+  const paddedRange = `${String(start).padStart(2, "0")}-${String(end).padStart(2, "0")}`;
+  const rawRange = `${start}-${end}`;
+  return [
+    paddedRange,
+    rawRange,
+    `:${paddedMinute}`,
+    `${paddedRange} at :${paddedMinute}`,
+    `hourly ${paddedRange} at :${paddedMinute}`,
+  ];
 }
 
 function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFilter): boolean {
@@ -4431,25 +4563,8 @@ function automationChannelLabel(
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
   const key = channel.trim().toLowerCase();
-  const labels: Record<string, string> = {
-    api: "API",
-    cli: "CLI",
-    dingtalk: "DingTalk",
-    discord: "Discord",
-    email: "Email",
-    feishu: "Feishu",
-    matrix: "Matrix",
-    msteams: "Microsoft Teams",
-    qq: "QQ",
-    slack: "Slack",
-    telegram: "Telegram",
-    wechat: "WeChat",
-    wecom: "WeCom",
-    weixin: "WeChat",
-    whatsapp: "WhatsApp",
-  };
-  return labels[key]
-    ? tx(`settings.automations.channels.${key}`, labels[key])
+  return AUTOMATION_CHANNEL_LABELS[key]
+    ? tx(`settings.automations.channels.${key}`, AUTOMATION_CHANNEL_LABELS[key])
     : channel;
 }
 

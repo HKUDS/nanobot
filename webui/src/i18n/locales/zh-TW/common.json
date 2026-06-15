@@ -493,7 +493,7 @@
         "updated": "更新時間",
         "name": "名稱"
       },
-      "search": "搜尋自動任務",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "任務佇列",
       "loading": "正在載入自動任務...",
       "noMatches": "目前檢視沒有符合的自動任務。",

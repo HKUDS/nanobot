@@ -493,7 +493,7 @@
         "updated": "Diperbarui",
         "name": "Nama"
       },
-      "search": "Cari otomatisasi",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "Antrean",
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",

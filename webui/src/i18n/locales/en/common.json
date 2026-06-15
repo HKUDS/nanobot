@@ -493,7 +493,7 @@
         "updated": "Updated",
         "name": "Name"
       },
-      "search": "Search automations",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",

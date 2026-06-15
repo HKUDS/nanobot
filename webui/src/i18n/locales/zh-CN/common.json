@@ -493,7 +493,7 @@
         "updated": "更新时间",
         "name": "名称"
       },
-      "search": "搜索自动任务",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "任务队列",
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",

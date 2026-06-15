@@ -493,7 +493,7 @@
         "updated": "Actualizada",
         "name": "Nombre"
       },
-      "search": "Buscar automatizaciones",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "Cola",
       "loading": "Cargando automatizaciones...",
       "noMatches": "No hay automatizaciones que coincidan con esta vista.",

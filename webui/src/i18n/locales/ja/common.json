@@ -493,7 +493,7 @@
         "updated": "更新日時",
         "name": "名前"
       },
-      "search": "自動化を検索",
+      "search": "name:quiz chat:WeChat cron:09-23",
       "queue": "キュー",
       "loading": "自動タスクを読み込み中...",
       "noMatches": "この表示に一致する自動タスクはありません。",

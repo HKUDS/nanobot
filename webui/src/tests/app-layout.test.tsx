@@ -393,7 +393,7 @@ describe("App layout", () => {
             enabled: true,
             protected: false,
             delete_after_run: false,
-            schedule: { kind: "every", every_ms: 3_600_000 },
+            schedule: { kind: "cron", expr: "30 9-23 * * *", tz: "Asia/Shanghai" },
             payload: {
               message: "Send a quiz",
               kind: "agent_turn",
@@ -452,6 +452,17 @@ describe("App layout", () => {
       "page",
     );
     expect(document.title).toBe("Automations · blackcat");
+
+    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
+      "name:quiz chat:WeChat cron:09-23",
+    );
+    fireEvent.change(searchInput, { target: { value: "chat:WeChat" } });
+    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
+    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.change(searchInput, { target: { value: "cron:09-23" } });
+    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
+    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
   });
 
   it("edits a past one-time automation without resubmitting its old schedule", async () => {
