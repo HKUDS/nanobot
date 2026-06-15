@@ -132,7 +132,6 @@ async def test_tavily_search(monkeypatch):
 
 
 def test_keenable_without_api_key_stays_on_provider(monkeypatch):
-    # Free tier needs no key, so Keenable must not fall back to DuckDuckGo.
     monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
     tool = _tool(provider="keenable", api_key="")
     assert tool.exclusive is False
@@ -159,7 +158,7 @@ async def test_keenable_search(monkeypatch):
     result = await tool.execute(query="keenable", count=1)
     assert "Keen" in result
     assert "https://keenable.ai" in result
-    assert "longer excerpt" in result  # snippet preferred over description
+    assert "longer excerpt" in result
 
 
 @pytest.mark.asyncio
@@ -176,7 +175,7 @@ async def test_keenable_search_without_key_omits_header(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
     tool = _tool(provider="keenable", api_key="")
     result = await tool.execute(query="keenable", count=1)
-    assert "Anon" in result  # description used when snippet absent
+    assert "Anon" in result
 
 
 @pytest.mark.asyncio
