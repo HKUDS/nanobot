@@ -14,8 +14,6 @@ from typing import Any
 import json_repair
 from loguru import logger
 
-from nanobot.utils.helpers import image_placeholder_text
-
 
 @dataclass
 class ToolCallRequest:
@@ -149,6 +147,7 @@ class GenerationSettings:
 
 
 _SYNTHETIC_USER_CONTENT = "(conversation continued)"
+_IMAGE_OMITTED_PLACEHOLDER = "[image omitted and cannot be viewed]"
 
 
 class LLMProvider(ABC):
@@ -535,9 +534,9 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
-                        new_content.append({"type": "text", "text": placeholder})
+                        new_content.append(
+                            {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
+                        )
                         found = True
                     else:
                         new_content.append(b)
@@ -560,9 +559,7 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 for i, b in enumerate(content):
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
-                        content[i] = {"type": "text", "text": placeholder}
+                        content[i] = {"type": "text", "text": _IMAGE_OMITTED_PLACEHOLDER}
                         found = True
         return found
 
