@@ -1613,12 +1613,10 @@ class AgentLoop:
         turn_continuation.prepare_save_boundary(ctx)
 
         if not ctx.suppress_response and is_cron_turn(ctx.msg.metadata):
-            # Cron turns are silent by default: the agent uses the `message` tool
-            # to proactively notify the user. Only jobs with deliver=True in their
-            # payload bypass this and send the text response directly.
+            # Suppress cron turn responses when the job is marked silent.
+            # Silent jobs use the `message` tool explicitly to notify the user.
             trigger = cron_trigger(ctx.msg.metadata)
-            deliver = bool(trigger and trigger.get("deliver"))
-            if not deliver:
+            if trigger and trigger.get("silent"):
                 ctx.suppress_response = True
         if (
             (ctx.final_content is None or not ctx.final_content.strip())

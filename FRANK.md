@@ -16,27 +16,27 @@ This file tracks every modification made to nanobot for the Frank deployment.
 
 ## Patches
 
-### P01 — Cron turns silent by default
+### P01 — Per-job `silent` flag suppresses cron response delivery
 **Status**: applied `2026-06-15`
-**Commit**: `8f0b8099`
+**Commit**: `8f0b8099` (initial), corrected same day
 **Problem**: Session-bound cron jobs ran as regular Telegram turns — every text response, even "Nessuna email nuova", was delivered as a notification. Caused continuous spam.
+**Mechanism**: Each job has `payload.silent` (bool). When `True`, the turn response is suppressed in `loop.py`. Silent jobs must call the `message` tool explicitly to notify the user.
+**DO NOT use `payload.deliver=True`** — it breaks `is_bound_cron_job()` routing (routes through legacy path instead of session path).
 **Files changed**:
-- `nanobot/agent/loop.py` — `_state_save`: suppress outbound for all cron turns unless `deliver=True` in trigger metadata
-- `nanobot/cron/bound_runner.py` — pass `deliver` flag into `CRON_TRIGGER_META`
-- `nanobot/templates/agent/cron_reminder.md` — changed instruction from "report the result to the user" to "your response is NOT delivered; use `message` tool to notify"
-- `nanobot/cron/types.py` — added `silent: bool = False` field to `CronPayload` (legacy, superseded by P01 default behavior)
-- `nanobot/cron/service.py` — serialize/deserialize `silent` and `deliver` fields in `_save_store` / load
+- `nanobot/cron/types.py` — added `silent: bool = False` field to `CronPayload`
+- `nanobot/cron/service.py` — serialize/deserialize `silent` in `_save_store` / load
+- `nanobot/cron/bound_runner.py` — pass `"silent": job.payload.silent` into `CRON_TRIGGER_META`
+- `nanobot/agent/loop.py` — `_state_save`: suppress outbound when trigger has `silent=True`
 
 **Key invariant to verify after merge**:
 ```python
 # In loop.py _state_save, this block must exist:
 if not ctx.suppress_response and is_cron_turn(ctx.msg.metadata):
     trigger = cron_trigger(ctx.msg.metadata)
-    deliver = bool(trigger and trigger.get("deliver"))
-    if not deliver:
+    if trigger and trigger.get("silent"):
         ctx.suppress_response = True
 ```
-**Also verify** `cron_reminder.md` does NOT say "report the result to the user in the same session".
+**Also verify** `service.py` `_save_store` includes `"silent": j.payload.silent` in payload dict.
 
 ---
 
