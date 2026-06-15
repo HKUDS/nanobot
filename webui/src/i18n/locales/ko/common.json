@@ -578,7 +578,7 @@
         "ok": "완료",
         "error": "오류",
         "skipped": "건너뜀",
-        "recent": "최근 실행",
+        "recent": "최근 결과",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

@@ -3590,6 +3590,8 @@ function AutomationRow({
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
   const history = job.state.run_history ?? [];
+  const latestRun = history[history.length - 1];
+  const lastResult = automationLastResult(job, latestRun, locale, tx);
   const canManage = !job.protected;
   const canRun = canManage && job.enabled && !job.state.pending;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
@@ -3597,11 +3599,11 @@ function AutomationRow({
   const needsRecreation = automationNeedsRecreation(job);
 
   return (
-    <article className="rounded-[22px] border border-border/45 bg-card/86 p-4 shadow-[0_18px_65px_rgba(15,23,42,0.06)] backdrop-blur-xl">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <article className="rounded-[22px] border border-border/45 bg-card/90 p-4 shadow-[0_18px_55px_rgba(15,23,42,0.055)] backdrop-blur-xl">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-[15px] font-medium leading-6 text-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate text-[15px] font-medium leading-6 text-foreground">
               {job.name || job.id}
             </span>
             <StatusPill tone={status.tone}>{status.label}</StatusPill>
@@ -3609,11 +3611,11 @@ function AutomationRow({
               <StatusPill>{tx("settings.automations.oneShot", "One-time")}</StatusPill>
             ) : null}
           </div>
-          <p className="mt-1 line-clamp-2 max-w-[46rem] text-[13px] leading-6 text-muted-foreground">
+          <p className="mt-1 line-clamp-2 max-w-[58rem] text-[13px] leading-5 text-muted-foreground">
             {job.payload.message || tx("settings.automations.systemTask", "System-managed automation")}
           </p>
 
-          <div className="mt-3 grid gap-2 text-[12px] text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-3 grid gap-px overflow-hidden rounded-[16px] border border-border/35 bg-border/35 text-[12px] text-muted-foreground md:grid-cols-2 xl:grid-cols-[1.25fr_0.8fr_1fr_0.85fr]">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
               title={formatAutomationSchedule(job, locale, tx)}
@@ -3627,10 +3629,17 @@ function AutomationRow({
               {formatAutomationNext(job, tx)}
             </AutomationDetail>
             <AutomationDetail
-              label={tx("settings.automations.labels.last", "Last")}
-              title={formatAutomationLast(job, locale, tx)}
+              label={tx("settings.automations.history.recent", "Last result")}
+              title={lastResult.title}
+              secondary={lastResult.secondary}
             >
-              {formatAutomationLast(job, locale, tx)}
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span
+                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", automationResultDotClass(lastResult.tone))}
+                  aria-hidden
+                />
+                <span className="truncate">{lastResult.primary}</span>
+              </span>
             </AutomationDetail>
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")} title={origin}>
               {originHref ? (
@@ -3662,45 +3671,6 @@ function AutomationRow({
             </div>
           ) : null}
 
-          {history.length ? (
-            <div className="mt-3">
-              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
-                {tx("settings.automations.history.recent", "Recent runs")}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {history.slice(-4).map((record) => {
-                  const statusLabel = automationRunStatusLabel(record.status, tx);
-                  const duration = formatAutomationRunDuration(record.duration_ms, locale, tx);
-                  const visibleLabel = record.status === "ok"
-                    ? duration
-                    : tx("settings.automations.history.statusWithDuration", "{{status}} · {{duration}}", {
-                        status: statusLabel,
-                        duration,
-                      });
-                  const detail = record.error || fmtDateTime(record.run_at_ms, locale);
-                  const accessibleLabel = `${statusLabel} · ${duration} · ${detail}`;
-                  return (
-                    <span
-                      key={`${record.run_at_ms}:${record.status}`}
-                      className={cn(
-                        "rounded-full px-2 py-1 text-[11px]",
-                        record.status === "error"
-                          ? "bg-destructive/10 text-destructive"
-                          : record.status === "skipped"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-                      )}
-                      title={accessibleLabel}
-                      aria-label={accessibleLabel}
-                    >
-                      {visibleLabel}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
           <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] leading-5 text-muted-foreground">
             {job.created_at_ms ? (
               <span>
@@ -3719,7 +3689,7 @@ function AutomationRow({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/35 bg-background/70 p-1 shadow-sm">
           {canManage ? (
             <>
               <AppsActionButton
@@ -3775,19 +3745,28 @@ function AutomationRow({
 function AutomationDetail({
   label,
   title,
+  secondary,
   children,
 }: {
   label: string;
   title?: string;
+  secondary?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-[14px] bg-muted/35 px-3 py-2">
-      <div className="text-[10.5px] font-medium uppercase leading-none text-muted-foreground/75">
+    <div className="min-w-0 bg-background/75 px-3 py-2.5">
+      <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
         {label}
       </div>
-      <div className="mt-1.5 truncate text-[12.5px] leading-5 text-foreground/85" title={title}>
-        {children}
+      <div className="mt-1.5 min-w-0">
+        <div className="truncate text-[13px] leading-5 text-foreground/85" title={title}>
+          {children}
+        </div>
+        {secondary ? (
+          <div className="mt-0.5 truncate text-[11.5px] leading-4 text-muted-foreground" title={title}>
+            {secondary}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -4413,14 +4392,70 @@ function formatAutomationNextTitle(
   return fmtDateTime(job.state.next_run_at_ms, locale);
 }
 
-function formatAutomationLast(
+function automationLastResult(
   job: SessionAutomationJob,
+  latestRun: NonNullable<SessionAutomationJob["state"]["run_history"]>[number] | undefined,
   locale: string,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): string {
-  if (!job.state.last_run_at_ms) return tx("settings.automations.last.never", "Never");
-  const status = automationRunStatusLabel(job.state.last_status, tx);
-  return `${fmtDateTime(job.state.last_run_at_ms, locale)} · ${status}`;
+): {
+  primary: string;
+  secondary?: string;
+  title: string;
+  tone: "neutral" | "success" | "warning" | "danger";
+} {
+  if (job.state.pending) {
+    const secondary = job.state.last_run_at_ms
+      ? fmtDateTime(job.state.last_run_at_ms, locale)
+      : undefined;
+    return {
+      primary: tx("settings.automations.next.pending", "Running now"),
+      secondary,
+      title: secondary ?? tx("settings.automations.next.pending", "Running now"),
+      tone: "warning",
+    };
+  }
+  if (latestRun) {
+    const status = automationRunStatusLabel(latestRun.status, tx);
+    const duration = latestRun.duration_ms === undefined
+      ? null
+      : formatAutomationRunDuration(latestRun.duration_ms, locale, tx);
+    const primary = duration
+      ? tx("settings.automations.history.statusWithDuration", "{{status}} · {{duration}}", {
+          status,
+          duration,
+        })
+      : status;
+    const secondary = fmtDateTime(latestRun.run_at_ms, locale);
+    return {
+      primary,
+      secondary,
+      title: latestRun.error ? `${secondary} · ${latestRun.error}` : secondary,
+      tone: latestRun.status === "error"
+        ? "danger"
+        : latestRun.status === "skipped"
+          ? "warning"
+          : "success",
+    };
+  }
+  if (job.state.last_run_at_ms) {
+    const status = automationRunStatusLabel(job.state.last_status, tx);
+    const secondary = fmtDateTime(job.state.last_run_at_ms, locale);
+    return {
+      primary: status,
+      secondary,
+      title: secondary,
+      tone: job.state.last_status === "error" ? "danger" : "success",
+    };
+  }
+  const never = tx("settings.automations.last.never", "Never");
+  return { primary: never, title: never, tone: "neutral" };
+}
+
+function automationResultDotClass(tone: "neutral" | "success" | "warning" | "danger"): string {
+  if (tone === "success") return "bg-emerald-500";
+  if (tone === "warning") return "bg-amber-500";
+  if (tone === "danger") return "bg-destructive";
+  return "bg-muted-foreground/45";
 }
 
 function automationRunStatusLabel(

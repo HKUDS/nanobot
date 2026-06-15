@@ -578,7 +578,7 @@
         "ok": "Hoàn tất",
         "error": "Lỗi",
         "skipped": "Đã bỏ qua",
-        "recent": "Lượt chạy gần đây",
+        "recent": "Kết quả gần nhất",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

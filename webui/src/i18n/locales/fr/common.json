@@ -578,7 +578,7 @@
         "ok": "Terminée",
         "error": "Erreur",
         "skipped": "Ignorée",
-        "recent": "Exécutions récentes",
+        "recent": "Dernier résultat",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

@@ -578,7 +578,7 @@
         "ok": "Selesai",
         "error": "Error",
         "skipped": "Dilewati",
-        "recent": "Eksekusi terbaru",
+        "recent": "Hasil terakhir",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

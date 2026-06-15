@@ -578,7 +578,7 @@
         "ok": "完成",
         "error": "错误",
         "skipped": "已跳过",
-        "recent": "最近运行",
+        "recent": "最近结果",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

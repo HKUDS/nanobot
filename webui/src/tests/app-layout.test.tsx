@@ -585,8 +585,8 @@ describe("App layout", () => {
     expect(screen.getByText("每日检查")).toBeInTheDocument();
     expect(screen.getByText("检查仓库状态")).toBeInTheDocument();
     expect(screen.getByText("每 1天")).toBeInTheDocument();
-    expect(screen.getByText("最近运行")).toBeInTheDocument();
-    expect(screen.getByText("不到 1 秒")).toBeInTheDocument();
+    expect(screen.getByText("最近结果")).toBeInTheDocument();
+    expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
     expect(document.title).toBe("自动任务 · nanobot");
