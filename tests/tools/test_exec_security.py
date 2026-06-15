@@ -9,7 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -238,7 +242,16 @@ async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["cat link.txt", "cat <link.txt", "cat 0<link.txt"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat link.txt",
+        "cat <link.txt",
+        "cat 0<link.txt",
+        "cat link.txt; echo ok",
+        "cat link.txt|wc -c",
+    ],
+)
 async def test_exec_restricted_workspace_blocks_relative_symlink_escape(tmp_path, command):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

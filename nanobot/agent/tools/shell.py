@@ -666,12 +666,22 @@ class ExecTool(Tool):
     def _relative_path_escape_error(cls, command: str, cwd_path: Path) -> str | None:
         """Block existing relative path operands that resolve outside the workspace."""
         try:
-            tokens = shlex.split(command, posix=not _IS_WINDOWS)
+            lexer = shlex.shlex(command, posix=not _IS_WINDOWS, punctuation_chars=True)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
         except ValueError:
             return None
 
         media_path = get_media_dir().resolve()
         for idx, token in enumerate(tokens):
+            if (
+                token.isdigit()
+                and idx + 1 < len(tokens)
+                and tokens[idx + 1].startswith((">", "<"))
+            ):
+                continue
+            if idx > 0 and tokens[idx - 1] in {"<<", "<<<"}:
+                continue
             relative_path = cls._relative_path_token(token, idx)
             if relative_path is None:
                 continue
