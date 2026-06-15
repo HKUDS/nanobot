@@ -4,6 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
+## Frank Deployment Patches
+
+@FRANK.md
+
+**After every upstream merge** (`git merge origin/main` or `git cherry-pick`): read `FRANK.md` and verify every patch is still in place before restarting Frank. Re-apply any that were overwritten. Update the status line in `FRANK.md` with the date.
+
+---
+
 ## Design Constraints
 
 - **Core stays small**: `agent/loop.py` and `agent/runner.py` are the critical path — changes there must be minimal and justified. New capabilities belong in `channels/`, `tools/`, skills, or MCP servers.
