@@ -190,6 +190,7 @@ class CronService:
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
                             deliver=j["payload"].get("deliver", False),
+                            silent=j["payload"].get("silent", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
                             channel_meta=(
@@ -347,6 +348,7 @@ class CronService:
                         "originChannel": j.payload.origin_channel,
                         "originChatId": j.payload.origin_chat_id,
                         "originMetadata": j.payload.origin_metadata,
+                        "silent": j.payload.silent,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -610,6 +612,7 @@ class CronService:
         origin_channel: str | None = None,
         origin_chat_id: str | None = None,
         origin_metadata: dict | None = None,
+        silent: bool = False,
     ) -> CronJob:
         """Add a new job."""
         _validate_schedule_for_add(schedule)
@@ -631,6 +634,7 @@ class CronService:
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
                 origin_metadata=origin_metadata or {},
+                silent=silent,
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,

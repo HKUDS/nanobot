@@ -91,7 +91,10 @@ async def run_bound_cron_job(
             f"Scheduled cron job triggered: {job.name}\n\n{job.payload.message}"
         ),
     }
-    metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    # Silent jobs run the agent turn but their response is not auto-delivered
+    # to the origin session; the agent can still notify via the message tool.
+    if not job.payload.silent:
+        metadata[CRON_DEFER_UNTIL_IDLE_META] = True
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,

@@ -32,6 +32,11 @@ class CronPayload:
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    # When True the job runs the agent turn but its response is NOT
+    # auto-delivered to the origin session. The agent can still notify
+    # explicitly via the message tool. Useful for background monitoring
+    # jobs that only act when there is something worth reporting.
+    silent: bool = False
 
 
 @dataclass
