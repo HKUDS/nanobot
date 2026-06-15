@@ -237,22 +237,32 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + "\n... (truncated)"
 
 
-def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
-    """Find the first index whose tool results have matching assistant calls."""
+def drop_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop tool results that have no matching preceding assistant tool_call.
+
+    Window slicing and interrupted turns can leave ``tool`` messages whose
+    assistant ``tool_call`` is missing; chat APIs reject such histories. Only
+    those orphan tool messages are removed -- every other (legal) message is
+    preserved. Unlike a prefix cut, this does not discard legitimate messages
+    that happen to precede a trailing or mid-list orphan.
+    """
     declared: set[str] = set()
-    start = 0
-    for i, msg in enumerate(messages):
+    kept: list[dict[str, Any]] = []
+    for msg in messages:
         role = msg.get("role")
         if role == "assistant":
             for tc in msg.get("tool_calls") or []:
                 if isinstance(tc, dict) and tc.get("id"):
                     declared.add(str(tc["id"]))
+            kept.append(msg)
         elif role == "tool":
             tid = msg.get("tool_call_id")
             if tid and str(tid) not in declared:
-                start = i + 1
-                declared.clear()
-    return start
+                continue  # orphan tool result: drop only this message
+            kept.append(msg)
+        else:
+            kept.append(msg)
+    return kept
 
 
 def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:

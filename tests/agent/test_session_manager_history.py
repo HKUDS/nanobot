@@ -775,3 +775,32 @@ def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():
     assert session.last_consolidated == 3
     # already_cons should count dropped messages with original index < 12
     assert already_cons == 9
+
+
+def test_retain_recent_legal_suffix_keeps_user_before_trailing_orphan():
+    """Regression for #4203: a trailing orphan tool result must not discard legal messages.
+
+    A ``tool`` message whose ``tool_call_id`` has no matching assistant ``tool_call``
+    (an orphan) previously made the trim wipe every retained message -- including the
+    user's question -- instead of dropping just the orphan.
+    """
+    session = Session(key="test:trailing-orphan")
+    session.messages.append({"role": "user", "content": "q1"})
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "A", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+        }
+    )
+    session.messages.append({"role": "tool", "tool_call_id": "A", "name": "x", "content": "ok"})
+    session.messages.append({"role": "user", "content": "q2"})
+    session.messages.append({"role": "tool", "tool_call_id": "B", "name": "y", "content": "orphan"})
+
+    session.retain_recent_legal_suffix(3)
+
+    history = session.get_history(max_messages=500)
+    # The legal user turn must survive the trailing orphan.
+    assert any(m.get("role") == "user" and m.get("content") == "q2" for m in history)
+    # And no orphan tool result is left behind.
+    _assert_no_orphans(history)

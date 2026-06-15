@@ -29,10 +29,10 @@ from nanobot.utils.file_edit_events import (
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
+    drop_orphan_tool_results,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     extract_reasoning,
-    find_legal_message_start,
     maybe_persist_tool_result,
     strip_think,
     truncate_text,
@@ -1507,14 +1507,10 @@ class AgentRunner:
                         break
                 # If no user exists at all, _enforce_role_alternation
                 # will insert a synthetic one as a safety net.
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
+            kept = drop_orphan_tool_results(kept)
         if not kept:
             kept = non_system[-min(len(non_system), 4) :]
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
+            kept = drop_orphan_tool_results(kept)
         return system_messages + kept
 
     def _partition_tool_batches(
