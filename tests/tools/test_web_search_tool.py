@@ -179,6 +179,32 @@ async def test_keenable_search_without_key_omits_header(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_keenable_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-Key"] == "env-keen-key"
+        return _response(json={
+            "results": [{"title": "Env", "url": "https://keenable.ai/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("KEENABLE_API_KEY", "env-keen-key")
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="bad-keen-key")
+    result = await tool.execute(query="keenable")
+    assert "Error: Keenable search failed (401)" in result
+
+
+@pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert url == "https://api.bochaai.com/v1/web-search"
