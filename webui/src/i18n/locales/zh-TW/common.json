@@ -477,14 +477,14 @@
       "stats": {
         "active": "執行中",
         "paused": "已暫停",
-        "failed": "需處理",
+        "failed": "異常",
         "system": "系統"
       },
       "filters": {
         "all": "全部",
         "active": "執行中",
         "paused": "已暫停",
-        "failed": "需處理",
+        "failed": "異常",
         "system": "系統"
       },
       "sort": {

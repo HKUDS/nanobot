@@ -477,14 +477,14 @@
       "stats": {
         "active": "运行中",
         "paused": "已暂停",
-        "failed": "需处理",
+        "failed": "异常",
         "system": "系统"
       },
       "filters": {
         "all": "全部",
         "active": "运行中",
         "paused": "已暂停",
-        "failed": "需处理",
+        "failed": "异常",
         "system": "系统"
       },
       "sort": {
