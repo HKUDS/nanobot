@@ -282,9 +282,11 @@ def recent_message_start_index(
     start_idx = max(0, len(messages) - max_messages)
     if not extend_to_user or len(messages) <= max_messages:
         return start_idx
+    if any(messages[i].get("role") == "user" for i in range(start_idx, len(messages))):
+        return start_idx
 
     recovered_user = next(
-        (i for i in range(start_idx, -1, -1) if messages[i].get("role") == "user"),
+        (i for i in range(start_idx - 1, -1, -1) if messages[i].get("role") == "user"),
         None,
     )
     if recovered_user is None:

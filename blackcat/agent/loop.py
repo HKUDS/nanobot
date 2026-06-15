@@ -1168,14 +1168,14 @@ class AgentLoop:
             channel, chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
         )
+        current_role = "assistant" if is_subagent else "user"
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
-            "extend_to_user": True,
+            "extend_to_user": is_subagent,
         }
         history = session.get_history(**_hist_kwargs)
-        current_role = "assistant" if is_subagent else "user"
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
         messages = self.context.build_messages(
@@ -1448,7 +1448,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
-            "extend_to_user": True,
+            "extend_to_user": False,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(

@@ -263,6 +263,38 @@ class TestConsolidatorTokenBudget:
         assert history[0]["content"] == "record this"
         assert history[-1]["content"] == "final answer"
 
+    async def test_replay_window_overflow_uses_newer_user_inside_window(
+        self,
+        consolidator,
+    ):
+        """Do not extend to an older long turn when the hard window has a newer user."""
+        session = Session(key="test:replay-newer-user")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "long older turn")
+        for i in range(8):
+            session.messages.extend(_tool_round(f"older-{i}"))
+        session.add_message("assistant", "older final")
+        session.add_message("user", "new question")
+        session.add_message("assistant", "new answer")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="older turn summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=6,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[2]["content"] == "long older turn"
+        assert archived_chunk[-1]["content"] == "older final"
+        assert session.last_consolidated == len(session.messages) - 2
+
+        history = session.get_history(max_messages=6, extend_to_user=True)
+        assert [m["content"] for m in history] == ["new question", "new answer"]
+
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
         consolidator._SAFETY_BUFFER = 0
