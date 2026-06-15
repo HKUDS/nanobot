@@ -561,8 +561,8 @@ class TestCompactIdleSession:
         real_consolidator,
         mock_provider,
     ):
-        """Assistant-only tails retain a non-contiguous slice, so archive the
-        actual dropped messages rather than a computed prefix."""
+        """Assistant-only tails extend back to the latest user turn, so archive
+        the actual dropped messages rather than a computed prefix."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -585,12 +585,16 @@ class TestCompactIdleSession:
             "assistant-02",
             "assistant-03",
             "assistant-04",
+            "assistant-05",
+            "assistant-06",
+            "assistant-07",
+            "assistant-08",
+            "assistant-09",
         ]
 
         # #4264: idle compaction now summarizes the full unconsolidated tail, so
-        # the dropped head (user-00), the non-contiguous dropped tail
-        # (assistant-09), and the retained suffix (user-14) are all summarized.
-        # Retention above still proves the non-contiguous suffix is handled.
+        # the dropped head (user-00) and retained suffix (user-14 through
+        # assistant-09) are all summarized.
         archived_call = mock_provider.chat_with_retry.call_args
         user_content = archived_call.kwargs["messages"][1]["content"]
         assert "user-00" in user_content
