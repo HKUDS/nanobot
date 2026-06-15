@@ -1733,7 +1733,7 @@ export function SettingsView({
                 {t("settings.backToChat")}
               </button>
             ) : null}
-            {activeSection !== "automations" ? (
+            {showSidebar ? (
               <p className="mb-2 text-[12px] font-normal text-muted-foreground">
                 {t("settings.sidebar.title")}
               </p>

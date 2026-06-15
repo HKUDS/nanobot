@@ -439,7 +439,11 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    expect(await screen.findByRole("heading", { name: "Automations" })).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: "Automations" });
+    expect(heading).toBeInTheDocument();
+    const automationsMain = heading.closest("main");
+    expect(automationsMain).not.toBeNull();
+    expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
     expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
@@ -586,7 +590,11 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
 
-    expect(await screen.findByRole("heading", { name: "自动任务" })).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: "自动任务" });
+    expect(heading).toBeInTheDocument();
+    const automationsMain = heading.closest("main");
+    expect(automationsMain).not.toBeNull();
+    expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
     expect(screen.getByText("任务队列")).toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
