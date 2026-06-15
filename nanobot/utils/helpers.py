@@ -237,6 +237,26 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + "\n... (truncated)"
 
 
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to a token budget with a stable suffix.
+
+    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
+    regardless of language or content (CJK and code cost more tokens per char).
+    Falls back to a char-based estimate (~4 chars/token) if tiktoken is
+    unavailable.
+    """
+    if max_tokens <= 0:
+        return text
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        return enc.decode(tokens[:max_tokens]) + "\n... (truncated)"
+    except Exception:
+        return truncate_text(text, max_tokens * 4)
+
+
 def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     """Find the first index whose tool results have matching assistant calls."""
     declared: set[str] = set()
