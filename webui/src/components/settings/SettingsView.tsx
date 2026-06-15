@@ -1733,9 +1733,11 @@ export function SettingsView({
                 {t("settings.backToChat")}
               </button>
             ) : null}
-            <p className="mb-2 text-[12px] font-normal text-muted-foreground">
-              {t("settings.sidebar.title")}
-            </p>
+            {activeSection !== "automations" ? (
+              <p className="mb-2 text-[12px] font-normal text-muted-foreground">
+                {t("settings.sidebar.title")}
+              </p>
+            ) : null}
             <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
               {text(`settings.nav.${activeSection}`, titleForSection(activeSection))}
             </h1>
