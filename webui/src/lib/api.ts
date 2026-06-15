@@ -1,7 +1,12 @@
 import type {
   ChatSummary,
   CliAppsPayload,
+  FileContentPayload,
+  FileDeletePayload,
   FilePreviewPayload,
+  FileSavePayload,
+  FileUploadPayload,
+  FilesListPayload,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   ModelConfigurationCreate,
@@ -18,6 +23,9 @@ import type {
   SkillsPayload,
   SlashCommand,
   TranscriptionSettingsUpdate,
+  UploadChunkPayload,
+  UploadFinalizePayload,
+  UploadInitPayload,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
@@ -34,6 +42,17 @@ export class ApiError extends Error {
     this.status = status;
     this.name = "ApiError";
   }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
 
 async function request<T>(
@@ -207,6 +226,132 @@ export async function fetchSkillDetail(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchFilesList(
+  token: string,
+  path: string | null = null,
+  base: string = "",
+): Promise<FilesListPayload> {
+  const url = path
+    ? `${base}/api/webui/files?path=${encodeURIComponent(path)}`
+    : `${base}/api/webui/files`;
+  return request<FilesListPayload>(url, token, undefined, API_READ_TIMEOUT_MS);
+}
+
+export async function fetchFileContent(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<FileContentPayload> {
+  return request<FileContentPayload>(
+    `${base}/api/webui/files/read?path=${encodeURIComponent(path)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function deleteFile(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<FileDeletePayload> {
+  return request<FileDeletePayload>(
+    `${base}/api/webui/files/delete?path=${encodeURIComponent(path)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+const CHUNK_B64_SIZE = 768;
+
+export async function uploadFileChunked(
+  token: string,
+  path: string,
+  filename: string,
+  content: ArrayBuffer,
+  base: string = "",
+): Promise<FileUploadPayload> {
+  const b64 = arrayBufferToBase64(content);
+  const chunkSize = CHUNK_B64_SIZE;
+  const totalChunks = Math.ceil(b64.length / chunkSize);
+
+  const initPayload = await request<UploadInitPayload>(
+    `${base}/api/webui/files/upload/init?path=${encodeURIComponent(path)}&filename=${encodeURIComponent(filename)}&total_chunks=${totalChunks}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+  if (!initPayload.ok || !initPayload.upload_id) {
+    return { ok: false, path: "", size: 0, error: initPayload.error };
+  }
+
+  for (let i = 0; i < totalChunks; i++) {
+    const chunkB64 = b64.slice(i * chunkSize, (i + 1) * chunkSize);
+    const chunkPayload = await request<UploadChunkPayload>(
+      `${base}/api/webui/files/upload/chunk?upload_id=${encodeURIComponent(initPayload.upload_id)}&chunk_index=${i}&chunk=${encodeURIComponent(chunkB64)}`,
+      token,
+      undefined,
+      API_READ_TIMEOUT_MS,
+    );
+    if (!chunkPayload.ok) {
+      return { ok: false, path: "", size: 0, error: chunkPayload.error };
+    }
+  }
+
+  const finalizePayload = await request<UploadFinalizePayload>(
+    `${base}/api/webui/files/upload/finalize?upload_id=${encodeURIComponent(initPayload.upload_id)}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+  if (!finalizePayload.ok) {
+    return { ok: false, path: "", size: 0, error: finalizePayload.error };
+  }
+
+  return { ok: true, path: finalizePayload.path, size: finalizePayload.size };
+}
+
+export async function saveFile(
+  token: string,
+  path: string,
+  content: string,
+  base: string = "",
+): Promise<FileSavePayload> {
+  const b64 = arrayBufferToBase64(new TextEncoder().encode(content).buffer);
+  const url = `${base}/api/webui/files/save?path=${encodeURIComponent(path)}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Nanobot-File-Content": b64,
+    },
+    credentials: "same-origin",
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new ApiError(response.status, data.error || `HTTP ${response.status}`);
+  }
+  return data as FileSavePayload;
+}
+
+export async function downloadFile(
+  token: string,
+  path: string,
+  base: string = "",
+): Promise<ArrayBuffer> {
+  const url = `${base}/api/webui/files/download?path=${encodeURIComponent(path)}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new ApiError(response.status, text || `HTTP ${response.status}`);
+  }
+  return response.arrayBuffer();
 }
 
 export async function deleteSession(

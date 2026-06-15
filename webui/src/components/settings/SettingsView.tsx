@@ -56,6 +56,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { FilesBrowserSettings } from "@/components/settings/FilesBrowserSettings";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,7 @@ export type SettingsSectionKey =
   | "browser"
   | "apps"
   | "skills"
+  | "files"
   | "runtime"
   | "advanced";
 
@@ -1507,6 +1509,8 @@ export function SettingsView({
         );
       case "skills":
         return <SkillsCatalogSettings skills={skills} />;
+      case "files":
+        return <FilesBrowserSettings />;
       case "runtime":
         return (
           <RuntimeSettings

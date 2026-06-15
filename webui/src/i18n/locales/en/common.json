@@ -57,6 +57,9 @@
     "apps": "Apps",
     "skills": {
       "title": "Skills"
+    },
+    "files": {
+      "title": "Files"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "runtime": "System",
       "advanced": "Security",
       "apps": "Apps",
-      "skills": "Skills"
+      "skills": "Skills",
+      "files": "Files"
     },
     "sections": {
       "interface": "Interface",
@@ -508,6 +512,28 @@
       "rawInstructions": "Raw SKILL.md",
       "rawInstructionsEmpty": "No raw instructions.",
       "detailDescription": "Details for {{name}}."
+    },
+    "files": {
+      "description": "Browse files in the agent workspace directory.",
+      "workspace": "Workspace",
+      "loading": "Loading...",
+      "loadError": "Failed to load directory.",
+      "empty": "This directory is empty.",
+      "refresh": "Refresh",
+      "upload": "Upload file",
+      "previewTitle": "{{name}}",
+      "previewError": "Failed to load file.",
+      "truncated": "Directory listing truncated.",
+      "uploadError": "Failed to upload file.",
+      "downloadError": "Failed to download file.",
+      "deleteError": "Failed to delete.",
+      "deleteTitle": "Delete {{name}}?",
+      "deleteDirHint": "The directory must be empty.",
+      "deleteFileHint": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "editing": "Editing",
+      "saveError": "Failed to save file."
     },
     "voice": {
       "selectProvider": "Select provider",

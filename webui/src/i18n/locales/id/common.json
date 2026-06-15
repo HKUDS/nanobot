@@ -57,6 +57,9 @@
     "apps": "Aplikasi",
     "skills": {
       "title": "Skill"
+    },
+    "files": {
+      "title": "Berkas"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
       "apps": "Aplikasi",
-      "skills": "Skill"
+      "skills": "Skill",
+      "files": "Berkas"
     },
     "sections": {
       "interface": "Antarmuka",
@@ -508,6 +512,28 @@
       "rawInstructions": "SKILL.md mentah",
       "rawInstructionsEmpty": "Tidak ada instruksi mentah.",
       "detailDescription": "Detail untuk {{name}}."
+    },
+    "files": {
+      "description": "Jelajahi file dalam direktori ruang kerja agent.",
+      "workspace": "Ruang kerja",
+      "loading": "Memuat...",
+      "loadError": "Gagal memuat direktori.",
+      "empty": "Direktori ini kosong.",
+      "refresh": "Segarkan",
+      "upload": "Unggah file",
+      "previewTitle": "{{name}}",
+      "previewError": "Gagal memuat file.",
+      "truncated": "Daftar direktori dipotong.",
+      "uploadError": "Gagal mengunggah file.",
+      "downloadError": "Gagal mengunduh file.",
+      "deleteError": "Gagal menghapus.",
+      "deleteTitle": "Hapus {{name}}?",
+      "deleteDirHint": "Direktori harus kosong.",
+      "deleteFileHint": "Tindakan ini tidak dapat dibatalkan.",
+      "cancel": "Batal",
+      "delete": "Hapus",
+      "editing": "Mengedit",
+      "saveError": "Gagal menyimpan file."
     },
     "voice": {
       "selectProvider": "Pilih penyedia",

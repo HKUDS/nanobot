@@ -57,6 +57,9 @@
     "apps": "Ứng dụng",
     "skills": {
       "title": "Kỹ năng"
+    },
+    "files": {
+      "title": "Tệp"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "Ứng dụng CLI",
       "mcp": "MCP",
       "apps": "Ứng dụng",
-      "skills": "Kỹ năng"
+      "skills": "Kỹ năng",
+      "files": "Tệp"
     },
     "sections": {
       "interface": "Giao diện",
@@ -508,6 +512,28 @@
       "rawInstructions": "SKILL.md gốc",
       "rawInstructionsEmpty": "Không có hướng dẫn gốc.",
       "detailDescription": "Chi tiết cho {{name}}."
+    },
+    "files": {
+      "description": "Duyệt các tệp trong thư mục không gian làm việc của agent.",
+      "workspace": "Không gian làm việc",
+      "loading": "Đang tải...",
+      "loadError": "Không thể tải thư mục.",
+      "empty": "Thư mục này trống.",
+      "refresh": "Làm mới",
+      "upload": "Tải lên tệp",
+      "previewTitle": "{{name}}",
+      "previewError": "Không thể tải tệp.",
+      "truncated": "Danh sách thư mục đã bị cắt ngắn.",
+      "uploadError": "Không thể tải lên.",
+      "downloadError": "Không thể tải xuống.",
+      "deleteError": "Không thể xóa.",
+      "deleteTitle": "Xóa {{name}}?",
+      "deleteDirHint": "Thư mục phải trống.",
+      "deleteFileHint": "Hành động này không thể hoàn tác.",
+      "cancel": "Hủy",
+      "delete": "Xóa",
+      "editing": "Đang chỉnh sửa",
+      "saveError": "Không thể lưu tệp."
     },
     "voice": {
       "selectProvider": "Chon nha cung cap",

@@ -21,10 +21,22 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
+from websockets.datastructures import Headers
 
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
+from nanobot.webui.files_api import (
+    file_content_payload,
+    file_delete_payload,
+    file_download_info,
+    file_save_payload,
+    file_upload_payload,
+    files_list_payload,
+    upload_chunk_payload,
+    upload_finalize_payload,
+    upload_init_payload,
+)
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
@@ -551,6 +563,32 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
+        if got == "/api/webui/files":
+            return self._handle_webui_files(request)
+        m = re.match(r"^/api/webui/files/read$", got)
+        if m:
+            return self._handle_webui_files_read(request)
+        m = re.match(r"^/api/webui/files/delete$", got)
+        if m:
+            return self._handle_webui_files_delete(request)
+        m = re.match(r"^/api/webui/files/download$", got)
+        if m:
+            return self._handle_webui_files_download(request)
+        m = re.match(r"^/api/webui/files/upload$", got)
+        if m:
+            return self._handle_webui_files_upload(request)
+        m = re.match(r"^/api/webui/files/upload/init$", got)
+        if m:
+            return self._handle_webui_files_upload_init(request)
+        m = re.match(r"^/api/webui/files/upload/chunk$", got)
+        if m:
+            return self._handle_webui_files_upload_chunk(request)
+        m = re.match(r"^/api/webui/files/upload/finalize$", got)
+        if m:
+            return self._handle_webui_files_upload_finalize(request)
+        m = re.match(r"^/api/webui/files/save$", got)
+        if m:
+            return self._handle_webui_files_save(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -620,6 +658,158 @@ class GatewayHTTPHandler:
             self._log.exception("failed to write webui sidebar state")
             return _http_error(500, "failed to write sidebar state")
         return _http_json_response(state)
+
+    def _handle_webui_files(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        payload = files_list_payload(self.skills_workspace_path, raw_path)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_read(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        payload = file_content_payload(self.skills_workspace_path, raw_path)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_delete(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        payload = file_delete_payload(self.skills_workspace_path, raw_path)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_download(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        meta, raw = file_download_info(self.skills_workspace_path, raw_path)
+        if raw is None:
+            status = meta.pop("status", 200)
+            return _http_json_response(meta, status=status)
+        name = meta["name"]
+        disposition = f'attachment; filename="{name}"'
+        import email.utils as _email_utils
+
+        headers = [
+            ("Date", _email_utils.formatdate(usegmt=True)),
+            ("Connection", "close"),
+            ("Content-Length", str(len(raw))),
+            ("Content-Type", meta["mime"]),
+            ("Content-Disposition", disposition),
+        ]
+        return Response(200, "OK", Headers(headers), raw)
+
+    def _handle_webui_files_upload(self, request: WsRequest) -> Response:
+        self._log.debug("[files] upload request path={}", request.path)
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        filename = _query_first(query, "filename")
+        content_b64 = _query_first(query, "content")
+        self._log.debug("[files] upload params: path={} filename={} content_len={}", raw_path, filename, len(content_b64) if content_b64 else 0)
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        if not filename:
+            return _http_error(400, "missing filename parameter")
+        if not content_b64:
+            return _http_error(400, "missing content parameter")
+        payload = file_upload_payload(self.skills_workspace_path, raw_path, content_b64, filename)
+        self._log.debug("[files] upload result: {}", payload)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_upload_init(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        filename = _query_first(query, "filename")
+        total_chunks = _query_first(query, "total_chunks")
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        if not filename:
+            return _http_error(400, "missing filename parameter")
+        if not total_chunks:
+            return _http_error(400, "missing total_chunks parameter")
+        try:
+            total_chunks_int = int(total_chunks)
+        except ValueError:
+            return _http_error(400, "total_chunks must be an integer")
+        if total_chunks_int < 1:
+            return _http_error(400, "total_chunks must be >= 1")
+        payload = upload_init_payload(self.skills_workspace_path, raw_path, filename, total_chunks_int)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_upload_chunk(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        upload_id = _query_first(query, "upload_id")
+        chunk_index_str = _query_first(query, "chunk_index")
+        chunk_b64 = _query_first(query, "chunk")
+        if not upload_id:
+            return _http_error(400, "missing upload_id parameter")
+        if not chunk_index_str:
+            return _http_error(400, "missing chunk_index parameter")
+        if not chunk_b64:
+            return _http_error(400, "missing chunk parameter")
+        try:
+            chunk_index = int(chunk_index_str)
+        except ValueError:
+            return _http_error(400, "chunk_index must be an integer")
+        payload = upload_chunk_payload(upload_id, chunk_index, chunk_b64)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    def _handle_webui_files_upload_finalize(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        upload_id = _query_first(query, "upload_id")
+        if not upload_id:
+            return _http_error(400, "missing upload_id parameter")
+        payload = upload_finalize_payload(upload_id)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
+
+    _FILE_SAVE_HEADER = "X-Nanobot-File-Content"
+
+    def _handle_webui_files_save(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_path = _query_first(query, "path")
+        if not raw_path:
+            return _http_error(400, "missing path parameter")
+        raw_content = request.headers.get(self._FILE_SAVE_HEADER)
+        if not raw_content:
+            return _http_error(400, "missing X-Nanobot-File-Content header")
+        import base64 as _base64
+
+        try:
+            content = _base64.b64decode(raw_content).decode("utf-8")
+        except Exception:
+            return _http_error(400, "X-Nanobot-File-Content must be base64-encoded UTF-8 text")
+        payload = file_save_payload(self.skills_workspace_path, raw_path, content)
+        status = payload.pop("status", 200) if "error" in payload else 200
+        return _http_json_response(payload, status=status)
 
     # -- Static file serving ------------------------------------------------
 

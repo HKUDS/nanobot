@@ -57,6 +57,9 @@
     "apps": "Apps",
     "skills": {
       "title": "Habilidades"
+    },
+    "files": {
+      "title": "Archivos"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "Apps CLI",
       "mcp": "MCP",
       "apps": "Aplicaciones",
-      "skills": "Habilidades"
+      "skills": "Habilidades",
+      "files": "Archivos"
     },
     "sections": {
       "interface": "Interfaz",
@@ -508,6 +512,28 @@
       "rawInstructions": "SKILL.md original",
       "rawInstructionsEmpty": "No hay instrucciones originales.",
       "detailDescription": "Detalles de {{name}}."
+    },
+    "files": {
+      "description": "Explorar archivos en el directorio del espacio de trabajo del agente.",
+      "workspace": "Espacio de trabajo",
+      "loading": "Cargando...",
+      "loadError": "Error al cargar el directorio.",
+      "empty": "Este directorio está vacío.",
+      "refresh": "Actualizar",
+      "upload": "Subir archivo",
+      "previewTitle": "{{name}}",
+      "previewError": "Error al cargar el archivo.",
+      "truncated": "Lista de directorios truncada.",
+      "uploadError": "Error al subir el archivo.",
+      "downloadError": "Error al descargar el archivo.",
+      "deleteError": "Error al eliminar.",
+      "deleteTitle": "¿Eliminar {{name}}?",
+      "deleteDirHint": "El directorio debe estar vacío.",
+      "deleteFileHint": "Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "delete": "Eliminar",
+      "editing": "Editando",
+      "saveError": "Error al guardar el archivo."
     },
     "voice": {
       "selectProvider": "Seleccionar proveedor",

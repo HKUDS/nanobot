@@ -57,6 +57,9 @@
     "apps": "應用",
     "skills": {
       "title": "技能"
+    },
+    "files": {
+      "title": "檔案"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用",
-      "skills": "技能"
+      "skills": "技能",
+      "files": "檔案"
     },
     "sections": {
       "interface": "介面",
@@ -508,6 +512,28 @@
       "rawInstructions": "原始 SKILL.md",
       "rawInstructionsEmpty": "沒有原始說明。",
       "detailDescription": "{{name}} 的詳細資訊。"
+    },
+    "files": {
+      "description": "瀏覽 agent 工作區目錄中的檔案。",
+      "workspace": "工作區",
+      "loading": "載入中...",
+      "loadError": "載入目錄失敗。",
+      "empty": "此目錄為空。",
+      "refresh": "重新整理",
+      "upload": "上傳檔案",
+      "previewTitle": "{{name}}",
+      "previewError": "載入檔案失敗。",
+      "truncated": "目錄列表已截斷。",
+      "uploadError": "上傳檔案失敗。",
+      "downloadError": "下載檔案失敗。",
+      "deleteError": "刪除失敗。",
+      "deleteTitle": "刪除 {{name}}？",
+      "deleteDirHint": "目錄必須為空。",
+      "deleteFileHint": "此操作無法撤銷。",
+      "cancel": "取消",
+      "delete": "刪除",
+      "editing": "編輯中",
+      "saveError": "儲存檔案失敗。"
     },
     "voice": {
       "selectProvider": "選擇提供商",

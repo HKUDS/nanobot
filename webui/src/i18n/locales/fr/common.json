@@ -57,6 +57,9 @@
     "apps": "Apps",
     "skills": {
       "title": "Compétences"
+    },
+    "files": {
+      "title": "Fichiers"
     }
   },
   "settings": {
@@ -80,7 +83,8 @@
       "cliApps": "Apps CLI",
       "mcp": "MCP",
       "apps": "Applications",
-      "skills": "Compétences"
+      "skills": "Compétences",
+      "files": "Fichiers"
     },
     "sections": {
       "interface": "Interface utilisateur",
@@ -508,6 +512,28 @@
       "rawInstructions": "SKILL.md brut",
       "rawInstructionsEmpty": "Aucune instruction brute.",
       "detailDescription": "Détails de {{name}}."
+    },
+    "files": {
+      "description": "Parcourir les fichiers du répertoire de l'espace de travail de l'agent.",
+      "workspace": "Espace de travail",
+      "loading": "Chargement...",
+      "loadError": "Échec du chargement du répertoire.",
+      "empty": "Ce répertoire est vide.",
+      "refresh": "Actualiser",
+      "upload": "Téléverser un fichier",
+      "previewTitle": "{{name}}",
+      "previewError": "Échec du chargement du fichier.",
+      "truncated": "Liste de répertoires tronquée.",
+      "uploadError": "Échec du téléversement.",
+      "downloadError": "Échec du téléchargement.",
+      "deleteError": "Échec de la suppression.",
+      "deleteTitle": "Supprimer {{name}} ?",
+      "deleteDirHint": "Le répertoire doit être vide.",
+      "deleteFileHint": "Cette action est irréversible.",
+      "cancel": "Annuler",
+      "delete": "Supprimer",
+      "editing": "Modification",
+      "saveError": "Échec de l'enregistrement du fichier."
     },
     "voice": {
       "selectProvider": "Choisir un fournisseur",
