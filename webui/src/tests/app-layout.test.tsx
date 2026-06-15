@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatSummary } from "@/lib/types";
+import { useShellStore } from "@/stores/shell-store";
 
 const connectSpy = vi.fn();
 const refreshSpy = vi.fn();
@@ -211,6 +212,19 @@ import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 
 describe("App layout", () => {
   beforeEach(() => {
+    useShellStore.setState({
+      activeKey: null,
+      view: "chat",
+      settingsSection: "overview",
+      hostSidebarOpen: true,
+      mobileSidebarOpen: false,
+      sessionSearchOpen: false,
+      pendingDelete: null,
+      pendingRename: null,
+      pendingProjectRename: null,
+      restartToast: null,
+      isRestarting: false,
+    });
     mockSessions = [];
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
@@ -465,7 +479,7 @@ describe("App layout", () => {
 
     const sheet = await screen.findByRole("dialog");
     const mobileSidebar = within(sheet).getByRole("navigation", {
-      name: "Sidebar navigation",
+      name: "Mobile sidebar navigation",
     });
     await waitFor(() =>
       expect(

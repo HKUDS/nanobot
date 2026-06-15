@@ -1,5 +1,5 @@
 import { useSessionStore } from "@/stores/session-store";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RESTART_STARTED_KEY, SIDEBAR_RAIL_WIDTH, SIDEBAR_WIDTH } from "../constants";
 import { useDeferredTitleRefresh } from "../hooks/useDeferredTitleRefresh";
@@ -47,6 +47,7 @@ export default function Shell({
   const view = useShellStore((s) => s.view);
   const settingsInitialSection = useShellStore((s) => s.settingsSection);
   const hostSidebarOpen = useShellStore((s) => s.hostSidebarOpen);
+  const [hostSidebarPreviewing, setHostSidebarPreviewing] = useState(false);
   const mobileSidebarOpen = useShellStore((s) => s.mobileSidebarOpen);
   const sessionSearchOpen = useShellStore((s) => s.sessionSearchOpen);
   const pendingDelete = useShellStore((s) => s.pendingDelete);
@@ -684,6 +685,9 @@ export default function Shell({
             onToggleSidebar={showMainSidebar ? toggleSidebar : undefined}
             theme={theme}
             onToggleTheme={toggle}
+            sidebarCollapsed={!hostSidebarOpen}
+            onSidebarHoverStart={() => setHostSidebarPreviewing(true)}
+            onSidebarHoverEnd={() => setHostSidebarPreviewing(false)}
           />
         ) : null}
         <div
@@ -694,12 +698,15 @@ export default function Shell({
           {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
+              data-testid={showHostChrome ? "host-sidebar-flow" : undefined}
               className={cn(
                 "relative z-20 hidden shrink-0 overflow-hidden lg:block",
                 "transition-[width] duration-300 ease-out",
               )}
               style={{
-                width: hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH,
+                width: showHostChrome
+                  ? (hostSidebarOpen ? SIDEBAR_WIDTH : 0)
+                  : (hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH),
               }}
             >
               <div
@@ -721,6 +728,25 @@ export default function Shell({
             </aside>
           ) : null}
 
+          {/* Host sidebar hover preview */}
+          {showMainSidebar && showHostChrome && !hostSidebarOpen && hostSidebarPreviewing && (
+            <aside
+              data-testid="host-sidebar-preview"
+              className="absolute inset-y-0 left-0 z-30 overflow-hidden"
+              style={{ width: SIDEBAR_WIDTH }}
+            >
+              <div className="h-full w-full overflow-hidden host-sidebar-glass">
+                <Sidebar
+                  {...sidebarProps}
+                  collapsed={false}
+                  hostChromeInset
+                  onCollapse={closeHostSidebar}
+                  onExpand={openHostSidebar}
+                />
+              </div>
+            </aside>
+          )}
+
           {showMainSidebar ? (
             <Sheet
               open={mobileSidebarOpen}
@@ -733,11 +759,12 @@ export default function Shell({
                 className="p-0 lg:hidden"
                 style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
               >
-                <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
+                <SheetTitle className="sr-only">{t("sidebar.mobileNavigation")}</SheetTitle>
                 <Sidebar
                   {...sidebarProps}
                   onCollapse={closeMobileSidebar}
                   containActionMenus
+                  ariaLabel={t("sidebar.mobileNavigation")}
                 />
               </SheetContent>
             </Sheet>
