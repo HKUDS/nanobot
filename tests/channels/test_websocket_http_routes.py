@@ -842,7 +842,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         origin_channel="websocket",
         origin_chat_id="abc",
     )
-    legacy_job = cron.add_job(
+    incomplete_job = cron.add_job(
         name="english-quiz",
         schedule=CronSchedule(kind="every", every_ms=3_600_000),
         message="Practice English",
@@ -899,6 +899,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         )
         assert resp.status_code == 200
         assert "wx-chat" not in resp.text
+        assert "unified:default" not in resp.text
         body = resp.json()
         by_id = {job["id"]: job for job in body["jobs"]}
         assert by_id[user_job.id]["protected"] is False
@@ -906,10 +907,12 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["state"]["run_history"] == []
         assert by_id[user_job.id]["origin"]["session_key"] == "websocket:abc"
         assert by_id[user_job.id]["origin"]["preview"] == "hi"
-        assert by_id[legacy_job.id]["payload"]["session_key"] == "unified:default"
-        assert by_id[legacy_job.id]["origin"] is None
-        assert by_id[external_job.id]["payload"]["origin_channel"] == "weixin"
+        assert "session_key" not in by_id[incomplete_job.id]["payload"]
+        assert "origin_channel" not in by_id[incomplete_job.id]["payload"]
+        assert "origin_chat_id" not in by_id[incomplete_job.id]["payload"]
+        assert by_id[incomplete_job.id]["origin"] is None
         assert "session_key" not in by_id[external_job.id]["payload"]
+        assert "origin_channel" not in by_id[external_job.id]["payload"]
         assert "origin_chat_id" not in by_id[external_job.id]["payload"]
         assert by_id[external_job.id]["origin"]["channel"] == "weixin"
         assert "session_key" not in by_id[external_job.id]["origin"]

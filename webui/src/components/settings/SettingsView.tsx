@@ -3698,7 +3698,6 @@ function AutomationDetailPanel({
   const originHref = job.origin?.channel === "websocket" && job.origin.session_key
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
-  const needsRecreation = automationNeedsRecreation(job);
   const created = job.created_at_ms ? fmtDateTime(job.created_at_ms, locale) : null;
   const updated = job.updated_at_ms ? fmtDateTime(job.updated_at_ms, locale) : null;
   const message = job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
@@ -3786,15 +3785,6 @@ function AutomationDetailPanel({
               )}
             </AutomationDetail>
           </div>
-
-          {needsRecreation ? (
-            <div className="rounded-[16px] border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
-              {tx(
-                "settings.automations.legacyWarning",
-                "This older automation is missing its target chat. Recreate it from the chat or channel where it should run.",
-              )}
-            </div>
-          ) : null}
 
           {job.state.last_error ? (
             <div className="rounded-[16px] border border-destructive/20 bg-destructive/8 px-3 py-2 text-[12px] leading-5 text-destructive">
@@ -4227,19 +4217,14 @@ function AutomationDeleteDialog({
   );
 }
 
-function automationNeedsRecreation(job: SessionAutomationJob): boolean {
-  return !job.protected && !job.origin && job.payload.kind === "agent_turn";
-}
-
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
-  return automationNeedsRecreation(job) || job.state.last_status === "error";
+  return job.state.last_status === "error";
 }
 
 function automationStatusKey(
   job: SessionAutomationJob,
-): "active" | "running" | "paused" | "failed" | "system" | "needs_setup" | "completed" | "idle" {
+): "active" | "running" | "paused" | "failed" | "system" | "completed" | "idle" {
   if (job.protected) return "system";
-  if (automationNeedsRecreation(job)) return "needs_setup";
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
@@ -4412,9 +4397,6 @@ function automationStatus(
 ): { label: string; tone: "neutral" | "success" | "warning" } {
   const status = automationStatusKey(job);
   if (status === "system") return { label: tx("settings.automations.status.system", "System"), tone: "neutral" };
-  if (status === "needs_setup") {
-    return { label: tx("settings.automations.status.needsSetup", "Needs setup"), tone: "warning" };
-  }
   if (status === "running") {
     return { label: tx("settings.automations.status.running", "Running now"), tone: "warning" };
   }
@@ -4437,9 +4419,6 @@ function automationOriginLabel(
 ): string {
   if (job.protected) return tx("settings.automations.origin.system", "System");
   const origin = job.origin;
-  if (!origin && job.payload.kind === "agent_turn") {
-    return tx("settings.automations.origin.legacy", "Recreate in target chat");
-  }
   if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
   if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, tx);
   return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, tx);
@@ -4574,7 +4553,7 @@ function formatAutomationNextTitle(
 function automationStatusDotClass(job: SessionAutomationJob): string {
   const status = automationStatusKey(job);
   if (status === "active" || status === "running") return "bg-emerald-500";
-  if (status === "failed" || status === "needs_setup") return "bg-amber-500";
+  if (status === "failed") return "bg-amber-500";
   if (status === "system") return "bg-blue-500";
   return "bg-muted-foreground/45";
 }

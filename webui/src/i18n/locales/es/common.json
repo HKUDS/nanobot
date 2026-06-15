@@ -525,18 +525,15 @@
         "system": "Sistema",
         "pending": "Pendiente",
         "running": "Ejecutándose ahora",
-        "needsSetup": "Requiere configuración",
         "paused": "Pausada",
         "failed": "Fallida",
         "completed": "Completada",
         "noSchedule": "Sin programación",
         "active": "Activa"
       },
-      "legacyWarning": "Esta automatización antigua no tiene chat de destino. Vuelve a crearla desde el chat o canal donde debe ejecutarse.",
       "origin": {
         "system": "Sistema",
-        "unknown": "Sin chat vinculado",
-        "legacy": "Recréala en el chat de destino"
+        "unknown": "Sin chat vinculado"
       },
       "channels": {
         "api": "API",

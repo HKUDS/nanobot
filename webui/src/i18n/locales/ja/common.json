@@ -525,18 +525,15 @@
         "system": "システム",
         "pending": "待機中",
         "running": "実行中",
-        "needsSetup": "再設定が必要",
         "paused": "一時停止",
         "failed": "失敗",
         "completed": "完了",
         "noSchedule": "スケジュールなし",
         "active": "実行中"
       },
-      "legacyWarning": "この古い自動タスクには対象チャットがありません。実行先のチャットまたは外部 channel から作り直してください。",
       "origin": {
         "system": "システム",
-        "unknown": "関連チャットなし",
-        "legacy": "対象チャットで作り直してください"
+        "unknown": "関連チャットなし"
       },
       "channels": {
         "api": "API",

@@ -372,7 +372,6 @@ describe("App layout", () => {
             payload: {
               message: "Check the repo status",
               kind: "agent_turn",
-              session_key: "websocket:chat-a",
             },
             state: {
               next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
@@ -389,26 +388,6 @@ describe("App layout", () => {
             },
           },
           {
-            id: "legacy-quiz",
-            name: "english-quiz",
-            enabled: true,
-            protected: false,
-            delete_after_run: false,
-            schedule: { kind: "cron", expr: "30 9-23 * * *", tz: "Asia/Shanghai" },
-            payload: {
-              message: "Practice English",
-              kind: "agent_turn",
-              session_key: "unified:default",
-            },
-            state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 0, 0),
-              last_status: "ok",
-              pending: false,
-              run_history: [],
-            },
-            origin: null,
-          },
-          {
             id: "external-quiz",
             name: "WeChat quiz",
             enabled: true,
@@ -418,7 +397,6 @@ describe("App layout", () => {
             payload: {
               message: "Send a quiz",
               kind: "agent_turn",
-              origin_channel: "weixin",
             },
             state: {
               next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
@@ -464,9 +442,6 @@ describe("App layout", () => {
     expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("english-quiz")).toBeInTheDocument();
-    expect(screen.getByText("Recreate in target chat")).toBeInTheDocument();
-    expect(screen.queryByText("unified:default")).not.toBeInTheDocument();
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     expect(screen.getByText("WeChat")).toBeInTheDocument();
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
@@ -490,7 +465,6 @@ describe("App layout", () => {
       payload: {
         message: "Old one-shot message",
         kind: "agent_turn",
-        session_key: "websocket:chat-a",
       },
       state: {
         next_run_at_ms: null,
@@ -589,7 +563,6 @@ describe("App layout", () => {
             payload: {
               message: longMessage,
               kind: "agent_turn",
-              session_key: "websocket:chat-a",
             },
             state: {
               next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
@@ -650,7 +623,6 @@ describe("App layout", () => {
             payload: {
               message: "检查仓库状态",
               kind: "agent_turn",
-              session_key: "websocket:chat-a",
             },
             state: {
               next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),

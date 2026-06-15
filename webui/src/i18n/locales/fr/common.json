@@ -525,18 +525,15 @@
         "system": "Système",
         "pending": "En attente",
         "running": "En cours d’exécution",
-        "needsSetup": "Configuration requise",
         "paused": "En pause",
         "failed": "Échouée",
         "completed": "Terminée",
         "noSchedule": "Aucun planning",
         "active": "En cours"
       },
-      "legacyWarning": "Cette ancienne automatisation n’a pas de discussion cible. Recréez-la depuis la discussion ou le canal où elle doit s’exécuter.",
       "origin": {
         "system": "Système",
-        "unknown": "Aucune discussion liée",
-        "legacy": "Recréez-la dans la discussion cible"
+        "unknown": "Aucune discussion liée"
       },
       "channels": {
         "api": "API",

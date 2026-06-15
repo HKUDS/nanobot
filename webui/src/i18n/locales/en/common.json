@@ -525,18 +525,15 @@
         "system": "System",
         "pending": "Pending",
         "running": "Running now",
-        "needsSetup": "Needs setup",
         "paused": "Paused",
         "failed": "Failed",
         "completed": "Completed",
         "noSchedule": "No schedule",
         "active": "Active"
       },
-      "legacyWarning": "This older automation is missing its target chat. Recreate it from the chat or channel where it should run.",
       "origin": {
         "system": "System",
-        "unknown": "No linked chat",
-        "legacy": "Recreate in target chat"
+        "unknown": "No linked chat"
       },
       "channels": {
         "api": "API",

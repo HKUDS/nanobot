@@ -525,18 +525,15 @@
         "system": "시스템",
         "pending": "대기 중",
         "running": "실행 중",
-        "needsSetup": "설정 필요",
         "paused": "일시 중지",
         "failed": "실패",
         "completed": "완료",
         "noSchedule": "일정 없음",
         "active": "활성"
       },
-      "legacyWarning": "이전 자동화에 대상 채팅이 없습니다. 실행되어야 하는 채팅 또는 외부 channel에서 다시 만드세요.",
       "origin": {
         "system": "시스템",
-        "unknown": "연결된 채팅 없음",
-        "legacy": "대상 채팅에서 다시 만드세요"
+        "unknown": "연결된 채팅 없음"
       },
       "channels": {
         "api": "API",

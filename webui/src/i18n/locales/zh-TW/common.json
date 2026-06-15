@@ -525,18 +525,15 @@
         "system": "系統",
         "pending": "等待中",
         "running": "正在執行",
-        "needsSetup": "需重新設定",
         "paused": "已暫停",
         "failed": "失敗",
         "completed": "已完成",
         "noSchedule": "無排程",
         "active": "執行中"
       },
-      "legacyWarning": "這個舊版自動任務缺少目標會話。請從它應該執行的聊天或外部 channel 中重新建立。",
       "origin": {
         "system": "系統",
-        "unknown": "未關聯會話",
-        "legacy": "請在目標會話中重新建立"
+        "unknown": "未關聯會話"
       },
       "channels": {
         "api": "API",

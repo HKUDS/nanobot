@@ -122,16 +122,6 @@ def _serialize_job(
     payload["created_at_ms"] = job.created_at_ms
     payload["updated_at_ms"] = job.updated_at_ms
     payload["payload"].update({"kind": job.payload.kind})
-    if _expose_origin_identifiers(job):
-        payload["payload"].update(
-            {
-                "session_key": job.payload.session_key,
-                "origin_channel": job.payload.origin_channel,
-                "origin_chat_id": job.payload.origin_chat_id,
-            }
-        )
-    elif job.payload.origin_channel:
-        payload["payload"]["origin_channel"] = job.payload.origin_channel
     payload["state"].update(
         {
             "last_run_at_ms": job.state.last_run_at_ms,
@@ -182,12 +172,6 @@ def _origin_payload(
         "title": title,
         "preview": preview,
     }
-
-
-def _expose_origin_identifiers(job: CronJob) -> bool:
-    channel = job.payload.origin_channel
-    return not channel or channel == "websocket"
-
 
 def _session_preview(messages: Any) -> str:
     if not isinstance(messages, list):

@@ -56,6 +56,7 @@
 
 ## 📢 News
 
+- **2026-06-16** ⚠️ Breaking change: agent-turn automation jobs now require complete target chat or channel metadata. Cron jobs created by older versions without that metadata should be recreated from the target chat or channel; existing cron records remain in the cron store.
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/blackcat/releases/tag/v0.2.1) for details.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.

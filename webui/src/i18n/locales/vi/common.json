@@ -525,18 +525,15 @@
         "system": "Hệ thống",
         "pending": "Đang chờ",
         "running": "Đang chạy",
-        "needsSetup": "Cần thiết lập",
         "paused": "Đã tạm dừng",
         "failed": "Thất bại",
         "completed": "Hoàn tất",
         "noSchedule": "Không có lịch",
         "active": "Đang chạy"
       },
-      "legacyWarning": "Tự động hóa cũ này thiếu cuộc trò chuyện đích. Hãy tạo lại từ cuộc trò chuyện hoặc channel nơi nó sẽ chạy.",
       "origin": {
         "system": "Hệ thống",
-        "unknown": "Chưa liên kết cuộc trò chuyện",
-        "legacy": "Tạo lại trong cuộc trò chuyện đích"
+        "unknown": "Chưa liên kết cuộc trò chuyện"
       },
       "channels": {
         "api": "API",

@@ -114,9 +114,6 @@ export interface SessionAutomationJob {
   payload: {
     message: string;
     kind?: "agent_turn" | "system_event" | string;
-    session_key?: string | null;
-    origin_channel?: string | null;
-    origin_chat_id?: string | null;
   };
   state: {
     next_run_at_ms?: number | null;

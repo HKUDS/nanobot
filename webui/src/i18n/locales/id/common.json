@@ -525,18 +525,15 @@
         "system": "Sistem",
         "pending": "Menunggu",
         "running": "Sedang berjalan",
-        "needsSetup": "Perlu disiapkan",
         "paused": "Dijeda",
         "failed": "Gagal",
         "completed": "Selesai",
         "noSchedule": "Tanpa jadwal",
         "active": "Aktif"
       },
-      "legacyWarning": "Otomasi lama ini tidak memiliki chat tujuan. Buat ulang dari chat atau channel tempat otomasi akan berjalan.",
       "origin": {
         "system": "Sistem",
-        "unknown": "Tidak ada chat tertaut",
-        "legacy": "Buat ulang di chat tujuan"
+        "unknown": "Tidak ada chat tertaut"
       },
       "channels": {
         "api": "API",
