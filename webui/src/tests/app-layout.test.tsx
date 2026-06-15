@@ -271,6 +271,23 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
+  it("places Automations after Skills in the main sidebar", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
+    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
+
+    expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(
+      skillsButton.compareDocumentPosition(automationsButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("opens Skills from the main sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
