@@ -143,7 +143,8 @@ async def test_keenable_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "keenable" in url
         assert kw["headers"]["X-API-Key"] == "keen-key"
-        assert kw["headers"]["User-Agent"].startswith("blackcat/")
+        assert kw["headers"]["User-Agent"] == "blackcat-search-test"
+        assert kw["headers"]["X-Keenable-Title"] == "blackcat"
         return _response(json={
             "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
         })

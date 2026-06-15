@@ -489,10 +489,12 @@ class WebSearchTool(Tool):
             return f"Error: {e}"
 
     async def _search_keenable(self, query: str, n: int) -> str:
-        from nanobot import __version__
         api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
-        # First-party API: identify honestly instead of the spoofed browser UA.
-        headers = {"Content-Type": "application/json", "User-Agent": f"nanobot/{__version__}"}
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
+            "X-Keenable-Title": "nanobot",
+        }
         if api_key:
             headers["X-API-Key"] = api_key
         try:
