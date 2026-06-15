@@ -99,3 +99,17 @@ temp/
 *.tmp
 exp/
 .playwright-mcp/
+
+# Frank-specific secrets (tokens hardcoded, non committare)
+scripts/frank-notify-start.sh
+scripts/frank-notify-crash.sh
+scripts/frank-notify-limit.sh
+
+# Frank-specific proprietary content
+.agents/
+nanobot/skills/foolish/
+nanobot/skills/agentmail/
+nanobot/agent/tools/agentmail.py
+
+# Bridge dependencies
+bridge/node_modules/
