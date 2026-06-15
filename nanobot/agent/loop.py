@@ -42,8 +42,6 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.cron.session_turns import (
     cron_history_overrides,
-    cron_trigger,
-    is_cron_turn,
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
@@ -1612,15 +1610,6 @@ class AgentLoop:
     async def _state_save(self, ctx: TurnContext) -> str:
         turn_continuation.prepare_save_boundary(ctx)
 
-        if not ctx.suppress_response and is_cron_turn(ctx.msg.metadata):
-            trigger = cron_trigger(ctx.msg.metadata)
-            # Silent jobs are always suppressed.
-            # Any cron turn with no text output is also suppressed — empty cron
-            # responses mean "nothing to report", not an agent error.
-            if (trigger and trigger.get("silent")) or not (
-                ctx.final_content and ctx.final_content.strip()
-            ):
-                ctx.suppress_response = True
         if (
             (ctx.final_content is None or not ctx.final_content.strip())
             and not ctx.suppress_response
