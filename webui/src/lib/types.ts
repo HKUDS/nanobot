@@ -340,6 +340,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    reasoning_effort_values?: string[];
   }>;
   providers: Array<{
     name: string;
