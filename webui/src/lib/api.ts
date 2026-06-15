@@ -89,6 +89,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
 }
 
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
+}
+
 function splitKey(key: string): { channel: string; chatId: string } {
   const idx = key.indexOf(":");
   if (idx === -1) return { channel: "", chatId: key };
@@ -226,9 +230,7 @@ export async function updateAutomation(
     `${base}/api/webui/automations/update?${query}`,
     token,
     {
-      headers: {
-        "X-Nanobot-Automation-Values": JSON.stringify(values),
-      },
+      headers: automationValuesHeader(values),
     },
     API_READ_TIMEOUT_MS,
   );

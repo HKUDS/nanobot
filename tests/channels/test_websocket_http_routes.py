@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 import pytest
@@ -942,6 +942,26 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
         assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
 
+        unicode_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": quote(
+                    json.dumps(
+                        {
+                            "name": "每日测验",
+                            "message": "问今日测验",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    safe="",
+                ),
+            },
+        )
+        assert unicode_update.status_code == 200
+        assert cron.get_job(user_job.id).name == "每日测验"
+        assert cron.get_job(user_job.id).payload.message == "问今日测验"
+
         malformed_update = await _http_get(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",
             headers={
@@ -950,7 +970,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             },
         )
         assert malformed_update.status_code == 400
-        assert cron.get_job(user_job.id).payload.message == "Ask the daily quiz"
+        assert cron.get_job(user_job.id).payload.message == "问今日测验"
 
         invalid_cron_update = await _http_get(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",

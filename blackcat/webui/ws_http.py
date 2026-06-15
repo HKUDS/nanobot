@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 from loguru import logger
 from websockets.http11 import Request as WsRequest
@@ -782,7 +783,10 @@ def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None
     try:
         values = json.loads(raw)
     except Exception:
-        return None
+        try:
+            values = json.loads(unquote(raw))
+        except Exception:
+            return None
     return values if isinstance(values, dict) else None
 
 

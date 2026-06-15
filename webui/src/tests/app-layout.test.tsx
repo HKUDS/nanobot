@@ -518,7 +518,7 @@ describe("App layout", () => {
     );
     expect(updateCall).toBeTruthy();
     const headers = updateCall?.[1]?.headers as Record<string, string>;
-    expect(JSON.parse(headers["X-Nanobot-Automation-Values"])).toEqual({
+    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
       name: "Past one-shot",
       message: "Updated one-shot message",
     });

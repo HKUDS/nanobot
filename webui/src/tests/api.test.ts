@@ -149,25 +149,24 @@ describe("webui API helpers", () => {
   });
 
   it("serializes workspace automation updates", async () => {
-    await updateAutomation("tok", "job 1/2", {
-      name: "Daily quiz",
-      message: "Ask the quiz",
+    const values = {
+      name: "每日测验",
+      message: "Ask 今日 quiz",
       schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
-    });
+    } as const;
+    await updateAutomation("tok", "job 1/2", values);
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/webui/automations/update?id=job+1%2F2",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
-          "X-Nanobot-Automation-Values": JSON.stringify({
-            name: "Daily quiz",
-            message: "Ask the quiz",
-            schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
-          }),
+          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
         },
       }),
     );
+    const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
   });
 
   it("fetches the WebUI skill summary", async () => {
