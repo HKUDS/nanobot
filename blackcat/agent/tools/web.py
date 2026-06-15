@@ -317,6 +317,8 @@ class WebSearchTool(Tool):
                 or os.environ.get("WEB_SEARCH_API_KEY", "")
             )
             return "volcengine" if api_key else "duckduckgo"
+        if provider == "keenable":
+            return "keenable"  # free tier works without a key; never fall back
         return provider
 
     @property
@@ -371,6 +373,8 @@ class WebSearchTool(Tool):
                 n,
                 freshness=kwargs.get("freshness", "noLimit"),
             )
+        elif provider == "keenable":
+            return await self._search_keenable(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -481,6 +485,33 @@ class WebSearchTool(Tool):
                 )
                 r.raise_for_status()
             return _format_results(query, r.json().get("results", []), n)
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _search_keenable(self, query: str, n: int) -> str:
+        # Keenable has a no-login free tier, so an API key is optional.
+        api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
+        headers = {"Content-Type": "application/json", "User-Agent": self.user_agent}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://api.keenable.ai/v1/search",
+                    headers=headers,
+                    json={"query": query},
+                    timeout=15.0,
+                )
+                r.raise_for_status()
+            items = [
+                {
+                    "title": x.get("title", ""),
+                    "url": x.get("url", ""),
+                    "content": x.get("snippet") or x.get("description", ""),
+                }
+                for x in r.json().get("results", [])
+            ]
+            return _format_results(query, items, n)
         except Exception as e:
             return f"Error: {e}"
 

@@ -131,6 +131,54 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
+def test_keenable_without_api_key_stays_on_provider(monkeypatch):
+    # Free tier needs no key, so Keenable must not fall back to DuckDuckGo.
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_keenable_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "keenable" in url
+        assert kw["headers"]["X-API-Key"] == "keen-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        return _response(json={
+            "results": [{
+                "title": "Keen",
+                "url": "https://keenable.ai",
+                "description": "short",
+                "snippet": "longer excerpt",
+            }]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="keen-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Keen" in result
+    assert "https://keenable.ai" in result
+    assert "longer excerpt" in result  # snippet preferred over description
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_without_key_omits_header(monkeypatch):
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+
+    async def mock_post(self, url, **kw):
+        assert "keenable" in url
+        assert "X-API-Key" not in kw["headers"]
+        return _response(json={
+            "results": [{"title": "Anon", "url": "https://keenable.ai", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Anon" in result  # description used when snippet absent
+
+
 @pytest.mark.asyncio
 async def test_volcengine_search(monkeypatch):
     async def mock_post(self, url, **kw):
