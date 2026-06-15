@@ -489,7 +489,6 @@ class WebSearchTool(Tool):
             return f"Error: {e}"
 
     async def _search_keenable(self, query: str, n: int) -> str:
-        # Keenable has a no-login free tier, so an API key is optional.
         api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
         headers = {"Content-Type": "application/json", "User-Agent": self.user_agent}
         if api_key:
