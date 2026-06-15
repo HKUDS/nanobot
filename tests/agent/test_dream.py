@@ -87,6 +87,21 @@ class TestBuildDreamPrompt:
         assert "entry-21" in next_prompt
         assert "entry-25" in next_prompt
 
+    def test_skips_malformed_history_entries(self, store):
+        """Dream prompt building should tolerate externally corrupted JSONL rows."""
+        store.history_file.write_text(
+            '{"cursor": 1, "timestamp": "2026-04-01 10:00"}\n'
+            '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "usable memory"}\n',
+            encoding="utf-8",
+        )
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, cursor = result
+        assert cursor == 2
+        assert "usable memory" in prompt
+
     def test_dream_prompt_consumes_consolidator_attribute_tags(self):
         prompt = render_template(
             "agent/dream.md",
