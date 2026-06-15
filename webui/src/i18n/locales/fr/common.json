@@ -493,7 +493,7 @@
         "updated": "Mise à jour",
         "name": "Nom"
       },
-      "search": "Rechercher une tâche, un message, une session ou une expression cron",
+      "search": "Rechercher des automatisations",
       "queue": "File",
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",

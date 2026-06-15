@@ -3477,42 +3477,44 @@ function AutomationsSettings({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 flex-wrap gap-1 rounded-[16px] bg-muted/50 p-1">
-            {summaryOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => onFilterChange(option.value)}
-                className={cn(
-                  "inline-flex h-8 items-center gap-2 rounded-[12px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
-                  filter === option.value && "bg-background text-foreground shadow-sm",
-                )}
-              >
-                <span>{option.label}</span>
-                <span className="min-w-5 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground">
-                  {option.count}
-                </span>
-              </button>
-            ))}
+      <section className="rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl sm:p-4">
+        <div className="flex flex-col gap-3">
+          <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
+            <div className="inline-flex min-w-max items-center gap-1 rounded-[16px] bg-muted/50 p-1">
+              {summaryOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onFilterChange(option.value)}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-[12px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+                    filter === option.value && "bg-background text-foreground shadow-sm",
+                  )}
+                >
+                  <span>{option.label}</span>
+                  <span className="min-w-5 shrink-0 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground">
+                    {option.count}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <div className="relative min-w-0 sm:w-[24rem]">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <div className="relative min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
               <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                placeholder={tx("settings.automations.search", "Search automation, message, session, or cron expression")}
-                className="h-9 rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
+                placeholder={tx("settings.automations.search", "Search automations")}
+                className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground"
+                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground sm:w-auto"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                   <span>{sortLabel[sort]}</span>

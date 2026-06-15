@@ -493,7 +493,7 @@
         "updated": "Actualizada",
         "name": "Nombre"
       },
-      "search": "Buscar tarea, mensaje, sesión o expresión cron",
+      "search": "Buscar automatizaciones",
       "queue": "Cola",
       "loading": "Cargando automatizaciones...",
       "noMatches": "No hay automatizaciones que coincidan con esta vista.",

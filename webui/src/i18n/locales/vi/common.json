@@ -493,7 +493,7 @@
         "updated": "Đã cập nhật",
         "name": "Tên"
       },
-      "search": "Tìm tác vụ, tin nhắn, phiên hoặc biểu thức cron",
+      "search": "Tìm tự động hóa",
       "queue": "Hàng đợi",
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",

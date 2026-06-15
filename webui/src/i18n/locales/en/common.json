@@ -493,7 +493,7 @@
         "updated": "Updated",
         "name": "Name"
       },
-      "search": "Search automation, message, session, or cron expression",
+      "search": "Search automations",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
