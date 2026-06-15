@@ -505,7 +505,9 @@
         "schedule": "Jadwal",
         "next": "Berikutnya",
         "last": "Terakhir",
-        "origin": "Chat tertaut"
+        "origin": "Chat tertaut",
+        "created": "Dibuat",
+        "updated": "Diperbarui"
       },
       "runNow": "Jalankan sekarang",
       "pause": "Jeda",
@@ -579,6 +581,7 @@
         "error": "Error",
         "skipped": "Dilewati",
         "recent": "Hasil terakhir",
+        "timeline": "Riwayat eksekusi",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

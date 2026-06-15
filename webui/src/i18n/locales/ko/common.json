@@ -505,7 +505,9 @@
         "schedule": "일정",
         "next": "다음",
         "last": "마지막",
-        "origin": "연결된 채팅"
+        "origin": "연결된 채팅",
+        "created": "생성",
+        "updated": "업데이트"
       },
       "runNow": "지금 실행",
       "pause": "일시 중지",
@@ -579,6 +581,7 @@
         "error": "오류",
         "skipped": "건너뜀",
         "recent": "최근 결과",
+        "timeline": "실행 기록",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

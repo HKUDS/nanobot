@@ -505,7 +505,9 @@
         "schedule": "Schedule",
         "next": "Next",
         "last": "Last",
-        "origin": "Linked chat"
+        "origin": "Linked chat",
+        "created": "Created",
+        "updated": "Updated"
       },
       "runNow": "Run now",
       "pause": "Pause",
@@ -579,6 +581,7 @@
         "error": "Error",
         "skipped": "Skipped",
         "recent": "Last result",
+        "timeline": "Run history",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

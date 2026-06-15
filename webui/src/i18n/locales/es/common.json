@@ -505,7 +505,9 @@
         "schedule": "Programación",
         "next": "Siguiente",
         "last": "Última",
-        "origin": "Chat vinculado"
+        "origin": "Chat vinculado",
+        "created": "Creada",
+        "updated": "Actualizada"
       },
       "runNow": "Ejecutar ahora",
       "pause": "Pausar",
@@ -579,6 +581,7 @@
         "error": "Error",
         "skipped": "Omitida",
         "recent": "Último resultado",
+        "timeline": "Historial de ejecuciones",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

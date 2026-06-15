@@ -505,7 +505,9 @@
         "schedule": "スケジュール",
         "next": "次回",
         "last": "前回",
-        "origin": "関連チャット"
+        "origin": "関連チャット",
+        "created": "作成",
+        "updated": "更新"
       },
       "runNow": "今すぐ実行",
       "pause": "一時停止",
@@ -579,6 +581,7 @@
         "error": "エラー",
         "skipped": "スキップ",
         "recent": "最新結果",
+        "timeline": "実行履歴",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

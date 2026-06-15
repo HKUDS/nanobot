@@ -505,7 +505,9 @@
         "schedule": "Lịch",
         "next": "Tiếp theo",
         "last": "Lần trước",
-        "origin": "Cuộc trò chuyện liên kết"
+        "origin": "Cuộc trò chuyện liên kết",
+        "created": "Đã tạo",
+        "updated": "Đã cập nhật"
       },
       "runNow": "Chạy ngay",
       "pause": "Tạm dừng",
@@ -579,6 +581,7 @@
         "error": "Lỗi",
         "skipped": "Đã bỏ qua",
         "recent": "Kết quả gần nhất",
+        "timeline": "Lịch sử chạy",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

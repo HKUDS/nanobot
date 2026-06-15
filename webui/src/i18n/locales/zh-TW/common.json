@@ -505,7 +505,9 @@
         "schedule": "排程",
         "next": "下次",
         "last": "上次",
-        "origin": "關聯會話"
+        "origin": "關聯會話",
+        "created": "建立於",
+        "updated": "更新於"
       },
       "runNow": "立即執行",
       "pause": "暫停",
@@ -579,6 +581,7 @@
         "error": "錯誤",
         "skipped": "已略過",
         "recent": "最近結果",
+        "timeline": "執行記錄",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {

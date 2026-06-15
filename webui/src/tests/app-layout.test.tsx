@@ -434,9 +434,9 @@ describe("App layout", () => {
     fireEvent.click(automationsButton);
 
     expect(await screen.findByRole("heading", { name: "Automations" })).toBeInTheDocument();
-    expect(screen.getByText("Daily repo check")).toBeInTheDocument();
-    expect(screen.getByText("Check the repo status")).toBeInTheDocument();
-    expect(screen.getByText("Release prep")).toBeInTheDocument();
+    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("english-quiz")).toBeInTheDocument();
     expect(screen.getByText("Recreate in target chat")).toBeInTheDocument();
     expect(screen.queryByText("unified:default")).not.toBeInTheDocument();
@@ -498,7 +498,7 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    expect(await screen.findByText("Past one-shot")).toBeInTheDocument();
+    expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
     expect(
@@ -582,8 +582,8 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "自动任务" })).toBeInTheDocument();
     expect(screen.getByText("任务队列")).toBeInTheDocument();
-    expect(screen.getByText("每日检查")).toBeInTheDocument();
-    expect(screen.getByText("检查仓库状态")).toBeInTheDocument();
+    expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("每 1天")).toBeInTheDocument();
     expect(screen.getByText("最近结果")).toBeInTheDocument();
     expect(screen.getByText("完成 · 不到 1 秒")).toBeInTheDocument();

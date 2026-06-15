@@ -505,7 +505,9 @@
         "schedule": "Planning",
         "next": "Prochaine",
         "last": "Dernière",
-        "origin": "Discussion liée"
+        "origin": "Discussion liée",
+        "created": "Créée",
+        "updated": "Modifiée"
       },
       "runNow": "Exécuter maintenant",
       "pause": "Mettre en pause",
@@ -579,6 +581,7 @@
         "error": "Erreur",
         "skipped": "Ignorée",
         "recent": "Dernier résultat",
+        "timeline": "Historique d’exécution",
         "statusWithDuration": "{{status}} · {{duration}}"
       },
       "meta": {
