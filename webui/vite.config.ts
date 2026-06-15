@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
+    base: "./",
     plugins: [react()],
     resolve: {
       alias: {
