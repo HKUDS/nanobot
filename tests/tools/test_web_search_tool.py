@@ -145,12 +145,7 @@ async def test_keenable_search(monkeypatch):
         assert kw["headers"]["X-API-Key"] == "keen-key"
         assert kw["headers"]["User-Agent"].startswith("blackcat/")
         return _response(json={
-            "results": [{
-                "title": "Keen",
-                "url": "https://keenable.ai",
-                "description": "short",
-                "snippet": "longer excerpt",
-            }]
+            "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
