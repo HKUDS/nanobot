@@ -1172,6 +1172,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
+            "extend_to_user": True,
         }
         history = session.get_history(**_hist_kwargs)
         current_role = "assistant" if is_subagent else "user"
@@ -1447,6 +1448,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
+            "extend_to_user": True,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(

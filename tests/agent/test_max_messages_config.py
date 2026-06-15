@@ -111,6 +111,7 @@ class TestMaxMessagesIntegration:
         assert result is not None
         assert mock_hist.call_count == 1
         assert mock_hist.call_args.kwargs["max_messages"] == 25
+        assert mock_hist.call_args.kwargs["extend_to_user"] is True
 
     @pytest.mark.asyncio
     async def test_zero_config_passes_builtin_limit_to_history_call(self, tmp_path: Path) -> None:
@@ -129,6 +130,7 @@ class TestMaxMessagesIntegration:
 
         assert result is not None
         assert mock_hist.call_args.kwargs["max_messages"] == DEFAULT_MAX_MESSAGES
+        assert mock_hist.call_args.kwargs["extend_to_user"] is True
 
 
 class TestSchemaConfig:

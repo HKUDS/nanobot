@@ -270,6 +270,30 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
         return truncate_text(text, max_chars - suffix_chars)
 
 
+def recent_message_start_index(
+    messages: list[dict[str, Any]],
+    max_messages: int,
+    *,
+    extend_to_user: bool = False,
+) -> int:
+    """Return the start index for a recent replay window."""
+    if max_messages <= 0:
+        return len(messages)
+    start_idx = max(0, len(messages) - max_messages)
+    if not extend_to_user or len(messages) <= max_messages:
+        return start_idx
+
+    recovered_user = next(
+        (i for i in range(start_idx, -1, -1) if messages[i].get("role") == "user"),
+        None,
+    )
+    if recovered_user is None:
+        return start_idx
+    if recovered_user > 0 and messages[recovered_user - 1].get("_channel_delivery"):
+        return recovered_user - 1
+    return recovered_user
+
+
 def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
     """Find the first index whose tool results have matching assistant calls."""
     declared: set[str] = set()
