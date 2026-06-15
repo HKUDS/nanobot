@@ -16,34 +16,11 @@ This file tracks every modification made to nanobot for the Frank deployment.
 
 ## Patches
 
-### P01 — Suppress empty and silent cron responses
-**Status**: applied `2026-06-15`
-**Commit**: `8f0b8099` (initial), `93f48c13` (root-cause fix)
-**Problem**: Two sources of spam:
-1. Jobs marked `silent=True` still had their text response delivered.
-2. Any cron job where the agent used tools but produced no text got `EMPTY_FINAL_RESPONSE_MESSAGE` ("I completed the tool steps…") injected and delivered. This is the root cause — `EMPTY_FINAL_RESPONSE_MESSAGE` is for interactive turns, not cron.
-**Mechanism**:
-- `payload.silent=True` → suppress always.
-- Empty `final_content` on any cron turn → suppress (not an error, just "nothing to report").
-- Loud jobs with actual text content → delivered normally.
-**DO NOT use `payload.deliver=True`** — breaks `is_bound_cron_job()` routing.
-**Files changed**:
-- `nanobot/cron/types.py` — added `silent: bool = False` to `CronPayload`
-- `nanobot/cron/service.py` — serialize/deserialize `silent` in `_save_store` / load
-- `nanobot/cron/bound_runner.py` — pass `"silent": job.payload.silent` into `CRON_TRIGGER_META`
-- `nanobot/agent/loop.py` — `_state_save`: suppress when silent OR when content is empty
-
-**Key invariant to verify after merge**:
-```python
-# In loop.py _state_save, this block must exist:
-if not ctx.suppress_response and is_cron_turn(ctx.msg.metadata):
-    trigger = cron_trigger(ctx.msg.metadata)
-    if (trigger and trigger.get("silent")) or not (
-        ctx.final_content and ctx.final_content.strip()
-    ):
-        ctx.suppress_response = True
-```
-**Also verify** `service.py` `_save_store` includes `"silent": j.payload.silent` in payload dict.
+### P01 — REVERTED (non necessario)
+**Status**: reverted `2026-06-15`
+**Problema originale**: notifiche spam da cron job.
+**Causa vera**: i job senza notifica erano configurati come cron Telegram invece di stare nell'heartbeat. Frank ha già l'architettura giusta — cron Telegram per notifiche, heartbeat per job silenti. Non serve patch al codice.
+**Azione**: nessuna modifica a `loop.py`. Se un job spamma, dirlo a Frank e farglielo spostare nell'heartbeat.
 
 ---
 
