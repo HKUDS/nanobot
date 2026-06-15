@@ -287,8 +287,13 @@ class Session:
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 
-    def retain_recent_legal_suffix(self, max_messages: int) -> tuple[list[dict], int]:
-        """Keep a legal recent suffix constrained by a hard message cap.
+    def retain_recent_legal_suffix(
+        self,
+        max_messages: int,
+        *,
+        extend_to_user: bool = False,
+    ) -> tuple[list[dict], int]:
+        """Keep a legal recent suffix, optionally extending it back to a user turn.
 
         Returns ``(dropped, already_consolidated_count)`` where *dropped* is
         the list of removed messages (in original order) and
@@ -307,30 +312,37 @@ class Session:
         original = list(self.messages)
         before_lc = self.last_consolidated
 
-        retained = list(self.messages[-max_messages:])
+        start_idx = max(0, len(self.messages) - max_messages)
+        if extend_to_user:
+            start_idx = next(
+                (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
+                start_idx,
+            )
 
-        # Prefer starting at a user turn when one exists within the tail.
+        retained = self.messages[start_idx:]
+
+        # Prefer starting at a user turn when one exists within the retained window.
         first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
         if first_user is not None:
             retained = retained[first_user:]
-        else:
-            # If the tail is assistant/tool-only, anchor to the latest user in
-            # the full session and take a capped forward window from there.
+        elif not extend_to_user:
+            # If the hard-capped tail is assistant/tool-only, anchor to the
+            # latest user in the full session and take a capped forward window.
             latest_user = next(
                 (i for i in range(len(self.messages) - 1, -1, -1)
                  if self.messages[i].get("role") == "user"),
                 None,
             )
             if latest_user is not None:
-                retained = list(self.messages[latest_user: latest_user + max_messages])
+                retained = self.messages[latest_user: latest_user + max_messages]
 
         # Mirror get_history(): avoid persisting orphan tool results at the front.
         start = find_legal_message_start(retained)
         if start:
             retained = retained[start:]
 
-        # Hard-cap guarantee: never keep more than max_messages.
-        if len(retained) > max_messages:
+        # Hard-cap guarantee unless the caller requested user-turn extension.
+        if not extend_to_user and len(retained) > max_messages:
             retained = retained[-max_messages:]
             start = find_legal_message_start(retained)
             if start:

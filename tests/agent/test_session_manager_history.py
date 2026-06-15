@@ -623,6 +623,24 @@ def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
     assert len(session.messages) <= 6
 
 
+def test_retain_recent_legal_suffix_can_extend_to_user_for_long_recent_turn():
+    session = Session(key="test:extend-to-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "record this"})
+    for i in range(4):
+        session.messages.extend(_tool_turn("recent", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+
+    session.retain_recent_legal_suffix(8, extend_to_user=True)
+
+    assert len(session.messages) > 8
+    assert session.messages[0]["content"] == "record this"
+    assert session.messages[-1]["content"] == "done"
+    history = session.get_history(max_messages=500)
+    _assert_no_orphans(history)
+
+
 # --- enforce_file_cap archive correctness (issue #4128) ---
 
 

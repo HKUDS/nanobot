@@ -1006,7 +1006,7 @@ class Consolidator:
                 metadata={},
                 last_consolidated=0,
             )
-            dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix)
+            dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             messages_to_keep = probe.messages
             messages_to_remove = dropped[already_consolidated:]
 

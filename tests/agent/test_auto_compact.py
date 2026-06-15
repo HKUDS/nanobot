@@ -45,6 +45,33 @@ def _add_turns(session, turns: int, *, prefix: str = "msg") -> None:
         session.add_message("assistant", f"{prefix} assistant {i}")
 
 
+def _add_tool_turn(session, prefix: str, idx: int) -> None:
+    call_id = f"{prefix}_{idx}"
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }
+            ],
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+    session.messages.append(
+        {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "name": "exec",
+            "content": "ok",
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+
+
 def _make_fake_compact(
     loop: AgentLoop,
     *,
@@ -76,7 +103,10 @@ def _make_fake_compact(
             metadata={},
             last_consolidated=0,
         )
-        dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix)
+        dropped, already_consolidated = probe.retain_recent_legal_suffix(
+            max_suffix,
+            extend_to_user=True,
+        )
         kept = probe.messages
         archive_msgs = dropped[already_consolidated:]
 
@@ -300,6 +330,35 @@ class TestAutoCompact:
         assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
         assert session_after.messages[0]["content"] == "msg user 2"
         assert session_after.messages[-1]["content"] == "msg assistant 5"
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_auto_compact_extends_recent_suffix_to_user_turn(self, tmp_path):
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 2, prefix="old")
+        session.add_message("user", "record this")
+        for i in range(8):
+            _add_tool_turn(session, "recent", i)
+        session.add_message("assistant", "done")
+        loop.sessions.save(session)
+
+        await loop.auto_compact._archive("cli:test")
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) > loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert session_after.messages[0]["content"] == "record this"
+        assert session_after.messages[-1]["content"] == "done"
+        tool_results = {
+            m.get("tool_call_id")
+            for m in session_after.messages
+            if m.get("role") == "tool"
+        }
+        assert all(
+            tc["id"] in tool_results
+            for m in session_after.messages
+            for tc in (m.get("tool_calls") or [])
+        )
         await loop.close_mcp()
 
     @pytest.mark.asyncio
