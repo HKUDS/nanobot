@@ -247,6 +247,38 @@ def test_self_tool_set_model_preset_via_modify(tmp_path) -> None:
     assert loop.model == "openai/gpt-4.1"
 
 
+def test_self_tool_set_model_preset_switches_back_to_default(tmp_path) -> None:
+    presets = {
+        "default": ModelPresetConfig(model="base-model", context_window_tokens=1000),
+        "fast": ModelPresetConfig(model="openai/gpt-4.1", context_window_tokens=32_768),
+    }
+    loop = _make_loop(tmp_path, presets=presets, active_preset="fast")
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    result = tool._modify("model_preset", "default")
+
+    assert "Error" not in result
+    assert "model is now 'base-model'" in result
+    assert loop.model_preset == "default"
+    assert loop.model == "base-model"
+    assert loop.context_window_tokens == 1000
+
+
+def test_self_tool_set_model_preset_unknown_lists_available(tmp_path) -> None:
+    presets = {
+        "default": ModelPresetConfig(model="base-model"),
+        "fast": ModelPresetConfig(model="openai/gpt-4.1"),
+    }
+    loop = _make_loop(tmp_path, presets=presets)
+    tool = MyTool(runtime_state=loop, modify_allowed=True)
+
+    result = tool._modify("model_preset", "missing")
+
+    assert result == "Error: model_preset 'missing' not found. Available: default, fast."
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+
+
 def test_self_tool_set_model_clears_active_preset(tmp_path) -> None:
     presets = {
         "fast": ModelPresetConfig(model="openai/gpt-4.1"),

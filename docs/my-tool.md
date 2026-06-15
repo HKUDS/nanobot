@@ -57,6 +57,9 @@ my(action="check", key="_last_usage.prompt_tokens")
 my(action="check", key="model")
 # → What model I'm currently running on
 
+my(action="check", key="model_preset")
+# → Which named model preset is active, or None/default
+
 my(action="check", key="web_config.enable")
 # → Whether web search is enabled
 ```
@@ -66,6 +69,7 @@ my(action="check", key="web_config.enable")
 | Scenario | How |
 |----------|-----|
 | "What model are you using?" | `check("model")` |
+| "Which model preset is active?" | `check("model_preset")` |
 | "How many more tool calls can you make?" | `check("max_iterations")` minus `check("_current_iteration")` |
 | "How many tokens has this conversation used?" | `check("_last_usage")` — cumulative across all turns |
 | "Where is your working directory?" | `check("workspace")` |
@@ -82,8 +86,11 @@ Changes take effect immediately, no restart required.
 my(action="set", key="max_iterations", value=80)
 # → Bump iteration limit from 40 to 80
 
+my(action="set", key="model_preset", value="fast")
+# → Switch to a configured model preset
+
 my(action="set", key="model", value="fast-model")
-# → Switch to a faster model
+# → Switch to a raw model and clear the active preset
 
 my(action="set", key="context_window_tokens", value=131072)
 # → Expand context window for long documents
@@ -107,6 +114,7 @@ These parameters have type and range validation — invalid values are rejected:
 | `max_iterations` | int | 1–100 | Max tool calls per conversation turn |
 | `context_window_tokens` | int | 4,096–1,000,000 | Context window size |
 | `model` | str | non-empty | LLM model to use |
+| `model_preset` | str | configured preset name | Named preset to use |
 
 Other parameters (e.g. `workspace`, `provider_retry_mode`, `max_tool_result_chars`) can be set freely, as long as the value is JSON-safe.
 
@@ -124,8 +132,8 @@ Agent: This codebase is large, let me expand my context window to handle it.
 ### "Simple question, don't waste compute"
 
 ```text
-Agent: This is a straightforward question, let me switch to a faster model.
-→ my(action="set", key="model", value="fast-model")
+Agent: This is a straightforward question, let me switch to the fast preset.
+→ my(action="set", key="model_preset", value="fast")
 ```
 
 ### "Remember user preferences across turns"

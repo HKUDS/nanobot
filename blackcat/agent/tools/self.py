@@ -148,6 +148,7 @@ class MyTool(Tool, ContextAware):
             "\n"
             "When to use:\n"
             "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
             "- About to start a large task → check context_window_tokens and max_iterations first."
@@ -175,9 +176,9 @@ class MyTool(Tool, ContextAware):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "For check without key, shows all config values.",
+                    "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model)."},
+                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
             },
             "required": ["action"],
         }
@@ -399,9 +400,27 @@ class MyTool(Tool, ContextAware):
                 setattr(parent, leaf, value)
             self._audit("modify", f"{key} = {value!r}")
             return f"Set {key} = {value!r}"
+        if key == "model_preset":
+            return self._modify_model_preset(value)
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_model_preset(self, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return "Error: 'model_preset' must be a non-empty string"
+        name = value.strip()
+        result = self._modify_free("model_preset", name)
+        if result.startswith("Error:"):
+            return result if result.endswith((".", "!", "?")) else f"{result}."
+        model = getattr(self._runtime_state, "model", None)
+        context_window = getattr(self._runtime_state, "context_window_tokens", None)
+        details = [result]
+        if model is not None:
+            details.append(f"model is now {model!r}")
+        if context_window is not None:
+            details.append(f"context_window_tokens is now {context_window!r}")
+        return "; ".join(details)
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
@@ -444,8 +463,9 @@ class MyTool(Tool, ContextAware):
             try:
                 setattr(self._runtime_state, key, value)
             except (ValueError, KeyError) as e:
-                self._audit("modify", f"REJECTED {key}: {e}")
-                return f"Error: {e}"
+                message = self._exception_message(e)
+                self._audit("modify", f"REJECTED {key}: {message}")
+                return f"Error: {message}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):
@@ -462,6 +482,10 @@ class MyTool(Tool, ContextAware):
         self._runtime_state._runtime_vars[key] = value
         self._audit("modify", f"scratchpad.{key}: {old!r} -> {value!r}")
         return f"Set scratchpad.{key} = {value!r}"
+
+    @staticmethod
+    def _exception_message(exc: Exception) -> str:
+        return str(exc.args[0] if isinstance(exc, KeyError) and exc.args else exc).strip('"')
 
     @classmethod
     def _validate_json_safe(cls, value: Any, depth: int = 0) -> str | None:
