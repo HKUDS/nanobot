@@ -81,7 +81,7 @@ The easiest path is the one-command installer. It installs or upgrades nanobot, 
 **macOS / Linux**
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
 
 **Windows PowerShell**
@@ -93,7 +93,7 @@ irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | i
 These commands install the stable PyPI package. To preview what the installer would do without changing your environment, pass `--dry-run`:
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
 ```
 
 ```powershell
@@ -103,7 +103,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 Use the development installer only when a maintainer asks you to test the current `main` branch:
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
 ```
 
 ```powershell
