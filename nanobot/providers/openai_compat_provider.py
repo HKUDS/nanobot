@@ -60,7 +60,14 @@ _DEFAULT_OPENROUTER_HEADERS = {
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
+    "kimi-k2.7",
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
     "k2.6-code-preview",
+})
+_KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
 })
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -692,13 +699,20 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
+            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
+                if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
+                    continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
-            if gateway_style and _model_thinking_style(model_name):
+            if (
+                gateway_style
+                and _model_thinking_style(model_name)
+                and (thinking_enabled or slug not in _KIMI_ALWAYS_THINKING_MODELS)
+            ):
                 extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
@@ -708,7 +722,7 @@ class OpenAICompatProvider(LLMProvider):
             # user's intent via the provider-native shape, so drop the
             # redundant wire-level kwarg.  Only kimi models need this —
             # Xiaomi's API accepts both params.
-            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+            if slug in _KIMI_THINKING_MODELS:
                 kwargs.pop("reasoning_effort", None)
 
         if tools:

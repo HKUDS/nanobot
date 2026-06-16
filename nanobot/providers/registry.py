@@ -352,7 +352,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
     ),
-    # Moonshot (月之暗面): Kimi K2.5 / K2.6 enforce temperature >= 1.0.
+    # Moonshot (月之暗面): Kimi K2.5+ enforce temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -363,6 +363,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
             ("kimi-k2.6", {"temperature": 1.0}),
+            ("kimi-k2.7", {"temperature": 1.0}),
+            ("kimi-k2.7-code", {"temperature": 1.0}),
+            ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
     ),
     # MiniMax: OpenAI-compatible API
