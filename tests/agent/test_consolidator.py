@@ -295,6 +295,61 @@ class TestConsolidatorTokenBudget:
         history = session.get_history(max_messages=6, extend_to_user=True)
         assert [m["content"] for m in history] == ["new question", "new answer"]
 
+    async def test_replay_window_preserves_channel_delivery_before_user_reply(
+        self,
+        consolidator,
+    ):
+        """A short user reply must keep the assistant delivery it references."""
+        session = Session(key="test:delivery-replay")
+        session.add_message("user", "older task")
+        session.add_message("assistant", "older answer")
+        session.add_message(
+            "assistant",
+            "Option 1: small fix\nOption 2: full repair",
+            _channel_delivery=True,
+        )
+        session.add_message("user", "Option 2")
+        session.add_message("assistant", "I'll proceed with the full repair.")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="old conversation summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=2,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert [m["content"] for m in archived_chunk] == ["older task", "older answer"]
+        assert session.last_consolidated == 2
+        assert [m["content"] for m in session.get_history(max_messages=2)] == [
+            "Option 1: small fix\nOption 2: full repair",
+            "Option 2",
+            "I'll proceed with the full repair.",
+        ]
+
+    def test_token_boundary_preserves_channel_delivery_before_user_reply(
+        self,
+        consolidator,
+        monkeypatch,
+    ):
+        session = Session(key="test:delivery-token-boundary")
+        session.add_message("user", "older task")
+        session.add_message("assistant", "older answer")
+        session.add_message(
+            "assistant",
+            "Option 1: small fix\nOption 2: full repair",
+            _channel_delivery=True,
+        )
+        session.add_message("user", "Option 2")
+        session.add_message("assistant", "I'll proceed with the full repair.")
+        monkeypatch.setattr("nanobot.agent.memory.estimate_message_tokens", lambda _m: 100)
+
+        boundary = consolidator.pick_consolidation_boundary(session, tokens_to_remove=250)
+
+        assert boundary == (2, 200)
+
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
         consolidator._SAFETY_BUFFER = 0

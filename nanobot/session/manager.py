@@ -163,22 +163,11 @@ class Session:
         """
         unconsolidated = self.messages[self.last_consolidated:]
         max_messages = max_messages if max_messages > 0 else 120
-        start_idx = recent_message_start_index(
+        sliced = self.recent_replay_messages(
             unconsolidated,
             max_messages,
             extend_to_user=extend_to_user,
         )
-        sliced = unconsolidated[start_idx:]
-
-        # Avoid starting mid-turn when possible, except for proactive
-        # assistant deliveries that the user may be replying to.
-        for i, message in enumerate(sliced):
-            if message.get("role") == "user":
-                start = i
-                if i > 0 and sliced[i - 1].get("_channel_delivery"):
-                    start = i - 1
-                sliced = sliced[start:]
-                break
 
         # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
@@ -186,6 +175,7 @@ class Session:
             sliced = sliced[start:]
 
         out: list[dict[str, Any]] = []
+        out_sources: list[dict[str, Any]] = []
         for message in sliced:
             if message.get("_command"):
                 continue
@@ -253,22 +243,34 @@ class Session:
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
+            out_sources.append(message)
 
         if max_tokens > 0 and out:
-            kept: list[dict[str, Any]] = []
+            def delivery_anchor_index(index: int) -> int:
+                if index > 0 and out_sources[index - 1].get("_channel_delivery"):
+                    return index - 1
+                return index
+
+            kept_pairs: list[tuple[int, dict[str, Any]]] = []
             used = 0
-            for message in reversed(out):
+            for index in range(len(out) - 1, -1, -1):
+                message = out[index]
                 tokens = estimate_message_tokens(message)
-                if kept and used + tokens > max_tokens:
+                if kept_pairs and used + tokens > max_tokens:
                     break
-                kept.append(message)
+                kept_pairs.append((index, message))
                 used += tokens
-            kept.reverse()
+            kept_pairs.reverse()
 
             # Keep history aligned to the first visible user turn.
-            first_user = next((i for i, m in enumerate(kept) if m.get("role") == "user"), None)
+            first_user = next(
+                (i for i, (_idx, m) in enumerate(kept_pairs) if m.get("role") == "user"),
+                None,
+            )
             if first_user is not None:
-                kept = kept[first_user:]
+                first_out_idx = kept_pairs[first_user][0]
+                start_out_idx = delivery_anchor_index(first_out_idx)
+                kept_pairs = list(enumerate(out[start_out_idx:], start=start_out_idx))
             else:
                 # Tight token budgets can otherwise leave assistant-only tails.
                 # If a user turn exists in the unsliced output, recover the
@@ -278,14 +280,52 @@ class Session:
                     None,
                 )
                 if recovered_user is not None:
-                    kept = out[recovered_user:]
+                    start_out_idx = delivery_anchor_index(recovered_user)
+                    kept_pairs = list(enumerate(out[start_out_idx:], start=start_out_idx))
 
             # And keep a legal tool-call boundary at the front.
+            kept = [message for _idx, message in kept_pairs]
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
             out = kept
         return out
+
+    @staticmethod
+    def recent_replay_messages(
+        messages: list[dict[str, Any]],
+        max_messages: int,
+        *,
+        extend_to_user: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return the recent replay window, preserving delivery->reply context."""
+        if not messages:
+            return []
+        max_messages = max_messages if max_messages > 0 else 120
+        slice_start = recent_message_start_index(
+            messages,
+            max_messages,
+            extend_to_user=extend_to_user,
+        )
+        sliced = messages[slice_start:]
+        if not sliced:
+            return []
+
+        # Avoid starting mid-turn when possible. If the first visible user is
+        # replying to a proactive channel delivery just outside the hard
+        # message window, pull that delivery back in as the conversational
+        # anchor.
+        for i, message in enumerate(sliced):
+            if message.get("role") == "user":
+                first_user_idx = slice_start + i
+                start_idx = first_user_idx
+                if (
+                    first_user_idx > 0
+                    and messages[first_user_idx - 1].get("_channel_delivery")
+                ):
+                    start_idx = first_user_idx - 1
+                return messages[start_idx:]
+        return sliced
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
