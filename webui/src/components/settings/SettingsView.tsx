@@ -1712,15 +1712,22 @@ export function SettingsView({
         onSave={handleAutomationEdit}
       />
 
-      <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <main
+        className={cn(
+          "min-w-0 flex-1 [scrollbar-gutter:stable]",
+          activeSection === "automations" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
+        )}
+      >
         <div
           className={cn(
             "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
-            "max-w-[920px]",
+            activeSection === "automations"
+              ? "xl:flex xl:h-full xl:max-w-[70rem] xl:flex-col xl:overflow-hidden xl:py-6"
+              : "max-w-[920px]",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
-          <div className="mb-7">
+          <div className={cn("mb-7", activeSection === "automations" && "xl:mb-4")}>
             {!showSidebar ? (
               <button
                 type="button"
@@ -1753,7 +1760,13 @@ export function SettingsView({
               </SettingsRow>
             </SettingsGroup>
           ) : settings ? (
-            <div className="space-y-5">
+            <div
+              className={cn(
+                "space-y-5",
+                activeSection === "automations" &&
+                  "xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:gap-3 xl:space-y-0 xl:overflow-hidden",
+              )}
+            >
               {error ? (
                 <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
@@ -3476,8 +3489,8 @@ function AutomationsSettings({
   }, [filtered, selectedJobId]);
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl sm:p-4">
+    <div className="flex min-h-0 flex-col gap-3 xl:flex-1 xl:overflow-hidden">
+      <section className="shrink-0 rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl sm:p-4">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
             <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[16px] bg-muted/50 p-1">
@@ -3550,9 +3563,9 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid items-start gap-4 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)]">
-          <aside className="overflow-hidden rounded-[24px] border border-border/45 bg-card/80 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+        <section className="grid min-h-0 gap-3 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch xl:overflow-hidden">
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-[24px] border border-border/45 bg-card/80 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
                 {tx("settings.automations.queue", "Queue")}
               </h2>
@@ -3561,7 +3574,7 @@ function AutomationsSettings({
               </span>
             </div>
             <div
-              className="max-h-[26rem] space-y-1 overflow-y-auto p-2 lg:max-h-[calc(100dvh-17rem)]"
+              className="max-h-[22rem] space-y-1 overflow-y-auto overscroll-contain p-2 xl:max-h-none xl:min-h-0 xl:flex-1"
               role="list"
               aria-label={tx("settings.automations.queue", "Queue")}
             >
@@ -3596,7 +3609,7 @@ function AutomationsSettings({
             <div className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
               {tx(
                 "settings.automations.emptyHint",
-                "Create one from the chat or channel where it should run so blackcat keeps the right context.",
+                "Create one from where it should run so blackcat keeps the right context.",
               )}
             </div>
           ) : null}
@@ -3715,9 +3728,9 @@ function AutomationDetailPanel({
   }, [job.id]);
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-[24px] border border-border/45 bg-card/90 shadow-[0_24px_80px_rgba(15,23,42,0.065)] backdrop-blur-xl">
-      <div className="border-b border-border/35 px-4 py-4 sm:px-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[24px] border border-border/45 bg-card/90 shadow-[0_24px_80px_rgba(15,23,42,0.065)] backdrop-blur-xl">
+      <div className="shrink-0 border-b border-border/35 px-4 py-3.5 sm:px-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h3 className="min-w-0 truncate text-[18px] font-medium leading-7 text-foreground">
@@ -3742,8 +3755,8 @@ function AutomationDetailPanel({
         </div>
       </div>
 
-      <div className="grid min-w-0">
-        <div className="min-w-0 space-y-4 p-4 sm:p-5">
+      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
+        <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <section className="rounded-[20px] border border-border/35 bg-background/60 px-4 py-3.5">
             <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
               {tx("settings.automations.fields.message", "Message")}
@@ -3798,8 +3811,8 @@ function AutomationDetailPanel({
           ) : null}
         </div>
 
-        <aside className="border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground sm:p-5">
-          <div className="space-y-4">
+        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground lg:border-l lg:border-t-0">
+          <div className="grid gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
               title={schedule}
@@ -3807,7 +3820,7 @@ function AutomationDetailPanel({
               {schedule}
             </AutomationDetail>
             <div className="rounded-[18px] bg-background/55 p-3">
-              <div className="space-y-3">
+              <div className="grid gap-3">
                 {created ? (
                   <div>
                     <div className="text-[11px] leading-none text-muted-foreground/75">
