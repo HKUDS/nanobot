@@ -136,23 +136,69 @@ class CronService:
     """Service for managing and executing scheduled jobs."""
 
     _MAX_RUN_HISTORY = 20
+    _UNBOUND_AGENT_JOB_REASON = (
+        "agent cron payload is missing bound session delivery context; "
+        "recreate it from a chat session"
+    )
 
     def __init__(
         self,
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
         max_sleep_ms: int = 300_000,  # 5 minutes
+        require_bound_agent_jobs: bool = False,
     ):
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
         self._run_records_dir = store_path.parent / "runs"
         self._lock = FileLock(str(self._action_path.parent) + ".lock")
         self.on_job = on_job
+        self.require_bound_agent_jobs = require_bound_agent_jobs
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
         self._timer_active = False
         self.max_sleep_ms = max_sleep_ms
+
+    def _is_unbound_agent_job(self, job: CronJob) -> bool:
+        return (
+            self.require_bound_agent_jobs
+            and job.payload.kind == "agent_turn"
+            and not is_bound_cron_job(job)
+        )
+
+    def _enforce_agent_binding(self, job: CronJob) -> bool:
+        """Disable user cron jobs that cannot be routed to a concrete session."""
+        if not self._is_unbound_agent_job(job):
+            return False
+        if (
+            not job.enabled
+            and job.state.next_run_at_ms is None
+            and job.state.last_status == "error"
+            and job.state.last_error == self._UNBOUND_AGENT_JOB_REASON
+        ):
+            return False
+
+        job.enabled = False
+        job.state.next_run_at_ms = None
+        job.state.last_status = "error"
+        job.state.last_error = self._UNBOUND_AGENT_JOB_REASON
+        job.updated_at_ms = max(job.updated_at_ms, _now_ms())
+        logger.warning(
+            "Cron: disabled unbound agent job '{}' ({}): {}",
+            job.name,
+            job.id,
+            self._UNBOUND_AGENT_JOB_REASON,
+        )
+        return True
+
+    def _enforce_store_agent_bindings(self) -> bool:
+        if not self._store:
+            return False
+        changed = False
+        for job in self._store.jobs:
+            changed = self._enforce_agent_binding(job) or changed
+        return changed
 
     def _load_jobs(self) -> tuple[list[CronJob], int] | None:
         """Load jobs from disk.
@@ -312,6 +358,8 @@ class CronService:
         jobs, version = loaded
         self._store = CronStore(version=version, jobs=jobs)
         self._merge_action()
+        if self._enforce_store_agent_bindings() and self._running:
+            self._save_store()
 
         return self._store
 
@@ -456,6 +504,8 @@ class CronService:
             return
         now = _now_ms()
         for job in self._store.jobs:
+            if self._enforce_agent_binding(job):
+                continue
             if job.enabled:
                 job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
 
@@ -638,6 +688,7 @@ class CronService:
             delete_after_run=delete_after_run,
         )
         _normalize_agent_turn_job(job)
+        self._enforce_agent_binding(job)
         if self._running:
             store = self._load_store()
             store.jobs.append(job)
@@ -695,7 +746,8 @@ class CronService:
             if job.id == job_id:
                 job.enabled = enabled
                 job.updated_at_ms = _now_ms()
-                if enabled:
+                self._enforce_agent_binding(job)
+                if job.enabled:
                     job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
                 else:
                     job.state.next_run_at_ms = None
@@ -747,10 +799,13 @@ class CronService:
         if delete_after_run is not None:
             job.delete_after_run = delete_after_run
         _normalize_agent_turn_job(job)
+        self._enforce_agent_binding(job)
 
         job.updated_at_ms = _now_ms()
         if job.enabled:
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+        else:
+            job.state.next_run_at_ms = None
 
         if self._running:
             self._save_store()
@@ -769,6 +824,10 @@ class CronService:
             store = self._load_store()
             for job in store.jobs:
                 if job.id == job_id:
+                    if self._is_unbound_agent_job(job):
+                        self._enforce_agent_binding(job)
+                        self._save_store()
+                        return False
                     if not force and not job.enabled:
                         return False
                     await self._execute_job(job)

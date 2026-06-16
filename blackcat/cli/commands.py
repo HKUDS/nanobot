@@ -785,6 +785,7 @@ def _run_gateway(
     # Create cron service with workspace-scoped store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    cron.require_bound_agent_jobs = True
 
     # Create agent with cron service
     agent = AgentLoop.from_config(

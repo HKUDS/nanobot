@@ -24,6 +24,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from blackcat.command.builtin import builtin_command_palette
+from blackcat.cron.session_turns import is_bound_cron_job
 from blackcat.cron.types import CronJob, CronSchedule
 from blackcat.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from blackcat.webui.file_preview import WebUIFilePreviewError, file_preview_payload
@@ -579,6 +580,8 @@ class GatewayHTTPHandler:
             return _http_error(404, "automation not found")
         if job.payload.kind == "system_event":
             return _http_error(403, "system automation is protected")
+        if action in {"enable", "run"} and not is_bound_cron_job(job):
+            return _http_error(409, "automation has no linked chat")
 
         if action == "enable":
             if self.cron_service.enable_job(job_id, enabled=True) is None:

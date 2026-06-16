@@ -43,6 +43,68 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+@pytest.mark.asyncio
+async def test_require_bound_agent_jobs_disables_unbound_adds(tmp_path) -> None:
+    called: list[str] = []
+
+    async def on_job(job):
+        called.append(job.id)
+
+    service = CronService(
+        tmp_path / "cron" / "jobs.json",
+        on_job=on_job,
+        require_bound_agent_jobs=True,
+    )
+    job = service.add_job(
+        name="unbound",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+
+    assert job.enabled is False
+    assert job.state.next_run_at_ms is None
+    assert job.state.last_status == "error"
+    assert "missing bound session delivery context" in (job.state.last_error or "")
+    assert await service.run_job(job.id, force=True) is False
+    assert called == []
+
+
+def test_require_bound_agent_jobs_disables_loaded_unbound_jobs(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    store_path.parent.mkdir(parents=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "unbound-1",
+                        "name": "Unbound reminder",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60_000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "check status",
+                        },
+                        "state": {"nextRunAtMs": 1},
+                        "createdAtMs": 1,
+                        "updatedAtMs": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    job = CronService(store_path, require_bound_agent_jobs=True).get_job("unbound-1")
+
+    assert job is not None
+    assert job.enabled is False
+    assert job.state.next_run_at_ms is None
+    assert job.state.last_status == "error"
+    assert "missing bound session delivery context" in (job.state.last_error or "")
+
+
 def test_add_job_migrates_legacy_delivery_context(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     meta = {"slack": {"thread_ts": "1234567890.123456", "channel_type": "channel"}}
