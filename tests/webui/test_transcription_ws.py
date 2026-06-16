@@ -27,6 +27,7 @@ async def test_webui_transcribe_audio_rejects_unconfigured_provider(
     config.transcription.provider = "groq"
     save_config(config, config_path)
     monkeypatch.setattr("blackcat.config.loader._current_config_path", config_path)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     event, payload = await webui_transcription_event({
         "request_id": "voice-1",
