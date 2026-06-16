@@ -46,6 +46,58 @@ _RELOAD_LOCKS: WeakKeyDictionary[Any, asyncio.Lock] = WeakKeyDictionary()
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 
 
+def _is_malformed_mcp_progress_notification(message: Any) -> bool:
+    root = getattr(getattr(message, "message", None), "root", None)
+    if getattr(root, "method", None) != "notifications/progress":
+        return False
+
+    params = getattr(root, "params", None)
+    return not isinstance(params, Mapping) or "progressToken" not in params
+
+
+class _MalformedProgressNotificationFilter:
+    def __init__(self, read_stream: Any, server_name: str) -> None:
+        self._read_stream = read_stream
+        self._server_name = server_name
+        self._iterator: Any | None = None
+
+    async def __aenter__(self) -> "_MalformedProgressNotificationFilter":
+        await self._read_stream.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
+        return await self._read_stream.__aexit__(exc_type, exc, tb)
+
+    def __aiter__(self) -> "_MalformedProgressNotificationFilter":
+        self._iterator = self._read_stream.__aiter__()
+        return self
+
+    async def __anext__(self) -> Any:
+        if self._iterator is None:
+            self._iterator = self._read_stream.__aiter__()
+
+        while True:
+            message = await self._iterator.__anext__()
+            if _is_malformed_mcp_progress_notification(message):
+                logger.debug(
+                    "MCP server '{}': dropped progress notification without progressToken",
+                    self._server_name,
+                )
+                continue
+            return message
+
+    async def aclose(self) -> None:
+        close = getattr(self._read_stream, "aclose", None)
+        if close is not None:
+            await close()
+
+
+def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: str) -> Any:
+    if not all(hasattr(read_stream, name) for name in ("__aenter__", "__aexit__", "__aiter__")):
+        return read_stream
+    return _MalformedProgressNotificationFilter(read_stream, server_name)
+
+
 def _sanitize_name(name: str) -> str:
     """Sanitize an MCP-derived name for model API compatibility."""
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
@@ -681,6 +733,7 @@ async def connect_mcp_servers(
                 await server_stack.aclose()
                 return name, None
 
+            read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 

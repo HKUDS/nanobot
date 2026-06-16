@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import anyio
 import pytest
 from mcp import types as mcp_types
 from mcp.shared.exceptions import McpError
+from mcp.shared.message import SessionMessage
 from mcp.types import ErrorData
 
 from nanobot.agent.loop import AgentLoop
@@ -20,6 +22,18 @@ from nanobot.agent.tools.mcp import MCPResourceWrapper, MCPToolWrapper
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import MCPServerConfig
+
+
+def _mcp_notification(method: str, params: dict[str, Any] | None = None) -> SessionMessage:
+    return SessionMessage(
+        message=mcp_types.JSONRPCMessage(
+            mcp_types.JSONRPCNotification(
+                jsonrpc="2.0",
+                method=method,
+                params=params,
+            )
+        )
+    )
 
 
 class _FakeMcpTool(Tool):
@@ -54,6 +68,33 @@ def _make_loop(tmp_path, *, mcp_servers: dict | None = None) -> AgentLoop:
         model="test-model",
         mcp_servers=mcp_servers or {"test": object()},
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_read_filter_drops_progress_notifications_without_progress_token():
+    send, receive = anyio.create_memory_object_stream(4)
+    malformed_progress = _mcp_notification(
+        "notifications/progress",
+        {"progress": 20, "total": 600, "message": "Polling"},
+    )
+    tool_change = _mcp_notification("notifications/tools/list_changed")
+    valid_progress = _mcp_notification(
+        "notifications/progress",
+        {"progressToken": "req-1", "progress": 25, "total": 600, "message": "Polling"},
+    )
+
+    await send.send(malformed_progress)
+    await send.send(tool_change)
+    await send.send(valid_progress)
+    await send.aclose()
+
+    wrapped = mcp_runtime._filter_malformed_mcp_progress_notifications(receive, "brightdata")
+    forwarded = []
+    async with wrapped:
+        async for message in wrapped:
+            forwarded.append(message)
+
+    assert forwarded == [tool_change, valid_progress]
 
 
 @pytest.mark.asyncio
