@@ -3496,10 +3496,16 @@ function AutomationsSettings({
                     "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
                     filter === option.value &&
                       "bg-background text-foreground shadow-[0_8px_20px_rgba(15,23,42,0.07)] dark:bg-background/80",
+                    automationFilterToneClass(option.value, option.count, filter === option.value),
                   )}
                 >
                   <span>{option.label}</span>
-                  <span className="min-w-5 shrink-0 rounded-full bg-orange-100/70 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-orange-800/70 dark:bg-orange-300/12 dark:text-orange-200/75">
+                  <span
+                    className={cn(
+                      "min-w-5 shrink-0 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground",
+                      automationFilterCountClass(option.value, option.count),
+                    )}
+                  >
                     {option.count}
                   </span>
                 </button>
@@ -4560,6 +4566,42 @@ function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFi
   if (filter === "failed") return automationNeedsAttention(job);
   if (filter === "system") return Boolean(job.protected);
   return true;
+}
+
+const AUTOMATION_FILTER_TONES: Partial<
+  Record<AutomationFilter, { text: string; selectedText: string; count: string }>
+> = {
+  active: {
+    text: "text-emerald-600 dark:text-emerald-400",
+    selectedText: "text-emerald-700 dark:text-emerald-300",
+    count: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  },
+  paused: {
+    text: "text-amber-600 dark:text-amber-400",
+    selectedText: "text-amber-700 dark:text-amber-300",
+    count: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  },
+  failed: {
+    text: "text-rose-600 dark:text-rose-400",
+    selectedText: "text-rose-700 dark:text-rose-300",
+    count: "bg-rose-500/10 text-rose-700 dark:text-rose-300",
+  },
+  system: {
+    text: "text-sky-600 dark:text-sky-400",
+    selectedText: "text-sky-700 dark:text-sky-300",
+    count: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  },
+};
+
+function automationFilterToneClass(value: AutomationFilter, count: number, selected: boolean): string {
+  const tone = AUTOMATION_FILTER_TONES[value];
+  if (count <= 0 || !tone) return "";
+  return selected ? tone.selectedText : tone.text;
+}
+
+function automationFilterCountClass(value: AutomationFilter, count: number): string {
+  const tone = AUTOMATION_FILTER_TONES[value];
+  return count > 0 && tone ? tone.count : "";
 }
 
 function automationStatus(
