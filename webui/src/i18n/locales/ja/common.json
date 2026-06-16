@@ -472,14 +472,6 @@
       "empty": "一致するアプリはありません。"
     },
     "automations": {
-      "kicker": "ワークスペースの自動タスク",
-      "title": "自動タスク",
-      "stats": {
-        "active": "実行中",
-        "paused": "一時停止",
-        "failed": "要対応",
-        "system": "システム"
-      },
       "filters": {
         "all": "すべて",
         "active": "実行中",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "スケジュール",
         "next": "次回",
-        "last": "前回",
         "origin": "関連チャット",
         "created": "作成",
         "updated": "更新"
@@ -516,14 +507,12 @@
       "delete": "削除",
       "protected": "保護済み",
       "editTitle": "自動タスクを編集",
-      "editDescription": "プロンプトとスケジュールを更新します。関連チャットは変更されません。",
       "save": "保存",
       "deleteTitle": "自動タスクを削除",
       "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
       "cancel": "キャンセル",
       "status": {
         "system": "システム",
-        "pending": "待機中",
         "running": "実行中",
         "paused": "一時停止",
         "failed": "失敗",
@@ -569,17 +558,9 @@
         "pending": "実行中",
         "none": "次回実行なし"
       },
-      "last": {
-        "never": "未実行",
-        "unknown": "不明"
-      },
       "message": {
         "showMore": "メッセージ全文を表示",
         "showLess": "折りたたむ"
-      },
-      "meta": {
-        "created": "{{time}} 作成",
-        "updated": "{{time}} 更新"
       },
       "fields": {
         "name": "名前",

@@ -472,14 +472,6 @@
       "empty": "Ninguna app coincide con este filtro."
     },
     "automations": {
-      "kicker": "Automatizaciones del espacio",
-      "title": "Automatizaciones",
-      "stats": {
-        "active": "Activas",
-        "paused": "Pausadas",
-        "failed": "Requieren atención",
-        "system": "Sistema"
-      },
       "filters": {
         "all": "Todas",
         "active": "Activas",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "Programación",
         "next": "Siguiente",
-        "last": "Última",
         "origin": "Chat vinculado",
         "created": "Creada",
         "updated": "Actualizada"
@@ -516,14 +507,12 @@
       "delete": "Eliminar",
       "protected": "Protegida",
       "editTitle": "Editar automatización",
-      "editDescription": "Actualiza el prompt y la programación. El chat vinculado no cambia.",
       "save": "Guardar",
       "deleteTitle": "Eliminar automatización",
       "deleteDescription": "Esto elimina {{name}} del almacén cron. Los mensajes de chat anteriores permanecen en la sesión.",
       "cancel": "Cancelar",
       "status": {
         "system": "Sistema",
-        "pending": "Pendiente",
         "running": "Ejecutándose ahora",
         "paused": "Pausada",
         "failed": "Fallida",
@@ -569,17 +558,9 @@
         "pending": "Ejecutándose ahora",
         "none": "Sin próxima ejecución"
       },
-      "last": {
-        "never": "Nunca",
-        "unknown": "desconocido"
-      },
       "message": {
         "showMore": "Mostrar mensaje completo",
         "showLess": "Mostrar menos"
-      },
-      "meta": {
-        "created": "Creada {{time}}",
-        "updated": "Actualizada {{time}}"
       },
       "fields": {
         "name": "Nombre",

@@ -3870,8 +3870,10 @@ function AutomationActionGroup({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const canManage = !job.protected;
-  const canRun = canManage && job.enabled && !job.state.pending;
+  const hasLinkedChat = Boolean(job.origin);
+  const canRun = canManage && hasLinkedChat && job.enabled && !job.state.pending;
   const toggleAction: AutomationAction = job.enabled ? "disable" : "enable";
+  const canToggle = canManage && (job.enabled || hasLinkedChat);
   const toggleBusy = actionKey === `${toggleAction}:${job.id}`;
 
   if (!canManage) {
@@ -3906,6 +3908,7 @@ function AutomationActionGroup({
             : tx("settings.automations.resume", "Resume")
         }
         busy={toggleBusy}
+        disabled={!canToggle}
         onClick={() => void onAction(toggleAction, job)}
       >
         {job.enabled ? (

@@ -472,14 +472,6 @@
       "empty": "Không có ứng dụng phù hợp."
     },
     "automations": {
-      "kicker": "Tự động hóa không gian làm việc",
-      "title": "Tự động hóa",
-      "stats": {
-        "active": "Đang chạy",
-        "paused": "Đã tạm dừng",
-        "failed": "Cần xử lý",
-        "system": "Hệ thống"
-      },
       "filters": {
         "all": "Tất cả",
         "active": "Đang chạy",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "Lịch",
         "next": "Tiếp theo",
-        "last": "Lần trước",
         "origin": "Cuộc trò chuyện liên kết",
         "created": "Đã tạo",
         "updated": "Đã cập nhật"
@@ -516,14 +507,12 @@
       "delete": "Xóa",
       "protected": "Được bảo vệ",
       "editTitle": "Sửa tự động hóa",
-      "editDescription": "Cập nhật prompt và lịch. Cuộc trò chuyện liên kết không thay đổi.",
       "save": "Lưu",
       "deleteTitle": "Xóa tự động hóa",
       "deleteDescription": "Thao tác này xóa {{name}} khỏi kho cron. Tin nhắn chat trước đó vẫn ở trong phiên.",
       "cancel": "Hủy",
       "status": {
         "system": "Hệ thống",
-        "pending": "Đang chờ",
         "running": "Đang chạy",
         "paused": "Đã tạm dừng",
         "failed": "Thất bại",
@@ -569,17 +558,9 @@
         "pending": "Đang chạy",
         "none": "Không có lần chạy tiếp theo"
       },
-      "last": {
-        "never": "Chưa từng chạy",
-        "unknown": "không xác định"
-      },
       "message": {
         "showMore": "Hiển thị toàn bộ tin nhắn",
         "showLess": "Thu gọn"
-      },
-      "meta": {
-        "created": "Tạo lúc {{time}}",
-        "updated": "Cập nhật lúc {{time}}"
       },
       "fields": {
         "name": "Tên",

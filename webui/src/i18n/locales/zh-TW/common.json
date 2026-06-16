@@ -472,14 +472,6 @@
       "empty": "沒有符合的應用。"
     },
     "automations": {
-      "kicker": "工作區自動任務",
-      "title": "自動任務",
-      "stats": {
-        "active": "執行中",
-        "paused": "已暫停",
-        "failed": "異常",
-        "system": "系統"
-      },
       "filters": {
         "all": "全部",
         "active": "執行中",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "排程",
         "next": "下次",
-        "last": "上次",
         "origin": "關聯會話",
         "created": "建立於",
         "updated": "更新於"
@@ -516,14 +507,12 @@
       "delete": "刪除",
       "protected": "受保護",
       "editTitle": "編輯自動任務",
-      "editDescription": "更新提示詞和排程；關聯會話不會改變。",
       "save": "儲存",
       "deleteTitle": "刪除自動任務",
       "deleteDescription": "這會從 cron 儲存中刪除 {{name}}，歷史聊天訊息會保留在會話中。",
       "cancel": "取消",
       "status": {
         "system": "系統",
-        "pending": "等待中",
         "running": "正在執行",
         "paused": "已暫停",
         "failed": "失敗",
@@ -569,17 +558,9 @@
         "pending": "正在執行",
         "none": "沒有下次執行"
       },
-      "last": {
-        "never": "從未執行",
-        "unknown": "未知"
-      },
       "message": {
         "showMore": "查看完整訊息",
         "showLess": "收起訊息"
-      },
-      "meta": {
-        "created": "建立於 {{time}}",
-        "updated": "更新於 {{time}}"
       },
       "fields": {
         "name": "名稱",

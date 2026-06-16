@@ -472,14 +472,6 @@
       "empty": "Aucune app ne correspond."
     },
     "automations": {
-      "kicker": "Automatisations de l’espace",
-      "title": "Automatisations",
-      "stats": {
-        "active": "Actives",
-        "paused": "En pause",
-        "failed": "À traiter",
-        "system": "Système"
-      },
       "filters": {
         "all": "Toutes",
         "active": "Actives",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "Planning",
         "next": "Prochaine",
-        "last": "Dernière",
         "origin": "Discussion liée",
         "created": "Créée",
         "updated": "Modifiée"
@@ -516,14 +507,12 @@
       "delete": "Supprimer",
       "protected": "Protégée",
       "editTitle": "Modifier l’automatisation",
-      "editDescription": "Modifiez le prompt et le planning. La discussion liée ne change pas.",
       "save": "Enregistrer",
       "deleteTitle": "Supprimer l’automatisation",
       "deleteDescription": "Cela supprime {{name}} du stockage cron. Les anciens messages de chat restent dans la session.",
       "cancel": "Annuler",
       "status": {
         "system": "Système",
-        "pending": "En attente",
         "running": "En cours d’exécution",
         "paused": "En pause",
         "failed": "Échouée",
@@ -569,17 +558,9 @@
         "pending": "En cours d’exécution",
         "none": "Aucune prochaine exécution"
       },
-      "last": {
-        "never": "Jamais",
-        "unknown": "inconnu"
-      },
       "message": {
         "showMore": "Afficher le message complet",
         "showLess": "Afficher moins"
-      },
-      "meta": {
-        "created": "Créée {{time}}",
-        "updated": "Mise à jour {{time}}"
       },
       "fields": {
         "name": "Nom",

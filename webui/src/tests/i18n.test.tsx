@@ -48,7 +48,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.nav.runtime",
   "settings.nav.advanced",
   "sidebar.automations",
-  "settings.automations.title",
   "settings.automations.filters.active",
   "settings.automations.queue",
   "settings.automations.empty",

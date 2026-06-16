@@ -472,14 +472,6 @@
       "empty": "일치하는 앱이 없습니다."
     },
     "automations": {
-      "kicker": "작업 공간 자동화",
-      "title": "자동화",
-      "stats": {
-        "active": "활성",
-        "paused": "일시 중지",
-        "failed": "확인 필요",
-        "system": "시스템"
-      },
       "filters": {
         "all": "전체",
         "active": "활성",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "일정",
         "next": "다음",
-        "last": "마지막",
         "origin": "연결된 채팅",
         "created": "생성",
         "updated": "업데이트"
@@ -516,14 +507,12 @@
       "delete": "삭제",
       "protected": "보호됨",
       "editTitle": "자동화 편집",
-      "editDescription": "프롬프트와 일정을 업데이트합니다. 연결된 채팅은 변경되지 않습니다.",
       "save": "저장",
       "deleteTitle": "자동화 삭제",
       "deleteDescription": "{{name}}을 cron 저장소에서 삭제합니다. 이전 채팅 메시지는 세션에 남습니다.",
       "cancel": "취소",
       "status": {
         "system": "시스템",
-        "pending": "대기 중",
         "running": "실행 중",
         "paused": "일시 중지",
         "failed": "실패",
@@ -569,17 +558,9 @@
         "pending": "실행 중",
         "none": "다음 실행 없음"
       },
-      "last": {
-        "never": "실행된 적 없음",
-        "unknown": "알 수 없음"
-      },
       "message": {
         "showMore": "전체 메시지 보기",
         "showLess": "접기"
-      },
-      "meta": {
-        "created": "{{time}} 생성",
-        "updated": "{{time}} 업데이트"
       },
       "fields": {
         "name": "이름",

@@ -137,10 +137,6 @@ async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -
     channel._attach(other_conn, "chat-b")
     assert sorted(channel._subs) == ["chat-a", "chat-b"]
     assert sum(len(conns) for conns in channel._subs.values()) == 2
-    assert {id(conn) for conn in channel._all_subscribed_connections()} == {
-        id(active_conn),
-        id(other_conn),
-    }
 
     await channel.send_session_updated("chat-a", scope="thread")
 

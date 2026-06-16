@@ -472,14 +472,6 @@
       "empty": "没有匹配的应用。"
     },
     "automations": {
-      "kicker": "工作区自动任务",
-      "title": "自动任务",
-      "stats": {
-        "active": "运行中",
-        "paused": "已暂停",
-        "failed": "异常",
-        "system": "系统"
-      },
       "filters": {
         "all": "全部",
         "active": "运行中",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "计划",
         "next": "下次",
-        "last": "上次",
         "origin": "关联会话",
         "created": "创建于",
         "updated": "更新于"
@@ -516,14 +507,12 @@
       "delete": "删除",
       "protected": "受保护",
       "editTitle": "编辑自动任务",
-      "editDescription": "更新提示词和计划；关联会话不会改变。",
       "save": "保存",
       "deleteTitle": "删除自动任务",
       "deleteDescription": "这会从 cron 存储中删除 {{name}}，历史聊天消息会保留在会话中。",
       "cancel": "取消",
       "status": {
         "system": "系统",
-        "pending": "等待中",
         "running": "正在运行",
         "paused": "已暂停",
         "failed": "失败",
@@ -569,17 +558,9 @@
         "pending": "正在运行",
         "none": "没有下次运行"
       },
-      "last": {
-        "never": "从未运行",
-        "unknown": "未知"
-      },
       "message": {
         "showMore": "查看完整消息",
         "showLess": "收起消息"
-      },
-      "meta": {
-        "created": "创建于 {{time}}",
-        "updated": "更新于 {{time}}"
       },
       "fields": {
         "name": "名称",

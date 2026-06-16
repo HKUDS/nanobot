@@ -472,14 +472,6 @@
       "empty": "Tidak ada aplikasi yang cocok."
     },
     "automations": {
-      "kicker": "Otomasi ruang kerja",
-      "title": "Otomasi",
-      "stats": {
-        "active": "Aktif",
-        "paused": "Dijeda",
-        "failed": "Perlu ditangani",
-        "system": "Sistem"
-      },
       "filters": {
         "all": "Semua",
         "active": "Aktif",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "Jadwal",
         "next": "Berikutnya",
-        "last": "Terakhir",
         "origin": "Chat tertaut",
         "created": "Dibuat",
         "updated": "Diperbarui"
@@ -516,14 +507,12 @@
       "delete": "Hapus",
       "protected": "Terlindungi",
       "editTitle": "Edit otomasi",
-      "editDescription": "Perbarui prompt dan jadwal. Chat tertaut tidak berubah.",
       "save": "Simpan",
       "deleteTitle": "Hapus otomasi",
       "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
       "cancel": "Batal",
       "status": {
         "system": "Sistem",
-        "pending": "Menunggu",
         "running": "Sedang berjalan",
         "paused": "Dijeda",
         "failed": "Gagal",
@@ -569,17 +558,9 @@
         "pending": "Sedang berjalan",
         "none": "Tidak ada jadwal berikutnya"
       },
-      "last": {
-        "never": "Belum pernah",
-        "unknown": "tidak dikenal"
-      },
       "message": {
         "showMore": "Tampilkan pesan lengkap",
         "showLess": "Tampilkan lebih sedikit"
-      },
-      "meta": {
-        "created": "Dibuat {{time}}",
-        "updated": "Diperbarui {{time}}"
       },
       "fields": {
         "name": "Nama",

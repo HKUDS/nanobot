@@ -472,14 +472,6 @@
       "empty": "No apps match this filter."
     },
     "automations": {
-      "kicker": "Workspace automations",
-      "title": "Automations",
-      "stats": {
-        "active": "Active",
-        "paused": "Paused",
-        "failed": "Needs attention",
-        "system": "System"
-      },
       "filters": {
         "all": "All",
         "active": "Active",
@@ -504,7 +496,6 @@
       "labels": {
         "schedule": "Schedule",
         "next": "Next",
-        "last": "Last",
         "origin": "Linked chat",
         "created": "Created",
         "updated": "Updated"
@@ -516,14 +507,12 @@
       "delete": "Delete",
       "protected": "Protected",
       "editTitle": "Edit automation",
-      "editDescription": "Update the prompt and schedule. The linked chat stays unchanged.",
       "save": "Save",
       "deleteTitle": "Delete automation",
       "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
       "cancel": "Cancel",
       "status": {
         "system": "System",
-        "pending": "Pending",
         "running": "Running now",
         "paused": "Paused",
         "failed": "Failed",
@@ -569,17 +558,9 @@
         "pending": "Running now",
         "none": "No next run"
       },
-      "last": {
-        "never": "Never",
-        "unknown": "unknown"
-      },
       "message": {
         "showMore": "Show full message",
         "showLess": "Show less"
-      },
-      "meta": {
-        "created": "Created {{time}}",
-        "updated": "Updated {{time}}"
       },
       "fields": {
         "name": "Name",

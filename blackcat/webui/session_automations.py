@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any, Protocol
 
+from blackcat.cron.session_turns import CRON_HISTORY_META
 from blackcat.cron.types import CronJob
+from blackcat.session.manager import _message_preview_text
 
 
 class _CronServiceLike(Protocol):
@@ -173,13 +175,21 @@ def _origin_payload(
         "preview": preview,
     }
 
+
 def _session_preview(messages: Any) -> str:
     if not isinstance(messages, list):
         return ""
+    fallback_preview = ""
     for message in messages:
         if not isinstance(message, dict):
             continue
-        content = message.get("content")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    return ""
+        if message.get(CRON_HISTORY_META) is True:
+            continue
+        text = _message_preview_text(message)
+        if not text:
+            continue
+        if message.get("role") == "user":
+            return text
+        if not fallback_preview and message.get("role") == "assistant":
+            fallback_preview = text
+    return fallback_preview
