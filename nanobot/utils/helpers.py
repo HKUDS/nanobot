@@ -257,11 +257,11 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
         body_budget = max_tokens - len(suffix_tokens)
         if body_budget <= 0:
             return enc.decode(tokens[:max_tokens])
-        result = enc.decode(tokens[:body_budget]) + _TRUNCATED_SUFFIX
-        while len(enc.encode(result)) > max_tokens and body_budget > 0:
-            body_budget -= 1
-            result = enc.decode(tokens[:body_budget]) + _TRUNCATED_SUFFIX
-        return result
+        for candidate_budget in range(body_budget, -1, -1):
+            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+            if len(enc.encode(result)) <= max_tokens:
+                return result
+        return enc.decode(tokens[:max_tokens])
     except Exception:
         max_chars = max_tokens * 4
         suffix_chars = len(_TRUNCATED_SUFFIX)
