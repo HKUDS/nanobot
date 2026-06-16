@@ -406,9 +406,24 @@ class OpenAICompatProvider(LLMProvider):
             # opening a fresh connection for each request, which is cheap on a
             # LAN. Cloud providers benefit from keepalive, so we leave the
             # default pool settings for them.
+            #
+            # Also disable proxy for local endpoints: when the host has
+            # HTTP_PROXY / HTTPS_PROXY / ALL_PROXY set, httpx would try to
+            # route local traffic through the proxy, which typically cannot
+            # reach localhost or LAN addresses.
+            _local_limits = httpx.Limits(keepalive_expiry=0)
             http_client = httpx.AsyncClient(
-                limits=httpx.Limits(keepalive_expiry=0),
+                limits=_local_limits,
                 timeout=timeout_s,
+                transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
+            )
+        else:
+            # Cloud endpoints: respect proxy environment variables
+            # (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY) so corporate
+            # or VPN proxies work without explicit configuration.
+            http_client = httpx.AsyncClient(
+                timeout=timeout_s,
+                trust_env=True,
             )
         self._client = AsyncOpenAI(
             api_key=self._api_key_for_client,
