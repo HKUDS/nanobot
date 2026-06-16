@@ -1,22 +1,31 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from blackcat.bus.events import InboundMessage
-from blackcat.command.builtin import cmd_dream_log, cmd_dream_restore
+from blackcat.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
 from blackcat.command.router import CommandContext
 from blackcat.utils.gitstore import CommitInfo
 
 
 class _FakeStore:
-    def __init__(self, git, last_dream_cursor: int = 1):
+    def __init__(self, git, last_dream_cursor: int = 1, dream_prompt_result=None):
         self.git = git
         self._last_dream_cursor = last_dream_cursor
+        self._dream_prompt_result = dream_prompt_result
+        self.compact_history_called = False
 
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
+
+    def build_dream_prompt(self):
+        return self._dream_prompt_result
+
+    def compact_history(self) -> None:
+        self.compact_history_called = True
 
 
 class _FakeGit:
@@ -45,12 +54,55 @@ class _FakeGit:
     def revert(self, sha: str) -> str | None:
         return self._revert_result
 
+    def auto_commit(self, message: str) -> str | None:
+        return None
+
+
+class _FakeBus:
+    def __init__(self):
+        self.outbound = []
+
+    async def publish_outbound(self, message):
+        self.outbound.append(message)
+
 
 def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1) -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
     loop = SimpleNamespace(consolidator=SimpleNamespace(store=store))
     return CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, args=args, loop=loop)
+
+
+def _make_dream_ctx(tmp_path) -> tuple[CommandContext, _FakeBus]:
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
+    store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=None)
+    bus = _FakeBus()
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    loop = SimpleNamespace(
+        bus=bus,
+        context=SimpleNamespace(memory=store, timezone="UTC"),
+        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+    )
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
+    return ctx, bus
+
+
+@pytest.mark.asyncio
+async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
+    ctx, bus = _make_dream_ctx(tmp_path)
+
+    immediate = await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert immediate.content == "Dreaming..."
+    assert len(bus.outbound) == 1
+    content = bus.outbound[0].content
+    assert "Dream has no conversation history to process yet." in content
+    assert "`memory/history.jsonl`" in content
+    assert "idle auto-compact" in content
+    assert "Dream cursor" in content
+    assert "agents.defaults.idleCompactAfterMinutes" in content
 
 
 @pytest.mark.asyncio
