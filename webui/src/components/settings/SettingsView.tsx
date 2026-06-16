@@ -1672,7 +1672,14 @@ export function SettingsView({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)] md:flex-row">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row",
+        activeSection === "automations"
+          ? "bg-background"
+          : "bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]",
+      )}
+    >
       {showSidebar ? (
         <SettingsSidebar
           activeSection={activeSection}
@@ -3490,7 +3497,7 @@ function AutomationsSettings({
 
   return (
     <div className="flex min-h-0 flex-col gap-2 xl:flex-1 xl:overflow-hidden">
-      <section className="shrink-0 rounded-[22px] border border-border/45 bg-card/72 p-3 shadow-[0_14px_42px_rgba(15,23,42,0.045)] backdrop-blur-xl dark:border-white/10 dark:bg-card/45 sm:p-4">
+      <section className="shrink-0">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
             <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted/42 p-1 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)] dark:bg-background/30">
@@ -3564,7 +3571,7 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-card/72 shadow-[0_18px_55px_rgba(15,23,42,0.055)] backdrop-blur-xl dark:border-white/10 dark:bg-card/45 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-transparent shadow-none dark:border-white/10 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
           <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-background/36 dark:border-white/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
