@@ -16,7 +16,10 @@ async def test_openai_compat_provider_defers_sdk_client_until_first_use() -> Non
 
     kwargs = mock_async_openai.call_args.kwargs
     _assert_openai_compat_timeout(kwargs["timeout"])
-    assert kwargs["http_client"] is None
+    # Cloud endpoints get an httpx client with trust_env=True to respect
+    # proxy environment variables (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY).
+    assert kwargs["http_client"] is not None
+    assert kwargs["http_client"]._trust_env is True
 
 
 async def test_openai_compat_provider_sets_timeout_on_local_http_client() -> None:
