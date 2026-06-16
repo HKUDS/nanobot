@@ -493,12 +493,12 @@
         "updated": "Updated",
         "name": "Name"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "Search task, message, linked chat, or schedule",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
       "empty": "No automations yet.",
-      "emptyHint": "Create one from the chat or channel where it should run so nanobot keeps the right context.",
+      "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
       "oneShot": "One-time",
       "systemTask": "System-managed automation",
       "labels": {

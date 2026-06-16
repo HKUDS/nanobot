@@ -3506,7 +3506,10 @@ function AutomationsSettings({
               <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                placeholder={tx("settings.automations.search", "name:quiz chat:WeChat cron:09-23")}
+                placeholder={tx(
+                  "settings.automations.search",
+                  "Search task, message, linked chat, or schedule",
+                )}
                 className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
               />
             </div>

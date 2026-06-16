@@ -493,12 +493,12 @@
         "updated": "Diperbarui",
         "name": "Nama"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
       "queue": "Antrean",
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
       "empty": "Belum ada otomasi.",
-      "emptyHint": "Buat dari chat atau channel tempat otomasi akan berjalan agar nanobot menyimpan konteks yang benar.",
+      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
       "oneShot": "Satu kali",
       "systemTask": "Automasi yang dikelola sistem",
       "labels": {

@@ -493,12 +493,12 @@
         "updated": "Đã cập nhật",
         "name": "Tên"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "Tìm tác vụ, tin nhắn, cuộc trò chuyện liên kết hoặc lịch",
       "queue": "Hàng đợi",
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
       "empty": "Chưa có tự động hóa.",
-      "emptyHint": "Tạo từ cuộc trò chuyện hoặc channel nơi tự động hóa sẽ chạy để nanobot giữ đúng ngữ cảnh.",
+      "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
       "oneShot": "Một lần",
       "systemTask": "Tự động hóa do hệ thống quản lý",
       "labels": {

@@ -493,12 +493,12 @@
         "updated": "Mise à jour",
         "name": "Nom"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "Rechercher tâche, message, discussion liée ou planning",
       "queue": "File",
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",
       "empty": "Aucune automatisation pour le moment.",
-      "emptyHint": "Créez-en une depuis la discussion ou le canal où elle doit s’exécuter afin que nanobot conserve le bon contexte.",
+      "emptyHint": "Créez-la depuis son point d'exécution pour que nanobot conserve le bon contexte.",
       "oneShot": "Ponctuelle",
       "systemTask": "Automatisation gérée par le système",
       "labels": {

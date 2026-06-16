@@ -493,12 +493,12 @@
         "updated": "更新时间",
         "name": "名称"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "搜索任务、消息、关联会话或计划",
       "queue": "任务队列",
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",
       "empty": "暂无自动任务。",
-      "emptyHint": "请从它应该运行的聊天或外部 channel 中创建，这样 nanobot 才能保留正确上下文。",
+      "emptyHint": "请从它应该运行的来源处创建，这样 nanobot 才能保留正确上下文。",
       "oneShot": "一次性",
       "systemTask": "系统管理的自动任务",
       "labels": {

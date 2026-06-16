@@ -454,13 +454,13 @@ describe("App layout", () => {
     expect(document.title).toBe("Automations · blackcat");
 
     const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
-      "name:quiz chat:WeChat cron:09-23",
+      "Search task, message, linked chat, or schedule",
     );
-    fireEvent.change(searchInput, { target: { value: "chat:WeChat" } });
+    fireEvent.change(searchInput, { target: { value: "WeChat" } });
     await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
     expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
 
-    fireEvent.change(searchInput, { target: { value: "cron:09-23" } });
+    fireEvent.change(searchInput, { target: { value: "09-23" } });
     await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
     expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
   });

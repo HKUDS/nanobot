@@ -493,12 +493,12 @@
         "updated": "업데이트",
         "name": "이름"
       },
-      "search": "name:quiz chat:WeChat cron:09-23",
+      "search": "작업, 메시지, 연결된 채팅 또는 일정 검색",
       "queue": "대기열",
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
       "empty": "아직 자동화가 없습니다.",
-      "emptyHint": "실행되어야 하는 채팅 또는 외부 channel에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
+      "emptyHint": "실행될 위치에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
       "oneShot": "일회성",
       "systemTask": "시스템 관리 자동화",
       "labels": {
