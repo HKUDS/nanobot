@@ -417,14 +417,9 @@ class OpenAICompatProvider(LLMProvider):
                 timeout=timeout_s,
                 transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
             )
-        else:
-            # Cloud endpoints: respect proxy environment variables
-            # (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, NO_PROXY) so corporate
-            # or VPN proxies work without explicit configuration.
-            http_client = httpx.AsyncClient(
-                timeout=timeout_s,
-                trust_env=True,
-            )
+        # else: http_client stays None → SDK creates DefaultAsyncHttpxClient
+        # which already reads proxy env vars via trust_env=True, has proper
+        # connection limits, and follows redirects.
         self._client = AsyncOpenAI(
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
