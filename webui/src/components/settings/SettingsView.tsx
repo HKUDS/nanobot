@@ -3490,22 +3490,23 @@ function AutomationsSettings({
 
   return (
     <div className="flex min-h-0 flex-col gap-3 xl:flex-1 xl:overflow-hidden">
-      <section className="shrink-0 rounded-[24px] border border-border/45 bg-card/80 p-3 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl sm:p-4">
+      <section className="shrink-0 rounded-[22px] border border-orange-200/35 bg-gradient-to-b from-orange-50/45 to-background/82 p-3 shadow-[0_18px_54px_rgba(120,72,25,0.08)] backdrop-blur-xl dark:border-orange-300/10 dark:from-orange-300/8 dark:to-card/72 sm:p-4">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[16px] bg-muted/50 p-1">
+            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-background/58 p-1 shadow-[inset_0_0_0_1px_rgba(120,72,25,0.045)] dark:bg-background/30">
               {summaryOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   onClick={() => onFilterChange(option.value)}
                   className={cn(
-                    "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[12px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
-                    filter === option.value && "bg-background text-foreground shadow-sm",
+                    "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
+                    filter === option.value &&
+                      "bg-white text-orange-950 shadow-[0_8px_20px_rgba(120,72,25,0.1)] dark:bg-background/80 dark:text-orange-100",
                   )}
                 >
                   <span>{option.label}</span>
-                  <span className="min-w-5 shrink-0 rounded-full bg-background/75 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-muted-foreground">
+                  <span className="min-w-5 shrink-0 rounded-full bg-orange-100/70 px-1.5 py-0.5 text-center text-[11px] tabular-nums text-orange-800/70 dark:bg-orange-300/12 dark:text-orange-200/75">
                     {option.count}
                   </span>
                 </button>
@@ -3523,14 +3524,14 @@ function AutomationsSettings({
                   "settings.automations.search",
                   "Search task, message, linked chat, or schedule",
                 )}
-                className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-sm"
+                className="h-9 w-full rounded-[13px] border-orange-200/35 bg-background/82 pl-9 text-[13px] shadow-[0_8px_22px_rgba(120,72,25,0.055)] focus-visible:ring-orange-300/55 dark:border-orange-300/10 dark:bg-background/40"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/70 hover:text-foreground sm:w-auto"
+                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-orange-200/35 bg-background/82 px-3 text-[12px] font-medium text-muted-foreground shadow-[0_8px_22px_rgba(120,72,25,0.055)] transition-colors hover:bg-orange-50/80 hover:text-foreground dark:border-orange-300/10 dark:bg-background/40 dark:hover:bg-orange-300/10 sm:w-auto"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                   <span>{sortLabel[sort]}</span>
@@ -3563,18 +3564,18 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 gap-3 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch xl:overflow-hidden">
-          <aside className="flex min-h-0 flex-col overflow-hidden rounded-[24px] border border-border/45 bg-card/80 shadow-[0_22px_70px_rgba(15,23,42,0.055)] backdrop-blur-xl">
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/35 px-4 py-3">
+        <section className="grid min-h-0 overflow-hidden rounded-[26px] border border-orange-200/30 bg-gradient-to-br from-background/92 via-orange-50/24 to-background/88 shadow-[0_26px_80px_rgba(120,72,25,0.1)] backdrop-blur-xl dark:border-orange-300/10 dark:from-card/78 dark:via-orange-300/6 dark:to-card/68 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-orange-200/24 bg-background/42 dark:border-orange-300/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
+            <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
                 {tx("settings.automations.queue", "Queue")}
               </h2>
-              <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums">
+              <span className="rounded-full bg-orange-100/60 px-2 py-0.5 text-[11px] text-orange-800/70 tabular-nums dark:bg-orange-300/10 dark:text-orange-200/75">
                 {filtered.length}
               </span>
             </div>
             <div
-              className="max-h-[22rem] space-y-1 overflow-y-auto overscroll-contain p-2 xl:max-h-none xl:min-h-0 xl:flex-1"
+              className="max-h-[22rem] space-y-1 overflow-y-auto overscroll-contain px-2 pb-2 xl:max-h-none xl:min-h-0 xl:flex-1"
               role="list"
               aria-label={tx("settings.automations.queue", "Queue")}
             >
@@ -3646,8 +3647,8 @@ function AutomationListItem({
         className={cn(
           "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3.5 text-left transition-colors",
           selected
-            ? "bg-background text-foreground shadow-sm ring-1 ring-border/45"
-            : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
+            ? "bg-white/82 text-foreground shadow-[0_10px_28px_rgba(120,72,25,0.08)] ring-1 ring-orange-200/45 dark:bg-background/45 dark:ring-orange-300/12"
+            : "text-muted-foreground hover:bg-white/48 hover:text-foreground dark:hover:bg-background/24",
         )}
       >
         <span className="min-w-0">
@@ -3672,7 +3673,7 @@ function AutomationListItem({
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-2 pt-0.5">
-          <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="rounded-full bg-white/65 px-2 py-0.5 text-[11px] font-medium text-muted-foreground shadow-[inset_0_0_0_1px_rgba(120,72,25,0.055)] dark:bg-background/35">
             {status.label}
           </span>
           {job.delete_after_run ? (
@@ -3728,17 +3729,17 @@ function AutomationDetailPanel({
   }, [job.id]);
 
   return (
-    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[24px] border border-border/45 bg-card/90 shadow-[0_24px_80px_rgba(15,23,42,0.065)] backdrop-blur-xl">
-      <div className="shrink-0 border-b border-border/35 px-4 py-3.5 sm:px-5">
+    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/44 dark:bg-background/18">
+      <div className="shrink-0 border-b border-orange-200/24 px-4 py-3.5 dark:border-orange-300/10 sm:px-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h3 className="min-w-0 truncate text-[18px] font-medium leading-7 text-foreground">
                 {job.name || job.id}
               </h3>
-              <StatusPill tone={status.tone}>{status.label}</StatusPill>
+              <AutomationStatusBadge tone={status.tone}>{status.label}</AutomationStatusBadge>
               {job.delete_after_run ? (
-                <StatusPill>{tx("settings.automations.oneShot", "One-time")}</StatusPill>
+                <AutomationStatusBadge>{tx("settings.automations.oneShot", "One-time")}</AutomationStatusBadge>
               ) : null}
             </div>
             <p className="mt-1 truncate text-[12.5px] leading-5 text-muted-foreground">
@@ -3757,7 +3758,7 @@ function AutomationDetailPanel({
 
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-          <section className="rounded-[20px] border border-border/35 bg-background/60 px-4 py-3.5">
+          <section className="rounded-[20px] border border-orange-200/24 bg-white/56 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-orange-300/10 dark:bg-background/24">
             <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
               {tx("settings.automations.fields.message", "Message")}
             </div>
@@ -3811,7 +3812,7 @@ function AutomationDetailPanel({
           ) : null}
         </div>
 
-        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground lg:border-l lg:border-t-0">
+        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-orange-200/24 bg-orange-50/24 p-4 text-[12px] text-muted-foreground dark:border-orange-300/10 dark:bg-orange-300/5 lg:border-l lg:border-t-0">
           <div className="grid gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
@@ -3882,7 +3883,7 @@ function AutomationActionGroup({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/35 bg-background/70 p-1 shadow-sm">
+    <div className="flex shrink-0 items-center gap-1 rounded-full border border-orange-200/30 bg-white/62 p-1 shadow-[0_10px_26px_rgba(120,72,25,0.08)] dark:border-orange-300/10 dark:bg-background/35">
       <AppsActionButton
         ariaLabel={tx("settings.automations.edit", "Edit")}
         disabled={Boolean(actionKey)}
@@ -3925,6 +3926,30 @@ function AutomationActionGroup({
   );
 }
 
+function AutomationStatusBadge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "success" | "warning";
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center rounded-full px-2.5 text-[11.5px] font-medium shadow-[inset_0_0_0_1px_rgba(120,72,25,0.055)]",
+        tone === "success" &&
+          "bg-orange-100/72 text-orange-800 dark:bg-orange-300/12 dark:text-orange-200",
+        tone === "warning" &&
+          "bg-amber-100/80 text-amber-800 dark:bg-amber-300/14 dark:text-amber-200",
+        tone === "neutral" &&
+          "bg-white/64 text-muted-foreground dark:bg-background/35 dark:text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function automationMessageNeedsExpansion(message: string): boolean {
   return message.length > 360 || message.split(/\r?\n/).length > 6;
 }
@@ -3941,7 +3966,7 @@ function AutomationDetail({
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-[18px] bg-muted/32 px-3 py-3">
+    <div className="min-w-0 rounded-[17px] bg-white/46 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(120,72,25,0.04)] dark:bg-background/22">
       <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
         {label}
       </div>
@@ -4685,9 +4710,9 @@ function formatAutomationNextTitle(
 
 function automationStatusDotClass(job: SessionAutomationJob): string {
   const status = automationStatusKey(job);
-  if (status === "active" || status === "running") return "bg-emerald-500";
-  if (status === "failed") return "bg-amber-500";
-  if (status === "system") return "bg-blue-500";
+  if (status === "active" || status === "running") return "bg-orange-500 shadow-[0_0_0_3px_rgba(249,115,22,0.12)]";
+  if (status === "failed") return "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.13)]";
+  if (status === "system") return "bg-muted-foreground/45";
   return "bg-muted-foreground/45";
 }
 
