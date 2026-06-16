@@ -705,7 +705,7 @@
     "confirm": "Delete",
     "automationsDescription": "This chat has scheduled automations. Deleting it will also delete them.",
     "moreAutomations": "+ {{count}} more",
-    "confirmWithAutomations": "Delete chat and automations",
+    "confirmWithAutomations": "Delete",
     "schedule": {
       "at": "{{time}}",
       "every": "Every {{duration}}",

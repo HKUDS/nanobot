@@ -3489,11 +3489,11 @@ function AutomationsSettings({
   }, [filtered, selectedJobId]);
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 xl:flex-1 xl:overflow-hidden">
-      <section className="shrink-0 rounded-[22px] border border-orange-200/35 bg-gradient-to-b from-orange-50/45 to-background/82 p-3 shadow-[0_18px_54px_rgba(120,72,25,0.08)] backdrop-blur-xl dark:border-orange-300/10 dark:from-orange-300/8 dark:to-card/72 sm:p-4">
+    <div className="flex min-h-0 flex-col gap-2 xl:flex-1 xl:overflow-hidden">
+      <section className="shrink-0 rounded-[22px] border border-border/45 bg-card/72 p-3 shadow-[0_14px_42px_rgba(15,23,42,0.045)] backdrop-blur-xl dark:border-white/10 dark:bg-card/45 sm:p-4">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
-            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-background/58 p-1 shadow-[inset_0_0_0_1px_rgba(120,72,25,0.045)] dark:bg-background/30">
+            <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-[15px] bg-muted/42 p-1 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)] dark:bg-background/30">
               {summaryOptions.map((option) => (
                 <button
                   key={option.value}
@@ -3502,7 +3502,7 @@ function AutomationsSettings({
                   className={cn(
                     "inline-flex h-8 min-w-0 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-3 text-[12px] font-medium text-muted-foreground transition-colors",
                     filter === option.value &&
-                      "bg-white text-orange-950 shadow-[0_8px_20px_rgba(120,72,25,0.1)] dark:bg-background/80 dark:text-orange-100",
+                      "bg-background text-foreground shadow-[0_8px_20px_rgba(15,23,42,0.07)] dark:bg-background/80",
                   )}
                 >
                   <span>{option.label}</span>
@@ -3524,14 +3524,14 @@ function AutomationsSettings({
                   "settings.automations.search",
                   "Search task, message, linked chat, or schedule",
                 )}
-                className="h-9 w-full rounded-[13px] border-orange-200/35 bg-background/82 pl-9 text-[13px] shadow-[0_8px_22px_rgba(120,72,25,0.055)] focus-visible:ring-orange-300/55 dark:border-orange-300/10 dark:bg-background/40"
+                className="h-9 w-full rounded-[13px] border-border/45 bg-background/85 pl-9 text-[13px] shadow-[0_8px_22px_rgba(15,23,42,0.04)] dark:border-white/10 dark:bg-background/40"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-orange-200/35 bg-background/82 px-3 text-[12px] font-medium text-muted-foreground shadow-[0_8px_22px_rgba(120,72,25,0.055)] transition-colors hover:bg-orange-50/80 hover:text-foreground dark:border-orange-300/10 dark:bg-background/40 dark:hover:bg-orange-300/10 sm:w-auto"
+                  className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-[13px] border border-border/45 bg-background/85 px-3 text-[12px] font-medium text-muted-foreground shadow-[0_8px_22px_rgba(15,23,42,0.04)] transition-colors hover:bg-muted/70 hover:text-foreground dark:border-white/10 dark:bg-background/40 sm:w-auto"
                 >
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                   <span>{sortLabel[sort]}</span>
@@ -3564,8 +3564,8 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-[26px] border border-orange-200/30 bg-gradient-to-br from-background/92 via-orange-50/24 to-background/88 shadow-[0_26px_80px_rgba(120,72,25,0.1)] backdrop-blur-xl dark:border-orange-300/10 dark:from-card/78 dark:via-orange-300/6 dark:to-card/68 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
-          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-orange-200/24 bg-background/42 dark:border-orange-300/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
+        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-card/72 shadow-[0_18px_55px_rgba(15,23,42,0.055)] backdrop-blur-xl dark:border-white/10 dark:bg-card/45 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-background/36 dark:border-white/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
                 {tx("settings.automations.queue", "Queue")}
@@ -3647,7 +3647,7 @@ function AutomationListItem({
         className={cn(
           "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-[18px] px-3 py-3.5 text-left transition-colors",
           selected
-            ? "bg-white/82 text-foreground shadow-[0_10px_28px_rgba(120,72,25,0.08)] ring-1 ring-orange-200/45 dark:bg-background/45 dark:ring-orange-300/12"
+            ? "bg-background text-foreground shadow-[0_10px_28px_rgba(15,23,42,0.055)] ring-1 ring-border/45 dark:bg-background/45 dark:ring-white/10"
             : "text-muted-foreground hover:bg-white/48 hover:text-foreground dark:hover:bg-background/24",
         )}
       >
@@ -3729,8 +3729,8 @@ function AutomationDetailPanel({
   }, [job.id]);
 
   return (
-    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/44 dark:bg-background/18">
-      <div className="shrink-0 border-b border-orange-200/24 px-4 py-3.5 dark:border-orange-300/10 sm:px-5">
+    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/42 dark:bg-background/18">
+      <div className="shrink-0 border-b border-border/35 px-4 py-3.5 dark:border-white/10 sm:px-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -3758,7 +3758,7 @@ function AutomationDetailPanel({
 
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-          <section className="rounded-[20px] border border-orange-200/24 bg-white/56 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-orange-300/10 dark:bg-background/24">
+          <section className="rounded-[20px] border border-border/35 bg-background/62 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:border-white/10 dark:bg-background/24">
             <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
               {tx("settings.automations.fields.message", "Message")}
             </div>
@@ -3812,7 +3812,7 @@ function AutomationDetailPanel({
           ) : null}
         </div>
 
-        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-orange-200/24 bg-orange-50/24 p-4 text-[12px] text-muted-foreground dark:border-orange-300/10 dark:bg-orange-300/5 lg:border-l lg:border-t-0">
+        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-muted/20 p-4 text-[12px] text-muted-foreground dark:border-white/10 dark:bg-background/16 lg:border-l lg:border-t-0">
           <div className="grid gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}
@@ -3883,7 +3883,7 @@ function AutomationActionGroup({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-1 rounded-full border border-orange-200/30 bg-white/62 p-1 shadow-[0_10px_26px_rgba(120,72,25,0.08)] dark:border-orange-300/10 dark:bg-background/35">
+    <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/35 bg-background/70 p-1 shadow-[0_10px_26px_rgba(15,23,42,0.055)] dark:border-white/10 dark:bg-background/35">
       <AppsActionButton
         ariaLabel={tx("settings.automations.edit", "Edit")}
         disabled={Boolean(actionKey)}
@@ -3966,7 +3966,7 @@ function AutomationDetail({
   children: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-[17px] bg-white/46 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(120,72,25,0.04)] dark:bg-background/22">
+    <div className="min-w-0 rounded-[17px] bg-background/52 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)] dark:bg-background/22">
       <div className="text-[11px] font-medium leading-none text-muted-foreground/75">
         {label}
       </div>

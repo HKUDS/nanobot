@@ -705,7 +705,7 @@
     "confirm": "刪除",
     "automationsDescription": "這個對話有關聯的自動任務。刪除對話也會刪除這些自動任務。",
     "moreAutomations": "另有 {{count}} 個",
-    "confirmWithAutomations": "刪除對話和自動任務",
+    "confirmWithAutomations": "刪除",
     "schedule": {
       "at": "{{time}}",
       "every": "每 {{duration}}",

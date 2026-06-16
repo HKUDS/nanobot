@@ -705,7 +705,7 @@
     "confirm": "Hapus",
     "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
     "moreAutomations": "+ {{count}} lagi",
-    "confirmWithAutomations": "Hapus obrolan dan automasi",
+    "confirmWithAutomations": "Hapus",
     "schedule": {
       "at": "{{time}}",
       "every": "Setiap {{duration}}",

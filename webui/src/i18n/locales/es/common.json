@@ -705,7 +705,7 @@
     "confirm": "Eliminar",
     "automationsDescription": "Este chat tiene automatizaciones programadas. Al eliminarlo también se eliminarán.",
     "moreAutomations": "+ {{count}} más",
-    "confirmWithAutomations": "Eliminar chat y automatizaciones",
+    "confirmWithAutomations": "Eliminar",
     "schedule": {
       "at": "{{time}}",
       "every": "Cada {{duration}}",

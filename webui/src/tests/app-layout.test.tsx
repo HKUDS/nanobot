@@ -845,7 +845,7 @@ describe("App layout", () => {
       screen.queryByText("This chat has scheduled automations. Deleting it will also delete them."),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "删除对话和自动任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
 
     await waitFor(() =>
       expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a", {
