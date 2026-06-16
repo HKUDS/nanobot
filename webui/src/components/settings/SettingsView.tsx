@@ -1675,9 +1675,9 @@ export function SettingsView({
     <div
       className={cn(
         "flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row",
-        activeSection === "automations"
-          ? "bg-background"
-          : "bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]",
+        showSidebar
+          ? "bg-[radial-gradient(circle_at_50%_0%,hsl(var(--muted))_0%,hsl(var(--background))_42%)]"
+          : "bg-background",
       )}
     >
       {showSidebar ? (
@@ -1719,22 +1719,14 @@ export function SettingsView({
         onSave={handleAutomationEdit}
       />
 
-      <main
-        className={cn(
-          "min-w-0 flex-1 [scrollbar-gutter:stable]",
-          activeSection === "automations" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
-        )}
-      >
+      <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto w-full px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
-            activeSection === "automations"
-              ? "xl:flex xl:h-full xl:max-w-[70rem] xl:flex-col xl:overflow-hidden xl:py-6"
-              : "max-w-[920px]",
+            "mx-auto w-full max-w-[920px] px-4 py-6 sm:px-8 sm:py-8 lg:py-12",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
-          <div className={cn("mb-7", activeSection === "automations" && "xl:mb-4")}>
+          <div className="mb-7">
             {!showSidebar ? (
               <button
                 type="button"
@@ -1767,13 +1759,7 @@ export function SettingsView({
               </SettingsRow>
             </SettingsGroup>
           ) : settings ? (
-            <div
-              className={cn(
-                "space-y-5",
-                activeSection === "automations" &&
-                  "xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:gap-3 xl:space-y-0 xl:overflow-hidden",
-              )}
-            >
+            <div className="space-y-5">
               {error ? (
                 <div className="rounded-[18px] border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
@@ -3496,7 +3482,7 @@ function AutomationsSettings({
   }, [filtered, selectedJobId]);
 
   return (
-    <div className="flex min-h-0 flex-col gap-2 xl:flex-1 xl:overflow-hidden">
+    <div className="space-y-5">
       <section className="shrink-0">
         <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
           <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
@@ -3571,7 +3557,7 @@ function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-transparent shadow-none dark:border-white/10 xl:flex-1 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
+        <section className="grid min-h-0 overflow-hidden rounded-[22px] border border-border/45 bg-transparent shadow-none dark:border-white/10 xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
           <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-background/36 dark:border-white/10 dark:bg-background/18 xl:border-b-0 xl:border-r">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
@@ -3582,7 +3568,7 @@ function AutomationsSettings({
               </span>
             </div>
             <div
-              className="max-h-[22rem] space-y-1 overflow-y-auto overscroll-contain px-2 pb-2 xl:max-h-none xl:min-h-0 xl:flex-1"
+              className="max-h-[28rem] space-y-1 overflow-y-auto overscroll-contain px-2 pb-2 xl:max-h-[calc(100vh-24rem)]"
               role="list"
               aria-label={tx("settings.automations.queue", "Queue")}
             >
