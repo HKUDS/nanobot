@@ -151,9 +151,14 @@ async def _drain_background_tasks(loop: AgentLoop) -> None:
 class TestSessionTTLConfig:
     """Test session TTL configuration."""
 
-    def test_default_ttl_is_zero(self):
-        """Default TTL should be 0 (disabled)."""
+    def test_default_ttl_is_fifteen_minutes(self):
+        """Default TTL should proactively compact stale sessions."""
         defaults = AgentDefaults()
+        assert defaults.session_ttl_minutes == 15
+
+    def test_explicit_zero_disables_ttl(self):
+        """Explicit 0 should still disable idle auto-compact."""
+        defaults = AgentDefaults(session_ttl_minutes=0)
         assert defaults.session_ttl_minutes == 0
 
     def test_custom_ttl(self):
