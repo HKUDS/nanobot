@@ -24,8 +24,7 @@ def test_truncate_text_to_tokens_truncates_over_budget():
     result = truncate_text_to_tokens(text, 50)
 
     assert result.endswith("\n... (truncated)")
-    body = result[: -len("\n... (truncated)")]
-    assert len(enc.encode(body)) <= 50
+    assert len(enc.encode(result)) <= 50
 
 
 def test_truncate_text_to_tokens_non_positive_budget_returns_text():

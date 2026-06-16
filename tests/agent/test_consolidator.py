@@ -825,4 +825,4 @@ class TestArchiveTruncation:
         enc = tiktoken.get_encoding("cl100k_base")
         sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         token_count = len(enc.encode(sent_content))
-        assert token_count <= 9_900 + 10  # small margin for truncation suffix
+        assert token_count <= 9_900

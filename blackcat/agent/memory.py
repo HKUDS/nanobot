@@ -13,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
-import tiktoken
 from loguru import logger
 
 from blackcat.session.manager import Session
@@ -25,6 +24,7 @@ from blackcat.utils.helpers import (
     find_legal_message_start,
     strip_think,
     truncate_text,
+    truncate_text_to_tokens,
 )
 from blackcat.utils.prompt_templates import render_template
 
@@ -806,14 +806,7 @@ class Consolidator:
         budget = self._input_token_budget
         if budget <= 0:
             return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
-        try:
-            enc = tiktoken.get_encoding("cl100k_base")
-            tokens = enc.encode(text)
-            if len(tokens) <= budget:
-                return text
-            return enc.decode(tokens[:budget]) + "\n... (truncated)"
-        except Exception:
-            return truncate_text(text, budget * 4)
+        return truncate_text_to_tokens(text, budget)
 
     async def archive(
         self,
