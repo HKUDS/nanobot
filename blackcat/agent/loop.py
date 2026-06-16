@@ -1810,12 +1810,16 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        persist_user_message: bool = True,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
+        metadata: dict[str, Any] = {}
+        if not persist_user_message:
+            metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(
             channel=channel, sender_id="user", chat_id=chat_id,
-            content=content, media=media or [],
+            content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
