@@ -136,8 +136,8 @@ function mockBlobUrls() {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  Reflect.deleteProperty(window, "blackcatHost");
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(window, "blackcatHost");
   if (ORIGINAL_MEDIA_DEVICES) {
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
@@ -282,7 +282,7 @@ describe("ThreadComposer", () => {
     expect(input.className).toContain("min-h-[50px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
-    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
+    expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_hsl(var(--brand)/0.03)]"); // HACK: specific to blackcat
     expect(screen.getByRole("button", { name: "Attach image" }).className).toContain("bg-card");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();

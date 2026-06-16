@@ -1,9 +1,10 @@
 import { useSessionStore } from "@/stores/session-store";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RESTART_STARTED_KEY, SIDEBAR_RAIL_WIDTH, SIDEBAR_WIDTH } from "../constants";
 import { useDeferredTitleRefresh } from "../hooks/useDeferredTitleRefresh";
 import { useSessions } from "../hooks/useSessions";
+import { useSkills } from "../hooks/useSkills";
 import { useSidebarState } from "../hooks/useSidebarState";
 import { ThemeProvider, useTheme } from "../hooks/useTheme";
 import { fetchSettings, fetchWorkspaces } from "../lib/api";
@@ -14,7 +15,7 @@ import { projectNameFromPath } from "../lib/workspace";
 import { useClient } from "../providers/ClientProvider";
 import { useShellStore } from "../stores/shell-store";
 import { normalizeWorkspaceScope, writeCompletedRunChatIds } from "../utils/helpers";
-import { defaultShellRoute, readShellRoute, ShellView } from "../utils/shell";
+import { defaultShellRoute, readShellRoute, ShellView, shellViewForSettingsSection } from "../utils/shell";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { RenameChatDialog } from "./RenameChatDialog";
 import { SessionSearchDialog } from "./SessionSearchDialog";
@@ -28,15 +29,18 @@ export default function Shell({
   runtimeSurface,
   onModelNameChange,
   onLogout,
+  onNativeEngineRestart,
 }: {
   runtimeSurface: RuntimeSurface;
   onModelNameChange: (modelName: string | null) => void;
-  onLogout: () => void;
+    onLogout: () => void;
+  onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
   const { client, token } = useClient();
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
+  const skills = useSkills(token);
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
 
@@ -45,6 +49,7 @@ export default function Shell({
   const view = useShellStore((s) => s.view);
   const settingsInitialSection = useShellStore((s) => s.settingsSection);
   const hostSidebarOpen = useShellStore((s) => s.hostSidebarOpen);
+  const [hostSidebarPreviewing, setHostSidebarPreviewing] = useState(false);
   const mobileSidebarOpen = useShellStore((s) => s.mobileSidebarOpen);
   const sessionSearchOpen = useShellStore((s) => s.sessionSearchOpen);
   const pendingDelete = useShellStore((s) => s.pendingDelete);
@@ -93,6 +98,7 @@ export default function Shell({
   const activeChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    applyRoute();
     window.addEventListener("hashchange", applyRoute);
     return () => window.removeEventListener("hashchange", applyRoute);
   }, [applyRoute]);
@@ -484,7 +490,7 @@ export default function Shell({
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
-        view: section === "apps" ? "apps" : "settings",
+        view: shellViewForSettingsSection(section),
         activeKey,
         settingsSection: section,
       });
@@ -619,6 +625,12 @@ export default function Shell({
       });
       return;
     }
+    if (view === "skills") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.skills", { defaultValue: "Skills" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -640,9 +652,9 @@ export default function Shell({
     onNewChatInProject,
     onOpenSettings: () => onOpenPage("overview", "settings"),
     onOpenApps: () => onOpenPage("apps", "apps"),
-    onOpenSkills: () => onOpenPage("skills", "apps"),
+    onOpenSkills: () => onOpenPage("skills", "skills"),
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" ? "apps" as const : null,
+    activeUtility: view === "apps" ? "apps" as const : view === "skills" ? "skills" as const : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -682,6 +694,9 @@ export default function Shell({
             onToggleSidebar={showMainSidebar ? toggleSidebar : undefined}
             theme={theme}
             onToggleTheme={toggle}
+            sidebarCollapsed={!hostSidebarOpen}
+            onSidebarHoverStart={() => setHostSidebarPreviewing(true)}
+            onSidebarHoverEnd={() => setHostSidebarPreviewing(false)}
           />
         ) : null}
         <div
@@ -692,15 +707,19 @@ export default function Shell({
           {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
+              data-testid={showHostChrome ? "host-sidebar-flow" : undefined}
               className={cn(
                 "relative z-20 hidden shrink-0 overflow-hidden lg:block",
                 "transition-[width] duration-300 ease-out",
               )}
               style={{
-                width: hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH,
+                width: showHostChrome
+                  ? (hostSidebarOpen ? SIDEBAR_WIDTH : 0)
+                  : (hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH),
               }}
             >
               <div
+                aria-hidden={showHostChrome && !hostSidebarOpen ? true : undefined}
                 className={cn(
                   "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                   showHostChrome
@@ -719,6 +738,25 @@ export default function Shell({
             </aside>
           ) : null}
 
+          {/* Host sidebar hover preview */}
+          {showMainSidebar && showHostChrome && !hostSidebarOpen && hostSidebarPreviewing && (
+            <aside
+              data-testid="host-sidebar-preview"
+              className="absolute inset-y-0 left-0 z-30 overflow-hidden"
+              style={{ width: SIDEBAR_WIDTH }}
+            >
+              <div className="h-full w-full overflow-hidden host-sidebar-glass">
+                <Sidebar
+                  {...sidebarProps}
+                  collapsed={false}
+                  hostChromeInset
+                  onCollapse={closeHostSidebar}
+                  onExpand={openHostSidebar}
+                />
+              </div>
+            </aside>
+          )}
+
           {showMainSidebar ? (
             <Sheet
               open={mobileSidebarOpen}
@@ -731,11 +769,12 @@ export default function Shell({
                 className="p-0 lg:hidden"
                 style={{ width: SIDEBAR_WIDTH, maxWidth: SIDEBAR_WIDTH }}
               >
-                <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
+                <SheetTitle className="sr-only">{t("sidebar.mobileNavigation")}</SheetTitle>
                 <Sidebar
                   {...sidebarProps}
                   onCollapse={closeMobileSidebar}
                   containActionMenus
+                  ariaLabel={t("sidebar.mobileNavigation")}
                 />
               </SheetContent>
             </Sheet>
@@ -797,8 +836,10 @@ export default function Shell({
                   onSectionChange={onSettingsSectionChange}
                   onLogout={onLogout}
                   onRestart={onRestart}
+                  onNativeEngineRestart={onNativeEngineRestart}
                   isRestarting={isRestarting}
                   hostChromeInset={showHostChrome}
+                  skills={skills}
                 />
               </div>
             )}

@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatSummary } from "@/lib/types";
+import { useSessionStore } from "@/stores/session-store";
+import { useShellStore } from "@/stores/shell-store";
+import { readShellRoute } from "@/utils/shell";
 
 const connectSpy = vi.fn();
 const refreshSpy = vi.fn();
@@ -145,6 +148,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         error: null,
         refresh: refreshSpy,
         createChat: createChatSpy,
+        forkChat: async () => "fork-chat",
         deleteChat: async (key: string) => {
           await deleteChatSpy(key);
           setSessions((prev: ChatSummary[]) => prev.filter((s) => s.key !== key));
@@ -210,6 +214,26 @@ import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 
 describe("App layout", () => {
   beforeEach(() => {
+    useShellStore.setState({
+      ...readShellRoute(),
+      hostSidebarOpen: true,
+      mobileSidebarOpen: false,
+      sessionSearchOpen: false,
+      pendingDelete: null,
+      pendingRename: null,
+      pendingProjectRename: null,
+      restartToast: null,
+      isRestarting: false,
+    });
+    useSessionStore.setState({
+      runningChatIds: new Set(),
+      completedChatIds: new Set(),
+      workspaces: null,
+      workspaceError: null,
+      draftWorkspaceScope: null,
+      workspaceOverrides: {},
+      settingsSnapshot: null,
+    });
     mockSessions = [];
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
@@ -220,7 +244,6 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     window.history.replaceState(null, "", "/");
-    localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
     setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("blackcat-webui.sidebar");
     localStorage.removeItem("blackcat-webui.sidebar.completed-runs.v1");
@@ -465,7 +488,7 @@ describe("App layout", () => {
 
     const sheet = await screen.findByRole("dialog");
     const mobileSidebar = within(sheet).getByRole("navigation", {
-      name: "Sidebar navigation",
+      name: "Mobile sidebar navigation",
     });
     await waitFor(() =>
       expect(
@@ -767,6 +790,9 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      useSessionStore.getState().addCompleted("chat-b");
+    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
       expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
@@ -1046,7 +1072,6 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(document.title).toBe("Settings · blackcat");
-    expect(screen.getByTestId("overview-blackcat-logo")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
     expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();

@@ -3,8 +3,7 @@
 import httpx
 import pytest
 
-from blackcat.agent.tools.web import WebSearchTool
-from blackcat.config.schema import WebSearchConfig
+from blackcat.agent.tools.web import WebSearchConfig, WebSearchTool
 
 
 def _tool(

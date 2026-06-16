@@ -39,6 +39,7 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
         "--dir", str(ws),                 # recreate workspace mount point
         "--bind", str(ws), str(ws),
         "--ro-bind-try", str(media), str(media),  # read-only access to media
+        "--setenv", "HOME", str(ws),
         "--chdir", sandbox_cwd,
         "--", "sh", "-c", command,
     ]

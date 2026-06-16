@@ -65,9 +65,20 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         aliases=("mimo", "xiaomi"),
     ),
     TranscriptionProviderSpec(
+        name="stepfun",
+        default_model="stepaudio-2.5-asr",
+        adapter="blackcat.providers.transcription:StepFunTranscriptionProvider",
+    ),
+    TranscriptionProviderSpec(
         name="assemblyai",
         default_model="universal-3-pro,universal-2",
         adapter="blackcat.providers.transcription:AssemblyAITranscriptionProvider",
+    ),
+    TranscriptionProviderSpec(
+        name="siliconflow",
+        default_model="FunAudioLLM/SenseVoiceSmall",
+        adapter="blackcat.providers.transcription:OpenAITranscriptionProvider",
+        aliases=("silicon",),
     ),
 )
 

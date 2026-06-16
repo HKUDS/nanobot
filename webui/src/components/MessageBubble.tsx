@@ -6,13 +6,27 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, ChevronRight, Clock3, Copy, ImageIcon, Sparkles, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Clock3,
+  Copy,
+  ImageIcon,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CliAppMentionText } from "@/components/CliAppMentionText";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatTurnLatency } from "@/lib/format";
@@ -34,6 +48,27 @@ interface MessageBubbleProps {
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   onOpenFilePreview?: (path: string) => void;
+  onForkFromHere?: () => void;
+}
+
+function ForkArrowIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M16 3h5v5" />
+      <path d="M8 3H3v5" />
+      <path d="m21 3-7.536 7.536A5 5 0 0 0 12 14.07V21" />
+      <path d="m3 3 7.536 7.536A5 5 0 0 1 12 14.07V15" />
+    </svg>
+  );
 }
 
 /**
@@ -51,6 +86,7 @@ export function MessageBubble({
   cliApps = [],
   mcpPresets = [],
   onOpenFilePreview,
+  onForkFromHere,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -138,13 +174,16 @@ export function MessageBubble({
 
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
   const showCopyButton = showAssistantCopyAction && showAssistantActions;
+  const showForkButton = showAssistantActions && !!onForkFromHere;
+  const copyReplyLabel = copied ? t("message.copiedReply") : t("message.copyReply");
+  const forkLabel = t("message.forkFromHere");
   const latencyMs = message.latencyMs;
   const showLatencyFooter =
     message.role === "assistant"
     && latencyMs != null
     && !message.isStreaming
     && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterRow = showCopyButton || showLatencyFooter;
+  const showAssistantFooterRow = showCopyButton || showForkButton || showLatencyFooter;
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -173,35 +212,60 @@ export function MessageBubble({
           </MarkdownText>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
-            <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-              {showCopyButton ? (
-                <button
-                  type="button"
-                  onClick={onCopyAssistantReply}
-                  aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
-                  title={copied ? t("message.copiedReply") : t("message.copyReply")}
-                  className={cn(
-                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                    "transition-colors hover:bg-muted/55 hover:text-foreground",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4" aria-hidden />
-                  ) : (
-                    <Copy className="h-4 w-4" aria-hidden />
-                  )}
-                </button>
-              ) : null}
-              {showLatencyFooter ? (
-                <span
-                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
-                  title={t("message.turnLatencyTitle")}
-                >
-                  {formatTurnLatency(latencyMs)}
-                </span>
-              ) : null}
-            </div>
+            <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+              <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                {showCopyButton ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={onCopyAssistantReply}
+                        aria-label={copyReplyLabel}
+                        className={cn(
+                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                          "transition-colors hover:bg-muted/55 hover:text-foreground",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
+                        {copied ? (
+                          <Check className="h-4 w-4" aria-hidden />
+                        ) : (
+                          <Copy className="h-4 w-4" aria-hidden />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">{copyReplyLabel}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showForkButton ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={onForkFromHere}
+                        aria-label={forkLabel}
+                        className={cn(
+                          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                          "transition-colors hover:bg-muted/55 hover:text-foreground",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
+                        <ForkArrowIcon className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showLatencyFooter ? (
+                  <span
+                    className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                    title={t("message.turnLatencyTitle")}
+                  >
+                    {formatTurnLatency(latencyMs)}
+                  </span>
+                ) : null}
+              </div>
+            </TooltipProvider>
           ) : null}
         </>
       )}
@@ -617,7 +681,7 @@ export function ReasoningBubble({
               "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
               "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
               "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
-              "prose-a:text-brand prose-a:underline hover:prose-a:text-brand/80",
+              "prose-a:text-blue-500 prose-a:underline hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
               "prose-code:text-[0.92em]",
             )}
           >

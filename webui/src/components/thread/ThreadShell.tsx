@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
+import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
-import { ThreadViewport } from "@/components/thread/ThreadViewport";
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
+import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useBlackcatStream, type SendImage, type SendOptions } from "@/hooks/useBlackcatStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { fetchCliApps, fetchMcpPresets, fetchSettings, listSlashCommands } from "@/lib/api";
@@ -19,18 +23,16 @@ import {
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import type {
   ChatSummary,
-  CliAppInfo,
-  McpPresetInfo,
   SettingsPayload,
   SlashCommand,
   UIMessage,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
+import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
@@ -51,6 +53,23 @@ function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boo
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
+const FILE_PREVIEW_DEFAULT_WIDTH = 544;
+const FILE_PREVIEW_MIN_WIDTH = 360;
+const FILE_PREVIEW_MAX_WIDTH = 860;
+const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
+const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+
+function clampFilePreviewWidth(width: number, maxWidth: number): number {
+  return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
+}
+
+function maxFilePreviewWidth(containerWidth: number): number {
+  return Math.max(
+    FILE_PREVIEW_MIN_WIDTH,
+    Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+  );
+}
+
 interface ThreadShellProps {
   session: ChatSummary | null;
   title: string;
@@ -58,10 +77,12 @@ interface ThreadShellProps {
   onGoHome?: () => void;
   onNewChat?: () => void;
   onCreateChat?: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string | null>;
+  onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
   hideSidebarToggleForHostChrome?: boolean;
+  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideHeader?: boolean;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -71,6 +92,7 @@ interface ThreadShellProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
+  onOpenModelSettings?: () => void;
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -85,6 +107,7 @@ interface ModelBadgeInfo {
   label: string | null;
   provider: string | null;
   providerLabel: string | null;
+  needsSetup: boolean;
 }
 
 function activeModelPreset(settings: SettingsPayload | null): SettingsPayload["model_presets"][number] | null {
@@ -107,12 +130,20 @@ function resolvedModelProvider(settings: SettingsPayload | null, modelName: stri
 }
 
 function toModelBadgeInfo(modelName: string | null, settings: SettingsPayload | null): ModelBadgeInfo {
-  const label = toModelBadgeLabel(modelName || settings?.agent.model || null);
-  const provider = resolvedModelProvider(settings, modelName || settings?.agent.model || null);
+  const model = modelName || settings?.agent.model || null;
+  const label = toModelBadgeLabel(model);
+  const provider = resolvedModelProvider(settings, model);
+  const providerRow = provider
+    ? settings?.providers.find((item) => item.name === provider)
+    : null;
+  const needsSetup = Boolean(
+    settings && (!model || !provider || !providerRow || !providerRow.configured),
+  );
   return {
     label,
     provider,
     providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
+    needsSetup,
   };
 }
 
@@ -134,15 +165,74 @@ interface PendingFirstMessage {
   options?: SendOptions;
 }
 
+interface InstalledSettingItemsOptions<Payload, Item> {
+  token: string;
+  eventName: string;
+  fetchPayload: (token: string) => Promise<Payload>;
+  isPayload: (value: unknown) => value is Payload;
+  selectItems: (payload: Payload) => Item[];
+}
+
+function useInstalledSettingItems<Payload, Item>({
+  token,
+  eventName,
+  fetchPayload,
+  isPayload,
+  selectItems,
+}: InstalledSettingItemsOptions<Payload, Item>): Item[] {
+  const [items, setItems] = useState<Item[]>([]);
+
+  const refresh = useCallback(async (isCancelled?: () => boolean) => {
+    try {
+      const payload = await fetchPayload(token);
+      if (!isCancelled?.()) setItems(selectItems(payload));
+    } catch {
+      if (!isCancelled?.()) setItems([]);
+    }
+  }, [fetchPayload, selectItems, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void refresh(() => cancelled);
+
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    };
+    const refreshOnChanged = (event: Event) => {
+      const payload = (event as CustomEvent<unknown>).detail;
+      if (isPayload(payload)) {
+        setItems(selectItems(payload));
+        return;
+      }
+      void refresh();
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    window.addEventListener(eventName, refreshOnChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+      window.removeEventListener(eventName, refreshOnChanged);
+    };
+  }, [eventName, isPayload, refresh, selectItems]);
+
+  return items;
+}
+
 export function ThreadShell({
   session,
   title,
   onToggleSidebar,
   onCreateChat,
+  onForkChat,
   onTurnEnd,
   theme = "light",
   onToggleTheme = () => {},
   hideSidebarToggleForHostChrome = false,
+  hostChromeTitleInset = false,
   hideThemeButton = false,
   hideHeader = false,
   workspaceScope = null,
@@ -152,6 +242,7 @@ export function ThreadShell({
   workspaceError = null,
   onWorkspaceScopeChange,
   settingsSnapshot = null,
+  onOpenModelSettings,
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
@@ -159,19 +250,43 @@ export function ThreadShell({
   const {
     messages: historical,
     loading,
+    loadingOlder,
+    loadOlder,
+    hasMoreBefore,
+    userMessageOffset,
     hasPendingToolCalls,
     refresh: refreshHistory,
     version: historyVersion,
+    forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
   const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
-  const [cliApps, setCliApps] = useState<CliAppInfo[]>([]);
-  const [mcpPresets, setMcpPresets] = useState<McpPresetInfo[]>([]);
+  const cliApps = useInstalledSettingItems({
+    token,
+    eventName: CLI_APPS_CHANGED_EVENT,
+    fetchPayload: fetchCliApps,
+    isPayload: isCliAppsPayload,
+    selectItems: installedCliAppsFromPayload,
+  });
+  const mcpPresets = useInstalledSettingItems({
+    token,
+    eventName: MCP_PRESETS_CHANGED_EVENT,
+    fetchPayload: fetchMcpPresets,
+    isPayload: isMcpPresetsPayload,
+    selectItems: installedMcpPresetsFromPayload,
+  });
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
+  const [filePreviewClosing, setFilePreviewClosing] = useState(false);
+  const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
+  const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
+  const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
@@ -194,6 +309,7 @@ export function ThreadShell({
     runStartedAt,
     goalState,
     send,
+    transcribeAudio,
     stop,
     setMessages,
     streamError,
@@ -204,6 +320,27 @@ export function ThreadShell({
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
 
+  useEffect(() => {
+    filePreviewWidthRef.current = filePreviewWidth;
+  }, [filePreviewWidth]);
+
+  useEffect(() => {
+    if (filePreviewCloseTimerRef.current !== null) {
+      window.clearTimeout(filePreviewCloseTimerRef.current);
+      filePreviewCloseTimerRef.current = null;
+    }
+    setFilePreviewClosing(false);
+    setFilePreviewPath(null);
+  }, [historyKey]);
+
+  useEffect(() => {
+    return () => {
+      if (filePreviewCloseTimerRef.current !== null) {
+        window.clearTimeout(filePreviewCloseTimerRef.current);
+      }
+    };
+  }, []);
+
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
 
   const showHeroComposer = messages.length === 0 && !loading;
@@ -212,6 +349,9 @@ export function ThreadShell({
     () => toModelBadgeInfo(modelName, settings),
     [modelName, settings],
   );
+  const modelBadgeLabel = modelBadge.needsSetup
+    ? t("thread.composer.modelNotConfigured", { defaultValue: "Model not configured" })
+    : modelBadge.label;
   useEffect(() => {
     if (showHeroComposer && !wasShowingHeroComposerRef.current) {
       setHeroGreetingKey(randomHeroGreetingKey());
@@ -279,6 +419,14 @@ export function ThreadShell({
       }
       if (cached && cached.length > 0) {
         const normalizedCached = projectWebuiThreadMessages(cached);
+        if (
+          normalizedHistory.length > normalizedCached.length
+          && !isStaleThreadSnapshot(prev, normalizedHistory)
+        ) {
+          messageCacheRef.current.set(chatId, normalizedHistory);
+          appliedHistoryVersionRef.current.set(chatId, historyVersion);
+          return normalizedHistory;
+        }
         if (isStaleThreadSnapshot(prev, normalizedCached)) return keepLiveMessages(prev);
         return normalizedCached;
       }
@@ -372,94 +520,6 @@ export function ThreadShell({
     };
   }, [token]);
 
-  const refreshCliApps = useCallback(async () => {
-    try {
-      const payload = await fetchCliApps(token);
-      setCliApps(installedCliAppsFromPayload(payload));
-    } catch {
-      setCliApps([]);
-    }
-  }, [token]);
-
-  const refreshMcpPresets = useCallback(async () => {
-    try {
-      const payload = await fetchMcpPresets(token);
-      setMcpPresets(installedMcpPresetsFromPayload(payload));
-    } catch {
-      setMcpPresets([]);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const payload = await fetchCliApps(token);
-        if (!cancelled) setCliApps(installedCliAppsFromPayload(payload));
-      } catch {
-        if (!cancelled) setCliApps([]);
-      }
-    };
-    load();
-
-    const refreshOnFocus = () => {
-      if (document.visibilityState === "hidden") return;
-      void refreshCliApps();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    const refreshOnCliAppsChanged = (event: Event) => {
-      const payload = (event as CustomEvent<unknown>).detail;
-      if (isCliAppsPayload(payload)) {
-        setCliApps(installedCliAppsFromPayload(payload));
-        return;
-      }
-      void refreshCliApps();
-    };
-    window.addEventListener(CLI_APPS_CHANGED_EVENT, refreshOnCliAppsChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-      window.removeEventListener(CLI_APPS_CHANGED_EVENT, refreshOnCliAppsChanged);
-    };
-  }, [refreshCliApps, token]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const payload = await fetchMcpPresets(token);
-        if (!cancelled) setMcpPresets(installedMcpPresetsFromPayload(payload));
-      } catch {
-        if (!cancelled) setMcpPresets([]);
-      }
-    };
-    load();
-
-    const refreshOnFocus = () => {
-      if (document.visibilityState === "hidden") return;
-      void refreshMcpPresets();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    const refreshOnMcpPresetsChanged = (event: Event) => {
-      const payload = (event as CustomEvent<unknown>).detail;
-      if (isMcpPresetsPayload(payload)) {
-        setMcpPresets(installedMcpPresetsFromPayload(payload));
-        return;
-      }
-      void refreshMcpPresets();
-    };
-    window.addEventListener(MCP_PRESETS_CHANGED_EVENT, refreshOnMcpPresetsChanged);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-      window.removeEventListener(MCP_PRESETS_CHANGED_EVENT, refreshOnMcpPresetsChanged);
-    };
-  }, [refreshMcpPresets, token]);
-
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendImage[], options?: SendOptions) => {
       if (booting) return;
@@ -482,6 +542,106 @@ export function ThreadShell({
     [send, withWorkspaceScope],
   );
 
+  const handleOpenFilePreview = useCallback((path: string) => {
+    if (filePreviewCloseTimerRef.current !== null) {
+      window.clearTimeout(filePreviewCloseTimerRef.current);
+      filePreviewCloseTimerRef.current = null;
+    }
+    setFilePreviewClosing(false);
+    setFilePreviewPath(path);
+  }, []);
+
+  const handleCloseFilePreview = useCallback(() => {
+    if (!filePreviewPath || filePreviewClosing) return;
+    setFilePreviewClosing(true);
+    filePreviewCloseTimerRef.current = window.setTimeout(() => {
+      filePreviewCloseTimerRef.current = null;
+      setFilePreviewPath(null);
+      setFilePreviewClosing(false);
+    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
+  }, [filePreviewClosing, filePreviewPath]);
+
+  const handleFilePreviewResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const panel = event.currentTarget.closest<HTMLElement>("[data-file-preview-panel]");
+    const shellRect = shellRef.current?.getBoundingClientRect();
+    const rightEdge = shellRect?.right ?? window.innerWidth;
+    const maxWidth = maxFilePreviewWidth(shellRect?.width ?? window.innerWidth);
+    const originalBodyCursor = document.body.style.cursor;
+    const originalBodyUserSelect = document.body.style.userSelect;
+    const originalPanelTransition = panel?.style.transition ?? "";
+    let nextWidth = filePreviewWidthRef.current;
+    let frame: number | null = null;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    if (panel) panel.style.transition = "none";
+
+    const applyWidth = (clientX: number) => {
+      nextWidth = clampFilePreviewWidth(rightEdge - clientX, maxWidth);
+      filePreviewWidthRef.current = nextWidth;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
+        panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
+      });
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+      panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
+      panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
+      if (panel) panel.style.transition = originalPanelTransition;
+      setFilePreviewWidth(nextWidth);
+      document.body.style.cursor = originalBodyCursor;
+      document.body.style.userSelect = originalBodyUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    applyWidth(event.clientX);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, []);
+
+  useEffect(() => {
+    if (!filePreviewPath) return;
+    const clampToShell = () => {
+      const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+      const maxWidth = maxFilePreviewWidth(shellWidth);
+      const nextWidth = clampFilePreviewWidth(filePreviewWidthRef.current, maxWidth);
+      filePreviewWidthRef.current = nextWidth;
+      setFilePreviewWidth(nextWidth);
+    };
+    clampToShell();
+    window.addEventListener("resize", clampToShell);
+    return () => {
+      window.removeEventListener("resize", clampToShell);
+    };
+  }, [filePreviewPath]);
+
+  const handleForkFromMessage = useCallback(
+    async (beforeUserIndex: number) => {
+      if (!chatId || !onForkChat) return;
+      const forkedChatId = await onForkChat(chatId, beforeUserIndex);
+      if (!forkedChatId) return;
+      messageCacheRef.current.delete(forkedChatId);
+      appliedHistoryVersionRef.current.delete(forkedChatId);
+      pendingCanonicalHydrateRef.current.add(forkedChatId);
+    },
+    [chatId, onForkChat],
+  );
+
   const composer = (
     <>
       {streamError ? (
@@ -500,14 +660,17 @@ export function ThreadShell({
               ? t("thread.composer.placeholderHero")
               : t("thread.composer.placeholderThread")
           }
-          modelLabel={modelBadge.label}
+          modelLabel={modelBadgeLabel}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
+          modelNeedsSetup={modelBadge.needsSetup}
+          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant={showHeroComposer ? "hero" : "thread"}
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           onStop={stop}
+          onTranscribeAudio={transcribeAudio}
           runStartedAt={runStartedAt}
           goalState={goalState}
           workspaceScope={workspaceScope}
@@ -528,14 +691,17 @@ export function ThreadShell({
               ? t("thread.composer.placeholderOpening")
               : t("thread.composer.placeholderHero")
           }
-          modelLabel={modelBadge.label}
+          modelLabel={modelBadgeLabel}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
+          modelNeedsSetup={modelBadge.needsSetup}
+          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           variant="hero"
           slashCommands={slashCommands}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           runStartedAt={runStartedAt}
+          onTranscribeAudio={transcribeAudio}
           goalState={goalState}
           workspaceScope={workspaceScope}
           workspaceDefaultScope={workspaceDefaultScope}
@@ -559,31 +725,64 @@ export function ThreadShell({
       </h1>
     </div>
   );
+  const sessionInfoAction = historyKey ? (
+    <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
+  ) : undefined;
+  const promptNavigatorAction = historyKey ? (
+    <PromptNavigator
+      messages={displayMessages}
+      onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
+    />
+  ) : undefined;
 
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      {!hideHeader ? (
-        <ThreadHeader
-          title={title}
-          onToggleSidebar={onToggleSidebar}
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-          hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
-          hideThemeButton={hideThemeButton}
-          minimal={!session && !loading}
+    <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {!hideHeader ? (
+          <ThreadHeader
+            title={title}
+            onToggleSidebar={onToggleSidebar}
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            hideSidebarToggleForHostChrome={hideSidebarToggleForHostChrome}
+            hostChromeTitleInset={hostChromeTitleInset}
+            hideThemeButton={hideThemeButton}
+            minimal={!session && !loading}
+            promptNavigatorAction={promptNavigatorAction}
+            sessionInfoAction={sessionInfoAction}
+          />
+        ) : null}
+        <ThreadViewport
+          ref={viewportRef}
+          messages={displayMessages}
+          isStreaming={isStreaming}
+          emptyState={emptyState}
+          composer={composer}
+          scrollToBottomSignal={scrollToBottomSignal}
+          conversationKey={historyKey}
+          showScrollToBottomButton={!!session}
+          cliApps={cliApps}
+          mcpPresets={mcpPresets}
+          forkBoundaryMessageCount={forkBoundaryMessageCount}
+          hasMoreBefore={hasMoreBefore}
+          loadingOlder={loadingOlder}
+          userMessageOffset={userMessageOffset}
+          onLoadOlder={loadOlder}
+          onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+          onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+        />
+      </div>
+      {filePreviewPath && historyKey ? (
+        <FilePreviewPanel
+          sessionKey={historyKey}
+          path={filePreviewPath}
+          token={token}
+          desktopWidth={filePreviewWidth}
+          isClosing={filePreviewClosing}
+          onResizeStart={handleFilePreviewResizeStart}
+          onClose={handleCloseFilePreview}
         />
       ) : null}
-      <ThreadViewport
-        messages={displayMessages}
-        isStreaming={isStreaming}
-        emptyState={emptyState}
-        composer={composer}
-        scrollToBottomSignal={scrollToBottomSignal}
-        conversationKey={historyKey}
-        showScrollToBottomButton={!!session}
-        cliApps={cliApps}
-        mcpPresets={mcpPresets}
-      />
     </section>
   );
 }

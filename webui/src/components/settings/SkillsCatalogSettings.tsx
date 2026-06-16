@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { Brain, Check, CircleAlert, KeyRound, Loader2, Terminal } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";

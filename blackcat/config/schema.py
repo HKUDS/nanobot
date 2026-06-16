@@ -350,13 +350,13 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     return getattr(module, class_name)()
 
 
-class AuthorIdentity(Base): # FIXME: add all the other platforms
-    """Platform identities for an author (like API keys, keep private)."""
+class PlatformIdentity(Base): # TODO: add all the other platforms
+    """Platform identifiers for a single author (user IDs per channel)."""
 
-    whatsapp: str | None = None
-    telegram: str | None = None
-    discord: str | None = None
-    cli: str | None = None
+    whatsapp: str | int | None = None
+    telegram: str | int | None = None
+    discord: str | int | None = None
+    cli: str | int | None = None
 
 
 class ToolsConfig(Base):
@@ -400,7 +400,7 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     my_tool: MyToolConfig = Field(default_factory=MyToolConfig, alias="myTool")
-    author_identity: AuthorIdentity | None = None
+    author_identity: dict[str, PlatformIdentity] | None = None
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),

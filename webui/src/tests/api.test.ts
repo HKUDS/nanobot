@@ -1,34 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-    createModelConfiguration,
-    deleteSession,
-    fetchCliApps,
-    fetchMcpPresets,
-    fetchProviderModels,
-    fetchSidebarState,
-    fetchWebuiThread,
-    fetchWorkspaces,
-    importMcpConfig,
-    listSessions,
-    listSlashCommands,
-    loginProviderOAuth,
-    logoutProviderOAuth,
-    runCliAppAction,
-    runMcpPresetAction,
-    saveCustomMcpServer,
-    updateImageGenerationSettings,
-    updateMcpServerTools,
-    updateModelConfiguration,
-    updateNetworkSafetySettings,
-    updateProviderSettings,
-    updateSettings,
-    updateSidebarState,
-    updateWebSearchSettings,
   createModelConfiguration,
   deleteSession,
-  fetchFilePreview,
   fetchCliApps,
+  fetchFilePreview,
   fetchMcpPresets,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -46,13 +22,13 @@ import {
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
-  updateSidebarState,
   updateImageGenerationSettings,
-  updateModelConfiguration,
   updateMcpServerTools,
+  updateModelConfiguration,
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSidebarState,
   updateWebSearchSettings,
 } from "@/lib/api";
 
@@ -77,6 +53,21 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Achat-1/webui-thread",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("passes pagination params when fetching a WebUI thread page", async () => {
+    await fetchWebuiThread("tok", "websocket:chat-1", {
+      limit: 120,
+      before: "abc+/=",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",

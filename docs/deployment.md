@@ -1,5 +1,32 @@
 # Deployment
 
+Use this page after `nanobot agent -m "Hello!"` works locally. Deployment keeps long-running surfaces online: WebUI, chat apps, heartbeat, Dream, cron jobs, and channel connections.
+
+## Before You Deploy
+
+Check these once before Docker, systemd, or LaunchAgent:
+
+| Check | Why it matters |
+|---|---|
+| `nanobot status` shows the expected config and workspace | Confirms the process will read the instance you meant to run |
+| `nanobot agent -m "Hello!"` works | Proves install, config, provider, model, and workspace writes before adding a service layer |
+| Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
+| `~/.nanobot/` or your custom config/workspace path is persistent | Sessions, memory, channel login state, generated artifacts, and cron jobs live there |
+| Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
+| Ports are planned | Gateway health defaults to `18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
+| Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
+
+Restart the deployed process after editing `config.json`. Long-running processes read config at startup.
+
+## Choose a Runtime
+
+| Runtime | Use it for | State location | Useful first command |
+|---|---|---|---|
+| Docker Compose | Repeatable container runs on Linux servers or workstations | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker compose run --rm nanobot-cli agent -m "Hello!"` |
+| Docker CLI | Manual container testing or small one-off hosts | Bind-mount `~/.nanobot` to `/home/nanobot/.nanobot` | `docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status` |
+| systemd user service | Linux user-level gateway that restarts automatically | Host user's `~/.nanobot` unless you pass explicit paths | `systemctl --user status nanobot-gateway` |
+| macOS LaunchAgent | macOS gateway that starts after login | Host user's `~/.nanobot` unless the plist passes explicit paths | `launchctl list | grep ai.nanobot.gateway` |
+
 ## Docker
 
 > [!TIP]

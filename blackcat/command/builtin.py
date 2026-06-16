@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 
-from blackcat import __version__
+from blackcat import __logo__, __name__, __version__
 from blackcat.bus.events import OutboundMessage
 from blackcat.command.router import CommandContext, CommandRouter
 from blackcat.utils.helpers import build_status_content
@@ -686,7 +686,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈‍⬛ blackcat commands:"] # FIXME: import the logo and name from the main file
+    lines = [f"{__logo__} {__name__} commands:"] # TODO: check with Nyx
     for spec in BUILTIN_COMMAND_SPECS:
         command = spec.command
         if spec.arg_hint:
