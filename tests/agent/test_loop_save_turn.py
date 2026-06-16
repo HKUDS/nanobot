@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +40,7 @@ def _mk_loop() -> AgentLoop:
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     WebuiTurnCoordinator(
@@ -986,6 +988,33 @@ async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
     )
 
     assert "Goal created during this runner call." in (seen["goal_continue"] or "")
+
+
+@pytest.mark.asyncio
+async def test_process_direct_skip_user_persist_does_not_save_retry_user(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()
+    session = loop.sessions.get_or_create("api:default")
+    session.add_message("user", "hello")
+    session.add_message("assistant", "previous empty-response attempt")
+    loop.sessions.save(session)
+
+    await loop.process_direct(
+        "hello",
+        session_key=session.key,
+        channel="api",
+        chat_id="default",
+        persist_user_message=False,
+    )
+
+    session = loop.sessions.get_or_create("api:default")
+    assert [(m["role"], m["content"]) for m in session.messages] == [
+        ("user", "hello"),
+        ("assistant", "previous empty-response attempt"),
+        ("assistant", "Test title"),
+    ]
 
 
 def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:

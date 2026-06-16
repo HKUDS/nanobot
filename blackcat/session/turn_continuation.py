@@ -183,6 +183,8 @@ def _save_skip_for_turn(
     user_persisted_early: bool,
 ) -> int:
     """Return the persisted-message append boundary for this turn."""
+    if message_metadata and message_metadata.get(SKIP_USER_PERSIST_META) is True:
+        return initial_message_count
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
     # build_messages may merge the current message into a same-role history tail.
