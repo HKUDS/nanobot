@@ -393,7 +393,7 @@ nanobot gateway
 
 To stop the WebUI later, return to the gateway terminal and press `Ctrl+C`.
 
-If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`../webui/README.md`](../webui/README.md).
+If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`webui.md`](./webui.md).
 
 ### Connect a Chat App
 

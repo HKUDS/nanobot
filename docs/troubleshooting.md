@@ -205,7 +205,7 @@ http://127.0.0.1:8765
 
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
-See [`../webui/README.md`](../webui/README.md) for LAN and development setup.
+See [`webui.md#lan-access`](./webui.md#lan-access) for LAN setup and [`../webui/README.md`](../webui/README.md) for frontend development.
 
 ## Chat App Problems
 
