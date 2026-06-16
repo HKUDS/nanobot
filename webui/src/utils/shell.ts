@@ -61,6 +61,9 @@ export function readShellRoute(): ShellRoute {
   if (path === "/apps") {
     return { view: "apps", activeKey, settingsSection: "apps" };
   }
+  if (path === "/skills") {
+    return { view: "skills", activeKey, settingsSection: settingsSection === "overview" ? "skills" : settingsSection };
+  }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
     try {

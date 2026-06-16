@@ -2,7 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatSummary } from "@/lib/types";
+import { useSessionStore } from "@/stores/session-store";
 import { useShellStore } from "@/stores/shell-store";
+import { readShellRoute } from "@/utils/shell";
 
 const connectSpy = vi.fn();
 const refreshSpy = vi.fn();
@@ -213,9 +215,7 @@ import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 describe("App layout", () => {
   beforeEach(() => {
     useShellStore.setState({
-      activeKey: null,
-      view: "chat",
-      settingsSection: "overview",
+      ...readShellRoute(),
       hostSidebarOpen: true,
       mobileSidebarOpen: false,
       sessionSearchOpen: false,
@@ -224,6 +224,15 @@ describe("App layout", () => {
       pendingProjectRename: null,
       restartToast: null,
       isRestarting: false,
+    });
+    useSessionStore.setState({
+      runningChatIds: new Set(),
+      completedChatIds: new Set(),
+      workspaces: null,
+      workspaceError: null,
+      draftWorkspaceScope: null,
+      workspaceOverrides: {},
+      settingsSnapshot: null,
     });
     mockSessions = [];
     connectSpy.mockClear();
@@ -781,6 +790,9 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => {
+      useSessionStore.getState().addCompleted("chat-b");
+    });
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await waitFor(() =>
       expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),

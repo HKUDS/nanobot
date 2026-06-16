@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { RESTART_STARTED_KEY, SIDEBAR_RAIL_WIDTH, SIDEBAR_WIDTH } from "../constants";
 import { useDeferredTitleRefresh } from "../hooks/useDeferredTitleRefresh";
 import { useSessions } from "../hooks/useSessions";
+import { useSkills } from "../hooks/useSkills";
 import { useSidebarState } from "../hooks/useSidebarState";
 import { ThemeProvider, useTheme } from "../hooks/useTheme";
 import { fetchSettings, fetchWorkspaces } from "../lib/api";
@@ -39,6 +40,7 @@ export default function Shell({
   const { client, token } = useClient();
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
+  const skills = useSkills(token);
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
 
@@ -96,6 +98,7 @@ export default function Shell({
   const activeChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    applyRoute();
     window.addEventListener("hashchange", applyRoute);
     return () => window.removeEventListener("hashchange", applyRoute);
   }, [applyRoute]);
@@ -622,6 +625,12 @@ export default function Shell({
       });
       return;
     }
+    if (view === "skills") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.skills", { defaultValue: "Skills" }),
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -645,7 +654,7 @@ export default function Shell({
     onOpenApps: () => onOpenPage("apps", "apps"),
     onOpenSkills: () => onOpenPage("skills", "skills"),
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" ? "apps" as const : null,
+    activeUtility: view === "apps" ? "apps" as const : view === "skills" ? "skills" as const : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -710,6 +719,7 @@ export default function Shell({
               }}
             >
               <div
+                aria-hidden={showHostChrome && !hostSidebarOpen ? true : undefined}
                 className={cn(
                   "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                   showHostChrome
@@ -829,6 +839,7 @@ export default function Shell({
                   onNativeEngineRestart={onNativeEngineRestart}
                   isRestarting={isRestarting}
                   hostChromeInset={showHostChrome}
+                  skills={skills}
                 />
               </div>
             )}
