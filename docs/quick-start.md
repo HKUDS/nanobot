@@ -32,7 +32,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `blackcat-ai` from PyPI, then starts `blackcat onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+The default command installs or upgrades `blackcat-ai` from PyPI, then starts `blackcat onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.blackcat/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -71,6 +71,8 @@ blackcat --version
 python -m pip install blackcat-ai
 blackcat --version
 ```
+
+Use pip only inside an environment you control. If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install blackcat-ai`, `pipx install blackcat-ai`, or create a virtual environment first.
 
 **Latest source checkout:**
 
@@ -271,7 +273,7 @@ Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
 | Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
 | Understand provider/model matching | [`providers.md`](./providers.md) |
-| Open the bundled browser UI | [`webui.md`](./webui.md) |
+| Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
 | Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
@@ -286,10 +288,19 @@ python -m pip install -U blackcat-ai
 blackcat --version
 ```
 
+If pip reports `externally-managed-environment`, upgrade with the same isolated method you used to install blackcat, such as `uv tool upgrade blackcat-ai`, `pipx upgrade blackcat-ai`, or the managed venv created by the one-command installer.
+
 **uv:**
 
 ```bash
 uv tool upgrade blackcat-ai
+blackcat --version
+```
+
+**pipx:**
+
+```bash
+pipx upgrade blackcat-ai
 blackcat --version
 ```
 

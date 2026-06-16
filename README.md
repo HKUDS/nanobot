@@ -217,7 +217,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `blackcat-ai` from PyPI, then starts `blackcat onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps below and go straight to **Test one message**.
+The default command installs or upgrades `blackcat-ai` from PyPI, then starts `blackcat onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.blackcat/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps below and go straight to **Test one message**.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -241,17 +241,19 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/blackcat/main/script
 
 If you prefer to inspect the script first, open [`scripts/install.sh`](./scripts/install.sh) or [`scripts/install.ps1`](./scripts/install.ps1).
 
-**Install from PyPI**
-
-```bash
-python -m pip install blackcat-ai
-```
-
 **Install with `uv`**
 
 ```bash
 uv tool install blackcat-ai
 ```
+
+**Install from PyPI with pip**
+
+```bash
+python -m pip install blackcat-ai
+```
+
+If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install blackcat-ai`, `pipx install blackcat-ai`, or install inside a virtual environment.
 
 **Install from source**
 
@@ -359,7 +361,7 @@ Need help with `PATH`, API keys, provider/model matching, or JSON errors? See th
 
 ## 🌐 WebUI
 
-The WebUI ships **inside the published wheel** — no extra build step. It is the browser workbench for chat sessions, workspace controls, Apps, Skills, Automations, and settings. For the full user guide, see [`docs/webui.md`](./docs/webui.md).
+The WebUI ships **inside the published wheel** — no extra build step. Just enable the WebSocket channel and open it in your browser.
 
 <p align="center">
   <img src="images/blackcat_webui.png" alt="blackcat webui preview" width="900">
@@ -381,12 +383,12 @@ blackcat gateway
 
 **3. Open the WebUI**
 
-Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs -> LAN access](./docs/webui.md#lan-access).
+Visit [`http://127.0.0.1:8765`](http://127.0.0.1:8765) in your browser. To open it from another device on your LAN, see [WebUI docs → LAN access](./webui/README.md#access-from-another-device-lan).
 
 The WebUI is served by the WebSocket channel on port `8765` by default. The gateway's `18790` port is for the health endpoint, not the browser UI.
 
 > [!TIP]
-> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the source-tree, Vite dev server, build, and test workflow.
+> Working on the WebUI itself? Check out [`webui/README.md`](./webui/README.md) for the Vite dev server (HMR) workflow.
 
 ## 🏗️ Architecture
 

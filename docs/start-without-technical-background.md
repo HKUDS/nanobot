@@ -76,7 +76,7 @@ An OpenRouter key usually starts with `sk-or-v1-`. Other providers use different
 
 ## 4. Install nanobot
 
-The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard.
+The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard. On macOS and Linux it avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`.
 
 **macOS / Linux**
 
@@ -110,13 +110,21 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
 ```
 
-If the command says `curl` or `irm` is not found, or it cannot download from GitHub, use the manual install command below.
+If the command says `curl` or `irm` is not found, or it cannot download from GitHub, use one of the manual install commands below.
 
-If you prefer to install manually, run:
+If `uv` is installed, use:
+
+```bash
+uv tool install nanobot-ai
+```
+
+If you prefer pip, use it only inside an environment you control:
 
 ```bash
 python -m pip install nanobot-ai
 ```
+
+If pip reports `externally-managed-environment` on macOS or Linux, go back to the one-command installer, use `uv tool install nanobot-ai`, use `pipx install nanobot-ai`, or create a virtual environment first.
 
 Then check that nanobot is installed:
 
