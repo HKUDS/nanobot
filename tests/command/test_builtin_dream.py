@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from blackcat.bus.events import InboundMessage
+from blackcat.bus.events import InboundMessage, OutboundMessage
 from blackcat.command.builtin import cmd_dream, cmd_dream_log, cmd_dream_restore
 from blackcat.command.router import CommandContext
 from blackcat.utils.gitstore import CommitInfo
@@ -23,6 +23,12 @@ class _FakeStore:
 
     def build_dream_prompt(self):
         return self._dream_prompt_result
+
+    def build_dream_tools(self):
+        return None
+
+    def set_last_dream_cursor(self, value: int) -> None:
+        self._last_dream_cursor = value
 
     def compact_history(self) -> None:
         self.compact_history_called = True
@@ -103,6 +109,39 @@ async def test_dream_no_history_explains_how_to_create_input(tmp_path) -> None:
     assert "idle auto-compact" in content
     assert "Dream cursor" in content
     assert "agents.defaults.idleCompactAfterMinutes" in content
+
+
+@pytest.mark.asyncio
+async def test_dream_internal_run_silences_progress(tmp_path) -> None:
+    msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="chat1", content="/dream")
+    store = _FakeStore(_FakeGit(initialized=False), dream_prompt_result=("dream prompt", 123))
+    bus = _FakeBus()
+    calls = []
+
+    async def process_direct(*args, **kwargs):
+        calls.append((args, kwargs))
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"_stop_reason": "completed"},
+        )
+
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    loop = SimpleNamespace(
+        bus=bus,
+        context=SimpleNamespace(memory=store, timezone="UTC"),
+        sessions=SimpleNamespace(sessions_dir=sessions_dir),
+        process_direct=process_direct,
+    )
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
+
+    await cmd_dream(ctx)
+    await asyncio.sleep(0)
+
+    assert len(calls) == 1
+    assert callable(calls[0][1]["on_progress"])
 
 
 @pytest.mark.asyncio
