@@ -22,6 +22,7 @@ INTERNAL_CONTINUATION_META = "_internal_continuation"
 INTERNAL_CONTINUATION_KIND_META = "_internal_continuation_kind"
 INTERNAL_CONTINUATION_PENDING_META = "_internal_continuation_pending"
 INTERNAL_CONTINUATION_RUN_STARTED_AT_META = "_internal_continuation_run_started_at"
+SKIP_USER_PERSIST_META = "_skip_user_persist"
 
 _GOAL_CONTINUATION_KIND = "sustained_goal"
 _GOAL_CONTINUATION_SENDER = "system:continuation"
@@ -59,6 +60,8 @@ def internal_continuation_run_started_at(metadata: Mapping[str, Any] | None) -> 
 
 def should_persist_user_message(metadata: Mapping[str, Any] | None) -> bool:
     """Return whether this inbound message should be persisted as user input."""
+    if metadata and metadata.get(SKIP_USER_PERSIST_META) is True:
+        return False
     return not internal_continuation_inbound(metadata)
 
 
@@ -180,6 +183,8 @@ def _save_skip_for_turn(
     user_persisted_early: bool,
 ) -> int:
     """Return the persisted-message append boundary for this turn."""
+    if message_metadata and message_metadata.get(SKIP_USER_PERSIST_META) is True:
+        return initial_message_count
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
     # build_messages may merge the current message into a same-role history tail.

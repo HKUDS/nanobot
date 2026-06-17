@@ -4,6 +4,7 @@ import {
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
+  fetchAutomations,
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpPresets,
@@ -20,9 +21,11 @@ import {
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  updateAutomation,
   updateSidebarState,
   updateImageGenerationSettings,
   updateModelConfiguration,
@@ -97,6 +100,49 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+
+  it("fetches workspace automations", async () => {
+    await fetchAutomations("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes workspace automation actions", async () => {
+    await runAutomationAction("tok", "disable", "job 1/2");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/disable?id=job+1%2F2",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes workspace automation updates", async () => {
+    const values = {
+      name: "每日测验",
+      message: "Ask 今日 quiz",
+      schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
+    } as const;
+    await updateAutomation("tok", "job 1/2", values);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/update?id=job+1%2F2",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
+        },
+      }),
+    );
+    const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
   });
 
   it("fetches the WebUI skill summary", async () => {

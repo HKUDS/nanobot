@@ -1,4 +1,6 @@
 import type {
+  AutomationsPayload,
+  AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -85,6 +87,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   });
   if (!Object.keys(payload).length) return undefined;
   return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
+}
+
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -180,6 +186,52 @@ export async function fetchSessionAutomations(
     `${base}/api/sessions/${encodeURIComponent(key)}/automations`,
     token,
     undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchAutomations(
+  token: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runAutomationAction(
+  token: string,
+  action: "enable" | "disable" | "delete" | "run",
+  id: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/${action}?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateAutomation(
+  token: string,
+  id: string,
+  values: AutomationUpdatePayload,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/update?${query}`,
+    token,
+    {
+      headers: automationValuesHeader(values),
+    },
     API_READ_TIMEOUT_MS,
   );
 }

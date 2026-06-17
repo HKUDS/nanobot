@@ -218,6 +218,7 @@ _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
+_TRUNCATED_SUFFIX = "\n... (truncated)"
 
 
 def safe_filename(name: str) -> str:
@@ -234,7 +235,39 @@ def truncate_text(text: str, max_chars: int) -> str:
     """Truncate text with a stable suffix."""
     if max_chars <= 0 or len(text) <= max_chars:
         return text
-    return text[:max_chars] + "\n... (truncated)"
+    return text[:max_chars] + _TRUNCATED_SUFFIX
+
+
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to a token budget with a stable suffix.
+
+    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
+    regardless of language or content (CJK and code cost more tokens per char).
+    Falls back to a char-based estimate (~4 chars/token) if tiktoken is
+    unavailable.
+    """
+    if max_tokens <= 0:
+        return text
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
+        body_budget = max_tokens - len(suffix_tokens)
+        if body_budget <= 0:
+            return enc.decode(tokens[:max_tokens])
+        for candidate_budget in range(body_budget, -1, -1):
+            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+            if len(enc.encode(result)) <= max_tokens:
+                return result
+        return enc.decode(tokens[:max_tokens])
+    except Exception:
+        max_chars = max_tokens * 4
+        suffix_chars = len(_TRUNCATED_SUFFIX)
+        if max_chars <= suffix_chars:
+            return text[:max_chars]
+        return truncate_text(text, max_chars - suffix_chars)
 
 
 def find_legal_message_start(messages: list[dict[str, Any]]) -> int:

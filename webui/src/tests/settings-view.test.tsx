@@ -159,8 +159,9 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "advanced" | "models";
+    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models";
     initialSettings?: SettingsPayload;
+    showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
     onNativeEngineRestart?: () => Promise<string>;
   } = {},
@@ -171,6 +172,7 @@ function renderSettingsView(
         theme="light"
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
+        showSidebar={options.showSidebar}
         onToggleTheme={() => {}}
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
@@ -185,6 +187,25 @@ describe("SettingsView Apps catalog", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("does not show the Settings kicker on the standalone Automations surface", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return jsonResponse({ jobs: [] });
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
+    expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
