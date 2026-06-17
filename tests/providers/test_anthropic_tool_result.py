@@ -94,3 +94,41 @@ def test_convert_assistant_message_repairs_history_tool_arguments():
 
     assert blocks[0]["type"] == "tool_use"
     assert blocks[0]["input"] == {"path": "foo.txt"}
+
+
+def test_anthropic_sanitizes_invalid_tool_ids_consistently():
+    """Invalid restored IDs must be valid for Anthropic and keep pairs matched."""
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{
+            "id": "call_abc|rs.same",
+            "function": {"name": "read_file", "arguments": "{}"},
+        }],
+    })
+    result = AnthropicProvider._tool_result_block({
+        "role": "tool",
+        "tool_call_id": "call_abc|rs.same",
+        "content": "ok",
+    })
+
+    tool_id = blocks[0]["id"]
+    assert tool_id == result["tool_use_id"]
+    assert tool_id != "call_abc|rs.same"
+    assert all(ch.isalnum() or ch in "_-" for ch in tool_id)
+
+
+def test_anthropic_sanitized_tool_ids_avoid_simple_collisions():
+    """Replacement-only sanitizing would collapse these two ids to call_a."""
+    blocks = AnthropicProvider._assistant_blocks({
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": "call.a", "function": {"name": "a", "arguments": "{}"}},
+            {"id": "call|a", "function": {"name": "b", "arguments": "{}"}},
+        ],
+    })
+
+    ids = [block["id"] for block in blocks if block["type"] == "tool_use"]
+    assert len(ids) == len(set(ids)) == 2
+    assert all(all(ch.isalnum() or ch in "_-" for ch in tool_id) for tool_id in ids)
