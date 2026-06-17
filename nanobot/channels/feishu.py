@@ -1420,16 +1420,11 @@ class FeishuChannel(BaseChannel):
             self.logger.warning("Error stream-updating card {}: {}", card_id, e)
             return False
 
-    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
-        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
-
-        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
-        streaming_mode is set to false via card settings (after final content update).
-        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
-        """
+    def _set_streaming_mode_sync(self, card_id: str, enabled: bool, sequence: int) -> bool:
+        """Set CardKit streaming_mode using a strictly increasing sequence."""
         from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
 
-        settings_payload = json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False)
+        settings_payload = json.dumps({"config": {"streaming_mode": enabled}}, ensure_ascii=False)
         try:
             request = (
                 SettingsCardRequest.builder()
@@ -1446,7 +1441,8 @@ class FeishuChannel(BaseChannel):
             response = self._client.cardkit.v1.card.settings(request)
             if not response.success():
                 self.logger.warning(
-                    "Failed to close streaming on card {}: code={}, msg={}",
+                    "Failed to set streaming={} on card {}: code={}, msg={}",
+                    enabled,
                     card_id,
                     response.code,
                     response.msg,
@@ -1454,8 +1450,31 @@ class FeishuChannel(BaseChannel):
                 return False
             return True
         except Exception as e:
-            self.logger.warning("Error closing streaming on card {}: {}", card_id, e)
+            self.logger.warning("Error setting streaming={} on card {}: {}", enabled, card_id, e)
             return False
+
+    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
+        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
+
+        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
+        streaming_mode is set to false via card settings (after final content update).
+        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
+        """
+        return self._set_streaming_mode_sync(card_id, False, sequence)
+
+    def _stream_update_text_with_reopen_sync(
+        self,
+        card_id: str,
+        content: str,
+        sequence: int,
+    ) -> tuple[bool, int]:
+        if self._stream_update_text_sync(card_id, content, sequence):
+            return True, sequence
+        sequence += 1
+        if not self._set_streaming_mode_sync(card_id, True, sequence):
+            return False, sequence
+        sequence += 1
+        return self._stream_update_text_sync(card_id, content, sequence), sequence
 
     async def send_delta(
         self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
@@ -1499,22 +1518,37 @@ class FeishuChannel(BaseChannel):
             # back to sending a regular interactive card.
             if buf.card_id:
                 buf.sequence += 1
-                ok = await loop.run_in_executor(
+                ok, buf.sequence = await loop.run_in_executor(
                     None,
-                    self._stream_update_text_sync,
+                    self._stream_update_text_with_reopen_sync,
                     buf.card_id,
                     buf.text,
                     buf.sequence,
                 )
                 if ok:
                     buf.sequence += 1
-                    await loop.run_in_executor(
+                    closed = await loop.run_in_executor(
                         None,
                         self._close_streaming_mode_sync,
                         buf.card_id,
                         buf.sequence,
                     )
+                    if not closed:
+                        buf.sequence += 1
+                        await loop.run_in_executor(
+                            None,
+                            self._close_streaming_mode_sync,
+                            buf.card_id,
+                            buf.sequence,
+                        )
                     return
+                buf.sequence += 1
+                await loop.run_in_executor(
+                    None,
+                    self._close_streaming_mode_sync,
+                    buf.card_id,
+                    buf.sequence,
+                )
                 self.logger.warning(
                     "Streaming card {} final update failed, falling back to regular card",
                     buf.card_id,
@@ -1567,18 +1601,36 @@ class FeishuChannel(BaseChannel):
                 ),
             )
             if card_id:
-                buf.card_id = card_id
-                buf.sequence = 1
-                await loop.run_in_executor(
-                    None, self._stream_update_text_sync, card_id, buf.text, 1
+                ok, sequence = await loop.run_in_executor(
+                    None, self._stream_update_text_with_reopen_sync, card_id, buf.text, 1
                 )
-                buf.last_edit = now
+                if ok:
+                    buf.card_id = card_id
+                    buf.sequence = sequence
+                    buf.last_edit = now
+                else:
+                    await loop.run_in_executor(
+                        None, self._close_streaming_mode_sync, card_id, sequence + 1
+                    )
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
-            buf.sequence += 1
-            await loop.run_in_executor(
-                None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence
+            ok, buf.sequence = await loop.run_in_executor(
+                None,
+                self._stream_update_text_with_reopen_sync,
+                buf.card_id,
+                buf.text,
+                buf.sequence + 1,
             )
-            buf.last_edit = now
+            if ok:
+                buf.last_edit = now
+            else:
+                buf.sequence += 1
+                await loop.run_in_executor(
+                    None,
+                    self._close_streaming_mode_sync,
+                    buf.card_id,
+                    buf.sequence,
+                )
+                buf.card_id = None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
