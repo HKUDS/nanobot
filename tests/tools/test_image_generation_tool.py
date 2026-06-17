@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.tools.image_generation import ImageGenerationTool
+from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
 from nanobot.config.loader import set_config_path
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
+from nanobot.config.schema import ProviderConfig
 from nanobot.providers.image_generation import GeneratedImageResponse
 
 PNG_BYTES = (

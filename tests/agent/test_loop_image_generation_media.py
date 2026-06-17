@@ -7,10 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import set_config_path
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
+from nanobot.config.schema import ProviderConfig, ToolsConfig
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.image_generation import GeneratedImageResponse
 

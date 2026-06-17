@@ -28,10 +28,15 @@ class ToolLoader:
         self._plugins: dict[str, type[Tool]] | None = None
 
     def discover(self) -> list[type[Tool]]:
+        """Discover concrete tools that should be registered automatically."""
         if self._test_classes is not None:
             return list(self._test_classes)
         if self._discovered is not None:
             return self._discovered
+        self._discovered = self._discover_package_tools(include_non_discoverable=False)
+        return self._discovered
+
+    def _discover_package_tools(self, *, include_non_discoverable: bool) -> list[type[Tool]]:
         seen: set[int] = set()
         results: list[type[Tool]] = []
         for _importer, module_name, _ispkg in pkgutil.iter_modules(self._package.__path__):
@@ -50,14 +55,22 @@ class ToolLoader:
                     and attr is not Tool
                     and not attr_name.startswith("_")
                     and not getattr(attr, "__abstractmethods__", None)
-                    and getattr(attr, "_plugin_discoverable", True)
+                    and (include_non_discoverable or getattr(attr, "_plugin_discoverable", True))
                     and id(attr) not in seen
                 ):
                     seen.add(id(attr))
                     results.append(attr)
         results.sort(key=lambda cls: cls.__name__)
-        self._discovered = results
         return results
+
+    def discover_config_classes(self) -> list[type[Tool]]:
+        """Discover tool classes that declare owned config models."""
+        classes = self._discover_package_tools(include_non_discoverable=True)
+        classes.extend(self._discover_plugins().values())
+        return [
+            cls for cls in classes
+            if getattr(cls, "config_key", "") and cls.config_cls() is not None
+        ]
 
     def _discover_plugins(self) -> dict[str, type[Tool]]:
         """Discover external tool plugins registered via entry_points."""

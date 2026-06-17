@@ -9,11 +9,10 @@ from typing import Any
 import pydantic
 from pydantic import BaseModel
 
-from nanobot.config.schema import Config, _resolve_tool_config_refs
+from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
-_schema_refs_ready = False
 
 
 def set_config_path(path: Path) -> None:
@@ -39,11 +38,6 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    global _schema_refs_ready
-    if not _schema_refs_ready:
-        _resolve_tool_config_refs()
-        _schema_refs_ready = True
-
     path = config_path or get_config_path()
 
     config = Config()
@@ -56,6 +50,12 @@ def load_config(config_path: Path | None = None) -> Config:
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             raise ValueError(f"Failed to load config from {path}: {e}") from e
 
+    from nanobot.agent.tools.config import materialize_tool_configs
+
+    try:
+        materialize_tool_configs(config.tools)
+    except (ValueError, pydantic.ValidationError) as e:
+        raise ValueError(f"Failed to load config from {path}: {e}") from e
     _apply_ssrf_whitelist(config)
     return config
 
@@ -78,6 +78,9 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    from nanobot.agent.tools.config import materialize_tool_configs
+
+    materialize_tool_configs(config.tools)
     data = config.model_dump(mode="json", by_alias=True)
 
     with open(path, "w", encoding="utf-8") as f:

@@ -20,6 +20,32 @@ print("nanobot.config.schema" in sys.modules)
     assert result.stdout.strip() == "False"
 
 
+def test_config_schema_import_does_not_load_builtin_tool_modules():
+    code = """
+import sys
+import nanobot.config.schema
+print(any(
+    name in sys.modules
+    for name in (
+        "nanobot.agent.tools.cli_apps",
+        "nanobot.agent.tools.filesystem",
+        "nanobot.agent.tools.image_generation",
+        "nanobot.agent.tools.self",
+        "nanobot.agent.tools.shell",
+        "nanobot.agent.tools.web",
+    )
+))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
+
+
 def test_builtin_tool_configs_do_not_depend_on_config_schema_base():
     repo = Path(__file__).resolve().parents[2]
     tool_paths = sorted((repo / "nanobot/agent/tools").glob("*.py"))

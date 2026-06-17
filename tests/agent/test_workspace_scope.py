@@ -7,10 +7,16 @@ import pytest
 
 from nanobot.agent.tools.cli_apps import CliAppsTool
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGenerationTool
+from nanobot.agent.tools.image_generation import (
+    ImageGenerationError,
+    ImageGenerationTool,
+    ImageGenerationToolConfig,
+)
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
+from nanobot.config.schema import ProviderConfig
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
@@ -20,8 +26,6 @@ from nanobot.security.workspace_access import (
     validate_workspace_scope_payload,
     workspace_scope_from_metadata,
 )
-from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"

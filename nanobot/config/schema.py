@@ -2,21 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
-
-if TYPE_CHECKING:
-    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
-    from nanobot.agent.tools.filesystem import FileToolsConfig
-    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
-    from nanobot.agent.tools.self import MyToolConfig
-    from nanobot.agent.tools.shell import ExecToolConfig
-    from nanobot.agent.tools.web import WebToolsConfig
 
 
 class ChannelsConfig(Base):
@@ -304,29 +296,16 @@ class MCPServerConfig(Base):
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
-def _lazy_default(module_path: str, class_name: str) -> Any:
-    """Deferred import helper for ToolsConfig default factories."""
-    import importlib
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)()
-
-
 class ToolsConfig(Base):
     """Tools configuration.
 
-    Field types for tool-specific sub-configs are resolved via model_rebuild()
-    at the bottom of this file so tool config classes can stay next to their
-    tool implementations.
+    Concrete tool sub-configs are stored as extra fields and parsed by the
+    owning tool module when tools are loaded.  This keeps the root schema from
+    importing or naming concrete tool configuration classes.
     """
 
-    web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
-    exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
-    file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.filesystem", "FileToolsConfig"))
-    cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.cli_apps", "CliAppsToolConfig"))
-    my: MyToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.self", "MyToolConfig"))
-    image_generation: ImageGenerationToolConfig = Field(
-        default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
-    )
+    model_config = ConfigDict(extra="allow")
+
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
     webui_allow_local_service_access: bool = Field(
         default=True,
@@ -339,6 +318,19 @@ class ToolsConfig(Base):
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return super().__getattr__(name)
+        except AttributeError as exc:
+            if name.startswith("_"):
+                raise
+            from nanobot.agent.tools.config import tool_config_by_key
+
+            try:
+                return tool_config_by_key(self, name)
+            except KeyError:
+                raise exc from None
 
 
 class Config(BaseSettings):
@@ -355,11 +347,6 @@ class Config(BaseSettings):
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
     )
-
-    def __init__(self, **values: Any) -> None:
-        if not type(self).__pydantic_complete__:
-            _resolve_tool_config_refs()
-        super().__init__(**values)
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
@@ -548,43 +535,3 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
-
-
-def _resolve_tool_config_refs() -> None:
-    """Resolve forward references in ToolsConfig by importing tool config classes.
-
-    Must be called after all modules are loaded (breaks circular imports).
-    Re-exports the classes into this module's namespace so existing imports
-    like ``from nanobot.config.schema import ExecToolConfig`` continue to work.
-    """
-    import sys
-
-    from nanobot.agent.tools.cli_apps import CliAppsToolConfig
-    from nanobot.agent.tools.filesystem import FileToolsConfig
-    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
-    from nanobot.agent.tools.self import MyToolConfig
-    from nanobot.agent.tools.shell import ExecToolConfig
-    from nanobot.agent.tools.web import WebFetchConfig, WebSearchConfig, WebToolsConfig
-
-    # Re-export into this module's namespace
-    mod = sys.modules[__name__]
-    mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
-    mod.FileToolsConfig = FileToolsConfig  # type: ignore[attr-defined]
-    mod.CliAppsToolConfig = CliAppsToolConfig  # type: ignore[attr-defined]
-    mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]
-    mod.WebSearchConfig = WebSearchConfig  # type: ignore[attr-defined]
-    mod.WebFetchConfig = WebFetchConfig  # type: ignore[attr-defined]
-    mod.MyToolConfig = MyToolConfig  # type: ignore[attr-defined]
-    mod.ImageGenerationToolConfig = ImageGenerationToolConfig  # type: ignore[attr-defined]
-
-    ToolsConfig.model_rebuild()
-    Config.model_rebuild()
-
-
-# Eagerly resolve when the import chain allows it (no circular deps at this
-# point).  If it fails (first import triggers a cycle), the rebuild will
-# happen lazily when Config/ToolsConfig is first used at runtime.
-try:
-    _resolve_tool_config_refs()
-except ImportError:
-    pass
