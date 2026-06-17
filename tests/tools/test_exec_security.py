@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import shutil
 import sys
 from unittest.mock import patch
 
@@ -224,6 +225,34 @@ async def test_exec_allows_working_dir_within_workspace(tmp_path):
     result = await tool.execute(command="echo ok", working_dir=str(subdir))
     assert "ok" in result
     assert "outside the configured workspace" not in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allows_git_commands_from_workspace_subdirectory(tmp_path):
+    """Regression for #4375: git commands in workspace subdirectories are allowed."""
+    if shutil.which("git") is None:
+        pytest.skip("git is required for the workspace git regression test")
+
+    workspace = tmp_path / "workspace"
+    repo = workspace / "obsidian_notes"
+    repo.mkdir(parents=True)
+    (repo / "note.md").write_text("hello\n", encoding="utf-8")
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=20)
+
+    commands = [
+        "git init",
+        "git config user.email test@example.com",
+        'git config user.name "Nanobot Test"',
+        "git add note.md",
+        'git commit -m "initial note"',
+        "git status --short",
+    ]
+    for command in commands:
+        result = await tool.execute(command=command, working_dir=str(repo))
+        assert "Command blocked by safety guard" not in result
+        assert "outside the configured workspace" not in result
+        assert "Exit code: 0" in result
 
 
 @pytest.mark.asyncio
