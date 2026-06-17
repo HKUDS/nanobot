@@ -6,7 +6,6 @@ settings payload shape and the allowlisted config mutations exposed to WebUI.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
@@ -23,7 +22,7 @@ from nanobot.audio.transcription_registry import (
     transcription_provider_names,
 )
 from nanobot.config.loader import get_config_path, load_config, save_config
-from nanobot.config.schema import InlineFallbackConfig, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import ModelPresetConfig, ProviderConfig
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -780,14 +779,12 @@ def settings_payload(
             "bot_name": defaults.bot_name,
             "bot_icon": defaults.bot_icon,
             "tool_hint_max_length": defaults.tool_hint_max_length,
-            # Step 2.1 — behavior scalars
             "max_tool_iterations": defaults.max_tool_iterations,
             "max_concurrent_subagents": defaults.max_concurrent_subagents,
             "max_tool_result_chars": defaults.max_tool_result_chars,
             "provider_retry_mode": defaults.provider_retry_mode,
             "unified_session": defaults.unified_session,
             "session_ttl_minutes": defaults.session_ttl_minutes,
-            # Step 2.2 — memory + session fields
             "max_messages": defaults.max_messages,
             "consolidation_ratio": defaults.consolidation_ratio,
             "context_block_limit": defaults.context_block_limit,
@@ -859,13 +856,6 @@ def settings_payload(
                 "schedule": defaults.dream.describe_schedule(),
             },
             "unified_session": defaults.unified_session,
-        },
-        "channels": {
-            "send_progress": config.channels.send_progress,
-            "send_tool_hints": config.channels.send_tool_hints,
-            "show_reasoning": config.channels.show_reasoning,
-            "extract_document_text": config.channels.extract_document_text,
-            "send_max_retries": config.channels.send_max_retries,
         },
         "usage": token_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
@@ -1133,36 +1123,6 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
                 raise WebUISettingsError("context_block_limit must be between 1 and 10000")
         if defaults.context_block_limit != cbl_val:
             defaults.context_block_limit = cbl_val
-            changed = True
-
-    raw = _query_first_alias(query, "disabled_skills", "disabledSkills")
-    if raw is not None:
-        skills = [s.strip() for s in raw.split(",") if s.strip()]
-        if defaults.disabled_skills != skills:
-            defaults.disabled_skills = skills
-            changed = True
-
-    raw = _query_first_alias(query, "fallback_models", "fallbackModels")
-    if raw is not None:
-        try:
-            entries = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise WebUISettingsError(f"fallback_models must be a JSON array: {exc}") from exc
-        if not isinstance(entries, list):
-            raise WebUISettingsError("fallback_models must be a JSON array")
-        parsed_fallbacks: list[Any] = []
-        for entry in entries:
-            if isinstance(entry, str):
-                parsed_fallbacks.append(entry)
-            elif isinstance(entry, dict):
-                try:
-                    parsed_fallbacks.append(InlineFallbackConfig.model_validate(entry))
-                except Exception as exc:
-                    raise WebUISettingsError(f"invalid fallback_models entry: {exc}") from exc
-            else:
-                raise WebUISettingsError("fallback_models entries must be strings or objects")
-        if defaults.fallback_models != parsed_fallbacks:
-            defaults.fallback_models = parsed_fallbacks
             changed = True
 
     if changed:
@@ -1456,56 +1416,6 @@ def logout_oauth_provider(query: QueryParams) -> dict[str, Any]:
     for path in (token_path, token_path.with_suffix(".lock")):
         with suppress(FileNotFoundError):
             path.unlink()
-    return settings_payload()
-
-
-def update_channels_settings(query: QueryParams) -> dict[str, Any]:
-    config = load_config()
-    channels = config.channels
-    changed = False
-
-    raw = _query_first_alias(query, "send_progress", "sendProgress")
-    if raw is not None:
-        value_bool = _parse_bool(raw, "send_progress")
-        if channels.send_progress != value_bool:
-            channels.send_progress = value_bool
-            changed = True
-
-    raw = _query_first_alias(query, "send_tool_hints", "sendToolHints")
-    if raw is not None:
-        value_bool = _parse_bool(raw, "send_tool_hints")
-        if channels.send_tool_hints != value_bool:
-            channels.send_tool_hints = value_bool
-            changed = True
-
-    raw = _query_first_alias(query, "show_reasoning", "showReasoning")
-    if raw is not None:
-        value_bool = _parse_bool(raw, "show_reasoning")
-        if channels.show_reasoning != value_bool:
-            channels.show_reasoning = value_bool
-            changed = True
-
-    raw = _query_first_alias(query, "extract_document_text", "extractDocumentText")
-    if raw is not None:
-        value_bool = _parse_bool(raw, "extract_document_text")
-        if channels.extract_document_text != value_bool:
-            channels.extract_document_text = value_bool
-            changed = True
-
-    raw = _query_first_alias(query, "send_max_retries", "sendMaxRetries")
-    if raw is not None:
-        try:
-            value_int = int(raw)
-        except ValueError:
-            raise WebUISettingsError("send_max_retries must be an integer") from None
-        if not (0 <= value_int <= 10):
-            raise WebUISettingsError("send_max_retries must be between 0 and 10")
-        if channels.send_max_retries != value_int:
-            channels.send_max_retries = value_int
-            changed = True
-
-    if changed:
-        save_config(config)
     return settings_payload()
 
 

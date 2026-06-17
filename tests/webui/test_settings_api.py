@@ -16,7 +16,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_channels_settings,
     update_dream_settings,
     update_model_configuration,
     update_network_safety_settings,
@@ -1053,11 +1052,6 @@ def test_azure_openai_spec_no_longer_requires_api_key() -> None:
     assert _provider_requires_api_key(spec) is False
 
 
-# ---------------------------------------------------------------------------
-# Step 1.1 — model-behavior scalars in update_agent_settings
-# ---------------------------------------------------------------------------
-
-
 def test_update_agent_settings_model_behavior_fields(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1131,11 +1125,6 @@ def test_update_agent_settings_reasoning_effort_cleared_with_empty(
     assert saved.agents.defaults.reasoning_effort is None
 
 
-# ---------------------------------------------------------------------------
-# Step 1.2 — temperature/max_tokens/reasoning_effort in preset create/update
-# ---------------------------------------------------------------------------
-
-
 def test_create_model_configuration_accepts_temperature_override(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1179,11 +1168,6 @@ def test_update_model_configuration_reasoning_effort_set_and_cleared(
     update_model_configuration({"name": ["fast"], "reasoning_effort": [""]})
     saved = load_config(config_path)
     assert saved.model_presets["fast"].reasoning_effort is None
-
-
-# ---------------------------------------------------------------------------
-# Step 1.3 — dream endpoint + memory/session fields
-# ---------------------------------------------------------------------------
 
 
 def test_update_dream_settings_toggle_and_interval(
@@ -1244,90 +1228,11 @@ def test_update_agent_settings_memory_fields(
     update_agent_settings({
         "max_messages": ["200"],
         "consolidation_ratio": ["0.6"],
-        "disabled_skills": ["summarize,search"],
     })
 
     saved = load_config(config_path)
     assert saved.agents.defaults.max_messages == 200
     assert saved.agents.defaults.consolidation_ratio == 0.6
-    assert saved.agents.defaults.disabled_skills == ["summarize", "search"]
-
-
-def test_update_agent_settings_disabled_skills_cleared(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    config = Config()
-    config.agents.defaults.disabled_skills = ["old-skill"]
-    save_config(config, config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    update_agent_settings({"disabled_skills": [""]})
-
-    saved = load_config(config_path)
-    assert saved.agents.defaults.disabled_skills == []
-
-
-# ---------------------------------------------------------------------------
-# Step 1.4 — channels settings endpoint
-# ---------------------------------------------------------------------------
-
-
-def test_update_channels_settings_bool_fields(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    payload = update_channels_settings({
-        "send_progress": ["false"],
-        "send_tool_hints": ["true"],
-        "show_reasoning": ["false"],
-        "extract_document_text": ["false"],
-    })
-
-    saved = load_config(config_path)
-    assert saved.channels.send_progress is False
-    assert saved.channels.send_tool_hints is True
-    assert saved.channels.show_reasoning is False
-    assert saved.channels.extract_document_text is False
-    assert "channels" in payload
-
-
-def test_update_channels_settings_send_max_retries(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    update_channels_settings({"send_max_retries": ["5"]})
-    saved = load_config(config_path)
-    assert saved.channels.send_max_retries == 5
-
-    with pytest.raises(WebUISettingsError, match="send_max_retries must be between"):
-        update_channels_settings({"send_max_retries": ["11"]})
-
-
-def test_update_channels_settings_no_params_returns_payload(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    payload = update_channels_settings({})
-    assert "channels" in payload
-
-
-# ---------------------------------------------------------------------------
-# Steps 2.1–2.3 — payload completeness
-# ---------------------------------------------------------------------------
 
 
 def test_settings_payload_agent_behavior_scalars(
@@ -1368,23 +1273,6 @@ def test_settings_payload_agent_memory_fields(
     assert payload["agent"]["fallback_models"] == []
 
 
-def test_settings_payload_channels_defaults(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    payload = settings_payload()
-
-    assert payload["channels"]["send_progress"] is True
-    assert payload["channels"]["send_tool_hints"] is False
-    assert payload["channels"]["show_reasoning"] is True
-    assert payload["channels"]["extract_document_text"] is True
-    assert payload["channels"]["send_max_retries"] == 3
-
-
 def test_settings_payload_advanced_ssrf_list(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1422,11 +1310,6 @@ def test_settings_payload_runtime_dream_expanded(
     assert payload["runtime"]["dream"]["interval_h"] == 4
     assert payload["runtime"]["dream"]["model_override"] is None
     assert "schedule" in payload["runtime"]["dream"]
-
-
-# ---------------------------------------------------------------------------
-# Step 2.4 — restrict_to_workspace in network-safety update
-# ---------------------------------------------------------------------------
 
 
 def test_update_network_safety_settings_restrict_to_workspace(

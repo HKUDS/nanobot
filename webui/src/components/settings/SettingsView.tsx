@@ -96,7 +96,6 @@ import {
   runMcpPresetAction,
   saveCustomMcpServer,
   updateAutomation,
-  updateChannelsSettings,
   updateDreamSettings,
   updateImageGenerationSettings,
   updateMcpServerTools,
@@ -177,18 +176,15 @@ interface AgentSettingsDraft {
   botName: string;
   botIcon: string;
   toolHintMaxLength: number;
-  // Step 3.1 — model-behavior scalars
   temperature: number;
   maxTokens: number;
   reasoningEffort: string;
-  // Step 3.2 — behavior sub-section
   maxToolIterations: number;
   maxConcurrentSubagents: number;
   maxToolResultChars: number;
   providerRetryMode: "standard" | "persistent";
   unifiedSession: boolean;
   sessionTtlMinutes: number;
-  // Step 3.3 — memory fields
   maxMessages: number;
   consolidationRatio: number;
   contextBlockLimit: number | null;

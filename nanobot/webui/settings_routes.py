@@ -30,7 +30,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_channels_settings,
     update_dream_settings,
     update_image_generation_settings,
     update_model_configuration,
@@ -111,8 +110,6 @@ class WebUISettingsRouter:
             return self._handle_settings_network_safety_update(request)
         if path == "/api/settings/dream/update":
             return self._handle_settings_dream_update(request)
-        if path == "/api/settings/channels/update":
-            return self._handle_settings_channels_update(request)
         if path == "/api/settings/cli-apps":
             return await self._handle_settings_cli_apps(request)
         if path == "/api/settings/cli-apps/install":
@@ -314,15 +311,6 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
-
-    def _handle_settings_channels_update(self, request: WsRequest) -> Response:
-        if not self._authorized(request):
-            return self._unauthorized()
-        try:
-            payload = update_channels_settings(self._query(request))
-        except WebUISettingsError as e:
-            return self._error_response(e.status, e.message)
-        return self._json_response(self._with_restart_state(payload))
 
     async def _handle_settings_cli_apps(self, request: WsRequest) -> Response:
         if not self._authorized(request):

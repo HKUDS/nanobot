@@ -477,13 +477,6 @@ export interface SettingsPayload {
     };
     unified_session: boolean;
   };
-  channels: {
-    send_progress: boolean;
-    send_tool_hints: boolean;
-    show_reasoning: boolean;
-    extract_document_text: boolean;
-    send_max_retries: number;
-  };
   usage?: {
     days: Array<{
       date: string;
@@ -731,8 +724,6 @@ export interface SettingsUpdate {
   maxMessages?: number;
   consolidationRatio?: number;
   contextBlockLimit?: number | null;
-  disabledSkills?: string[];
-  fallbackModels?: string;
 }
 
 export interface ModelConfigurationCreate {

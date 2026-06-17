@@ -543,9 +543,6 @@ export async function updateSettings(
     query.set("consolidation_ratio", String(update.consolidationRatio));
   if (update.contextBlockLimit !== undefined)
     query.set("context_block_limit", update.contextBlockLimit === null ? "null" : String(update.contextBlockLimit));
-  if (update.disabledSkills !== undefined)
-    query.set("disabled_skills", update.disabledSkills.join(","));
-  if (update.fallbackModels !== undefined) query.set("fallback_models", update.fallbackModels);
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
 }
 
@@ -721,27 +718,4 @@ export async function updateDreamSettings(
   if (update.modelOverride !== undefined)
     query.set("model_override", update.modelOverride ?? "");
   return request<SettingsPayload>(`${base}/api/settings/dream/update?${query}`, token);
-}
-
-export async function updateChannelsSettings(
-  token: string,
-  update: {
-    sendProgress?: boolean;
-    sendToolHints?: boolean;
-    showReasoning?: boolean;
-    extractDocumentText?: boolean;
-    sendMaxRetries?: number;
-  },
-  base: string = "",
-): Promise<SettingsPayload> {
-  const query = new URLSearchParams();
-  if (update.sendProgress !== undefined) query.set("send_progress", String(update.sendProgress));
-  if (update.sendToolHints !== undefined)
-    query.set("send_tool_hints", String(update.sendToolHints));
-  if (update.showReasoning !== undefined) query.set("show_reasoning", String(update.showReasoning));
-  if (update.extractDocumentText !== undefined)
-    query.set("extract_document_text", String(update.extractDocumentText));
-  if (update.sendMaxRetries !== undefined)
-    query.set("send_max_retries", String(update.sendMaxRetries));
-  return request<SettingsPayload>(`${base}/api/settings/channels/update?${query}`, token);
 }
