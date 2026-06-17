@@ -37,8 +37,8 @@ def _resolve_logical_path(path: str | Path, workspace: str | Path | None = None)
     return Path(os.path.abspath(candidate))
 
 
-def _same_logical_path(left: str | Path, right: str | Path) -> bool:
-    return os.path.normcase(os.fspath(left)) == os.path.normcase(os.fspath(right))
+def _path_key(path: str | Path) -> str:
+    return os.path.normcase(os.fspath(path))
 
 
 def is_path_within(path: str | Path, root: str | Path) -> bool:
@@ -63,14 +63,15 @@ def _is_path_exactly_allowed(
     files: Iterable[str | Path],
 ) -> bool:
     """Return True when *path* resolves exactly to one of the allowed files."""
+    logical_key = _path_key(logical_path)
+    if _path_key(resolved_path) != logical_key:
+        return False
     for file in files:
         try:
             allowed_file = _resolve_logical_path(file)
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
-        if not _same_logical_path(logical_path, allowed_file):
-            continue
-        if _same_logical_path(resolved_path, allowed_file):
+        if _path_key(allowed_file) == logical_key:
             return True
     return False
 
@@ -102,7 +103,6 @@ def resolve_allowed_path(
     strict: bool = False,
 ) -> Path:
     """Resolve a path and enforce containment in allowed roots when configured."""
-    logical = _resolve_logical_path(path, workspace)
     resolved = resolve_path(path, workspace, strict=False)
     files = list(extra_allowed_files or [])
     if allowed_root is None and not files:
@@ -112,11 +112,12 @@ def resolve_allowed_path(
     if allowed_root is not None:
         roots.append(allowed_root)
     roots.extend(extra_allowed_roots or [])
-    if not is_path_allowed(resolved, roots) and not _is_path_exactly_allowed(
-        logical,
+    exact_allowed = bool(files) and _is_path_exactly_allowed(
+        _resolve_logical_path(path, workspace),
         resolved,
         files,
-    ):
+    )
+    if not is_path_allowed(resolved, roots) and not exact_allowed:
         boundary = Path(allowed_root).expanduser() if allowed_root is not None else "allowed files"
         raise WorkspaceBoundaryError(
             f"Path {path} is outside allowed directory {boundary}"
