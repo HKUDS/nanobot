@@ -353,3 +353,49 @@ def test_exec_allows_format_in_url_and_args(command):
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is None
+
+
+# --- workspace_root allows paths inside workspace but outside cwd ----------
+
+
+def test_exec_allows_workspace_paths_from_subdirectory(tmp_path):
+    """Absolute paths inside the workspace root must be allowed even when cwd
+    is a subdirectory.  This is the scenario reported in the issue: git
+    commands in ``~/.nanobot/workspace/obsidian_notes`` reference paths
+    under the broader workspace that are outside the subdirectory cwd."""
+    workspace = tmp_path / "workspace"
+    subdir = workspace / "obsidian_notes"
+    subdir.mkdir(parents=True)
+    sibling = workspace / "other_project"
+    sibling.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    # A command run from the subdirectory that references a sibling path
+    # inside the workspace should be allowed.
+    result = tool._guard_command(
+        f"git clone {sibling}",
+        str(subdir),
+        workspace_root=str(workspace),
+    )
+    assert result is None
+
+
+def test_exec_blocks_outside_paths_from_subdirectory(tmp_path):
+    """Paths truly outside the workspace must still be blocked even when
+    workspace_root is provided."""
+    workspace = tmp_path / "workspace"
+    subdir = workspace / "project"
+    subdir.mkdir(parents=True)
+    outside = tmp_path / "secrets"
+    outside.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    result = tool._guard_command(
+        f"cat {outside / 'key.pem'}",
+        str(subdir),
+        workspace_root=str(workspace),
+    )
+    assert result is not None
+    assert "path outside working dir" in result
