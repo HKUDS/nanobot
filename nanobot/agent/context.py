@@ -52,6 +52,7 @@ class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
+    _DEFAULT_FALLBACK_BOOTSTRAP_FILES = {"SOUL.md", "USER.md"}
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
@@ -164,17 +165,31 @@ class ContextBuilder:
         return _to_blocks(left) + _to_blocks(right)
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
-        """Load all bootstrap files from workspace."""
+        """Load bootstrap files from workspace with default memory fallbacks."""
         parts = []
         root = workspace or self.workspace
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = root / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+            file_path = self._resolve_bootstrap_file(root, filename)
+            if file_path is None:
+                continue
+            content = file_path.read_text(encoding="utf-8")
+            parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
+
+    def _resolve_bootstrap_file(self, root: Path, filename: str) -> Path | None:
+        file_path = root / filename
+        if file_path.exists():
+            return file_path
+        if filename not in self._DEFAULT_FALLBACK_BOOTSTRAP_FILES:
+            return None
+        if root.expanduser().resolve(strict=False) == self.workspace.expanduser().resolve(strict=False):
+            return None
+        fallback_path = self.workspace / filename
+        if fallback_path.exists():
+            return fallback_path
+        return None
 
     @staticmethod
     def _is_template_content(content: str, template_path: str) -> bool:

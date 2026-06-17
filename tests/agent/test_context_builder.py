@@ -152,6 +152,37 @@ class TestLoadBootstrapFiles:
         result = builder._load_bootstrap_files()
         assert "用中文回复" in result
 
+    def test_project_workspace_falls_back_to_default_memory_bootstrap(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "SOUL.md").write_text("Default soul.", encoding="utf-8")
+        (tmp_path / "USER.md").write_text("Default user.", encoding="utf-8")
+        (project / "AGENTS.md").write_text("Project rules.", encoding="utf-8")
+
+        builder = _builder(tmp_path)
+        result = builder._load_bootstrap_files(project)
+
+        assert "## AGENTS.md" in result
+        assert "Project rules." in result
+        assert "## SOUL.md" in result
+        assert "Default soul." in result
+        assert "## USER.md" in result
+        assert "Default user." in result
+
+    def test_project_workspace_memory_bootstrap_overrides_default_fallback(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "SOUL.md").write_text("Default soul.", encoding="utf-8")
+        (tmp_path / "USER.md").write_text("Default user.", encoding="utf-8")
+        (project / "SOUL.md").write_text("Project soul.", encoding="utf-8")
+
+        builder = _builder(tmp_path)
+        result = builder._load_bootstrap_files(project)
+
+        assert "Project soul." in result
+        assert "Default soul." not in result
+        assert "Default user." in result
+
 
 # ---------------------------------------------------------------------------
 # _is_template_content (static)
