@@ -413,14 +413,10 @@ class MyTool(Tool, ContextAware):
         result = self._modify_free("model_preset", name)
         if result.startswith("Error:"):
             return result if result.endswith((".", "!", "?")) else f"{result}."
-        model = getattr(self._runtime_state, "model", None)
-        context_window = getattr(self._runtime_state, "context_window_tokens", None)
-        details = [result]
-        if model is not None:
-            details.append(f"model is now {model!r}")
-        if context_window is not None:
-            details.append(f"context_window_tokens is now {context_window!r}")
-        return "; ".join(details)
+        return (
+            f"{result}; model is now {self._runtime_state.model!r}; "
+            f"context_window_tokens is now {self._runtime_state.context_window_tokens!r}"
+        )
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
@@ -463,7 +459,7 @@ class MyTool(Tool, ContextAware):
             try:
                 setattr(self._runtime_state, key, value)
             except (ValueError, KeyError) as e:
-                message = self._exception_message(e)
+                message = str(e.args[0] if isinstance(e, KeyError) and e.args else e).strip('"')
                 self._audit("modify", f"REJECTED {key}: {message}")
                 return f"Error: {message}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
@@ -482,10 +478,6 @@ class MyTool(Tool, ContextAware):
         self._runtime_state._runtime_vars[key] = value
         self._audit("modify", f"scratchpad.{key}: {old!r} -> {value!r}")
         return f"Set scratchpad.{key} = {value!r}"
-
-    @staticmethod
-    def _exception_message(exc: Exception) -> str:
-        return str(exc.args[0] if isinstance(exc, KeyError) and exc.args else exc).strip('"')
 
     @classmethod
     def _validate_json_safe(cls, value: Any, depth: int = 0) -> str | None:

@@ -57,9 +57,6 @@ my(action="check", key="_last_usage.prompt_tokens")
 my(action="check", key="model")
 # → What model I'm currently running on
 
-my(action="check", key="model_preset")
-# → Which named model preset is active, or None/default
-
 my(action="check", key="web_config.enable")
 # → Whether web search is enabled
 ```
