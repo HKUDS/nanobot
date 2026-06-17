@@ -37,6 +37,7 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "aws-docs",
         "brave-search",
         "postman",
+        "globalping",
     }.issubset(names)
     browserbase = next(preset for preset in payload["presets"] if preset["name"] == "browserbase")
     assert browserbase["installed"] is False
@@ -135,10 +136,29 @@ def test_enable_no_auth_remote_presets_write_url(tmp_path, monkeypatch: pytest.M
 
     mcp_presets_action("enable", {"name": ["microsoft-learn"]})
     mcp_presets_action("enable", {"name": ["exa"]})
+    mcp_presets_action("enable", {"name": ["globalping"]})
 
     config = load_config()
     assert config.tools.mcp_servers["microsoft-learn"].url == "https://learn.microsoft.com/api/mcp"
     assert config.tools.mcp_servers["exa"].url == "https://mcp.exa.ai/mcp"
+    assert config.tools.mcp_servers["globalping"].url == "https://mcp.globalping.dev/mcp"
+    assert "Authorization" not in config.tools.mcp_servers["globalping"].headers
+
+
+def test_enable_globalping_optional_token_sets_auth_header(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action(
+        "enable",
+        {"name": ["globalping"], "globalping_token": ["Bearer gp_secret"]},
+    )
+
+    assert "gp_secret" not in str(payload)
+    config = load_config()
+    assert config.tools.mcp_servers["globalping"].headers["Authorization"] == "Bearer gp_secret"
 
 
 def test_enable_firecrawl_writes_scrubbed_env(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
