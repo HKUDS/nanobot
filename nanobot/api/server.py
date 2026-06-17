@@ -340,6 +340,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                             session_key=session_key,
                             channel="api",
                             chat_id=API_CHAT_ID,
+                            persist_user_message=False,
                         ),
                         timeout=timeout_s,
                     )

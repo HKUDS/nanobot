@@ -16,7 +16,7 @@ If you find a docs mistake, outdated command, or confusing step, please open an 
 |---|---|---|
 | New to terminals and config files | [`start-without-technical-background.md`](./start-without-technical-background.md) | [`troubleshooting.md`](./troubleshooting.md) if the first reply fails |
 | Comfortable pasting commands and JSON | [`quick-start.md`](./quick-start.md) | [`provider-cookbook.md`](./provider-cookbook.md) for pasteable provider setups |
-| Operating a long-running bot | [`concepts.md`](./concepts.md) | [`chat-apps.md`](./chat-apps.md), [`../webui/README.md`](../webui/README.md), and [`deployment.md`](./deployment.md) |
+| Operating a long-running bot | [`concepts.md`](./concepts.md) | [`chat-apps.md`](./chat-apps.md), [`webui.md`](./webui.md), and [`deployment.md`](./deployment.md) |
 | Integrating or extending nanobot | [`architecture.md`](./architecture.md) | [`configuration.md`](./configuration.md), [`openai-api.md`](./openai-api.md), [`python-sdk.md`](./python-sdk.md), [`development.md`](./development.md), and [`channel-plugin-guide.md`](./channel-plugin-guide.md) |
 
 ## Start Here
@@ -38,7 +38,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 
 | Next goal | Read | First check |
 |---|---|---|
-| Use nanobot in a browser | [`../webui/README.md`](../webui/README.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
+| Use nanobot in a browser | [`webui.md`](./webui.md) | Enable WebSocket, run `nanobot gateway`, open `http://127.0.0.1:8765` |
 | Talk through a chat app | [`chat-apps.md`](./chat-apps.md) | Merge one channel snippet, run `nanobot channels status`, keep `nanobot gateway` running |
 | Change provider or add fallbacks | [`provider-cookbook.md`](./provider-cookbook.md) | Keep `modelPresets` named and set `agents.defaults.modelPreset` |
 | Understand before operating long-term | [`concepts.md`](./concepts.md) | Know what config, workspace, gateway, sessions, memory, and tools mean |
@@ -48,7 +48,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 
 | Goal | Read | Outcome |
 |---|---|---|
-| Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) | WebUI on port `8765`, or Vite HMR when developing the frontend |
+| Open the bundled browser UI | [`webui.md`](./webui.md) | WebUI on port `8765`, chat workspace, Apps, Skills, Automations, and settings |
 | Connect Telegram, Discord, WeChat, Slack, and other apps | [`chat-apps.md`](./chat-apps.md) | A gateway-backed chat channel with access control |
 | Use slash commands and periodic tasks | [`chat-commands.md`](./chat-commands.md) | Pairing, model presets, heartbeat tasks, and chat-side controls |
 | Generate images | [`image-generation.md`](./image-generation.md) | Image provider config, WebUI image mode, and artifact behavior |

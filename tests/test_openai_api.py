@@ -402,6 +402,32 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_empty_response_retry_does_not_duplicate_user_turn(aiohttp_client) -> None:
+    persist_flags = []
+
+    async def record(content, session_key="", channel="", chat_id="", **kwargs):
+        persist_flags.append(kwargs.get("persist_user_message", True))
+        return "" if len(persist_flags) == 1 else "recovered response"
+
+    agent = MagicMock()
+    agent.process_direct = record
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 200
+    # first call persists the user turn; the retry must not persist it again
+    assert persist_flags == [True, False]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_empty_response_falls_back(aiohttp_client) -> None:
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 

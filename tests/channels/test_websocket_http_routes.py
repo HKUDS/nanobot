@@ -3,12 +3,14 @@
 import asyncio
 import functools
 import json
+import random
+import socket
 import threading
 import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 import pytest
@@ -21,6 +23,18 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 
 _PORT = 29900
+
+
+def _free_port() -> int:
+    for _ in range(100):
+        port = random.randint(30_000, 60_000)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("could not find a free localhost port")
 
 
 def _make_handler(
@@ -808,6 +822,255 @@ async def test_session_delete_removes_file(
         assert resp.json()["deleted"] is True
         assert not path.exists()
         assert not webui_path.exists()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    user_job = cron.add_job(
+        name="Daily repo check",
+        schedule=CronSchedule(kind="every", every_ms=86_400_000),
+        message="Check the repo status",
+        session_key="websocket:abc",
+        origin_channel="websocket",
+        origin_chat_id="abc",
+    )
+    incomplete_job = cron.add_job(
+        name="english-quiz",
+        schedule=CronSchedule(kind="every", every_ms=3_600_000),
+        message="Practice English",
+        session_key="unified:default",
+    )
+    external_job = cron.add_job(
+        name="WeChat quiz",
+        schedule=CronSchedule(kind="every", every_ms=3_600_000),
+        message="Send a quiz",
+        session_key="weixin:wx-chat",
+        origin_channel="weixin",
+        origin_chat_id="wx-chat",
+    )
+    past_one_shot_job = cron.add_job(
+        name="Past one-shot",
+        schedule=CronSchedule(kind="at", at_ms=1),
+        message="Old one-shot message",
+        session_key="websocket:abc",
+        origin_channel="websocket",
+        origin_chat_id="abc",
+        delete_after_run=True,
+    )
+    cron.register_system_job(
+        CronJob(
+            id="heartbeat",
+            name="heartbeat",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
+    session_manager = _seed_session(tmp_path, key="websocket:abc")
+    external_session = Session(key="weixin:wx-chat")
+    external_session.add_message("user", "Scheduled cron job triggered")
+    session_manager.save(external_session)
+    channel = _ch(
+        bus,
+        session_manager=session_manager,
+        cron_service=cron,
+        cron_pending_job_ids=lambda key: {user_job.id} if key == "websocket:abc" else set(),
+        port=port,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        deny = await _http_get(f"{base_url}/api/webui/automations")
+        assert deny.status_code == 401, deny.text
+
+        boot = await _http_get(f"{base_url}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        resp = await _http_get(
+            f"{base_url}/api/webui/automations",
+            headers=auth,
+        )
+        assert resp.status_code == 200
+        assert "wx-chat" not in resp.text
+        assert "unified:default" not in resp.text
+        body = resp.json()
+        by_id = {job["id"]: job for job in body["jobs"]}
+        assert by_id[user_job.id]["protected"] is False
+        assert by_id[user_job.id]["state"]["pending"] is True
+        assert by_id[user_job.id]["state"]["run_history"] == []
+        assert by_id[user_job.id]["origin"]["session_key"] == "websocket:abc"
+        assert by_id[user_job.id]["origin"]["preview"] == "hi"
+        assert "session_key" not in by_id[incomplete_job.id]["payload"]
+        assert "origin_channel" not in by_id[incomplete_job.id]["payload"]
+        assert "origin_chat_id" not in by_id[incomplete_job.id]["payload"]
+        assert by_id[incomplete_job.id]["origin"] is None
+        assert "session_key" not in by_id[external_job.id]["payload"]
+        assert "origin_channel" not in by_id[external_job.id]["payload"]
+        assert "origin_chat_id" not in by_id[external_job.id]["payload"]
+        assert by_id[external_job.id]["origin"]["channel"] == "weixin"
+        assert "session_key" not in by_id[external_job.id]["origin"]
+        assert "chat_id" not in by_id[external_job.id]["origin"]
+        assert by_id[external_job.id]["origin"]["preview"] == ""
+        assert by_id["heartbeat"]["protected"] is True
+
+        updated = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {
+                        "name": "Daily quiz",
+                        "message": "Ask the daily quiz",
+                        "schedule": {
+                            "kind": "cron",
+                            "expr": "0 9 * * *",
+                            "tz": "UTC",
+                        },
+                    }
+                ),
+            },
+        )
+        assert updated.status_code == 200
+        by_id = {job["id"]: job for job in updated.json()["jobs"]}
+        assert by_id[user_job.id]["name"] == "Daily quiz"
+        assert by_id[user_job.id]["payload"]["message"] == "Ask the daily quiz"
+        assert by_id[user_job.id]["schedule"]["kind"] == "cron"
+        assert by_id[user_job.id]["schedule"]["expr"] == "0 9 * * *"
+        assert by_id[user_job.id]["schedule"]["tz"] == "UTC"
+
+        unicode_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": quote(
+                    json.dumps(
+                        {
+                            "name": "每日测验",
+                            "message": "问今日测验",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    safe="",
+                ),
+            },
+        )
+        assert unicode_update.status_code == 200
+        assert cron.get_job(user_job.id).name == "每日测验"
+        assert cron.get_job(user_job.id).payload.message == "问今日测验"
+
+        malformed_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"message": ["bad"]}),
+            },
+        )
+        assert malformed_update.status_code == 400
+        assert cron.get_job(user_job.id).payload.message == "问今日测验"
+
+        invalid_cron_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={user_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {"schedule": {"kind": "cron", "expr": "not a cron", "tz": "UTC"}}
+                ),
+            },
+        )
+        assert invalid_cron_update.status_code == 400
+        assert cron.get_job(user_job.id).schedule.expr == "0 9 * * *"
+
+        past_one_shot_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id={past_one_shot_job.id}",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps(
+                    {
+                        "message": "Updated one-shot message",
+                        "schedule": {"kind": "at", "at_ms": 1},
+                    }
+                ),
+            },
+        )
+        assert past_one_shot_update.status_code == 200
+        assert cron.get_job(past_one_shot_job.id).payload.message == "Updated one-shot message"
+        assert cron.get_job(past_one_shot_job.id).schedule.at_ms == 1
+
+        protected_update = await _http_get(
+            f"{base_url}/api/webui/automations/update?id=heartbeat",
+            headers={
+                **auth,
+                "X-Nanobot-Automation-Values": json.dumps({"name": "bad"}),
+            },
+        )
+        assert protected_update.status_code == 403
+
+        disabled = await _http_get(
+            f"{base_url}/api/webui/automations/disable?id={user_job.id}",
+            headers=auth,
+        )
+        assert disabled.status_code == 200
+        by_id = {job["id"]: job for job in disabled.json()["jobs"]}
+        assert by_id[user_job.id]["enabled"] is False
+
+        disabled_run = await _http_get(
+            f"{base_url}/api/webui/automations/run?id={user_job.id}",
+            headers=auth,
+        )
+        assert disabled_run.status_code == 409
+
+        unbound_run = await _http_get(
+            f"{base_url}/api/webui/automations/run?id={incomplete_job.id}",
+            headers=auth,
+        )
+        assert unbound_run.status_code == 409
+        assert "no linked chat" in unbound_run.text
+
+        unbound_enable = await _http_get(
+            f"{base_url}/api/webui/automations/enable?id={incomplete_job.id}",
+            headers=auth,
+        )
+        assert unbound_enable.status_code == 409
+        assert "no linked chat" in unbound_enable.text
+
+        protected_delete = await _http_get(
+            f"{base_url}/api/webui/automations/delete?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_delete.status_code == 403
+        protected_disable = await _http_get(
+            f"{base_url}/api/webui/automations/disable?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_disable.status_code == 403
+        protected_run = await _http_get(
+            f"{base_url}/api/webui/automations/run?id=heartbeat",
+            headers=auth,
+        )
+        assert protected_run.status_code == 403
+
+        enabled = await _http_get(
+            f"{base_url}/api/webui/automations/enable?id={user_job.id}",
+            headers=auth,
+        )
+        assert enabled.status_code == 200
+        by_id = {job["id"]: job for job in enabled.json()["jobs"]}
+        assert by_id[user_job.id]["enabled"] is True
+
+        deleted = await _http_get(
+            f"{base_url}/api/webui/automations/delete?id={user_job.id}",
+            headers=auth,
+        )
+        assert deleted.status_code == 200
+        assert user_job.id not in {job["id"] for job in deleted.json()["jobs"]}
+        assert "heartbeat" in {job["id"] for job in deleted.json()["jobs"]}
     finally:
         await channel.stop()
         await server_task

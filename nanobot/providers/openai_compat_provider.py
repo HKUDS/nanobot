@@ -25,6 +25,7 @@ from nanobot.providers.base import (
     LLMResponse,
     ToolCallRequest,
     parse_tool_arguments,
+    resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
@@ -60,7 +61,14 @@ _DEFAULT_OPENROUTER_HEADERS = {
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
+    "kimi-k2.7",
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
     "k2.6-code-preview",
+})
+_KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
 })
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -692,13 +700,20 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
+            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
+                if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
+                    continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
-            if gateway_style and _model_thinking_style(model_name):
+            if (
+                gateway_style
+                and _model_thinking_style(model_name)
+                and (thinking_enabled or slug not in _KIMI_ALWAYS_THINKING_MODELS)
+            ):
                 extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
@@ -708,7 +723,7 @@ class OpenAICompatProvider(LLMProvider):
             # user's intent via the provider-native shape, so drop the
             # redundant wire-level kwarg.  Only kimi models need this —
             # Xiaomi's API accepts both params.
-            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+            if slug in _KIMI_THINKING_MODELS:
                 kwargs.pop("reasoning_effort", None)
 
         if tools:
@@ -1372,7 +1387,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1489,7 +1504,7 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

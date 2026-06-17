@@ -55,6 +55,7 @@
       "ariaLabel": "Ganti bahasa"
     },
     "apps": "Aplikasi",
+    "automations": "Otomasi",
     "skills": {
       "title": "Skill"
     }
@@ -80,6 +81,7 @@
       "cliApps": "Aplikasi CLI",
       "mcp": "MCP",
       "apps": "Aplikasi",
+      "automations": "Otomasi",
       "skills": "Skill"
     },
     "sections": {
@@ -469,6 +471,127 @@
       "loading": "Memuat aplikasi...",
       "empty": "Tidak ada aplikasi yang cocok."
     },
+    "automations": {
+      "filters": {
+        "all": "Semua",
+        "active": "Aktif",
+        "paused": "Dijeda",
+        "failed": "Perlu ditangani",
+        "system": "Sistem"
+      },
+      "sort": {
+        "next": "Jalankan berikutnya",
+        "last": "Jalankan terakhir",
+        "updated": "Diperbarui",
+        "name": "Nama"
+      },
+      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
+      "queue": "Antrean",
+      "loading": "Memuat otomasi...",
+      "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
+      "empty": "Belum ada otomasi.",
+      "emptyHint": "Buat dari tempat tugas ini berjalan agar nanobot menyimpan konteks yang tepat.",
+      "oneShot": "Satu kali",
+      "systemTask": "Automasi yang dikelola sistem",
+      "labels": {
+        "schedule": "Jadwal",
+        "next": "Berikutnya",
+        "origin": "Chat tertaut",
+        "created": "Dibuat",
+        "updated": "Diperbarui"
+      },
+      "runNow": "Jalankan sekarang",
+      "pause": "Jeda",
+      "resume": "Lanjutkan",
+      "edit": "Edit",
+      "delete": "Hapus",
+      "protected": "Terlindungi",
+      "editTitle": "Edit otomasi",
+      "save": "Simpan",
+      "deleteTitle": "Hapus otomasi",
+      "deleteDescription": "Ini menghapus {{name}} dari penyimpanan cron. Pesan chat sebelumnya tetap ada di sesi.",
+      "cancel": "Batal",
+      "status": {
+        "system": "Sistem",
+        "running": "Sedang berjalan",
+        "paused": "Dijeda",
+        "failed": "Gagal",
+        "completed": "Selesai",
+        "noSchedule": "Tanpa jadwal",
+        "active": "Aktif"
+      },
+      "origin": {
+        "system": "Sistem",
+        "unknown": "Tidak ada chat tertaut"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "Pada {{time}}",
+        "every": "Setiap {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Setiap hari pukul {{time}}",
+        "weekdaysAt": "Hari kerja pukul {{time}}",
+        "hourlyAt": "Setiap jam pada :{{minute}}",
+        "hourlyWindow": "Setiap jam {{start}}-{{end}} pada :{{minute}}",
+        "custom": "Jadwal khusus"
+      },
+      "next": {
+        "paused": "Dijeda",
+        "pending": "Sedang berjalan",
+        "none": "Tidak ada jadwal berikutnya"
+      },
+      "message": {
+        "showMore": "Tampilkan pesan lengkap",
+        "showLess": "Tampilkan lebih sedikit"
+      },
+      "fields": {
+        "name": "Nama",
+        "message": "Pesan",
+        "scheduleType": "Jenis jadwal",
+        "every": "Setiap",
+        "unit": "Unit",
+        "cronExpression": "Ekspresi cron",
+        "timezone": "Zona waktu",
+        "runAt": "Jalankan pada"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Sekali"
+      },
+      "everyUnits": {
+        "second": "Detik",
+        "minute": "Menit",
+        "hour": "Jam",
+        "day": "Hari"
+      },
+      "validation": {
+        "nameRequired": "Nama wajib diisi.",
+        "messageRequired": "Pesan wajib diisi.",
+        "intervalRequired": "Interval harus berupa angka positif.",
+        "cronRequired": "Ekspresi cron wajib diisi.",
+        "timeRequired": "Waktu eksekusi wajib diisi.",
+        "futureRequired": "Waktu eksekusi harus berada di masa depan."
+      }
+    },
     "oauth": {
       "authentication": "Autentikasi OAuth",
       "signIn": "Masuk",
@@ -527,7 +650,8 @@
     "newInProject": "Mulai obrolan baru di {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -562,7 +686,7 @@
     "confirm": "Hapus",
     "automationsDescription": "Obrolan ini memiliki automasi terjadwal. Menghapusnya juga akan menghapus automasi tersebut.",
     "moreAutomations": "+ {{count}} lagi",
-    "confirmWithAutomations": "Hapus obrolan dan automasi",
+    "confirmWithAutomations": "Hapus",
     "schedule": {
       "at": "{{time}}",
       "every": "Setiap {{duration}}",
