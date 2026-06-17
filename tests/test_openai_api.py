@@ -33,6 +33,7 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent.process_direct = AsyncMock(return_value=response_text)
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
     return agent
 
 
@@ -78,6 +79,25 @@ def test_chat_completion_response() -> None:
     assert result["choices"][0]["message"]["content"] == "hello world"
     assert result["choices"][0]["finish_reason"] == "stop"
     assert result["id"].startswith("chatcmpl-")
+    assert result["usage"]["prompt_tokens"] == 0
+    assert result["usage"]["completion_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 0
+
+
+def test_chat_completion_response_with_usage() -> None:
+    usage = {"prompt_tokens": 150, "completion_tokens": 42}
+    result = _chat_completion_response("hello world", "test-model", usage)
+    assert result["usage"]["prompt_tokens"] == 150
+    assert result["usage"]["completion_tokens"] == 42
+    assert result["usage"]["total_tokens"] == 192
+
+
+def test_chat_completion_response_preserves_provider_total_usage() -> None:
+    usage = {"total_tokens": 77}
+    result = _chat_completion_response("hello world", "test-model", usage)
+    assert result["usage"]["prompt_tokens"] == 0
+    assert result["usage"]["completion_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 77
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -213,6 +233,7 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     agent.process_direct = fake_process
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -250,6 +271,7 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent.process_direct = slow_process
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -364,6 +386,7 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     agent.process_direct = sometimes_empty
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -375,6 +398,32 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == "recovered response"
     assert call_count == 2
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_empty_response_retry_does_not_duplicate_user_turn(aiohttp_client) -> None:
+    persist_flags = []
+
+    async def record(content, session_key="", channel="", chat_id="", **kwargs):
+        persist_flags.append(kwargs.get("persist_user_message", True))
+        return "" if len(persist_flags) == 1 else "recovered response"
+
+    agent = MagicMock()
+    agent.process_direct = record
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 200
+    # first call persists the user turn; the retry must not persist it again
+    assert persist_flags == [True, False]
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -393,6 +442,7 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     agent.process_direct = always_empty
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)

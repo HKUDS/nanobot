@@ -10,7 +10,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.runtime_state import RuntimeState
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentStatus

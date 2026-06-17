@@ -49,6 +49,7 @@ class ProviderSpec:
 
     # gateway behavior
     strip_model_prefix: bool = False  # strip "provider/" before sending to gateway
+    strip_model_prefixes: tuple[str, ...] = ()  # strip only when the first model segment matches
     supports_max_completion_tokens: bool = False
 
     # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
@@ -351,7 +352,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
     ),
-    # Moonshot (月之暗面): Kimi K2.5 / K2.6 enforce temperature >= 1.0.
+    # Moonshot (月之暗面): Kimi K2.5+ enforce temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -362,6 +363,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
             ("kimi-k2.6", {"temperature": 1.0}),
+            ("kimi-k2.7", {"temperature": 1.0}),
+            ("kimi-k2.7-code", {"temperature": 1.0}),
+            ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
     ),
     # MiniMax: OpenAI-compatible API
@@ -545,3 +549,18 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == normalized:
             return spec
     return None
+
+
+def create_dynamic_spec(name: str) -> ProviderSpec:
+    """Create a dynamic ProviderSpec for custom user-defined providers."""
+    normalized = to_snake(name.replace("-", "_"))
+    strip_prefixes = tuple(dict.fromkeys((name, normalized)))
+    return ProviderSpec(
+        name=normalized,
+        keywords=(),
+        env_key="",
+        display_name=name.title(),
+        backend="openai_compat",
+        is_direct=True,
+        strip_model_prefixes=strip_prefixes,
+    )

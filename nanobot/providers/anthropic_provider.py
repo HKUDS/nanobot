@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import secrets
 import string
@@ -14,6 +13,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
+    resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
 
@@ -452,9 +452,10 @@ class AnthropicProvider(LLMProvider):
         max_tokens = max(1, max_tokens)
         thinking_enabled = bool(reasoning_effort) and reasoning_effort.lower() != "none"
 
-        # claude-opus-4-7 deprecated the `temperature` parameter entirely — the
-        # API returns 400 if it is present, on any code path.
-        omit_temperature = "opus-4-7" in model_name
+        # Several Anthropic models (opus-4-7, opus-4-8, fable) deprecated the
+        # `temperature` parameter — the API returns 400 if it is present.
+        _model_lower = model_name.lower()
+        omit_temperature = any(m in _model_lower for m in ("opus-4-7", "opus-4-8", "fable"))
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -612,7 +613,7 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta or on_thinking_delta or on_tool_call_delta:
@@ -681,7 +682,7 @@ class AnthropicProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

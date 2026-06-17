@@ -18,12 +18,14 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from loguru import logger
+from pydantic.alias_generators import to_snake
 
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
     parse_tool_arguments,
+    resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
@@ -59,7 +61,14 @@ _DEFAULT_OPENROUTER_HEADERS = {
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
+    "kimi-k2.7",
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
     "k2.6-code-preview",
+})
+_KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
 })
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -91,6 +100,10 @@ _MODEL_THINKING_STYLES: dict[str, str] = {
 
 def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
+
+
+def _provider_prefix_key(name: str) -> str:
+    return to_snake(name.replace("-", "_")).lower()
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
@@ -592,6 +605,22 @@ class OpenAICompatProvider(LLMProvider):
     # Build kwargs
     # ------------------------------------------------------------------
 
+    def _request_model_name(self, model_name: str) -> str:
+        spec = self._spec
+        if not spec or "/" not in model_name:
+            return model_name
+        if spec.strip_model_prefix:
+            return model_name.split("/")[-1]
+
+        route_prefixes = getattr(spec, "strip_model_prefixes", ())
+        if not isinstance(route_prefixes, tuple) or not route_prefixes:
+            return model_name
+        model_prefix, routed_model = model_name.split("/", 1)
+        model_prefix_key = _provider_prefix_key(model_prefix)
+        if any(_provider_prefix_key(prefix) == model_prefix_key for prefix in route_prefixes):
+            return routed_model
+        return model_name
+
     @staticmethod
     def _supports_temperature(
         model_name: str,
@@ -625,8 +654,7 @@ class OpenAICompatProvider(LLMProvider):
             if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
                 messages, tools = self._apply_cache_control(messages, tools)
 
-        if spec and spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -672,13 +700,20 @@ class OpenAICompatProvider(LLMProvider):
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
+            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
+                if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
+                    continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
-            if gateway_style and _model_thinking_style(model_name):
+            if (
+                gateway_style
+                and _model_thinking_style(model_name)
+                and (thinking_enabled or slug not in _KIMI_ALWAYS_THINKING_MODELS)
+            ):
                 extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
@@ -688,7 +723,7 @@ class OpenAICompatProvider(LLMProvider):
             # user's intent via the provider-native shape, so drop the
             # redundant wire-level kwarg.  Only kimi models need this —
             # Xiaomi's API accepts both params.
-            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+            if slug in _KIMI_THINKING_MODELS:
                 kwargs.pop("reasoning_effort", None)
 
         if tools:
@@ -830,8 +865,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
-        if self._spec and self._spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         instructions, input_items = convert_messages(sanitized_messages)
 
@@ -1353,7 +1387,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1470,7 +1504,7 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

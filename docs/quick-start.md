@@ -23,7 +23,7 @@ Pick one install method.
 **One-command setup:**
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
 
 On Windows PowerShell:
@@ -32,12 +32,12 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
 ```
 
 ```powershell
@@ -47,7 +47,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 To install the current `main` branch instead, pass `--dev`:
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
 ```
 
 ```powershell
@@ -71,6 +71,8 @@ nanobot --version
 python -m pip install nanobot-ai
 nanobot --version
 ```
+
+Use pip only inside an environment you control. If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment first.
 
 **Latest source checkout:**
 
@@ -271,7 +273,7 @@ Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 | Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
 | Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
 | Understand provider/model matching | [`providers.md`](./providers.md) |
-| Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) |
+| Open the bundled browser UI | [`webui.md`](./webui.md) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
 | Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
@@ -286,10 +288,19 @@ python -m pip install -U nanobot-ai
 nanobot --version
 ```
 
+If pip reports `externally-managed-environment`, upgrade with the same isolated method you used to install nanobot, such as `uv tool upgrade nanobot-ai`, `pipx upgrade nanobot-ai`, or the managed venv created by the one-command installer.
+
 **uv:**
 
 ```bash
 uv tool upgrade nanobot-ai
+nanobot --version
+```
+
+**pipx:**
+
+```bash
+pipx upgrade nanobot-ai
 nanobot --version
 ```
 

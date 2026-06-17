@@ -22,6 +22,7 @@ from nanobot.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
+from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.providers.base import LLMProvider
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.manager import Session, SessionManager
@@ -67,6 +68,8 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     assistant_text = ""
     for message in session.messages:
         if message.get("_command") is True:
+            continue
+        if message.get(CRON_HISTORY_META) is True:
             continue
         role = message.get("role")
         content = message.get("content")

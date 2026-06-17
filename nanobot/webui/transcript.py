@@ -17,7 +17,9 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.cron.session_turns import CRON_HISTORY_META
 from nanobot.session.manager import SessionManager
+from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -29,8 +31,6 @@ _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
 _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-WEBUI_TURN_METADATA_KEY = "webui_turn_id"
-WEBUI_MESSAGE_SOURCE_METADATA_KEY = "_webui_message_source"
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
 )
@@ -854,6 +854,8 @@ def _session_user_event(
     message: dict[str, Any],
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
+        return None
+    if message.get(CRON_HISTORY_META) is True:
         return None
     content = message.get("content")
     text = content if isinstance(content, str) else ""
@@ -1823,6 +1825,29 @@ def fork_boundary_message_count(lines: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def has_pending_tool_calls(lines: list[dict[str, Any]]) -> bool:
+    """Return True when the selected transcript tail looks like an unfinished turn."""
+    for rec in reversed(lines):
+        ev = rec.get("event")
+        if ev == "turn_end":
+            return False
+        if ev == "user":
+            return False
+        if ev == "message":
+            return rec.get("kind") in {"tool_hint", "progress", "reasoning"}
+        if ev in {
+            "delta",
+            "stream_end",
+            "reasoning_delta",
+            "reasoning_end",
+            "file_edit",
+        }:
+            return True
+        if ev in {WEBUI_FORK_MARKER_EVENT}:
+            continue
+    return False
+
+
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -1855,6 +1880,7 @@ def build_webui_thread_response(
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
         "messages": msgs,
+        "has_pending_tool_calls": has_pending_tool_calls(lines),
     }
     if page is not None:
         page["loaded_message_count"] = len(msgs)

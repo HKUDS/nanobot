@@ -176,6 +176,9 @@ function formatNextRun(job: SessionAutomationJob, t: TFunction, now: number) {
   if (!job.enabled) {
     return { label: t("thread.sessionInfo.next.disabled"), title: "" };
   }
+  if (job.state.pending) {
+    return { label: t("thread.sessionInfo.next.pending"), title: "" };
+  }
   const next = job.state.next_run_at_ms;
   if (!next) {
     return { label: t("thread.sessionInfo.next.none"), title: "" };

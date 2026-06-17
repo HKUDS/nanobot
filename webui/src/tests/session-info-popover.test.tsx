@@ -5,14 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { setAppLanguage } from "@/i18n";
 
-function automationJob(nextRunAt = Date.now() + 3_600_000) {
+function automationJob(
+  nextRunAt = Date.now() + 3_600_000,
+  state: Record<string, unknown> = {},
+) {
   return {
     id: "job-1",
     name: "Morning check",
     enabled: true,
     schedule: { kind: "every", every_ms: 3_600_000 },
     payload: { message: "Check the project status" },
-    state: { next_run_at_ms: nextRunAt },
+    state: { next_run_at_ms: nextRunAt, ...state },
   };
 }
 
@@ -27,7 +30,8 @@ function automationsResponse(jobs: unknown[]) {
 }
 
 describe("SessionInfoPopover", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await setAppLanguage("en");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(automationsResponse([automationJob()])),
@@ -84,6 +88,29 @@ describe("SessionInfoPopover", () => {
     expect(screen.getByText(/下次/)).toBeInTheDocument();
     expect(screen.queryByText("Session")).not.toBeInTheDocument();
     expect(screen.queryByText("Automations")).not.toBeInTheDocument();
+  });
+
+  it("shows a short pending label for deferred automations", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        automationsResponse([automationJob(Date.now() - 1000, { pending: true })]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <SessionInfoPopover
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+
+    expect(await screen.findByText("Runs shortly")).toBeInTheDocument();
+    expect(screen.queryByText(/ago/i)).not.toBeInTheDocument();
   });
 
   it("refreshes while open so completed one-shot automations disappear", async () => {

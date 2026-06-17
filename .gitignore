@@ -7,13 +7,6 @@
 .web
 .orion
 
-# Desktop app generated artifacts
-desktop/build/
-desktop/dist/
-desktop/node_modules/
-desktop/package-lock.json
-desktop/resources/nanobot-engine/
-
 # Claude / AI assistant artifacts
 docs/superpowers/
 docs/plans/
@@ -106,3 +99,4 @@ temp/
 *.tmp
 exp/
 .playwright-mcp/
+bridge/node_modules/

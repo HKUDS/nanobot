@@ -1573,9 +1573,46 @@ def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
     assert "reasoning_effort" not in kw
 
 
+def test_kimi_k27_code_thinking_enabled() -> None:
+    """Kimi K2.7 Code supports native thinking controls."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_enabled_with_openrouter_prefix() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should carry both thinking shapes."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="high")
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "high"},
+    }
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_omits_disabled() -> None:
+    """Kimi K2.7 Code is always-thinking; disabled thinking is invalid upstream."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should not request disabled thinking."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
 def test_moonshot_kimi_k26_temperature_override() -> None:
     """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
+    assert kw["temperature"] == 1.0
+
+
+def test_moonshot_kimi_k27_code_temperature_override() -> None:
+    """Moonshot registry should force temperature 1.0 for Kimi K2.7 Code."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort=None)
     assert kw["temperature"] == 1.0
 
 

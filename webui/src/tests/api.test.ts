@@ -4,7 +4,9 @@ import {
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
+  fetchAutomations,
   fetchCliApps,
+  fetchInstalledCliApps,
   fetchMcpPresets,
   fetchProviderModels,
   fetchSessionAutomations,
@@ -19,9 +21,11 @@ import {
   listSlashCommands,
   loginProviderOAuth,
   logoutProviderOAuth,
+  runAutomationAction,
   runCliAppAction,
   runMcpPresetAction,
   saveCustomMcpServer,
+  updateAutomation,
   updateSidebarState,
   updateImageGenerationSettings,
   updateModelConfiguration,
@@ -98,6 +102,49 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("fetches workspace automations", async () => {
+    await fetchAutomations("tok");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes workspace automation actions", async () => {
+    await runAutomationAction("tok", "disable", "job 1/2");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/disable?id=job+1%2F2",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes workspace automation updates", async () => {
+    const values = {
+      name: "每日测验",
+      message: "Ask 今日 quiz",
+      schedule: { kind: "cron", expr: "0 9 * * *", tz: "Asia/Shanghai" },
+    } as const;
+    await updateAutomation("tok", "job 1/2", values);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/update?id=job+1%2F2",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
+        },
+      }),
+    );
+    const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
+  });
+
   it("fetches the WebUI skill summary", async () => {
     await fetchSkills("tok");
 
@@ -125,6 +172,17 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Achat-1/delete",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("passes the automation cascade flag when deleting a session", async () => {
+    await deleteSession("tok", "websocket:chat-1", { deleteAutomations: true });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/delete?delete_automations=true",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -358,6 +416,25 @@ describe("webui API helpers", () => {
     await runCliAppAction("tok", "install", "gimp");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/cli-apps/install?name=gimp",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads installed CLI Apps without fetching the full catalog", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        apps: [],
+        installed_count: 0,
+        catalog_updated_at: null,
+      }),
+    } as Response);
+
+    await expect(fetchInstalledCliApps("tok")).resolves.toMatchObject({ apps: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/cli-apps?installed_only=1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

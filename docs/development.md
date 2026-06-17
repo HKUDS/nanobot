@@ -49,7 +49,7 @@ Transcription is intentionally split into two layers:
 - `nanobot/audio/transcription_registry.py` owns provider names, aliases, default models, and adapter loading.
 - `nanobot/providers/transcription.py` owns provider-specific HTTP behavior.
 
-Credentials still live under `providers.<provider>` so chat channels, WebUI, and desktop resolve API keys and API bases the same way.
+Credentials still live under `providers.<provider>` so chat channels and WebUI resolve API keys and API bases the same way.
 
 1. Add provider credentials to `ProvidersConfig`.
 

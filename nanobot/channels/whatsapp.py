@@ -290,6 +290,7 @@ class WhatsAppChannel(BaseChannel):
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
                     "is_group": data.get("isGroup", False),
+                    "is_forwarded": bool(data.get("isForwarded", False)),
                     "participant": participant or None,
                     "is_reply_to_bot": data.get("isReplyToBot", False),
                 },

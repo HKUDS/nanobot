@@ -10,18 +10,35 @@ from typing import Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.config_base import Base
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+
+
+class FileToolsConfig(Base):
+    """Filesystem tools configuration."""
+
+    enable: bool = True  # built-in file tools on by default
 
 
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
+
+    config_key = "file"
+
+    @classmethod
+    def config_cls(cls):
+        return FileToolsConfig
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.config.file.enable
 
     def __init__(
         self,

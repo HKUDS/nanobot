@@ -103,7 +103,7 @@ describe("useSessions", () => {
         preview: "Beta",
       },
     ]);
-    vi.mocked(api.deleteSession).mockResolvedValue(true);
+    vi.mocked(api.deleteSession).mockResolvedValue({ deleted: true });
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(fakeClient()),
@@ -115,8 +115,40 @@ describe("useSessions", () => {
       await result.current.deleteChat("websocket:chat-a");
     });
 
-    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a");
+    expect(api.deleteSession).toHaveBeenCalledWith("tok", "websocket:chat-a", undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-b"]);
+  });
+
+  it("keeps a session when delete is blocked by bound automations", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Alpha",
+      },
+    ]);
+    vi.mocked(api.deleteSession).mockResolvedValue({
+      deleted: false,
+      blocked_by_automations: true,
+      automations: [],
+    });
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    let deleteResult: Awaited<ReturnType<typeof result.current.deleteChat>> | undefined;
+    await act(async () => {
+      deleteResult = await result.current.deleteChat("websocket:chat-a");
+    });
+
+    expect(deleteResult?.blocked_by_automations).toBe(true);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
 
   it("refreshes sessions when the websocket reports a session update", async () => {
@@ -187,7 +219,7 @@ describe("useSessions", () => {
       await result.current.createChat();
     });
 
-    expect(client.newChat).toHaveBeenCalledWith(5000, undefined);
+    expect(client.newChat).toHaveBeenCalledWith(60_000, undefined);
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
 
     await act(async () => {
@@ -226,7 +258,7 @@ describe("useSessions", () => {
       await result.current.createChat(workspaceScope);
     });
 
-    expect(client.newChat).toHaveBeenCalledWith(5000, workspaceScope);
+    expect(client.newChat).toHaveBeenCalledWith(60_000, workspaceScope);
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
@@ -382,6 +414,40 @@ describe("useSessions", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.hasPendingToolCalls).toBe(true);
+  });
+
+  it("uses the server pending flag for completed tails that still end with trace rows", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      has_pending_tool_calls: false,
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content: "Cron test",
+          turnId: "cron:run",
+          createdAt: 1,
+        },
+        {
+          id: "t1",
+          role: "tool",
+          kind: "trace",
+          content: "message({})",
+          traces: ["message({})"],
+          turnId: "cron:run",
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-cron-done"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
+    expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
   it("does not flag transcript as pending when last row is not a trace", async () => {

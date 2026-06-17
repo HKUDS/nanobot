@@ -8,7 +8,7 @@ from pathlib import Path
 from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,10 @@ def _make_provider_core(
     provider_name = config.get_provider_name(model, preset=resolved)
     p = config.get_provider(model, preset=resolved)
     spec = find_by_name(provider_name) if provider_name else None
+    if provider_name and not spec and p:
+        if not p.api_base:
+            raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
+        spec = create_dynamic_spec(provider_name)
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
@@ -48,6 +52,14 @@ def _make_provider_core(
     if backend == "azure_openai":
         if not p or not p.api_base:
             raise ValueError("Azure OpenAI requires api_base in config.")
+    elif (
+        backend == "openai_compat"
+        and spec
+        and spec.is_direct
+        and not spec.default_api_base
+        and not (p and p.api_base)
+    ):
+        raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
         needs_key = not (p and p.api_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)

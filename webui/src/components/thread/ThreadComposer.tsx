@@ -419,9 +419,20 @@ function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
   window.setTimeout(() => ghost.remove(), 0);
 }
 
+function visualViewportBounds(): { top: number; bottom: number; height: number } {
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    return { top: 0, bottom: window.innerHeight, height: window.innerHeight };
+  }
+  const top = Math.max(0, viewport.offsetTop);
+  const height = Math.max(0, viewport.height);
+  return { top, bottom: top + height, height };
+}
+
 function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
-  let top = 0;
-  let bottom = window.innerHeight;
+  const viewport = visualViewportBounds();
+  let top = viewport.top;
+  let bottom = viewport.bottom;
   let parent = el.parentElement;
 
   while (parent) {
@@ -455,11 +466,12 @@ const GOAL_PANEL_MIN_HEIGHT_PX = 112;
 const GOAL_PANEL_MAX_VIEWPORT_RATIO = 0.62;
 
 function measureGoalPanelMaxCssHeight(stripTopY: number): number {
+  const viewport = visualViewportBounds();
   const spaceAboveStrip =
-    stripTopY - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
+    stripTopY - viewport.top - GOAL_PANEL_VIEWPORT_TOP_PAD - GOAL_PANEL_GAP_ABOVE_STRIP_PX;
   return Math.min(
     Math.max(spaceAboveStrip, GOAL_PANEL_MIN_HEIGHT_PX),
-    Math.floor(window.innerHeight * GOAL_PANEL_MAX_VIEWPORT_RATIO),
+    Math.floor(viewport.height * GOAL_PANEL_MAX_VIEWPORT_RATIO),
   );
 }
 
@@ -593,10 +605,15 @@ function RunElapsedStrip({
     if (stripWrapperRef.current && ro) {
       ro.observe(stripWrapperRef.current);
     }
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", relayout);
+    viewport?.addEventListener("scroll", relayout);
     window.addEventListener("resize", relayout);
     window.addEventListener("scroll", relayout, true);
     return () => {
       ro?.disconnect();
+      viewport?.removeEventListener("resize", relayout);
+      viewport?.removeEventListener("scroll", relayout);
       window.removeEventListener("resize", relayout);
       window.removeEventListener("scroll", relayout, true);
     };
@@ -1111,9 +1128,14 @@ export function ThreadComposer({
     };
 
     updateLayout();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", updateLayout);
+    viewport?.addEventListener("scroll", updateLayout);
     window.addEventListener("resize", updateLayout);
     document.addEventListener("scroll", updateLayout, true);
     return () => {
+      viewport?.removeEventListener("resize", updateLayout);
+      viewport?.removeEventListener("scroll", updateLayout);
       window.removeEventListener("resize", updateLayout);
       document.removeEventListener("scroll", updateLayout, true);
     };
@@ -1544,10 +1566,10 @@ export function ThreadComposer({
     "w-full resize-none bg-transparent",
     isHero
       ? cn(
-          "min-h-[78px] px-5 text-[15px] leading-6",
+          "min-h-[78px] px-4 text-[15px] leading-6 sm:px-5",
           relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
         )
-      : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
+      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[13.5px] leading-5 sm:px-4",
   );
 
   return (
@@ -1699,11 +1721,13 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "flex items-center justify-between",
-            isHero ? cn("gap-1.5 px-4", showProjectPicker ? "pb-1.5" : "pb-3.5") : "gap-2 px-3 pb-2",
+            "flex flex-wrap items-center justify-between gap-y-2",
+            isHero
+              ? cn("gap-x-1.5 px-3 sm:px-4", showProjectPicker ? "pb-1.5" : "pb-3.5")
+              : "gap-x-2 px-2.5 pb-2 sm:px-3",
           )}
         >
-          <div className={cn("flex min-w-0 flex-1 items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div className={cn("flex min-w-0 flex-1 basis-[8rem] items-center", isHero ? "gap-1.5" : "gap-2")}>
             <input
               ref={fileInputRef}
               type="file"
@@ -1746,7 +1770,7 @@ export function ThreadComposer({
               />
             ) : null}
           </div>
-          <div className={cn("flex shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
+          <div className={cn("ml-auto flex min-w-0 shrink-0 items-center", isHero ? "gap-1.5" : "gap-2")}>
             {modelLabel && !voiceRecorder.isRecording ? (
               <ComposerModelBadge
                 label={modelLabel}
@@ -1768,6 +1792,7 @@ export function ThreadComposer({
                       disabled={voiceRecorder.buttonDisabled}
                       aria-label={voiceButtonLabel}
                       aria-keyshortcuts={VOICE_SHORTCUT_ARIA}
+                      title={voiceButtonTooltip}
                       onPointerDown={voiceRecorder.beginPress}
                       onPointerUp={voiceRecorder.endPress}
                       onPointerCancel={voiceRecorder.endPress}
@@ -2071,7 +2096,9 @@ function ComposerModelBadge({
         "shadow-[0_2px_8px_rgba(15,23,42,0.045)]",
         interactive && "cursor-pointer hover:bg-accent/55 hover:text-foreground",
         needsSetup && "border-amber-500/35 bg-amber-50/70 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200",
-        isHero ? "h-8 max-w-[12.5rem] gap-1.5 px-2 text-[11.5px]" : "h-9 max-w-[12rem] gap-2 px-2.5 text-[12px]",
+        isHero
+          ? "h-8 max-w-[min(12.5rem,44vw)] gap-1.5 px-2 text-[11.5px]"
+          : "h-9 max-w-[min(12rem,44vw)] gap-2 px-2.5 text-[12px]",
       )}
     >
       <span
@@ -2252,7 +2279,7 @@ function CliAppMentionPalette({
                 onChoose(candidate);
               }}
               className={cn(
-                "flex h-10 w-full items-center gap-2.5 rounded-[13px] px-2.5 text-left transition-colors",
+                "flex min-h-10 w-full items-center gap-2.5 rounded-[13px] px-2.5 py-1.5 text-left transition-colors",
                 selected
                   ? "bg-foreground/[0.055] text-foreground"
                   : "text-foreground/90 hover:bg-foreground/[0.04]",
@@ -2260,7 +2287,7 @@ function CliAppMentionPalette({
             >
               <MentionCandidateLogo candidate={candidate} selected={selected} />
               <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                <span className="shrink-0 text-[15px] font-medium tracking-normal text-foreground">
+                <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
                   {displayName}
                 </span>
                 <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
@@ -2396,7 +2423,7 @@ function SlashCommandPalette({
               >
                 <Icon className="h-4 w-4" />
               </span>
-              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
                 <span className="min-w-0 truncate text-[13.5px] font-semibold tracking-normal text-foreground">
                   {title}
                 </span>
@@ -2404,7 +2431,7 @@ function SlashCommandPalette({
                   {command.detail || description}
                 </span>
               </span>
-              <span className="ml-2 flex shrink-0 items-center gap-1.5">
+              <span className="ml-2 flex max-w-[42%] shrink-0 items-center gap-1.5 sm:max-w-none">
                 {command.badge || command.recent ? (
                   <span className="hidden rounded-full bg-foreground/[0.055] px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
                     {command.badge ?? t("thread.composer.slash.badges.recent")}
@@ -2486,7 +2513,7 @@ function AttachmentChip({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
-        <span className="truncate max-w-[14rem] font-medium" title={image.file.name}>
+        <span className="max-w-[min(14rem,calc(100vw-8rem))] truncate font-medium" title={image.file.name}>
           {image.file.name}
         </span>
         <span className="truncate text-muted-foreground">
