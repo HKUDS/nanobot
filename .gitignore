@@ -17,6 +17,7 @@ desktop/resources/nanobot-engine/
 # Claude / AI assistant artifacts
 docs/superpowers/
 docs/plans/
+.nanobot/
 
 # webui (monorepo frontend)
 webui/node_modules/
