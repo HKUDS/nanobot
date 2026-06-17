@@ -6,6 +6,7 @@ consistent across tools, but they are not a replacement for an OS sandbox.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -28,6 +29,18 @@ def resolve_path(path: str | Path, workspace: str | Path | None = None, *, stric
     return candidate.resolve(strict=strict)
 
 
+def _resolve_logical_path(path: str | Path, workspace: str | Path | None = None) -> Path:
+    """Return an absolute normalized path without following symlinks."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() and workspace is not None:
+        candidate = Path(workspace).expanduser() / candidate
+    return Path(os.path.abspath(candidate))
+
+
+def _same_logical_path(left: str | Path, right: str | Path) -> bool:
+    return os.path.normcase(os.fspath(left)) == os.path.normcase(os.fspath(right))
+
+
 def is_path_within(path: str | Path, root: str | Path) -> bool:
     """Return True when *path* resolves to *root* or a descendant of *root*."""
     try:
@@ -44,18 +57,20 @@ def is_path_allowed(path: str | Path, roots: Iterable[str | Path]) -> bool:
     return any(is_path_within(path, root) for root in roots)
 
 
-def _is_path_exactly_allowed(path: str | Path, files: Iterable[str | Path]) -> bool:
+def _is_path_exactly_allowed(
+    logical_path: Path,
+    resolved_path: Path,
+    files: Iterable[str | Path],
+) -> bool:
     """Return True when *path* resolves exactly to one of the allowed files."""
-    try:
-        resolved_path = Path(path).expanduser().resolve(strict=False)
-    except (OSError, RuntimeError, TypeError, ValueError):
-        return False
     for file in files:
         try:
-            resolved_file = Path(file).expanduser().resolve(strict=False)
+            allowed_file = _resolve_logical_path(file)
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
-        if resolved_path == resolved_file:
+        if not _same_logical_path(logical_path, allowed_file):
+            continue
+        if _same_logical_path(resolved_path, allowed_file):
             return True
     return False
 
@@ -87,6 +102,7 @@ def resolve_allowed_path(
     strict: bool = False,
 ) -> Path:
     """Resolve a path and enforce containment in allowed roots when configured."""
+    logical = _resolve_logical_path(path, workspace)
     resolved = resolve_path(path, workspace, strict=False)
     files = list(extra_allowed_files or [])
     if allowed_root is None and not files:
@@ -96,7 +112,11 @@ def resolve_allowed_path(
     if allowed_root is not None:
         roots.append(allowed_root)
     roots.extend(extra_allowed_roots or [])
-    if not is_path_allowed(resolved, roots) and not _is_path_exactly_allowed(resolved, files):
+    if not is_path_allowed(resolved, roots) and not _is_path_exactly_allowed(
+        logical,
+        resolved,
+        files,
+    ):
         boundary = Path(allowed_root).expanduser() if allowed_root is not None else "allowed files"
         raise WorkspaceBoundaryError(
             f"Path {path} is outside allowed directory {boundary}"
