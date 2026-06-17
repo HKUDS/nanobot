@@ -130,6 +130,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_concurrent_subagents: int = Field(default=1, ge=1)
     max_tool_result_chars: int = 16_000
+    microcompact_tool_results: bool = True  # Set false to preserve prompt-cache prefixes over old tool results
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     tool_hint_max_length: int = Field(
         default=40,

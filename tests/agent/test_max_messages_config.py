@@ -16,7 +16,12 @@ from nanobot.session.manager import Session
 DEFAULT_MAX_MESSAGES = 120
 
 
-def _make_loop(tmp_path: Path, max_messages: int = DEFAULT_MAX_MESSAGES) -> AgentLoop:
+def _make_loop(
+    tmp_path: Path,
+    max_messages: int = DEFAULT_MAX_MESSAGES,
+    *,
+    microcompact_tool_results: bool = True,
+) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     return AgentLoop(
@@ -25,6 +30,7 @@ def _make_loop(tmp_path: Path, max_messages: int = DEFAULT_MAX_MESSAGES) -> Agen
         workspace=tmp_path,
         model="test-model",
         max_messages=max_messages,
+        microcompact_tool_results=microcompact_tool_results,
     )
 
 
@@ -210,3 +216,25 @@ class TestSchemaConfig:
 
         with pytest.raises(Exception):  # Pydantic validation error
             AgentDefaults(max_messages=-1)
+
+
+class TestMicrocompactToolResultsConfig:
+    """Verify #4222 prompt-cache opt-out wiring."""
+
+    def test_schema_default_enabled(self) -> None:
+        from nanobot.config.schema import AgentDefaults
+
+        assert AgentDefaults().microcompact_tool_results is True
+
+    def test_schema_accepts_camel_case_disable(self) -> None:
+        from nanobot.config.schema import AgentDefaults
+
+        defaults = AgentDefaults(microcompactToolResults=False)
+        assert defaults.microcompact_tool_results is False
+
+    def test_loop_propagates_disable_to_execution_components(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path, microcompact_tool_results=False)
+
+        assert loop.microcompact_tool_results is False
+        assert loop.consolidator.microcompact_tool_results is False
+        assert loop.subagents.microcompact_tool_results is False

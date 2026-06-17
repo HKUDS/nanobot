@@ -189,6 +189,7 @@ class AgentLoop:
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
+        microcompact_tool_results: bool = True,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
@@ -244,6 +245,7 @@ class AgentLoop:
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
         )
+        self.microcompact_tool_results = microcompact_tool_results
         self.provider_retry_mode = provider_retry_mode
         self.tool_hint_max_length = (
             tool_hint_max_length if tool_hint_max_length is not None
@@ -286,6 +288,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            microcompact_tool_results=microcompact_tool_results,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
@@ -323,6 +326,7 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
+            microcompact_tool_results=microcompact_tool_results,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -376,6 +380,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
+            microcompact_tool_results=defaults.microcompact_tool_results,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -815,6 +820,7 @@ class AgentLoop:
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
+                microcompact_tool_results=self.microcompact_tool_results,
                 hook=hook,
                 error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,

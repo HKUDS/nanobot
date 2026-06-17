@@ -476,6 +476,60 @@ async def test_microcompact_replaces_old_tool_results():
 
 
 @pytest.mark.asyncio
+async def test_run_can_disable_microcompact_for_prompt_cache_stability():
+    """#4222: cache-sensitive users can keep old tool results stable."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MICROCOMPACT_KEEP_RECENT
+
+    captured: list[dict] = []
+    provider = MagicMock()
+
+    async def chat_with_retry(*, messages, **_kwargs):
+        captured[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    total = _MICROCOMPACT_KEEP_RECENT + 3
+    long_content = "x" * 600
+    messages: list[dict] = [{"role": "user", "content": "inspect"}]
+    for i in range(total):
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": f"c{i}",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        })
+        messages.append({
+            "role": "tool",
+            "tool_call_id": f"c{i}",
+            "name": "read_file",
+            "content": long_content,
+        })
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        microcompact_tool_results=False,
+    ))
+
+    assert result.final_content == "done"
+    tool_messages = [m for m in captured if m.get("role") == "tool"]
+    assert len(tool_messages) == total
+    assert all(m.get("content") == long_content for m in tool_messages)
+    assert "omitted from context" not in "\n".join(str(m.get("content")) for m in captured)
+
+
+@pytest.mark.asyncio
 async def test_microcompact_preserves_short_results():
     """Short tool results (< _MICROCOMPACT_MIN_CHARS) should not be replaced."""
     from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
