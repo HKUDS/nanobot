@@ -461,6 +461,48 @@ class CliAppManager:
         _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
         return fetched
 
+    async def _fetch_registry_async(
+        self,
+        url: str,
+        cache_path: Path,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        data, cached_at = self._cached_registry(cache_path)
+        if (
+            not force_refresh
+            and data is not None
+            and _now() - cached_at < self.runtime.catalog_ttl_seconds
+        ):
+            return data
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                response = await client.get(url)
+            response.raise_for_status()
+            fetched = response.json()
+            if not isinstance(fetched, dict):
+                raise ValueError("registry response must be an object")
+        except Exception:
+            if data is not None:
+                return data
+            raise
+
+        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        return fetched
+
+    async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:
+        for source, url, _raw_base, required in _CATALOG_SOURCES:
+            try:
+                await self._fetch_registry_async(
+                    url,
+                    self._cache_path(source),
+                    force_refresh=force_refresh,
+                )
+            except Exception:
+                if required:
+                    raise
+
     def catalog(
         self,
         *,

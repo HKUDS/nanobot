@@ -8,6 +8,7 @@ request mapping and response shaping.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections.abc import Callable
 from typing import Any
@@ -309,10 +310,12 @@ class WebUISettingsRouter:
             "yes",
         }
         try:
-            if installed_only:
-                payload = await asyncio.to_thread(cli_apps_payload, installed_only=True)
-            else:
-                payload = await asyncio.to_thread(cli_apps_payload)
+            payload_result = (
+                cli_apps_payload(installed_only=True)
+                if installed_only
+                else cli_apps_payload()
+            )
+            payload = await payload_result if inspect.isawaitable(payload_result) else payload_result
         except Exception:
             self.logger.exception("failed to load CLI Apps payload")
             return self._error_response(500, "failed to load CLI Apps")

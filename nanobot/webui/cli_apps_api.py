@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
-import threading
 import time
 from typing import Any
 
@@ -22,37 +22,26 @@ _CLI_APP_ATTACHMENT_KEYS = (
     "brand_color",
 )
 _CATALOG_REFRESH_RETRY_SECONDS = 60.0
-_catalog_refresh_lock = threading.Lock()
-_catalog_refresh_running = False
+_catalog_refresh_task: asyncio.Task[None] | None = None
 _catalog_refresh_last_started = 0.0
 
 
-def _start_catalog_refresh() -> bool:
-    global _catalog_refresh_last_started, _catalog_refresh_running
+async def _refresh_catalog(manager: CliAppManager) -> None:
+    try:
+        await manager.refresh_catalog_cache(force_refresh=True)
+    except Exception:
+        pass
+
+
+def _start_catalog_refresh(manager: CliAppManager) -> bool:
+    global _catalog_refresh_last_started, _catalog_refresh_task
     now = time.monotonic()
-    with _catalog_refresh_lock:
-        if _catalog_refresh_running:
-            return True
-        if now - _catalog_refresh_last_started < _CATALOG_REFRESH_RETRY_SECONDS:
-            return False
-        _catalog_refresh_running = True
-        _catalog_refresh_last_started = now
-
-    def refresh() -> None:
-        global _catalog_refresh_running
-        try:
-            _manager().catalog(force_refresh=True)
-        except Exception:
-            pass
-        finally:
-            with _catalog_refresh_lock:
-                _catalog_refresh_running = False
-
-    threading.Thread(
-        target=refresh,
-        name="nanobot-cli-app-catalog-refresh",
-        daemon=True,
-    ).start()
+    if _catalog_refresh_task is not None and not _catalog_refresh_task.done():
+        return True
+    if now - _catalog_refresh_last_started < _CATALOG_REFRESH_RETRY_SECONDS:
+        return False
+    _catalog_refresh_last_started = now
+    _catalog_refresh_task = asyncio.create_task(_refresh_catalog(manager))
     return True
 
 
@@ -108,14 +97,14 @@ def _manager() -> CliAppManager:
     )
 
 
-def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
+async def cli_apps_payload(*, installed_only: bool = False) -> dict[str, Any]:
     manager = _manager()
     if installed_only:
         return manager.installed_payload()
     payload = manager.payload(cache_only=True)
     refresh_pending = False
     if not manager.catalog_cache_fresh(include_optional=True):
-        refresh_pending = _start_catalog_refresh()
+        refresh_pending = _start_catalog_refresh(manager)
     if not payload["apps"]:
         installed = manager.installed_payload()
         if installed["apps"]:
