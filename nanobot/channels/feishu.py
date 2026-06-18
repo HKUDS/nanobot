@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
+from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
+from rich.text import Text
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
     from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
+_LOGIN_CONSOLE = Console()
 
 
 def _load_lark_runtime() -> tuple[Any, str, str]:
@@ -400,10 +405,6 @@ def _poll_registration(
             continue
 
         poll_count += 1
-        if poll_count == 1:
-            print("Waiting for authorization", end="", flush=True)
-        elif poll_count % 6 == 0:
-            print(".", end="", flush=True)
 
         # Domain auto-detection: if the user's tenant is on Lark, switch automatically
         user_info = res.get("user_info") or {}
@@ -413,8 +414,6 @@ def _poll_registration(
 
         # Success
         if res.get("client_id") and res.get("client_secret"):
-            if poll_count > 0:
-                print(" done.")
             return {
                 "app_id": res["client_id"],
                 "app_secret": res["client_secret"],
@@ -424,20 +423,13 @@ def _poll_registration(
         # Terminal errors
         error = res.get("error", "")
         if error in ("access_denied", "expired_token"):
-            if poll_count > 0:
-                print()
-            from loguru import logger
-
-            logger.warning("[Feishu onboard] Registration {}", error)
+            _LOGIN_CONSOLE.print("[yellow]Authorization was cancelled or expired.[/yellow]")
             return None
 
         # authorization_pending or unknown — keep polling
         time.sleep(interval)
 
-    if poll_count > 0:
-        print(" timed out.")
-    else:
-        print("Login timed out.")
+    _LOGIN_CONSOLE.print("[yellow]Authorization timed out.[/yellow]")
     return None
 
 
@@ -462,7 +454,9 @@ def qr_register(
     try:
         return _qr_register_inner(initial_domain=initial_domain)
     except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError) as exc:
-        print(f"[Warning] Registration failed: {exc}")
+        _LOGIN_CONSOLE.print(
+            f"[yellow]Unable to start Feishu/Lark login:[/yellow] {escape(str(exc))}"
+        )
         return None
 
 
@@ -471,15 +465,16 @@ def _print_qr_code(url: str) -> None:
     try:
         import qrcode as qr_lib
 
-        print("\nScan this QR code with Feishu or Lark on your phone:\n")
+        _LOGIN_CONSOLE.print("\n[bold]Scan with Feishu or Lark[/bold]\n")
         qr = qr_lib.QRCode(border=1)
         qr.add_data(url)
         qr.make(fit=True)
         qr.print_ascii(invert=True)
-        print()
+        _LOGIN_CONSOLE.print()
     except ImportError:
-        print("\nOpen this link with Feishu or Lark on your phone:")
-        print(f"{url}\n")
+        _LOGIN_CONSOLE.print()
+        _LOGIN_CONSOLE.print(Panel.fit(Text(url), title="Open with Feishu or Lark", border_style="cyan"))
+        _LOGIN_CONSOLE.print()
 
 
 def _qr_register_inner(
@@ -487,19 +482,19 @@ def _qr_register_inner(
     initial_domain: str,
 ) -> dict | None:
     """Run init → begin → poll. Raises on network/protocol errors."""
-    print("Preparing Feishu/Lark login...")
+    _LOGIN_CONSOLE.print("[cyan]Preparing Feishu/Lark login...[/cyan]")
     _init_registration(initial_domain)
     begin = _begin_registration(initial_domain)
 
     _print_qr_code(begin["qr_url"])
 
-    result = _poll_registration(
-        device_code=begin["device_code"],
-        interval=begin["interval"],
-        expire_in=begin["expire_in"],
-        domain=initial_domain,
-    )
-    return result
+    with _LOGIN_CONSOLE.status("Waiting for authorization in Feishu/Lark...", spinner="dots"):
+        return _poll_registration(
+            device_code=begin["device_code"],
+            interval=begin["interval"],
+            expire_in=begin["expire_in"],
+            domain=initial_domain,
+        )
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
@@ -575,17 +570,18 @@ class FeishuChannel(BaseChannel):
             self.config.app_secret = ""
 
         if self.config.app_id and self.config.app_secret:
-            print("Feishu / Lark is already authenticated.")
-            print("Use --force to re-authenticate with a new bot.")
-            print()
+            _LOGIN_CONSOLE.print("[green]Feishu/Lark is already authenticated.[/green]")
+            _LOGIN_CONSOLE.print("Use --force to re-authenticate with a new bot.\n")
             return True
 
-        print("Authorize with the mobile app. nanobot will save the new bot credentials.")
-        print()
+        _LOGIN_CONSOLE.print("Authorize with the mobile app. nanobot will save the new bot credentials.\n")
 
         result = qr_register(initial_domain=self.config.domain or "feishu")
         if not result:
-            print("Login was not completed. Run 'nanobot channels login feishu --force' to retry.")
+            _LOGIN_CONSOLE.print(
+                "[yellow]Login was not completed.[/yellow] "
+                "Run 'nanobot channels login feishu --force' to retry."
+            )
             return False
 
         self.config.app_id = result["app_id"]
@@ -605,9 +601,9 @@ class FeishuChannel(BaseChannel):
             setattr(full_config.channels, "feishu", feishu_cfg)
         save_config(full_config)
 
-        print("\nFeishu/Lark login complete.")
-        print(f"App ID: {result['app_id']}")
-        print(f"Domain: {self.config.domain}")
+        _LOGIN_CONSOLE.print("\n[green]Feishu/Lark login complete.[/green]")
+        _LOGIN_CONSOLE.print(f"App ID: {escape(result['app_id'])}")
+        _LOGIN_CONSOLE.print(f"Domain: {escape(self.config.domain)}")
         return True
 
     @staticmethod
