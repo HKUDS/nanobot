@@ -1456,7 +1456,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
 | `bocha` | `apiKey` | `BOCHA_API_KEY` | Free tier (1M calls for startups) |
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
-| `keenable` | `apiKey` | `KEENABLE_API_KEY` | No |
+| `keenable` | `apiKey` (optional) | `KEENABLE_API_KEY` | Yes (no key needed; key raises limits) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1566,21 +1566,20 @@ You can set `BOCHA_API_KEY` in the environment instead of storing it in config.
 
 You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-search skill. Create the key in the [Volcengine web search console](https://console.volcengine.com/search-infinity/web-search), then copy it from [API keys](https://console.volcengine.com/search-infinity/api-key). Volcengine Ark keys are separate and do not work for this search provider.
 
-**Keenable:**
+**Keenable** (works without an API key on the free tier):
 ```json
 {
   "tools": {
     "web": {
       "search": {
-        "provider": "keenable",
-        "apiKey": "${KEENABLE_API_KEY}"
+        "provider": "keenable"
       }
     }
   }
 }
 ```
 
-Create a key at [keenable.ai](https://keenable.ai). You can also set `KEENABLE_API_KEY` in the environment instead of storing it in config.
+Keenable search works out of the box with no account, via its token-less public endpoint (free tier, limited to 1,000 requests/hour). Set `apiKey` (or `KEENABLE_API_KEY`) from [keenable.ai](https://keenable.ai) to remove the hourly limit.
 
 **SearXNG** (self-hosted, no API key needed):
 ```json
