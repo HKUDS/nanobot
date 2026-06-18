@@ -1480,21 +1480,11 @@ def channels_login(
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import get_config_path, load_config, set_config_path
+    from nanobot.config.loader import load_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
         set_config_path(resolved_config_path)
-
-    default_config_path = get_config_path()
-    # Feishu requires a configuration file to be present
-    if channel_name == "feishu" and not config_path and not default_config_path.exists():
-        console.print(
-            "[yellow]No configuration file found.[/yellow] "
-            "Please run [bold]nanobot onboard[/bold] to initialize nanobot first, "
-            "then retry this command."
-        )
-        raise typer.Exit(1)
 
     config = load_config(resolved_config_path)
     channel_cfg = getattr(config.channels, channel_name, None) or {}

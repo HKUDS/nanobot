@@ -50,11 +50,52 @@ def test_begin_registration_requires_login_url(monkeypatch):
         feishu_module._begin_registration()
 
 
-def test_channels_login_feishu_requires_default_config_file(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_feishu_login_creates_missing_active_config(monkeypatch, tmp_path):
     missing_config = tmp_path / "missing.json"
-    monkeypatch.setattr(loader, "get_config_path", lambda: missing_config)
+    monkeypatch.setattr(loader, "_current_config_path", missing_config)
+    monkeypatch.setattr(
+        feishu_module,
+        "qr_register",
+        lambda initial_domain="feishu": {
+            "app_id": "cli_app",
+            "app_secret": "secret",
+            "domain": "feishu",
+            "bot_name": None,
+            "bot_open_id": None,
+        },
+    )
 
-    result = CliRunner().invoke(app, ["channels", "login", "feishu"])
+    channel = FeishuChannel({}, None)
 
-    assert result.exit_code == 1
-    assert "No configuration file found" in result.output
+    assert await channel.login() is True
+    assert missing_config.exists()
+    data = json.loads(missing_config.read_text(encoding="utf-8"))
+    assert data["channels"]["feishu"]["appId"] == "cli_app"
+
+
+def test_channels_login_feishu_uses_generic_channel_login(monkeypatch, tmp_path):
+    missing_config = tmp_path / "missing.json"
+    seen: dict[str, object] = {}
+
+    class _LoginChannel:
+        display_name = "Feishu"
+
+        def __init__(self, config, bus):
+            seen["config"] = config
+            seen["bus"] = bus
+
+        async def login(self, force: bool = False) -> bool:
+            seen["force"] = force
+            return True
+
+    monkeypatch.setattr(loader, "_current_config_path", missing_config)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"feishu": _LoginChannel},
+    )
+
+    result = CliRunner().invoke(app, ["channels", "login", "feishu", "--force"])
+
+    assert result.exit_code == 0
+    assert seen["force"] is True
