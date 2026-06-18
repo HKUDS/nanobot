@@ -350,7 +350,7 @@ nanobot channels login feishu
 # Use --force to create/sign in with a new bot
 ```
 
-Open the printed URL or scan the QR code with Feishu/Lark on your phone. nanobot writes `appId`, `appSecret`, `domain`, and `enabled` under `channels.feishu` in the active config file. Use `--config <path>` to update a non-default config.
+Open the printed URL or scan the QR code with Feishu/Lark on your phone. If the optional `qrcode` package is installed, nanobot shows a terminal QR code; otherwise it prints the login URL. nanobot writes `appId`, `appSecret`, `domain`, and `enabled` under `channels.feishu` in the active config file. Use `--config <path>` to update a non-default config.
 
 If QR login is unavailable for your account, use manual setup below.
 
