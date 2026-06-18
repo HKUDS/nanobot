@@ -523,6 +523,9 @@ export interface SettingsPayload {
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };
+  webui?: {
+    hidden_settings_sections?: string[];
+  };
   requires_restart: boolean;
   restart_required_sections?: Array<"runtime" | "browser" | "image">;
   version?: {
