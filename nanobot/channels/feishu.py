@@ -717,7 +717,7 @@ class FeishuChannel(BaseChannel):
         print(f"Domain: {self.config.domain}")
 
         # Write credentials back to config.json
-        from nanobot.config.loader import get_config_path, load_config, save_config
+        from nanobot.config.loader import load_config, save_config
 
         full_config = load_config()
         feishu_cfg = getattr(full_config.channels, "feishu", None) or {}
@@ -729,7 +729,6 @@ class FeishuChannel(BaseChannel):
             setattr(full_config.channels, "feishu", feishu_cfg)
         save_config(full_config)
 
-        print(f"\nCredentials saved to {get_config_path()} (feishu enabled)")
         print("Login successful!")
         return True
 
