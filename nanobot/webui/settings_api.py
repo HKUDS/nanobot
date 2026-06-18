@@ -298,9 +298,12 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
                 token_filename=OPENAI_CODEX_PROVIDER.token_filename,
             ).load()
         expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
         return {
             "configured": bool(
-                token and token.access and expires_at and expires_at > int(time.time() * 1000)
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
             ),
             "account": getattr(token, "account_id", None) if token else None,
             "expires_at": expires_at,

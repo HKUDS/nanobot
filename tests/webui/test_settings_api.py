@@ -806,6 +806,27 @@ def test_openai_codex_oauth_status_uses_available_token(
     assert status["account"] == "acct-codex"
 
 
+def test_openai_codex_oauth_status_uses_refreshable_expired_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = type(
+        "Token",
+        (),
+        {
+            "access": "access-token",
+            "refresh": "refresh-token",
+            "expires": 1,
+            "account_id": "acct-codex",
+        },
+    )()
+    monkeypatch.setattr("oauth_cli_kit.storage.FileTokenStorage.load", lambda _self: token)
+
+    status = _oauth_provider_status(find_by_name("openai_codex"))
+
+    assert status["configured"] is True
+    assert status["expires_at"] == 1
+
+
 def test_openai_codex_oauth_status_rejects_unavailable_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
