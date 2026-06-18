@@ -161,6 +161,28 @@ def _extract_interactive_content(content: dict) -> list[str]:
     return parts
 
 
+def _stringify_table_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, int | float | bool):
+        return str(value)
+    if isinstance(value, list):
+        return " ".join(filter(None, (_stringify_table_cell(item) for item in value)))
+    if isinstance(value, dict):
+        nested = _extract_element_content(value)
+        if nested:
+            return " ".join(nested)
+        for key in ("content", "text", "value", "name"):
+            text = value.get(key)
+            if isinstance(text, str):
+                return text.strip()
+            if isinstance(text, int | float | bool):
+                return str(text)
+    return ""
+
+
 def _extract_element_content(element: dict) -> list[str]:
     """Extract content from a single card element."""
     parts = []
@@ -231,6 +253,28 @@ def _extract_element_content(element: dict) -> list[str]:
         content = element.get("content", "")
         if content:
             parts.append(content)
+
+    elif tag == "table":
+        columns = element.get("columns", [])
+        rows = element.get("rows", [])
+        if isinstance(columns, list):
+            column_names = []
+            headers = []
+            for column in columns:
+                if not isinstance(column, dict) or not column.get("name"):
+                    continue
+                column_names.append(column["name"])
+                headers.append(str(column.get("display_name") or column["name"]))
+            if headers:
+                parts.append(" | ".join(headers))
+            if isinstance(rows, list):
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    values = [_stringify_table_cell(row.get(name)) for name in column_names]
+                    row_text = " | ".join(values).strip()
+                    if row_text:
+                        parts.append(row_text)
 
     else:
         for ne in element.get("elements", []):
