@@ -7,6 +7,7 @@ platform-specific binaries (all subprocess calls are mocked).
 
 import asyncio
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -356,6 +357,35 @@ class TestSandboxPlatform:
         mock_wrap.assert_called_once()
         spawned_cmd = mock_spawn.call_args[0][0]
         assert "bwrap" in spawned_cmd
+
+    @pytest.mark.asyncio
+    async def test_bwrap_receives_configured_bind_roots(self):
+        """Configured bwrap bind roots should be forwarded to the sandbox wrapper."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"sandboxed", b"")
+        mock_proc.returncode = 0
+
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch("nanobot.agent.tools.shell.wrap_command", return_value="bwrap -- sh -c ls") as mock_wrap,
+            patch.object(ExecTool, "_spawn", return_value=mock_proc),
+            patch.object(ExecTool, "_guard_command", return_value=None),
+        ):
+            tool = ExecTool(
+                sandbox="bwrap",
+                working_dir="/workspace",
+                sandbox_ro_binds=["/home/user/.local/bin"],
+                sandbox_rw_binds=["/home/user/.cache/uv"],
+            )
+            await tool.execute(command="ls")
+
+        kwargs = mock_wrap.call_args.kwargs
+        assert kwargs["sandbox_ro_binds"] == [
+            str(Path("/home/user/.local/bin").resolve(strict=False))
+        ]
+        assert kwargs["sandbox_rw_binds"] == [
+            str(Path("/home/user/.cache/uv").resolve(strict=False))
+        ]
 
 
 # ---------------------------------------------------------------------------
