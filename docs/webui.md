@@ -88,6 +88,12 @@ nanobot can call from a chat. CLI Apps install local adapters that nanobot runs
 on your machine; they do not modify the native apps themselves. MCP presets add
 predefined MCP server configurations.
 
+Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
+preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
+extraction tools without requiring an API key. This does not replace nanobot's
+built-in web search provider; mention the Firecrawl MCP preset with `@` when a
+turn needs Firecrawl's richer web data tools.
+
 After an App or MCP preset is available, mention it from the composer with `@`
 to attach that capability to the next message.
 
