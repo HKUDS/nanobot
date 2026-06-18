@@ -161,28 +161,6 @@ def _extract_interactive_content(content: dict) -> list[str]:
     return parts
 
 
-def _stringify_table_cell(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, int | float | bool):
-        return str(value)
-    if isinstance(value, list):
-        return " ".join(filter(None, (_stringify_table_cell(item) for item in value)))
-    if isinstance(value, dict):
-        nested = _extract_element_content(value)
-        if nested:
-            return " ".join(nested)
-        for key in ("content", "text", "value", "name"):
-            text = value.get(key)
-            if isinstance(text, str):
-                return text.strip()
-            if isinstance(text, int | float | bool):
-                return str(text)
-    return ""
-
-
 def _extract_element_content(element: dict) -> list[str]:
     """Extract content from a single card element."""
     parts = []
@@ -255,26 +233,27 @@ def _extract_element_content(element: dict) -> list[str]:
             parts.append(content)
 
     elif tag == "table":
-        columns = element.get("columns", [])
+        columns = [
+            (column["name"], str(column.get("display_name") or column["name"]))
+            for column in (element.get("columns") or [])
+            if isinstance(column, dict) and column.get("name")
+        ]
         rows = element.get("rows", [])
-        if isinstance(columns, list):
-            column_names = []
-            headers = []
-            for column in columns:
-                if not isinstance(column, dict) or not column.get("name"):
+        if columns:
+            parts.append(" | ".join(header for _, header in columns))
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
                     continue
-                column_names.append(column["name"])
-                headers.append(str(column.get("display_name") or column["name"]))
-            if headers:
-                parts.append(" | ".join(headers))
-            if isinstance(rows, list):
-                for row in rows:
-                    if not isinstance(row, dict):
-                        continue
-                    values = [_stringify_table_cell(row.get(name)) for name in column_names]
-                    row_text = " | ".join(values).strip()
-                    if row_text:
-                        parts.append(row_text)
+                values = []
+                for name, _ in columns:
+                    value = row.get(name)
+                    if isinstance(value, list):
+                        value = " ".join(str(item).strip() for item in value if item is not None)
+                    values.append("" if value is None else str(value).strip())
+                row_text = " | ".join(values).strip()
+                if row_text:
+                    parts.append(row_text)
 
     else:
         for ne in element.get("elements", []):
