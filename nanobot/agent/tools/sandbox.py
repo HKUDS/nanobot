@@ -5,13 +5,40 @@ To add a new backend, implement a function with the signature:
 and register it in _BACKENDS below.
 """
 
+import os
 import shlex
 from pathlib import Path
+from typing import Iterable
 
 from nanobot.config.paths import get_media_dir
 
 
-def _bwrap(command: str, workspace: str, cwd: str) -> str:
+def _normalize_bind_paths(paths: Iterable[str] | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in paths or []:
+        value = str(raw).strip()
+        if not value:
+            continue
+        path = Path(os.path.expandvars(value)).expanduser()
+        if not path.is_absolute():
+            continue
+        resolved = str(path.resolve(strict=False))
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        out.append(resolved)
+    return out
+
+
+def _bwrap(
+    command: str,
+    workspace: str,
+    cwd: str,
+    *,
+    sandbox_ro_binds: Iterable[str] | None = None,
+    sandbox_rw_binds: Iterable[str] | None = None,
+) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
 
     Only the workspace is bind-mounted read-write; its parent dir (which holds
@@ -51,17 +78,34 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
         "--dir", str(ws),                 # recreate workspace mount point
         "--bind", str(ws), str(ws),
         "--ro-bind-try", str(media), str(media),  # read-only access to media
-        "--chdir", sandbox_cwd,
-        "--", "sh", "-c", command,
     ]
+    for p in _normalize_bind_paths(sandbox_ro_binds):
+        args += ["--ro-bind-try", p, p]
+    for p in _normalize_bind_paths(sandbox_rw_binds):
+        args += ["--bind-try", p, p]
+    args += ["--chdir", sandbox_cwd, "--", "sh", "-c", command]
     return shlex.join(args)
 
 
 _BACKENDS = {"bwrap": _bwrap}
 
 
-def wrap_command(sandbox: str, command: str, workspace: str, cwd: str) -> str:
+def wrap_command(
+    sandbox: str,
+    command: str,
+    workspace: str,
+    cwd: str,
+    *,
+    sandbox_ro_binds: Iterable[str] | None = None,
+    sandbox_rw_binds: Iterable[str] | None = None,
+) -> str:
     """Wrap *command* using the named sandbox backend."""
     if backend := _BACKENDS.get(sandbox):
-        return backend(command, workspace, cwd)
+        return backend(
+            command,
+            workspace,
+            cwd,
+            sandbox_ro_binds=sandbox_ro_binds,
+            sandbox_rw_binds=sandbox_rw_binds,
+        )
     raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")
