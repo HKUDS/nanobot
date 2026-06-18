@@ -175,8 +175,8 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 
 @pytest.mark.asyncio
 async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.hook import AgentHook, AgentHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     captured_usage: list[dict] = []
@@ -288,8 +288,8 @@ async def test_runner_calls_run_level_hooks_on_success():
 
 @pytest.mark.asyncio
 async def test_runner_run_level_context_is_detached_snapshot():
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.hook import AgentHook, AgentRunHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     call_count = {"n": 0}
@@ -441,8 +441,8 @@ async def test_runner_calls_on_error_and_finally_for_unhandled_exception():
 
 @pytest.mark.asyncio
 async def test_runner_preserves_original_exception_when_finally_hook_fails():
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.hook import AgentHook, AgentRunHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
 
@@ -473,8 +473,8 @@ async def test_runner_preserves_original_exception_when_finally_hook_fails():
 async def test_runner_does_not_report_cancellation_as_error():
     import asyncio
 
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.hook import AgentHook, AgentRunHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     events: list[tuple] = []
@@ -525,8 +525,8 @@ async def test_runner_does_not_report_cancellation_as_error():
 async def test_runner_preserves_cancellation_when_finally_hook_fails():
     import asyncio
 
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.hook import AgentHook, AgentRunHookContext
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
 

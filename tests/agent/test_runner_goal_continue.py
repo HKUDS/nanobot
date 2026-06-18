@@ -215,7 +215,7 @@ async def test_runner_uses_custom_goal_continue_message():
 @pytest.mark.asyncio
 async def test_runner_resolves_goal_continue_message_lazily():
     """The continuation text can depend on goal metadata created during the run."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(

@@ -132,8 +132,8 @@ def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monke
 
 
 def test_delete_webui_transcript_removes_segments(tmp_path, monkeypatch) -> None:
-    from nanobot.webui.thread_disk import webui_thread_file_path
-    from nanobot.webui.transcript import delete_webui_transcript, webui_transcript_path
+    from blackcat.webui.thread_disk import webui_thread_file_path
+    from blackcat.webui.transcript import delete_webui_transcript, webui_transcript_path
 
     key = "websocket:delete-segments"
     _write_segmented_turns(tmp_path, monkeypatch, key, "delete-segments", 4)

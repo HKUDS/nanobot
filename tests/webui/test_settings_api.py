@@ -651,7 +651,7 @@ def test_settings_payload_includes_token_usage_summary(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
 
-    from nanobot.webui.token_usage import record_token_usage
+    from blackcat.webui.token_usage import record_token_usage
 
     record_token_usage({"prompt_tokens": 10, "completion_tokens": 5})
 
@@ -676,7 +676,7 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr("nanobot.webui.token_usage.get_webui_dir", lambda: tmp_path / "webui")
 
-    from nanobot.webui.token_usage import record_token_usage
+    from blackcat.webui.token_usage import record_token_usage
 
     record_token_usage({"prompt_tokens": 20, "completion_tokens": 2})
 

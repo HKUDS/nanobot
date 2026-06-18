@@ -7,7 +7,7 @@ from pathlib import Path
 def test_config_base_import_does_not_load_config_schema():
     code = """
 import sys
-from nanobot.config_base import Base
+from blackcat.config_base import Base
 print("nanobot.config.schema" in sys.modules)
 """
     result = subprocess.run(

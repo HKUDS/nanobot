@@ -2921,8 +2921,8 @@ def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.cron.session_turns import CRON_HISTORY_META
-    from nanobot.webui.transcript import append_transcript_object
+    from blackcat.cron.session_turns import CRON_HISTORY_META
+    from blackcat.webui.transcript import append_transcript_object
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     workspace = tmp_path / "workspace"

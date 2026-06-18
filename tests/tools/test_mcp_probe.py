@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent.tools.mcp import _probe_http_url, connect_mcp_servers
-from nanobot.agent.tools.registry import ToolRegistry
+from blackcat.agent.tools.mcp import _probe_http_url, connect_mcp_servers
+from blackcat.agent.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # _probe_http_url unit tests

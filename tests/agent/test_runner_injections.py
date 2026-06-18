@@ -155,7 +155,7 @@ async def test_drain_injections_skips_empty_content():
 @pytest.mark.asyncio
 async def test_drain_injections_filters_empty_dict_payloads():
     """Pre-normalized dict injections should obey the same empty-content guard."""
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     runner = AgentRunner(provider)
@@ -193,7 +193,7 @@ async def test_drain_injections_skips_objects_with_none_content():
     """Objects exposing content=None should be skipped rather than stringified."""
     from types import SimpleNamespace
 
-    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from blackcat.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     runner = AgentRunner(provider)
@@ -733,8 +733,8 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
 @pytest.mark.asyncio
 async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
     """Bound cron jobs remain marked pending while their session turn is in flight."""
-    from nanobot.bus.events import InboundMessage, OutboundMessage
-    from nanobot.cron.session_turns import CRON_TRIGGER_META
+    from blackcat.bus.events import InboundMessage, OutboundMessage
+    from blackcat.cron.session_turns import CRON_TRIGGER_META
 
     loop = _make_loop(tmp_path)
     loop._running = True

@@ -4,9 +4,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import nanobot.webui.session_list_index as session_list_index
-from nanobot.cron.session_turns import CRON_HISTORY_META
-from nanobot.session.manager import SessionManager
+import blackcat.webui.session_list_index as session_list_index
+from blackcat.cron.session_turns import CRON_HISTORY_META
+from blackcat.session.manager import SessionManager
 
 
 def test_webui_session_list_reuses_valid_index_without_scanning_files(
