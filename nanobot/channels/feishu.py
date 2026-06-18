@@ -371,6 +371,8 @@ def _begin_registration(domain: str = "feishu") -> dict:
     if not device_code:
         raise RuntimeError("Feishu / Lark registration did not return a device_code")
     qr_url = res.get("verification_uri_complete", "")
+    if not qr_url:
+        raise RuntimeError("Feishu / Lark registration did not return a login URL")
     if "?" in qr_url:
         qr_url += "&from=nanobot&tp=nanobot"
     else:
@@ -715,7 +717,7 @@ class FeishuChannel(BaseChannel):
         print(f"Domain: {self.config.domain}")
 
         # Write credentials back to config.json
-        from nanobot.config.loader import load_config, save_config
+        from nanobot.config.loader import get_config_path, load_config, save_config
 
         full_config = load_config()
         feishu_cfg = getattr(full_config.channels, "feishu", None) or {}
@@ -727,7 +729,7 @@ class FeishuChannel(BaseChannel):
             setattr(full_config.channels, "feishu", feishu_cfg)
         save_config(full_config)
 
-        print(f"\nCredentials saved to ~/.nanobot/config.json (feishu enabled)")
+        print(f"\nCredentials saved to {get_config_path()} (feishu enabled)")
         print("Login successful!")
         return True
 
