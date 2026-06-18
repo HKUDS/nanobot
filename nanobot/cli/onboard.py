@@ -62,17 +62,6 @@ _QUICK_START_TARGETS = {
     "Discord": "discord",
 }
 
-_QUICK_START_PROVIDER_CHOICES = {
-    "OpenRouter": "openrouter",
-    "Anthropic": "anthropic",
-    "OpenAI": "openai",
-    "DeepSeek": "deepseek",
-    "DashScope": "dashscope",
-    "Gemini": "gemini",
-    "Ollama (local)": "ollama",
-    "Custom OpenAI-compatible": "custom",
-}
-
 _QUICK_START_CHANNEL_FIELDS = {
     "telegram": (("token", "Telegram bot token from BotFather"),),
     "feishu": (
@@ -1054,6 +1043,17 @@ def _get_provider_names() -> dict[str, str]:
     return {name: data[0] for name, data in info.items() if name}
 
 
+def _get_quick_start_provider_choices() -> dict[str, str]:
+    """Return display-name -> provider key choices for chat-capable providers."""
+    from nanobot.providers.registry import PROVIDERS
+
+    return {
+        spec.display_name or spec.name: spec.name
+        for spec in PROVIDERS
+        if not spec.is_oauth and not spec.is_transcription_only
+    }
+
+
 def _configure_provider(config: Config, provider_name: str) -> None:
     """Configure a single LLM provider."""
     provider_config = getattr(config.providers, provider_name, None)
@@ -1370,16 +1370,17 @@ def _show_quick_start_progress(active_step: int) -> None:
 def _configure_quick_start_provider(config: Config) -> bool:
     """Configure the minimum needed provider + primary model preset."""
     _show_quick_start_progress(2)
+    provider_choices = _get_quick_start_provider_choices()
     answer = _select_with_back(
         "Choose your AI provider:",
-        list(_QUICK_START_PROVIDER_CHOICES),
+        list(provider_choices),
         default="OpenRouter",
     )
     if answer is _BACK_PRESSED or answer is None:
         return False
 
     assert isinstance(answer, str)
-    provider_name = _QUICK_START_PROVIDER_CHOICES[answer]
+    provider_name = provider_choices[answer]
     provider_config = getattr(config.providers, provider_name, None)
     if provider_config is None:
         console.print(f"[red]Unknown provider: {provider_name}[/red]")

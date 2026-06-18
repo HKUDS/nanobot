@@ -417,6 +417,18 @@ class TestProviderChannelInfo:
             assert isinstance(value, tuple)
             assert len(value) == 4  # (display_name, needs_api_key, needs_api_base, env_var)
 
+    def test_quick_start_provider_choices_cover_chat_registry(self):
+        from nanobot.cli.onboard import _get_quick_start_provider_choices
+
+        choices = _get_quick_start_provider_choices()
+
+        assert choices["OpenRouter"] == "openrouter"
+        assert choices["Moonshot"] == "moonshot"
+        assert choices["NVIDIA NIM"] == "nvidia"
+        assert "OpenAI Codex" not in choices
+        assert "Github Copilot" not in choices
+        assert "AssemblyAI" not in choices
+
 
 class _SimpleDraftModel(BaseModel):
     api_key: str = ""
