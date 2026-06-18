@@ -627,6 +627,9 @@ class Consolidator:
     _MAX_CONSOLIDATION_ROUNDS = 5
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
+    _EAGER_TIMESTAMP_METADATA_KEY = "_last_eager_consolidated_at"
+    _EAGER_SKIP_SESSION_PREFIXES = ("cron:", "dream:")
+    _EAGER_SKIP_SESSION_KEYS = {"heartbeat"}
 
     def __init__(
         self,
@@ -640,6 +643,10 @@ class Consolidator:
         max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
+        eager_consolidation: bool = False,
+        eager_min_messages: int = 3,
+        eager_min_interval_s: int = 120,
+        eager_max_batch: int = 20,
     ):
         self.store = store
         self.provider = provider
@@ -649,6 +656,10 @@ class Consolidator:
         self.max_completion_tokens = max_completion_tokens
         self.consolidation_ratio = consolidation_ratio
         self.unified_session = unified_session
+        self.eager_consolidation = eager_consolidation
+        self.eager_min_messages = max(1, eager_min_messages)
+        self.eager_min_interval_s = max(0, eager_min_interval_s)
+        self.eager_max_batch = max(1, eager_max_batch)
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
@@ -669,6 +680,44 @@ class Consolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    @staticmethod
+    def _cursor_value(session: Session, name: str, default: int) -> int:
+        value = getattr(session, name, default)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return default
+        return value
+
+    def _should_skip_eager_session(self, session_key: str) -> bool:
+        if session_key in self._EAGER_SKIP_SESSION_KEYS:
+            return True
+        return session_key.startswith(self._EAGER_SKIP_SESSION_PREFIXES)
+
+    def _eager_interval_elapsed(self, session: Session) -> bool:
+        if self.eager_min_interval_s <= 0:
+            return True
+        value = session.metadata.get(self._EAGER_TIMESTAMP_METADATA_KEY)
+        if not isinstance(value, str):
+            return True
+        with suppress(TypeError, ValueError):
+            last_run = datetime.fromisoformat(value)
+            return (datetime.now() - last_run).total_seconds() >= self.eager_min_interval_s
+        return True
+
+    def _pick_eager_boundary(self, session: Session, start: int) -> int | None:
+        available = len(session.messages) - start
+        if available < self.eager_min_messages:
+            return None
+        if available <= self.eager_max_batch:
+            return len(session.messages)
+
+        capped_end = start + self.eager_max_batch
+        for idx in range(capped_end, start, -1):
+            if idx < len(session.messages) and session.messages[idx].get("role") == "user":
+                if idx - start >= self.eager_min_messages:
+                    return idx
+                return None
+        return capped_end
 
     def pick_consolidation_boundary(
         self,
@@ -764,6 +813,10 @@ class Consolidator:
         )
         summary = await self.archive(chunk, session_key=session.key)
         session.last_consolidated = end_idx
+        session.last_eager_consolidated = max(
+            self._cursor_value(session, "last_eager_consolidated", session.last_consolidated),
+            end_idx,
+        )
         self.sessions.save(session)
         return summary
 
@@ -954,6 +1007,10 @@ class Consolidator:
                 if summary:
                     last_summary = summary
                 session.last_consolidated = end_idx
+                session.last_eager_consolidated = max(
+                    self._cursor_value(session, "last_eager_consolidated", session.last_consolidated),
+                    end_idx,
+                )
                 self.sessions.save(session)
                 if not summary:
                     # LLM is degraded — stop hammering it this call;
@@ -974,6 +1031,51 @@ class Consolidator:
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
             self._persist_last_summary(session, last_summary)
+
+    async def maybe_eager_consolidate(self, session: Session) -> None:
+        """Proactively archive completed conversation history without trimming it."""
+        if not self.eager_consolidation:
+            return
+        if self._should_skip_eager_session(session.key):
+            return
+
+        lock = self.get_lock(session.key)
+        async with lock:
+            fresh = self.sessions.get_or_create(session.key)
+            if fresh is not session:
+                session = fresh
+            if not session.messages:
+                return
+            if not self._eager_interval_elapsed(session):
+                return
+
+            last_consolidated = self._cursor_value(session, "last_consolidated", 0)
+            last_eager = self._cursor_value(session, "last_eager_consolidated", last_consolidated)
+            start = max(last_consolidated, last_eager)
+            if start > len(session.messages):
+                start = last_consolidated
+            end_idx = self._pick_eager_boundary(session, start)
+            if end_idx is None:
+                return
+
+            chunk = session.messages[start:end_idx]
+            if not chunk:
+                return
+
+            logger.info(
+                "Eager consolidation for {}: chunk={} msgs, cursor={}->{}",
+                session.key,
+                len(chunk),
+                start,
+                end_idx,
+            )
+            await self.archive(chunk, session_key=session.key)
+            # Advance on summary success or raw-archive fallback. In both cases
+            # the chunk has a breadcrumb in history.jsonl and should not be
+            # eagerly archived again.
+            session.last_eager_consolidated = end_idx
+            session.metadata[self._EAGER_TIMESTAMP_METADATA_KEY] = datetime.now().isoformat()
+            self.sessions.save(session)
 
     async def compact_idle_session(
         self,
@@ -998,6 +1100,12 @@ class Consolidator:
                 self.sessions.save(session)
                 return ""
 
+            original_messages = list(session.messages)
+            original_eager = self._cursor_value(
+                session,
+                "last_eager_consolidated",
+                session.last_consolidated,
+            )
             probe = Session(
                 key=session.key,
                 messages=messages_to_summarize.copy(),
@@ -1009,6 +1117,11 @@ class Consolidator:
             dropped, already_consolidated = probe.retain_recent_legal_suffix(max_suffix, extend_to_user=True)
             messages_to_keep = probe.messages
             messages_to_remove = dropped[already_consolidated:]
+            kept_ids = {id(m) for m in messages_to_keep}
+            retained_eager = sum(
+                1 for i, m in enumerate(original_messages)
+                if i < original_eager and id(m) in kept_ids
+            )
 
             if not messages_to_remove and not messages_to_keep:
                 session.updated_at = datetime.now()
@@ -1034,6 +1147,10 @@ class Consolidator:
 
             session.messages = messages_to_keep
             session.last_consolidated = 0
+            if summary:
+                session.last_eager_consolidated = len(messages_to_keep)
+            else:
+                session.last_eager_consolidated = retained_eager
             session.updated_at = datetime.now()
             self.sessions.save(session)
 

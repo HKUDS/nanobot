@@ -29,6 +29,13 @@ When a conversation grows large enough to pressure the context window, nanobot d
 
 Instead, the `Consolidator` summarizes the oldest safe slice of the conversation and appends that summary to `memory/history.jsonl`.
 
+When `agents.defaults.dream.eagerConsolidation` is enabled, the same archive
+layer can also run after completed responses in the background. This eager
+pass appends new conversation slices to `memory/history.jsonl` without trimming
+the live session and without injecting the summary back into the next prompt.
+It exists so Dream can learn from ordinary short conversations too, not only
+from sessions that have already hit the context budget.
+
 This file is:
 
 - append-only
@@ -146,6 +153,10 @@ Dream is configured under `agents.defaults.dream`:
       "dream": {
         "intervalH": 2,
         "modelOverride": null,
+        "eagerConsolidation": false,
+        "eagerMinMessages": 3,
+        "eagerMinIntervalS": 120,
+        "eagerMaxBatch": 20,
         "maxBatchSize": 20,
         "maxIterations": 10
       }
@@ -159,6 +170,10 @@ Dream is configured under `agents.defaults.dream`:
 | `intervalH` | How often Dream runs, in hours |
 | `cron` | Cron expression override (takes precedence over `intervalH`) |
 | `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
+| `eagerConsolidation` | Proactively append recent completed turns to `memory/history.jsonl` after responses |
+| `eagerMinMessages` | Minimum new messages required before one eager archive pass |
+| `eagerMinIntervalS` | Per-session throttle, in seconds, between eager archive passes |
+| `eagerMaxBatch` | Maximum messages summarized by one eager archive pass |
 | `maxBatchSize` | *(Deprecated — not used)* |
 | `maxIterations` | *(Deprecated — not used)* |
 
@@ -167,6 +182,7 @@ In practical terms:
 - `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
 - `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
 - `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
+- `eagerConsolidation` is off by default because it can create extra LLM summarization calls. When enabled, it only appends archive entries; it does not delete live session messages.
 - `maxBatchSize` and `maxIterations` are preserved for config compatibility but no longer affect behavior.
 
 ## In Practice

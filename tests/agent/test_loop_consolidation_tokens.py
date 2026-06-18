@@ -5,11 +5,11 @@ import pytest
 import nanobot.agent.memory as memory_module
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMResponse
+from nanobot.config.schema import Config, DreamConfig
+from nanobot.providers.base import GenerationSettings, LLMResponse
 
 
 def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
-    from nanobot.providers.base import GenerationSettings
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=0)
@@ -28,6 +28,27 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
     return loop
+
+
+def test_from_config_propagates_eager_consolidation_options(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=0)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+    config.agents.defaults.dream = DreamConfig(
+        eager_consolidation=True,
+        eager_min_messages=4,
+        eager_min_interval_s=10,
+        eager_max_batch=12,
+    )
+
+    loop = AgentLoop.from_config(config, provider=provider)
+
+    assert loop.consolidator.eager_consolidation is True
+    assert loop.consolidator.eager_min_messages == 4
+    assert loop.consolidator.eager_min_interval_s == 10
+    assert loop.consolidator.eager_max_batch == 12
 
 
 @pytest.mark.asyncio
@@ -210,6 +231,26 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
         session,
         replay_max_messages=loop._max_messages,
     )
+
+
+@pytest.mark.asyncio
+async def test_post_turn_consolidation_runs_token_check_before_eager(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    session = loop.sessions.get_or_create("cli:test")
+    order: list[tuple[str, int | None]] = []
+
+    async def eager(_session):
+        order.append(("eager", None))
+
+    async def token(_session, *, replay_max_messages=None):
+        order.append(("token", replay_max_messages))
+
+    loop.consolidator.maybe_eager_consolidate = eager  # type: ignore[method-assign]
+    loop.consolidator.maybe_consolidate_by_tokens = token  # type: ignore[method-assign]
+
+    await loop._post_turn_consolidation(session, replay_max_messages=7)
+
+    assert order == [("token", 7), ("eager", None)]
 
 
 @pytest.mark.asyncio
