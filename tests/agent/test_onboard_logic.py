@@ -982,6 +982,112 @@ class TestMainMenuUpdate:
         assert onboard_wizard._configure_quick_start_channel(config, "telegram") is False
         assert getattr(config.channels, "telegram", None) is None
 
+    def test_quick_start_login_channel_runs_login_without_fields(self, monkeypatch):
+        """Quick Start should use interactive login for channels that support it."""
+        from nanobot.channels.base import BaseChannel
+
+        config = Config()
+        calls: dict[str, Any] = {}
+
+        class LoginConfig(BaseModel):
+            enabled: bool = False
+            token: str = ""
+
+        class LoginChannel(BaseChannel):
+            name = "loginchat"
+            display_name = "Login Chat"
+
+            async def login(self, force: bool = False) -> bool:
+                calls["force"] = force
+                calls["enabled_during_login"] = self.config.enabled
+                return True
+
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                pass
+
+            async def send(self, msg) -> None:
+                pass
+
+        def fail_input(*_args, **_kwargs):
+            raise AssertionError("Quick Start should not ask for manual channel fields")
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_config_class",
+            lambda channel: LoginConfig if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_class",
+            lambda channel: LoginChannel if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(onboard_wizard, "_get_channel_names", lambda: {"loginchat": "Login Chat"})
+        monkeypatch.setattr(onboard_wizard, "_input_with_existing", fail_input)
+
+        assert onboard_wizard._configure_quick_start_channel(config, "loginchat") is True
+
+        loginchat = getattr(config.channels, "loginchat")
+        assert loginchat["enabled"] is True
+        assert calls == {"force": False, "enabled_during_login": True}
+
+    def test_configure_login_channel_defaults_to_login(self, monkeypatch):
+        """The channel wizard should start login before exposing advanced fields."""
+        from nanobot.channels.base import BaseChannel
+
+        config = Config()
+        calls: dict[str, Any] = {}
+
+        class LoginConfig(BaseModel):
+            enabled: bool = False
+
+        class LoginChannel(BaseChannel):
+            name = "loginchat"
+            display_name = "Login Chat"
+
+            async def login(self, force: bool = False) -> bool:
+                calls["force"] = force
+                return True
+
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                pass
+
+            async def send(self, msg) -> None:
+                pass
+
+        def fail_configure(*_args, **_kwargs):
+            raise AssertionError("Default action should run login, not open advanced fields")
+
+        monkeypatch.setattr(onboard_wizard, "_get_channel_names", lambda: {"loginchat": "Login Chat"})
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_config_class",
+            lambda channel: LoginConfig if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_channel_class",
+            lambda channel: LoginChannel if channel == "loginchat" else None,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_select_with_back",
+            lambda *_args, **_kwargs: onboard_wizard._CHANNEL_LOGIN_CHOICE,
+        )
+        monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_configure)
+
+        onboard_wizard._configure_channel(config, "loginchat")
+
+        loginchat = getattr(config.channels, "loginchat")
+        assert loginchat["enabled"] is True
+        assert calls == {"force": False}
+
     def test_main_menu_dispatch_includes_channel_common(self):
         """Main menu dispatch should route [H] to Channel Common."""
 

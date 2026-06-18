@@ -190,7 +190,7 @@ For the first setup, choose `[Q] Quick Start (recommended)`. It asks for the mod
 If you are following the OpenRouter example:
 
 1. Choose `[Q] Quick Start (recommended)`.
-2. Choose `No chat channel yet` unless you already want to configure WebUI, Telegram, Feishu/Lark, Slack, or Discord now.
+2. Choose `No chat channel yet` unless you already want to configure WebUI, Telegram, WeChat, WhatsApp, Feishu/Lark, Slack, or Discord now.
 3. Select OpenRouter.
 4. Paste your OpenRouter API key.
 5. Enter a model ID, for example `anthropic/claude-sonnet-4.5`.

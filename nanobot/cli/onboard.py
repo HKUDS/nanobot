@@ -1,5 +1,6 @@
 """Interactive onboarding questionnaire for nanobot."""
 
+import asyncio
 import json
 import types
 from dataclasses import dataclass
@@ -57,6 +58,8 @@ _QUICK_START_TARGETS = {
     "WebUI / local browser (recommended)": "websocket",
     "No chat channel yet": None,
     "Telegram": "telegram",
+    "WeChat": "weixin",
+    "WhatsApp": "whatsapp",
     "Feishu / Lark": "feishu",
     "Slack": "slack",
     "Discord": "discord",
@@ -83,6 +86,8 @@ _UI_BORDER = "#4E5254"
 _UI_TEXT = "#A9B7C6"
 _UI_MUTED = "#80868B"
 _UI_SUCCESS = "#6AAB73"
+_CHANNEL_LOGIN_CHOICE = "Login with QR/link"
+_CHANNEL_ADVANCED_CHOICE = "Edit advanced settings"
 
 
 def _get_questionary():
@@ -1162,6 +1167,60 @@ def _get_channel_config_class(channel: str) -> type[BaseModel] | None:
     return entry[1] if entry else None
 
 
+def _get_channel_class(channel: str) -> type[Any] | None:
+    """Get channel implementation class."""
+    from nanobot.channels.registry import discover_all
+
+    return discover_all().get(channel)
+
+
+def _channel_supports_login(channel_cls: type[Any] | None) -> bool:
+    """Return True when a channel overrides BaseChannel.login."""
+    if channel_cls is None:
+        return False
+    from nanobot.channels.base import BaseChannel
+
+    return getattr(channel_cls, "login", None) is not BaseChannel.login
+
+
+def _run_channel_login(
+    config: Config,
+    channel_name: str,
+    model: BaseModel,
+    display_name: str,
+) -> bool:
+    """Run a channel's interactive login and enable it only on success."""
+    channel_cls = _get_channel_class(channel_name)
+    if channel_cls is None:
+        console.print(f"[red]Unknown channel: {channel_name}[/red]")
+        return False
+    if not _channel_supports_login(channel_cls):
+        return False
+
+    if hasattr(model, "enabled"):
+        setattr(model, "enabled", True)
+
+    console.print(f"[{_UI_ACCENT}]Starting {display_name} login...[/]")
+    try:
+        channel = channel_cls(model, bus=None)
+        success = asyncio.run(channel.login(force=False))
+    except KeyboardInterrupt:
+        console.print("\n[dim]Login cancelled.[/dim]")
+        return False
+    except Exception as exc:
+        logger.exception("{} login failed", display_name)
+        console.print(f"[red]{display_name} login failed:[/red] {exc}")
+        return False
+
+    if not success:
+        console.print(f"[yellow]! {display_name} login did not complete; channel was not enabled[/yellow]")
+        return False
+
+    setattr(config.channels, channel_name, model.model_dump(by_alias=True, exclude_none=True))
+    console.print(f"[{_UI_SUCCESS}]{display_name} enabled[/]")
+    return True
+
+
 def _configure_channel(config: Config, channel_name: str) -> None:
     """Configure a single channel."""
     channel_dict = getattr(config.channels, channel_name, None)
@@ -1177,6 +1236,19 @@ def _configure_channel(config: Config, channel_name: str) -> None:
         return
 
     model = config_cls.model_validate(channel_dict) if channel_dict else config_cls()
+
+    channel_cls = _get_channel_class(channel_name)
+    if _channel_supports_login(channel_cls):
+        action = _select_with_back(
+            f"Configure {display_name}:",
+            [_CHANNEL_LOGIN_CHOICE, _CHANNEL_ADVANCED_CHOICE, "<- Back"],
+            default=_CHANNEL_LOGIN_CHOICE,
+        )
+        if action is _BACK_PRESSED or action is None or action == "<- Back":
+            return
+        if action == _CHANNEL_LOGIN_CHOICE:
+            _run_channel_login(config, channel_name, model, display_name)
+            return
 
     updated_channel = _configure_pydantic_model(
         model,
@@ -1457,6 +1529,11 @@ def _configure_quick_start_channel(config: Config, channel_name: str | None) -> 
             return False
         setattr(config.channels, channel_name, updated.model_dump(by_alias=True, exclude_none=True))
         return True
+
+    channel_cls = _get_channel_class(channel_name)
+    display_name = _get_channel_names().get(channel_name, channel_name)
+    if _channel_supports_login(channel_cls):
+        return _run_channel_login(config, channel_name, model, display_name)
 
     required_fields = _QUICK_START_CHANNEL_FIELDS.get(channel_name, ())
     for field_name, prompt in required_fields:
