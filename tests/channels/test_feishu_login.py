@@ -47,6 +47,20 @@ def test_begin_registration_requires_login_url(monkeypatch):
         feishu_module._begin_registration()
 
 
+def test_begin_registration_preserves_login_url(monkeypatch):
+    login_url = "https://accounts.feishu.cn/login?device_code=device"
+    monkeypatch.setattr(
+        feishu_module,
+        "_post_registration",
+        lambda _base_url, _body: {
+            "device_code": "device",
+            "verification_uri_complete": login_url,
+        },
+    )
+
+    assert feishu_module._begin_registration()["qr_url"] == login_url
+
+
 def test_qr_register_returns_none_on_network_error(monkeypatch):
     def raise_connect_error(_base_url, _body):
         raise httpx.ConnectError("network down")

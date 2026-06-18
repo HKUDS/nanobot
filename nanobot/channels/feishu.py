@@ -364,10 +364,6 @@ def _begin_registration(domain: str = "feishu") -> dict:
     qr_url = res.get("verification_uri_complete", "")
     if not qr_url:
         raise RuntimeError("Feishu / Lark registration did not return a login URL")
-    if "?" in qr_url:
-        qr_url += "&from=nanobot&tp=nanobot"
-    else:
-        qr_url += "?from=nanobot&tp=nanobot"
     return {
         "device_code": device_code,
         "qr_url": qr_url,
