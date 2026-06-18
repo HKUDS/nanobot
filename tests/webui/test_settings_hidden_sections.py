@@ -99,3 +99,28 @@ def test_hidden_sections_snake_case_alias_works(
         }
     })
     assert config.webui.hidden_settings_sections == ["models", "image"]
+
+
+def test_save_config_omits_webui_key_when_at_defaults(
+    tmp_path,
+) -> None:
+    """Default config should not serialize the webui key to avoid config noise."""
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "webui" not in raw
+
+
+def test_save_config_preserves_webui_key_when_configured(
+    tmp_path,
+) -> None:
+    """Non-default hidden sections should be serialized."""
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "webui": {"hiddenSettingsSections": ["advanced"]},
+    })
+    save_config(config, config_path)
+
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    assert raw["webui"]["hiddenSettingsSections"] == ["advanced"]

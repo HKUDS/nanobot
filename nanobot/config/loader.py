@@ -80,6 +80,12 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     data = config.model_dump(mode="json", by_alias=True)
 
+    # Strip webui section when at defaults to avoid config noise for users
+    # who never opt into hidden settings sections.
+    webui_data = data.get("webui")
+    if isinstance(webui_data, dict) and not webui_data.get("hiddenSettingsSections"):
+        data.pop("webui", None)
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
