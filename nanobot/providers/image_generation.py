@@ -977,7 +977,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
         handles: list[Any] = []
         try:
             for path in reference_images:
-                p = Path(path)
+                p = Path(path).expanduser()
                 raw = p.read_bytes()
                 mime = detect_image_mime(raw)
                 if mime is None:

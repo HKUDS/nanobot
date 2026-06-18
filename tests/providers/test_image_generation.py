@@ -823,6 +823,34 @@ async def test_openai_reference_images_use_edits_endpoint(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_openai_reference_images_expand_user_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = OpenAIImageGenerationClient(
+        api_key="sk-openai-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="use a home-relative reference",
+        model="gpt-image-1",
+        reference_images=["~/ref.png"],
+    )
+
+    call = fake.calls[0]
+    assert call["url"] == "https://api.openai.com/v1/images/edits"
+    assert call["files"][0][0] == "image[]"
+    assert call["files"][0][1][0] == "ref.png"
+    assert call["files"][0][1][2] == "image/png"
+    assert call["files"][0][1][1].closed is True
+
+
+@pytest.mark.asyncio
 async def test_openai_reference_images_send_multiple_multipart_files(
     tmp_path: Path,
 ) -> None:
