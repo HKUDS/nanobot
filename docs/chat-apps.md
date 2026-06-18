@@ -336,6 +336,25 @@ nanobot gateway
 > WhatsApp bridge updates are not applied automatically for existing installations. After upgrading nanobot, rebuild the local bridge with:
 > `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
 
+**Optional: static LID mappings**
+
+Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobot
+learns the LID→phone mapping at runtime (and reuses the ones the bridge persists on
+disk), but you can also seed mappings up front so the phone number resolves from the
+very first message:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": ["+1234567890"],
+      "lidMappings": { "123456789012345": "1234567890" }
+    }
+  }
+}
+```
+
 </details>
 
 <details>
