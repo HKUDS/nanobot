@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from nanobot.config.schema import Config
 
@@ -92,15 +93,58 @@ def install_args_for_extra(extra: str, deps: list[str] | None) -> tuple[list[str
     return [target], f'"{target}"'
 
 
-def requirement_installed(raw: str, extra: str = "") -> bool:
-    req = Requirement(raw)
+def _requirement_installed(req: Requirement, extra: str, seen: set[tuple[str, str]]) -> bool:
     if req.marker and not req.marker.evaluate({"extra": extra}):
         return True
+    key = (
+        canonicalize_name(req.name),
+        ",".join(sorted(canonicalize_name(value) for value in req.extras)),
+    )
+    if key in seen:
+        return True
+    seen.add(key)
     try:
-        installed = distribution(req.name).version
+        dist = distribution(req.name)
     except PackageNotFoundError:
         return False
-    return not req.specifier or req.specifier.contains(installed, prereleases=True)
+    if req.specifier and not req.specifier.contains(dist.version, prereleases=True):
+        return False
+
+    for requested_extra in req.extras:
+        if not _extra_dependencies_installed(dist, requested_extra, seen):
+            return False
+    return True
+
+
+def _extra_dependencies_installed(
+    dist: Any,
+    requested_extra: str,
+    seen: set[tuple[str, str]],
+) -> bool:
+    normalized = canonicalize_name(requested_extra)
+    provided = {
+        canonicalize_name(value)
+        for value in (dist.metadata.get_all("Provides-Extra") or [])
+    }
+    if provided and normalized not in provided:
+        return False
+
+    matched = False
+    for raw in dist.requires or []:
+        try:
+            req = Requirement(raw)
+        except Exception:
+            continue
+        if req.marker and not req.marker.evaluate({"extra": requested_extra}):
+            continue
+        matched = True
+        if not _requirement_installed(req, requested_extra, seen):
+            return False
+    return matched or bool(provided)
+
+
+def requirement_installed(raw: str, extra: str = "") -> bool:
+    return _requirement_installed(Requirement(raw), extra, set())
 
 
 def extra_installed(extra: str, deps: list[str] | None) -> bool:
@@ -298,4 +342,6 @@ def enable_optional_feature(
     else:
         message = f"Enabled feature '{name}'"
 
-    return optional_features_payload(last_action={"ok": True, "message": message, "enabled": True})
+    payload = optional_features_payload(last_action={"ok": True, "message": message, "enabled": True})
+    payload["requires_restart"] = bool(name in builtin_channels or name in plugin_channels or name in extras)
+    return payload

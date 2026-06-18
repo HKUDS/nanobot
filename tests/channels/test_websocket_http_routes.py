@@ -487,34 +487,31 @@ async def test_nanobot_feature_routes_require_token_and_enable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.nanobot_features_payload",
-        lambda: {
-            "features": [
-                {
-                    "name": "matrix",
-                    "display_name": "Matrix",
-                    "type": "channel",
-                    "enabled": False,
-                    "installed": False,
-                    "ready": False,
-                    "status": "missing_dependency",
-                    "install_supported": True,
-                    "requires_restart": True,
-                }
-            ],
-            "enabled_count": 0,
-        },
-    )
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.nanobot_features_action",
-        lambda action, query: {
-            "features": [],
-            "enabled_count": 1,
-            "requires_restart": True,
-            "last_action": {"ok": True, "message": f"{action}:{query['name'][0]}"},
-        },
-    )
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.base import BaseChannel
+    class _MatrixChannel(BaseChannel):
+        name = "matrix"
+        display_name = "Matrix"
+
+        @classmethod
+        def default_config(cls) -> dict[str, Any]:
+            return {"enabled": False, "allowFrom": []}
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            pass
+
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr("nanobot.channels.registry.discover_channel_names", lambda: ["matrix"])
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.load_channel_class", lambda _name: _MatrixChannel)
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {"matrix": []})
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29916)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -539,7 +536,7 @@ async def test_nanobot_feature_routes_require_token_and_enable(
         )
         assert enabled.status_code == 200
         body = enabled.json()
-        assert body["last_action"]["message"] == "enable:matrix"
+        assert body["last_action"]["message"] == "Enabled channel 'matrix'"
         assert body["restart_required_sections"] == ["runtime"]
     finally:
         await channel.stop()

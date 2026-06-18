@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tomllib
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -700,6 +701,53 @@ def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
         ["nanobot-ai[bedrock]"],
         '"nanobot-ai[bedrock]"',
     )
+
+
+def test_requirement_installed_validates_requested_extras(monkeypatch):
+    from nanobot import optional_features
+
+    class _Metadata:
+        def __init__(self, extras: list[str] | None = None) -> None:
+            self._extras = extras or []
+
+        def get_all(self, key: str):
+            assert key == "Provides-Extra"
+            return self._extras
+
+    class _Distribution:
+        def __init__(
+            self,
+            version: str,
+            *,
+            requires: list[str] | None = None,
+            extras: list[str] | None = None,
+        ) -> None:
+            self.version = version
+            self.requires = requires or []
+            self.metadata = _Metadata(extras)
+
+    installed: dict[str, _Distribution] = {
+        "qrcode": _Distribution(
+            "8.2",
+            requires=["pillow>=9.1; extra == 'pil'"],
+            extras=["pil"],
+        ),
+    }
+
+    def _distribution(name: str) -> _Distribution:
+        normalized = name.lower()
+        if normalized not in installed:
+            raise PackageNotFoundError(name)
+        return installed[normalized]
+
+    monkeypatch.setattr(optional_features, "distribution", _distribution)
+
+    assert optional_features.requirement_installed("qrcode>=8.0") is True
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is False
+
+    installed["pillow"] = _Distribution("10.0")
+
+    assert optional_features.requirement_installed("qrcode[pil]>=8.0") is True
 
 
 @pytest.mark.asyncio

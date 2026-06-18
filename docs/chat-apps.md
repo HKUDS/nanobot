@@ -676,10 +676,10 @@ nanobot gateway
 
 Uses **HTTP long-poll** with QR-code login via the ilinkai personal WeChat API. No local WeChat desktop client is required.
 
-**1. Install with WeChat support**
+**1. Enable WeChat support**
 
 ```bash
-python -m pip install "nanobot-ai[weixin]"
+nanobot plugins enable weixin
 ```
 
 **2. Configure**
@@ -728,10 +728,10 @@ nanobot gateway
 >
 > Uses **WebSocket** long connection — no public IP required.
 
-**1. Install the optional dependency**
+**1. Enable WeCom support**
 
 ```bash
-python -m pip install "nanobot-ai[wecom]"
+nanobot plugins enable wecom
 ```
 
 **2. Create a WeCom AI Bot**
@@ -767,10 +767,10 @@ nanobot gateway
 > Direct-message text in/out, tenant-aware OAuth, conversation reference persistence.
 > Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
 
-**1. Install the optional dependency**
+**1. Enable Microsoft Teams support**
 
 ```bash
-python -m pip install "nanobot-ai[msteams]"
+nanobot plugins enable msteams
 ```
 
 **2. Create a Teams / Azure bot app registration**

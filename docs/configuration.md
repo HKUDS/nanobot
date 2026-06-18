@@ -342,7 +342,7 @@ Omit `apiKey` (or leave it empty / unset). The provider falls back to [`DefaultA
 Install the optional dependency:
 
 ```bash
-python -m pip install 'nanobot-ai[azure]'
+nanobot plugins enable azure
 ```
 
 `DefaultAzureCredential` walks this chain in order and uses the first identity that succeeds:
@@ -357,7 +357,7 @@ python -m pip install 'nanobot-ai[azure]'
 
 The identity that ends up signing the request **must be assigned the `Cognitive Services OpenAI User` RBAC role** (or higher) on the Azure OpenAI resource. Without that role you will see `401`/`403` errors at the first request.
 
-> `apiBase` remains mandatory in both modes — it's your Azure resource endpoint and cannot be inferred. If neither `apiKey` is set nor `azure-identity` is installed, the provider raises a clear error pointing you at `python -m pip install 'nanobot-ai[azure]'`.
+> `apiBase` remains mandatory in both modes — it's your Azure resource endpoint and cannot be inferred. If neither `apiKey` is set nor `azure-identity` is installed, the provider raises a clear error pointing you at `nanobot plugins enable azure`.
 
 </details>
 
