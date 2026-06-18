@@ -1709,6 +1709,22 @@ You can also set `WEB_SEARCH_API_KEY` for compatibility with the Volcengine web-
 
 Keenable search works out of the box with no account, via its token-less public endpoint (free tier, limited to 1,000 requests/hour). Set `apiKey` (or `KEENABLE_API_KEY`) from [keenable.ai](https://keenable.ai) to remove the hourly limit.
 
+**Serper** (Google Search API):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "serper",
+        "apiKey": "${SERPER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_KEY` in the environment instead of storing it in config.
+
 **SearXNG** (self-hosted, no API key needed):
 ```json
 {
@@ -1740,7 +1756,7 @@ Keenable search works out of the box with no account, via its token-less public 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |

@@ -201,6 +201,89 @@ async def test_keenable_search_http_error(monkeypatch):
     assert "Error: Keenable search failed (401)" in result
 
 
+def test_serper_without_api_key_is_treated_as_duckduckgo(monkeypatch):
+    # Serper requires a key; without one we fall back to DuckDuckGo for concurrency.
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    tool = _tool(provider="serper", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+@pytest.mark.asyncio
+async def test_serper_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://google.serper.dev/search"
+        assert kw["headers"]["X-API-KEY"] == "serper-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["json"] == {"q": "serper", "num": 1}
+        return _response(json={
+            "organic": [
+                {"title": "Serper", "link": "https://serper.dev", "snippet": "Google Search API"}
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="serper", api_key="serper-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="serper", count=1)
+    assert "Serper" in result
+    assert "https://serper.dev" in result
+    assert "Google Search API" in result
+
+
+@pytest.mark.asyncio
+async def test_serper_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-KEY"] == "env-serper-key"
+        return _response(json={
+            "organic": [{"title": "Env", "link": "https://serper.dev/env", "snippet": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("SERPER_API_KEY", "env-serper-key")
+    tool = _tool(provider="serper", api_key="")
+    result = await tool.execute(query="serper", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_serper_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+
+    tool = _tool(provider="serper", api_key="")
+    result = await tool.execute(query="serper", count=1)
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_serper_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=403, json={"message": "Unauthorized"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="serper", api_key="bad-serper-key")
+    result = await tool.execute(query="serper")
+    assert "Error: Serper search failed (403)" in result
+
+
+@pytest.mark.asyncio
+async def test_serper_search_rate_limited(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=429, json={"message": "rate limited"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="serper", api_key="serper-key")
+    result = await tool.execute(query="serper")
+    assert "Serper search rate limited" in result
+
+
 @pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):
