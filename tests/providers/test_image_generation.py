@@ -830,6 +830,7 @@ async def test_openai_reference_images_expand_user_paths(
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
         api_key="sk-openai-test",
