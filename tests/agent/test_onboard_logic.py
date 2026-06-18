@@ -926,10 +926,10 @@ class TestMainMenuUpdate:
         assert telegram["enabled"] is True
         assert telegram["token"] == "123:abc"
 
-    def test_quick_start_webui_enables_websocket(self, monkeypatch):
-        """The recommended Quick Start target should create a working WebUI channel."""
+    def test_quick_start_recommended_path_does_not_enable_channel(self, monkeypatch):
+        """The recommended Quick Start target should leave chat surfaces as explicit opt-ins."""
         config = Config()
-        selections = iter(["WebUI only (recommended)", "OpenRouter"])
+        selections = iter(["No chat channel yet (recommended)", "OpenRouter"])
 
         def fake_select_with_back(*_args, **_kwargs):
             return next(selections)
@@ -948,9 +948,18 @@ class TestMainMenuUpdate:
 
         onboard_wizard._configure_quick_start(config)
 
-        websocket = getattr(config.channels, "websocket")
-        assert websocket["enabled"] is True
-        assert websocket["allowFrom"] == ["*"]
+        assert getattr(config.channels, "websocket", None) is None
+        assert config.agents.defaults.model_preset == "primary"
+
+    def test_quick_start_channel_requires_token_before_enable(self, monkeypatch):
+        """Quick Start should not enable token-based channels with blank credentials."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_input_with_existing", lambda *a, **kw: "")
+
+        assert onboard_wizard._configure_quick_start_channel(config, "telegram") is False
+        assert getattr(config.channels, "telegram", None) is None
 
     def test_main_menu_dispatch_includes_channel_common(self):
         """Main menu dispatch should route [H] to Channel Common."""

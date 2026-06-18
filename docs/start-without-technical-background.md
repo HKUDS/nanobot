@@ -190,12 +190,14 @@ For the first setup, choose `[Q] Quick Start (recommended)`. It asks for the mod
 If you are following the OpenRouter example:
 
 1. Choose `[Q] Quick Start (recommended)`.
-2. Choose `WebUI only (recommended)` unless you already have a Telegram, Feishu/Lark, Slack, or Discord bot token ready.
+2. Choose `No chat channel yet (recommended)` unless you already have a Telegram, Feishu/Lark, Slack, or Discord bot token ready.
 3. Select OpenRouter.
 4. Paste your OpenRouter API key.
 5. Enter a model ID, for example `anthropic/claude-sonnet-4.5`.
 6. Review the Quick Start summary.
 7. Choose `[S] Save and Exit`.
+
+Enable WebUI later from `[C] Chat Channel` -> `WebSocket` after the first local reply works.
 
 If OpenRouter says your account cannot use that model, use another OpenRouter model ID that your account can access.
 
