@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 
 from nanobot.channels import feishu as feishu_module
@@ -44,6 +45,15 @@ def test_begin_registration_requires_login_url(monkeypatch):
 
     with pytest.raises(RuntimeError, match="login URL"):
         feishu_module._begin_registration()
+
+
+def test_qr_register_returns_none_on_network_error(monkeypatch):
+    def raise_connect_error(_base_url, _body):
+        raise httpx.ConnectError("network down")
+
+    monkeypatch.setattr(feishu_module, "_post_registration", raise_connect_error)
+
+    assert feishu_module.qr_register() is None
 
 
 @pytest.mark.asyncio

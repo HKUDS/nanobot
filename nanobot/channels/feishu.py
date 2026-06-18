@@ -460,9 +460,11 @@ def qr_register(
     Returns None on expected failures (network, auth denied, timeout).
     Unexpected errors (bugs, protocol regressions) propagate to the caller.
     """
+    import httpx
+
     try:
         return _qr_register_inner(initial_domain=initial_domain)
-    except (RuntimeError, OSError, json.JSONDecodeError) as exc:
+    except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError) as exc:
         print(f"[Warning] Registration failed: {exc}")
         return None
 
