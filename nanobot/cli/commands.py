@@ -452,9 +452,11 @@ def onboard(
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
+    can_prompt = _onboard_can_prompt()
     wants_wizard = wizard or not defaults
-    use_wizard = wants_wizard and not defaults and _onboard_can_prompt()
+    use_wizard = wants_wizard and not defaults and can_prompt
     default_fallback = wants_wizard and not use_wizard and not defaults
+    default_refresh_without_prompt = defaults and not can_prompt
     if default_fallback:
         console.print(
             "[yellow]No interactive terminal detected; using --defaults setup instead.[/yellow]"
@@ -476,7 +478,7 @@ def onboard(
     if config_path.exists():
         if use_wizard:
             config = _apply_workspace_override(load_config(config_path))
-        elif default_fallback:
+        elif default_fallback or default_refresh_without_prompt:
             config = _apply_workspace_override(load_config(config_path))
             save_config(config, config_path)
             console.print(

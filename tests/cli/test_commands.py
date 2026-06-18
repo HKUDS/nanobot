@@ -108,10 +108,11 @@ def test_onboard_fresh_install(mock_paths):
     assert mock_ws.call_args.args == (expected_workspace,)
 
 
-def test_onboard_existing_config_refresh(mock_paths):
+def test_onboard_existing_config_refresh(mock_paths, monkeypatch):
     """Config exists, user declines overwrite — should refresh (load-merge-save)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
+    monkeypatch.setattr("nanobot.cli.commands._onboard_can_prompt", lambda: True)
 
     result = runner.invoke(app, ["onboard", "--defaults"], input="n\n")
 
@@ -136,10 +137,46 @@ def test_onboard_non_tty_existing_config_refreshes_without_prompt(mock_paths):
     assert workspace_dir.exists()
 
 
-def test_onboard_existing_config_overwrite(mock_paths):
+def test_onboard_defaults_non_tty_existing_config_preserves_values_without_prompt(
+    tmp_path, monkeypatch
+):
+    """Explicit --defaults should refresh existing configs without prompts outside a TTY."""
+    config_path = tmp_path / "config.json"
+    workspace_path = tmp_path / "workspace"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"model": "custom/keep"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("nanobot.cli.commands._onboard_can_prompt", lambda: False)
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(
+        app,
+        [
+            "onboard",
+            "--defaults",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Config already exists" not in result.stdout
+    assert "Overwrite?" not in result.stdout
+    assert "existing values preserved" in result.stdout
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.agents.defaults.model == "custom/keep"
+    assert saved.workspace_path == workspace_path
+
+
+def test_onboard_existing_config_overwrite(mock_paths, monkeypatch):
     """Config exists, user confirms overwrite — should reset to defaults."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
+    monkeypatch.setattr("nanobot.cli.commands._onboard_can_prompt", lambda: True)
 
     result = runner.invoke(app, ["onboard", "--defaults"], input="y\n")
 
@@ -149,11 +186,12 @@ def test_onboard_existing_config_overwrite(mock_paths):
     assert workspace_dir.exists()
 
 
-def test_onboard_existing_workspace_safe_create(mock_paths):
+def test_onboard_existing_workspace_safe_create(mock_paths, monkeypatch):
     """Workspace exists — should not recreate, but still add missing templates."""
     config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
+    monkeypatch.setattr("nanobot.cli.commands._onboard_can_prompt", lambda: True)
 
     result = runner.invoke(app, ["onboard", "--defaults"], input="n\n")
 
