@@ -401,7 +401,7 @@ def _poll_registration(
 
         poll_count += 1
         if poll_count == 1:
-            print("Fetching configuration results...", end="", flush=True)
+            print("Waiting for authorization", end="", flush=True)
         elif poll_count % 6 == 0:
             print(".", end="", flush=True)
 
@@ -414,7 +414,7 @@ def _poll_registration(
         # Success
         if res.get("client_id") and res.get("client_secret"):
             if poll_count > 0:
-                print()
+                print(" done.")
             return {
                 "app_id": res["client_id"],
                 "app_secret": res["client_secret"],
@@ -435,8 +435,9 @@ def _poll_registration(
         time.sleep(interval)
 
     if poll_count > 0:
-        print()
-    print(f"[Warning] Poll timed out after {expire_in}s")
+        print(" timed out.")
+    else:
+        print("Login timed out.")
     return None
 
 
@@ -470,13 +471,15 @@ def _print_qr_code(url: str) -> None:
     try:
         import qrcode as qr_lib
 
+        print("\nScan this QR code with Feishu or Lark on your phone:\n")
         qr = qr_lib.QRCode(border=1)
         qr.add_data(url)
         qr.make(fit=True)
         qr.print_ascii(invert=True)
-        print("Scan the QR code with Feishu / Lark on your phone to authorize.\n")
+        print()
     except ImportError:
-        print(f"\nLogin URL: {url}\n")
+        print("\nOpen this link with Feishu or Lark on your phone:")
+        print(f"{url}\n")
 
 
 def _qr_register_inner(
@@ -484,10 +487,9 @@ def _qr_register_inner(
     initial_domain: str,
 ) -> dict | None:
     """Run init → begin → poll. Raises on network/protocol errors."""
-    print("Connecting to Feishu / Lark...", end="", flush=True)
+    print("Preparing Feishu/Lark login...")
     _init_registration(initial_domain)
     begin = _begin_registration(initial_domain)
-    print(" done.")
 
     _print_qr_code(begin["qr_url"])
 
@@ -578,24 +580,17 @@ class FeishuChannel(BaseChannel):
             print()
             return True
 
-        print("--- Feishu / Lark QR Login ---")
-        print("Open the URL below in Feishu / Lark on your phone to authorize.")
-        print("The platform will create a new bot application automatically.")
+        print("Authorize with the mobile app. nanobot will save the new bot credentials.")
+        print()
 
         result = qr_register(initial_domain=self.config.domain or "feishu")
         if not result:
-            self.logger.error(
-                "QR registration failed. "
-                "Run 'nanobot channels login feishu --force' to retry."
-            )
+            print("Login was not completed. Run 'nanobot channels login feishu --force' to retry.")
             return False
 
         self.config.app_id = result["app_id"]
         self.config.app_secret = result["app_secret"]
         self.config.domain = result.get("domain", "feishu")
-
-        print(f"App ID: {result['app_id']}")
-        print(f"Domain: {self.config.domain}")
 
         # Write credentials back to config.json
         from nanobot.config.loader import load_config, save_config
@@ -610,7 +605,9 @@ class FeishuChannel(BaseChannel):
             setattr(full_config.channels, "feishu", feishu_cfg)
         save_config(full_config)
 
-        print("Login successful!")
+        print("\nFeishu/Lark login complete.")
+        print(f"App ID: {result['app_id']}")
+        print(f"Domain: {self.config.domain}")
         return True
 
     @staticmethod
