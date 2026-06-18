@@ -314,13 +314,14 @@ def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
     assert "path outside working dir" in blocked
 
 
-def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path):
+def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool_bin = tmp_path / "home" / ".local" / "bin"
     tool_bin.mkdir(parents=True)
     uv = tool_bin / "uv"
     uv.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
@@ -338,11 +339,12 @@ def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path):
     assert blocked is None
 
 
-def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path):
+def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
+    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
