@@ -286,6 +286,33 @@ describe("SettingsView Apps catalog", () => {
     await waitFor(() => expect(onSettingsChange).toHaveBeenCalledWith(payload));
   });
 
+  it("does not keep Apps loading while an empty CLI catalog refresh is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({
+            apps: [],
+            installed_count: 0,
+            catalog_updated_at: null,
+            catalog_refresh_pending: true,
+          });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [], installed_count: 0 });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    renderSettingsView();
+
+    expect(await screen.findByText("No apps match this filter.")).toBeInTheDocument();
+    expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
+  });
+
   it("shows token activity on the overview", async () => {
     const payload: SettingsPayload = {
       ...settingsPayload(),

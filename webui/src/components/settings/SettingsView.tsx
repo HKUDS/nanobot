@@ -693,7 +693,6 @@ export function SettingsView({
           if (cancelled) return;
           if (payload.catalog_refresh_pending) {
             retry = window.setTimeout(() => loadCliApps(false), 2000);
-            if (payload.apps.length === 0) return;
           }
           setCliApps(payload);
           setCliAppsError(null);
