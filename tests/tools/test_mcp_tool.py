@@ -670,7 +670,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
 
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(url="https://mcp.example.com/mcp")},
+        {"test": MCPServerConfig(url="https://example.com/mcp")},
         registry,
     )
     for stack in stacks.values():
