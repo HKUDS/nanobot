@@ -9,10 +9,25 @@
       "title": "nanobot に接続できませんでした",
       "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
+    "auth": {
+      "title": "認証が必要です",
+      "hint": "gateway 設定の tokenIssueSecret に指定されたシークレットを入力してください。",
+      "placeholder": "パスワード",
+      "submit": "接続",
+      "invalid": "パスワードが無効です。もう一度お試しください。"
+    },
+    "account": {
+      "section": "アカウント",
+      "logoutHint": "このブラウザーを gateway から切断します。",
+      "logout": "サインアウト"
+    },
     "system": {
       "section": "システム",
       "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
-      "restart": "nanobot を再起動"
+      "restart": "nanobot を再起動",
+      "restarting": "再起動中...",
+      "restartEngine": "エンジンを再起動",
+      "restartingEngine": "エンジンを再起動中..."
     },
     "restart": {
       "completed": "{{seconds}} 秒で再起動が完了しました。"
@@ -26,29 +41,664 @@
     }
   },
   "sidebar": {
+    "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
-    "toggleTheme": "テーマを切り替える",
     "newChat": "新しいチャット",
+    "searchAria": "検索",
+    "searchPlaceholder": "検索",
+    "searchResults": "検索結果",
+    "noSearchResults": "一致するチャットはありません。",
     "recent": "最近のチャット",
-    "refreshSessions": "セッションを更新",
+    "settings": "設定",
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
+    },
+    "apps": "アプリ",
+    "automations": "自動タスク",
+    "skills": {
+      "title": "スキル"
+    }
+  },
+  "settings": {
+    "backToChat": "チャットに戻る",
+    "sidebar": {
+      "title": "設定",
+      "ariaLabel": "設定セクション"
+    },
+    "nav": {
+      "general": "一般",
+      "byok": "BYOK",
+      "overview": "概要",
+      "appearance": "外観",
+      "models": "モデル",
+      "providers": "プロバイダー",
+      "image": "画像",
+      "voice": "音声",
+      "browser": "ウェブ",
+      "runtime": "システム",
+      "advanced": "セキュリティ",
+      "cliApps": "CLI アプリ",
+      "mcp": "MCP",
+      "apps": "アプリ",
+      "automations": "自動タスク",
+      "skills": "スキル"
+    },
+    "sections": {
+      "interface": "インターフェース",
+      "ai": "AI",
+      "system": "システム",
+      "about": "情報",
+      "status": "状態",
+      "localPreferences": "ローカル設定",
+      "presets": "プリセット",
+      "imageGeneration": "画像生成",
+      "imageDefaults": "既定値",
+      "webSearch": "ウェブ検索",
+      "webBehavior": "動作",
+      "identity": "ID",
+      "webuiSafety": "WebUI の安全性",
+      "capabilities": "機能",
+      "cliApps": "CLI アプリ",
+      "mcp": "MCP サービス",
+      "apps": "アプリ",
+      "nativeHost": "ネイティブホスト",
+      "hostSafety": "アプリの安全性",
+      "voiceInput": "音声入力"
+    },
+    "rows": {
+      "theme": "テーマ",
+      "language": "言語",
+      "provider": "プロバイダー",
+      "model": "モデル",
+      "restart": "nanobot を再起動",
+      "configPath": "設定パス",
+      "activePreset": "アクティブなプリセット",
+      "gateway": "ゲートウェイ",
+      "restartState": "再起動状態",
+      "pendingChanges": "保留中の変更",
+      "selectedPreset": "選択中のプリセット",
+      "presetModel": "プリセットモデル",
+      "density": "表示密度",
+      "activityMode": "アクティビティ詳細",
+      "codeWrap": "コードの折り返し",
+      "maxResults": "最大結果数",
+      "timeout": "タイムアウト",
+      "jinaReader": "Jina リーダー",
+      "imageGeneration": "画像生成",
+      "imageProvider": "画像プロバイダー",
+      "imageProviderStatus": "プロバイダー状態",
+      "imageProviderBase": "プロバイダー URL",
+      "imageModel": "画像モデル",
+      "defaultAspectRatio": "既定の比率",
+      "defaultImageSize": "既定のサイズ",
+      "maxImagesPerTurn": "1 ターンの最大画像数",
+      "imageSaveDir": "保存先ディレクトリ",
+      "botName": "Bot 名",
+      "botIcon": "Bot アイコン",
+      "timezone": "タイムゾーン",
+      "workspacePath": "既定のワークスペース",
+      "localServiceAccess": "ローカルサービス",
+      "webuiDefaultAccess": "既定の権限",
+      "currentModel": "現在の設定",
+      "brandLogos": "ブランドロゴ",
+      "cliAppsCatalog": "カタログ",
+      "cliAppsFilter": "フィルター",
+      "engine": "エンジン",
+      "logs": "ログ",
+      "diagnostics": "診断",
+      "contextWindow": "コンテキストウィンドウ",
+      "transcription": "文字起こし",
+      "transcriptionProvider": "プロバイダー",
+      "transcriptionProviderStatus": "プロバイダー状態",
+      "transcriptionModel": "モデル",
+      "transcriptionLanguage": "言語",
+      "voiceLimits": "制限"
+    },
+    "help": {
+      "theme": "ライト表示とダーク表示を切り替えます。",
+      "language": "WebUI で使用する言語を選択します。",
+      "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
+      "model": "nanobot が既定で使用するモデル名を設定します。",
+      "configPath": "現在ゲートウェイが使用している設定ファイルです。",
+      "selectedPreset": "名前付きプリセットはここでは読み取り専用です。編集するには config.json を変更してください。",
+      "presetModel": "Default に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
+      "density": "このブラウザーにのみ保存されます。",
+      "activityMode": "既定で表示する agent アクティビティの詳細量を選択します。",
+      "codeWrap": "小さな画面でも長いコード行を読みやすくします。",
+      "maxResults": "各 web_search 呼び出しで返す結果数です。",
+      "timeout": "検索プロバイダーのリクエストがタイムアウトするまでの秒数です。",
+      "jinaReader": "利用可能な場合、web_fetch に Jina Reader を使います。",
+      "imageGeneration": "画像プロバイダーが設定済みのとき、チャットで generate_image を有効にします。",
+      "imageProvider": "generate_image で使用する登録済みプロバイダーを選択します。",
+      "imageProviderStatus": "画像生成は「プロバイダー」の認証情報を再利用します。",
+      "imageModel": "選択した画像プロバイダーへ送信するモデル名です。",
+      "defaultAspectRatio": "プロンプトで比率が指定されていない場合に使用します。",
+      "defaultImageSize": "対応しているプロバイダーへ送信するサイズ指定です。",
+      "maxImagesPerTurn": "1 回の generate_image リクエストで生成できる画像数の上限です。",
+      "botName": "nanobot が表示名を使う場所に表示されます。",
+      "botIcon": "Bot 名の横に表示する短い emoji またはテキストです。",
+      "timezone": "スケジュールと時刻を考慮する返信に使用します。",
+      "localServiceAccess": "Full Access の shell コマンドが localhost サービスにアクセスできるようにします。",
+      "webuiDefaultAccess": "プロジェクト固有の権限がない Web チャットで使用します。",
+      "securityManagedControls": "Web 取得は常にローカル、プライベート、メタデータサービスを保護します。コアチャネルの安全性は config.json で管理されます。",
+      "currentModel": "新しい返信に使用します。",
+      "selectedModelProvider": "選択したモデルによって設定されます。",
+      "selectedModelValue": "選択したモデルによって設定されます。",
+      "brandLogos": "設定で第三者プロバイダーと CLI のロゴを表示します。",
+      "cliAppsCatalog": "nanobot がローカルで実行できるアプリ CLI アダプターだけをインストールします。ネイティブアプリは変更しません。",
+      "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
+      "logs": "ネイティブエンジンのログフォルダーを開きます。",
+      "diagnostics": "サポート用の小さなランタイムレポートを書き出します。",
+      "localServiceAccessNative": "Full Access の shell コマンドがこの Mac 上のサービスにアクセスできるようにします。",
+      "webuiDefaultAccessNative": "プロジェクト固有の権限がないネイティブチャットで使用します。",
+      "contextWindow": "このモデル設定で使う既定のコンテキスト予算を選択します。",
+      "transcription": "マイク入力を送信前に文字起こしします。チャネルの音声メッセージも同じ設定を使います。",
+      "transcriptionProvider": "プロバイダー設定にある対応する認証情報を使います。",
+      "transcriptionProviderStatus": "APIキーは文字起こし設定ではなくプロバイダー側に保存されます。",
+      "transcriptionModel": "プロバイダーがカスタムモデルIDを必要としない限り、解決済みのデフォルトのままにします。",
+      "transcriptionLanguage": "en、zh、ja、ko などの任意の ISO-639 ヒント。"
+    },
+    "values": {
+      "light": "ライト",
+      "dark": "ダーク",
+      "notAvailable": "利用不可",
+      "enabled": "有効",
+      "disabled": "無効",
+      "restartPending": "再起動待ち",
+      "ready": "準備完了",
+      "privateEngine": "プライベートエンジン",
+      "unixSocket": "Unix ソケット",
+      "defaultWorkspace": "デフォルトワークスペース",
+      "comfortable": "標準",
+      "compact": "コンパクト",
+      "auto": "自動",
+      "expanded": "展開",
+      "on": "オン",
+      "off": "オフ",
+      "defaultPermission": "既定の権限",
+      "fullAccess": "完全アクセス",
+      "configured": "設定済み",
+      "notConfigured": "未設定",
+      "pending": "保留中",
+      "restartingEngine": "再起動中"
+    },
+    "status": {
+      "loading": "設定を読み込んでいます...",
+      "loadError": "設定を読み込めませんでした",
+      "unsaved": "未保存の変更があります。",
+      "upToDate": "最新です。",
+      "savedRestart": "保存しました。反映するには nanobot を再起動してください。",
+      "restartAfterSaving": "変更を保存してから、準備ができたら再起動してください。",
+      "savedRestartApply": "保存しました。準備ができたら再起動してください。",
+      "imageProviderRestart": "画像プロバイダーの変更を保存しました。準備ができたら再起動してください。",
+      "hostRestartAfterSaving": "保存すると nanobot がエンジンを再起動します。",
+      "hostRestartPending": "保存しました。準備ができたらエンジンを再起動します。",
+      "hostApiUnavailable": "ホスト操作はネイティブアプリ内でのみ利用できます。",
+      "logsOpened": "ログフォルダーを開きました。",
+      "logsOpenFailed": "ログフォルダーを開けませんでした。",
+      "diagnosticsExported": "診断を {{path}} に書き出しました。",
+      "diagnosticsExportFailed": "診断を書き出せませんでした。"
+    },
+    "actions": {
+      "save": "保存",
+      "saving": "保存中",
+      "edit": "編集",
+      "cancel": "キャンセル",
+      "open": "開く",
+      "export": "書き出す",
+      "opening": "開いています...",
+      "exporting": "書き出しています..."
+    },
+    "byok": {
+      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
+      "configured": "設定済み",
+      "notConfigured": "未設定",
+      "configuredSection": "設定済み",
+      "notConfiguredSection": "未設定",
+      "showMore": "さらに {{count}} 件表示",
+      "showLess": "折りたたむ",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "API key を入力",
+      "apiKeyConfiguredPlaceholder": "空欄のままなら現在の key を保持",
+      "configuredKeyHint": "設定済み key",
+      "apiBasePlaceholder": "provider の既定値を使用",
+      "apiKeyRequired": "この provider を設定するには API key が必要です。",
+      "showApiKey": "API key を表示",
+      "hideApiKey": "API key を隠す",
+      "noConfiguredProviders": "設定済み provider がありません",
+      "configureFirst": "先に BYOK で provider を設定してください。",
+      "openByok": "BYOK を開く",
+      "tabs": {
+        "ariaLabel": "BYOK 認証情報タイプ",
+        "llm": "LLM",
+        "webSearch": "ウェブ検索"
+      },
+      "webSearch": {
+        "provider": "検索 provider",
+        "providerHelp": "web search ツールで使うバックエンドを選択します。",
+        "selectProvider": "provider を選択",
+        "credentials": "認証情報",
+        "noCredentialRequired": "key は不要",
+        "noCredentialHelp": "DuckDuckGo は API key を保存せずに使えます。",
+        "apiKeyHelp": "config に保存され、保存後はマスク表示されます。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG には自分のインスタンス URL が必要です。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "この検索 provider には API key が必要です。",
+        "baseUrlRequired": "SearXNG には Base URL が必要です。",
+        "missingCredential": "保存する前に必要な認証情報を入力してください。",
+        "saveHint": "変更は新しい web search リクエストに適用されます。"
+      }
+    },
+    "overview": {
+      "model": "現在のモデル",
+      "providers": "プロバイダー",
+      "configuredCount": "{{count}} 個設定済み",
+      "totalProviders": "{{count}} 個利用可能",
+      "webSearch": "Web 検索",
+      "imageGeneration": "画像生成",
+      "voiceInput": "音声入力",
+      "workspace": "ワークスペース"
+    },
+    "usage": {
+      "title": "Token アクティビティ",
+      "shortTitle": "Token Usage",
+      "subtitle": "直近 12 か月にプロバイダーが報告した使用量。",
+      "empty": "新しいモデル返信の後に token アクティビティが表示されます。",
+      "totalTokens": "累計 Token 数",
+      "peakTokens": "ピーク Token 数",
+      "thirtyDayTokens": "30 日 Token 数",
+      "currentStreak": "現在の連続日数",
+      "longestStreak": "最長連続日数",
+      "daysValue": "{{count}} 日",
+      "last30": "30 日",
+      "activeDays": "アクティブ日数",
+      "requests": "リクエスト",
+      "estimated": "推定",
+      "includesEstimates": "推定を含む",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} 件のリクエスト",
+      "sources": {
+        "user": "チャット",
+        "api": "API",
+        "cron": "自動タスク",
+        "dream": "メモリ整理",
+        "system": "システム"
+      }
+    },
+    "providers": {
+      "searchPlaceholder": "プロバイダーを検索",
+      "noMatches": "一致するプロバイダーはありません。",
+      "saveProvider": "プロバイダーを保存"
+    },
+    "image": {
+      "selectProvider": "プロバイダーを選択",
+      "selectAspect": "比率を選択",
+      "selectSize": "サイズを選択",
+      "configureProvider": "プロバイダーを設定",
+      "missingCredential": "画像生成を有効にする前に、このプロバイダーを設定してください。"
+    },
+    "models": {
+      "selectModel": "モデルを選択",
+      "addConfiguration": "設定を追加",
+      "newConfiguration": "新しいモデル設定",
+      "newConfigurationHelp": "プロバイダーとモデルをワンクリックの選択肢として保存します。",
+      "configurationName": "設定名",
+      "configurationNameHelp": "保存済みのモデル設定の名前を変更します。",
+      "configurationNamePlaceholder": "高速執筆",
+      "searchModels": "モデル ID を検索または入力",
+      "useCustomModel": "使用",
+      "loadingModels": "モデルを読み込んでいます...",
+      "searchCatalog": "プロバイダーのカタログからモデルを選択します。",
+      "modelsAvailable": "利用可能",
+      "noModelResults": "一致するモデルはありません。",
+      "loadFailed": "モデル一覧を利用できません。",
+      "unsupportedModelList": "モデル ID を手動で入力してください。",
+      "providerNotConfigured": "モデルを読み込む前にこのプロバイダーを設定してください。",
+      "autoProviderCustomOnly": "自動プロバイダーモードではカスタムモデル ID を使用します。"
+    },
+    "timezone": {
+      "select": "タイムゾーンを選択",
+      "search": "タイムゾーンを検索",
+      "empty": "一致するタイムゾーンはありません。"
+    },
+    "cliApps": {
+      "allCategories": "すべてのカテゴリ",
+      "availableCount": "{{count}} 個のアプリ",
+      "installedCount": "{{count}} 個インストール済み",
+      "summary": "{{total}} 個中 {{installed}} 個の CLI がインストール済み",
+      "filterAll": "すべて",
+      "filterInstalled": "インストール済み CLI",
+      "filterNotInstalled": "未インストール",
+      "searchPlaceholder": "CLI を検索",
+      "statusInstalled": "インストール済み",
+      "statusAvailable": "利用可能",
+      "statusMissing": "依存関係が不足",
+      "statusUnsupported": "未対応",
+      "statusNotInstalled": "未インストール",
+      "unsupported": "未対応",
+      "loading": "CLI アプリを読み込み中...",
+      "empty": "この条件に一致する CLI アプリはありません。",
+      "readyTitle": "@{{name}} の準備ができました",
+      "readyStatus": "準備完了",
+      "readyPrompt": "@{{name}} を使って、この CLI でできることを確認します。",
+      "readyTry": "@{{name}} を試す",
+      "readyCopied": "コピーしました",
+      "openChat": "チャットを開く",
+      "requires": "必要条件",
+      "test": "CLI をテスト",
+      "update": "CLI を更新",
+      "uninstall": "CLI をアンインストール",
+      "install": "CLI をインストール",
+      "unavailable": "利用不可",
+      "noDescription": "説明はありません。"
+    },
+    "about": {
+      "version": "バージョン",
+      "checking": "確認中...",
+      "checkForUpdates": "アップデートを確認",
+      "upToDate": "最新の状態です",
+      "updateAvailable": "アップデートがあります v{{version}}"
+    },
+    "mcp": {
+      "allCategories": "すべてのカテゴリ",
+      "summary": "{{total}} 個中 {{installed}} 個のプリセットが有効",
+      "filterAll": "すべて",
+      "filterInstalled": "有効",
+      "filterNotInstalled": "未有効",
+      "searchPlaceholder": "MCP プリセットを検索",
+      "moreOptions": "その他の MCP オプション",
+      "moreOptionsSubtitle": "カスタムサーバーを追加するか mcp.json をインポートします。",
+      "customTitle": "カスタム MCP",
+      "customSubtitle": "任意の stdio、HTTP、SSE MCP サーバーを追加します。",
+      "customAction": "カスタム",
+      "importAction": "インポート",
+      "serverName": "サーバー名",
+      "serverUrl": "URL",
+      "transport": "トランスポート",
+      "command": "コマンド",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "ツールのタイムアウト",
+      "advancedOptions": "詳細オプション",
+      "hideAdvanced": "詳細を隠す",
+      "saveCustom": "MCP を保存",
+      "configImport": "mcp.json をインポート",
+      "importConfig": "インポート",
+      "restartRequired": "更新された MCP ツールに接続するには nanobot を再起動してください。",
+      "toolsFound": "{{count}} 個のツール",
+      "loading": "MCP プリセットを読み込み中...",
+      "empty": "この条件に一致する MCP プリセットはありません。",
+      "openDocs": "ドキュメントを開く",
+      "test": "テスト",
+      "remove": "削除",
+      "enable": "有効化",
+      "enabled": "有効",
+      "setup": "接続",
+      "configure": "接続",
+      "connectTitle": "{{name}} に接続",
+      "connectHint": "アカウント設定からキーを追加します。",
+      "saveAndEnable": "保存して有効化",
+      "updateSetup": "設定を更新",
+      "configured": "設定済み",
+      "keepExisting": "既存の値を維持するには空欄のままにします",
+      "statusConfigured": "設定済み",
+      "statusMissingCredentials": "キーが必要",
+      "statusMissingDependency": "依存関係が必要",
+      "statusComingSoon": "近日公開",
+      "statusNotInstalled": "未有効",
+      "toolScope": "ツール",
+      "allTools": "すべて",
+      "noTools": "なし",
+      "testForTools": "テストを実行して個別のツールを確認・選択します。"
+    },
+    "legal": {
+      "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
+    },
+    "apps": {
+      "description": "nanobot がチャットで使用できる App CLI と MCP サービスを追加します。",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "すべて",
+      "filterCli": "CLI アプリ",
+      "filterMcp": "MCP サービス",
+      "enabledSummary": "{{count}} 件有効",
+      "caption": "CLI {{cli}} 件 · MCP {{mcp}} 件",
+      "searchPlaceholder": "アプリを検索",
+      "featured": "注目",
+      "loading": "アプリを読み込み中...",
+      "empty": "一致するアプリはありません。"
+    },
+    "automations": {
+      "filters": {
+        "all": "すべて",
+        "active": "実行中",
+        "paused": "一時停止",
+        "failed": "要対応",
+        "system": "システム"
+      },
+      "sort": {
+        "next": "次回実行",
+        "last": "前回実行",
+        "updated": "更新日時",
+        "name": "名前"
+      },
+      "search": "タスク、メッセージ、関連チャット、予定を検索",
+      "queue": "キュー",
+      "loading": "自動タスクを読み込み中...",
+      "noMatches": "この表示に一致する自動タスクはありません。",
+      "empty": "自動タスクはまだありません。",
+      "emptyHint": "実行元から作成すると、nanobot が正しいコンテキストを保持できます。",
+      "oneShot": "一回限り",
+      "systemTask": "システム管理の自動タスク",
+      "labels": {
+        "schedule": "スケジュール",
+        "next": "次回",
+        "origin": "関連チャット",
+        "created": "作成",
+        "updated": "更新"
+      },
+      "runNow": "今すぐ実行",
+      "pause": "一時停止",
+      "resume": "再開",
+      "edit": "編集",
+      "delete": "削除",
+      "protected": "保護済み",
+      "editTitle": "自動タスクを編集",
+      "save": "保存",
+      "deleteTitle": "自動タスクを削除",
+      "deleteDescription": "{{name}} を cron ストアから削除します。過去のチャットメッセージはセッションに残ります。",
+      "cancel": "キャンセル",
+      "status": {
+        "system": "システム",
+        "running": "実行中",
+        "paused": "一時停止",
+        "failed": "失敗",
+        "completed": "完了",
+        "noSchedule": "スケジュールなし",
+        "active": "実行中"
+      },
+      "origin": {
+        "system": "システム",
+        "unknown": "関連チャットなし"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}} ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "毎日 {{time}}",
+        "weekdaysAt": "平日 {{time}}",
+        "hourlyAt": "毎時 :{{minute}}",
+        "hourlyWindow": "{{start}}-{{end}} の毎時 :{{minute}}",
+        "custom": "カスタムスケジュール"
+      },
+      "next": {
+        "paused": "一時停止",
+        "pending": "実行中",
+        "none": "次回実行なし"
+      },
+      "message": {
+        "showMore": "メッセージ全文を表示",
+        "showLess": "折りたたむ"
+      },
+      "fields": {
+        "name": "名前",
+        "message": "メッセージ",
+        "scheduleType": "スケジュール種別",
+        "every": "間隔",
+        "unit": "単位",
+        "cronExpression": "Cron 式",
+        "timezone": "タイムゾーン",
+        "runAt": "実行日時"
+      },
+      "scheduleTypes": {
+        "every": "間隔",
+        "cron": "Cron",
+        "at": "一回限り"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分",
+        "hour": "時間",
+        "day": "日"
+      },
+      "validation": {
+        "nameRequired": "名前は必須です。",
+        "messageRequired": "メッセージは必須です。",
+        "intervalRequired": "間隔は正の数で指定してください。",
+        "cronRequired": "Cron 式は必須です。",
+        "timeRequired": "実行日時は必須です。",
+        "futureRequired": "実行日時は現在より後にしてください。"
+      }
+    },
+    "oauth": {
+      "authentication": "OAuth 認証",
+      "signIn": "サインイン",
+      "signingIn": "サインイン中...",
+      "signInAgain": "再度サインイン",
+      "signOut": "サインアウト",
+      "signedInAs": "{{account}} としてサインイン済み",
+      "signInHelp": "このデバイスからサインインします。API key は config に保存されません。",
+      "signInRequired": "サインインが必要です",
+      "signInBeforeSaving": "この OAuth プロバイダーをアクティブなモデルプロバイダーとして保存する前にサインインしてください。",
+      "signedIn": "サインイン済み",
+      "notSignedIn": "未サインイン"
+    },
+    "skills": {
+      "description": "このエージェントが会話中に読み込める指示スキルを確認します。",
+      "caption": "{{available}} 利用可能 · 合計 {{total}}",
+      "featured": "エージェントスキル",
+      "empty": "利用可能なスキルはありません。",
+      "sourceWorkspace": "カスタム",
+      "sourceBuiltin": "組み込み",
+      "statusAvailable": "利用可能",
+      "statusUnavailable": "利用不可",
+      "unavailableReason": "不足: {{reason}}",
+      "openDetails": "{{name}} の詳細を開く",
+      "loadingDetail": "スキル詳細を読み込み中...",
+      "loadFailed": "スキル詳細を読み込めませんでした。",
+      "descriptionTitle": "説明",
+      "source": "ソース",
+      "status": "状態",
+      "requirements": "要件",
+      "noRequirements": "明示的な要件はありません。",
+      "commands": "コマンド",
+      "environment": "環境変数",
+      "missingCommands": "CLI 不足",
+      "missingEnvironment": "ENV 不足",
+      "unavailableReasonLabel": "利用不可の理由",
+      "rawInstructions": "元の SKILL.md",
+      "rawInstructionsEmpty": "元の説明はありません。",
+      "detailDescription": "{{name}} の詳細。"
+    },
+    "voice": {
+      "selectProvider": "プロバイダーを選択",
+      "configureProvider": "プロバイダーを設定",
+      "languageAuto": "自動"
     }
   },
   "chat": {
     "fallbackTitle": "チャット {{id}}",
+    "forkTitle": "分岐：{{title}}",
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
+    "showMore": "さらに {{count}} 件表示",
+    "collapsed": "{{count}} 件のチャットを折りたたみ中",
+    "showLess": "折りたたむ",
     "actions": "「{{title}}」のチャット操作",
+    "newInProject": "「{{project}}」で新しいチャットを開始",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished",
+      "updated": "New activity"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "削除",
-    "newChat": "新しいチャット"
+    "newChat": "新しいチャット",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "projects": "Projects",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
     "description": "この操作は元に戻せません。",
     "cancel": "キャンセル",
-    "confirm": "削除"
+    "confirm": "削除",
+    "automationsDescription": "このチャットにはスケジュール済みの自動タスクがあります。削除するとそれらも削除されます。",
+    "moreAutomations": "他 {{count}} 件",
+    "confirmWithAutomations": "削除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "{{duration}} ごと",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "カスタムスケジュール"
+    },
+    "next": {
+      "label": "次回: {{time}}",
+      "disabled": "一時停止中",
+      "none": "次回実行なし"
+    }
   },
   "connection": {
     "idle": "待機中",
@@ -61,8 +711,12 @@
   "thread": {
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。",
-      "greeting": "何をお手伝いしましょうか？",
+      "greetings": {
+        "workOn": "一緒に何に取り組みましょうか？",
+        "start": "今日はどこから始めましょう？",
+        "build": "今日は何を作りましょうか？",
+        "tackle": "一緒に何を解決しましょう？"
+      },
       "quickActions": {
         "plan": {
           "title": "プロジェクト計画を作成",
@@ -117,7 +771,34 @@
       }
     },
     "header": {
-      "toggleSidebar": "サイドバーを切り替える"
+      "toggleSidebar": "サイドバーを切り替える",
+      "newChat": "新しいチャットを開始",
+      "toggleTheme": "ヘッダーからテーマを切り替える",
+      "settings": "設定を開く",
+      "sessionInfo": "セッション詳細"
+    },
+    "sessionInfo": {
+      "title": "セッション",
+      "untitled": "無題のチャット",
+      "automations": "自動タスク",
+      "count": "{{count}}",
+      "loading": "自動タスクを読み込み中...",
+      "loadFailed": "自動タスクを読み込めませんでした。",
+      "empty": "このセッションにはまだ自動タスクがありません。",
+      "disabled": "オフ",
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}}ごと",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "カスタムスケジュール"
+      },
+      "next": {
+        "label": "次回 {{time}}",
+        "pending": "まもなく実行",
+        "disabled": "一時停止",
+        "none": "次回実行なし"
+      }
     },
     "composer": {
       "placeholderThread": "メッセージを入力…",
@@ -126,8 +807,23 @@
       "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
+      "runRuntimeTitle": "実行中 · {{elapsed}}",
+      "goalStateStrip": "目標 · {{label}}",
+      "goalStateFallback": "目標",
+      "goalStateExpandAria": "目標の全文を表示",
+      "goalStateSheetTitle": "目標",
+      "goalStateCloseAria": "目標を閉じる",
       "send": "メッセージを送信",
       "stop": "応答を停止",
+      "modelNotConfigured": "モデルが未設定です",
+      "configureModel": "モデルを設定",
+      "queued": {
+        "label": "保留中のガイド",
+        "guide": "ガイド",
+        "delete": "ガイドを削除",
+        "edit": "ガイドを編集",
+        "drag": "ドラッグして並べ替え"
+      },
       "attachImage": "画像を添付",
       "imageMode": {
         "label": "画像生成",
@@ -144,16 +840,26 @@
           "16_9": "ワイド 16:9"
         }
       },
-      "encoding": "処理中…",
-      "remove": "添付を削除",
-      "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
-      "imageRejected": {
-        "unsupported_type": "対応していないファイル形式です",
-        "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
-        "magic_mismatch": "画像ファイルではないようです",
-        "decode_failed": "この画像をデコードできません",
-        "too_large": "画像が大きすぎます。小さいものを選んでください",
-        "io": "このファイルを読み込めません"
+      "tools": {
+        "search": "検索",
+        "reason": "推論",
+        "deepResearch": "詳細調査",
+        "voice": "音声入力"
+      },
+      "voice": {
+        "hint": "クリックして音声入力、または長押し",
+        "stop": "録音を停止",
+        "transcribing": "文字起こし中...",
+        "recordingStatus": "録音中 {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "このブラウザーは音声入力に対応していません。",
+        "permission": "マイクの許可が必要です。",
+        "notConfigured": "先に文字起こしプロバイダーを設定してください。",
+        "tooLong": "録音が長すぎます。",
+        "tooShort": "もう少し長く録音してください。",
+        "noInput": "マイク入力が検出されませんでした。",
+        "failed": "音声を文字起こしできませんでした。"
       },
       "slash": {
         "ariaLabel": "スラッシュコマンド",
@@ -178,6 +884,10 @@
             "title": "ステータスを表示",
             "description": "ランタイム、provider、channel の状態を表示します。"
           },
+          "model": {
+            "title": "モデル",
+            "description": "有効なモデルプリセットを表示または切り替えます。"
+          },
           "history": {
             "title": "会話履歴を表示",
             "description": "保存済みの直近 N 件の会話メッセージを表示します。"
@@ -194,21 +904,108 @@
             "title": "メモリを復元",
             "description": "以前の Dream スナップショットへメモリを戻します。"
           },
+          "goal": {
+            "title": "長期目標",
+            "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"
+          },
           "help": {
             "title": "ヘルプを表示",
             "description": "利用可能なスラッシュコマンドを一覧表示します。"
+          },
+          "pairing": {
+            "title": "ペアリング",
+            "description": "ペアリングリクエストを管理します。"
           }
+        },
+        "badges": {
+          "current": "現在",
+          "recent": "最近"
+        },
+        "details": {
+          "goalActive": "目標が実行中",
+          "goalReady": "継続的な目標を開始",
+          "history": "最近のメッセージを表示",
+          "stopRunning": "実行中"
         }
+      },
+      "encoding": "処理中…",
+      "remove": "添付を削除",
+      "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
+      "imageRejected": {
+        "unsupported_type": "対応していないファイル形式です",
+        "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
+        "magic_mismatch": "画像ファイルではないようです",
+        "decode_failed": "この画像をデコードできません",
+        "too_large": "画像が大きすぎます。小さいものを選んでください",
+        "io": "このファイルを読み込めません"
+      },
+      "mentions": {
+        "ariaLabel": "アプリ",
+        "label": "アプリ",
+        "cliGroup": "CLI アプリ",
+        "mcpGroup": "MCP サービス",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "@{{name}} をローカル CLI アプリとして使用",
+        "mcpDescription": "@{{name}} を MCP サーバーとして使用"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "プロジェクトを選択",
+        "projectPlaceholder": "プロジェクトを選択",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
-    "scrollToBottom": "一番下へスクロール"
+    "scrollToBottom": "一番下へスクロール",
+    "loadEarlier": "以前のメッセージを読み込む",
+    "forkedFromHistory": "履歴から分岐",
+    "promptNavigator": {
+      "open": "プロンプトナビゲーターを開く",
+      "title": "プロンプト",
+      "search": "プロンプトを検索",
+      "noResults": "一致するプロンプトがありません。",
+      "jumpTo": "プロンプトへ移動: {{label}}"
+    }
   },
   "message": {
     "streaming": "生成中",
     "assistantTyping": "アシスタントが入力中",
     "toolSingle": "ツールを使用中",
     "toolMany": "{{count}} 個のツールを使用",
-    "imageAttachment": "画像の添付"
+    "toolSummary": "{{count}} 個のツール",
+    "toolSummaryMany": "{{count}} 個のツール",
+    "reasoningTools": "思考 · {{count}} 個のツール",
+    "reasoningToolsSingular": "思考 · 1 個のツール",
+    "reasoning": "思考",
+    "reasoningStreaming": "思考中…",
+    "reasoningSummary": "思考",
+    "agentActivitySummary": "{{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
+    "agentActivityToolsOnly": "ツール呼び出し {{tools}} 回",
+    "agentActivityLiveSummary": "実行中… · {{reasoning}} ステップ · ツール呼び出し {{tools}} 回",
+    "agentActivityLiveToolsOnly": "実行中… · ツール呼び出し {{tools}} 回",
+    "imageAttachment": "画像の添付",
+    "forkFromHere": "分岐",
+    "copyReply": "コピー",
+    "copiedReply": "コピー済み",
+    "turnLatencyTitle": "応答時間（全行程）",
+    "activityThinkingFor": "{{duration}}考えています",
+    "activityThought": "思考しました",
+    "activityThoughtFor": "{{duration}}考えました",
+    "activityWorkingFor": "{{duration}}作業中",
+    "activityWorked": "作業しました",
+    "activityWorkedFor": "{{duration}}作業しました",
+    "cliActivityRunningOne": "@{{name}} を使用中",
+    "cliActivityRanOne": "@{{name}} を使用しました",
+    "cliActivityFailedOne": "@{{name}} が失敗しました",
+    "cliActivityRunningMany": "{{count}} 個の CLI アプリを使用中",
+    "cliActivityRanMany": "{{count}} 個の CLI アプリを使用しました",
+    "cliActivityFailedMany": "{{count}} 個の CLI アプリが失敗しました",
+    "cliRunRunning": "使用中",
+    "cliRunRan": "使用済み",
+    "cliRunFailed": "失敗",
+    "automationSourceFallback": "自動化",
+    "automationTriggered": "自動実行"
   },
   "lightbox": {
     "title": "画像プレビュー",
@@ -216,6 +1013,15 @@
     "prev": "前の画像",
     "next": "次の画像",
     "close": "プレビューを閉じる"
+  },
+  "filePreview": {
+    "aria": "ファイルプレビュー",
+    "close": "ファイルプレビューを閉じる",
+    "loading": "プレビューを読み込み中...",
+    "failed": "このファイルをプレビューできませんでした。",
+    "routeMissing": "ファイルプレビューには最新の gateway が必要です。nanobot gateway を再起動してから再試行してください。",
+    "resize": "ファイルプレビューの幅を変更",
+    "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
   "code": {
     "fallbackLanguage": "コード",
@@ -230,6 +1036,19 @@
     "messageTooBig": {
       "title": "メッセージが大きすぎます",
       "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "パスを貼り付け",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

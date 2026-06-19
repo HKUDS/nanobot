@@ -85,17 +85,18 @@ class TestIsLocalEndpoint:
 class TestLocalKeepaliveConfig:
     """Verify that local endpoints get keepalive_expiry=0."""
 
-    def test_local_spec_disables_keepalive(self):
+    async def test_local_spec_disables_keepalive(self):
         spec = _make_spec(is_local=True)
         spec.env_key = ""
         spec.default_api_base = "http://localhost:11434/v1"
         provider = OpenAICompatProvider(
             api_key="test", api_base="http://localhost:11434/v1", spec=spec,
         )
+        await provider._ensure_client()
         pool = provider._client._client._transport._pool
         assert pool._keepalive_expiry == 0
 
-    def test_lan_ip_disables_keepalive(self):
+    async def test_lan_ip_disables_keepalive(self):
         """A generic 'openai' spec with a LAN IP should still disable keepalive."""
         spec = _make_spec(is_local=False)
         spec.env_key = ""
@@ -103,16 +104,18 @@ class TestLocalKeepaliveConfig:
         provider = OpenAICompatProvider(
             api_key="test", api_base="http://192.168.8.188:1234/v1", spec=spec,
         )
+        await provider._ensure_client()
         pool = provider._client._client._transport._pool
         assert pool._keepalive_expiry == 0
 
-    def test_cloud_keeps_default_keepalive(self):
+    async def test_cloud_keeps_default_keepalive(self):
         spec = _make_spec(is_local=False)
         spec.env_key = ""
         spec.default_api_base = "https://api.openai.com/v1"
         provider = OpenAICompatProvider(
             api_key="test", api_base=None, spec=spec,
         )
+        await provider._ensure_client()
         pool = provider._client._client._transport._pool
         # Default httpx keepalive is 5.0s
         assert pool._keepalive_expiry == 5.0

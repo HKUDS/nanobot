@@ -420,7 +420,7 @@ async def test_send_exception_caught_not_raised() -> None:
     await channel.send(
         OutboundMessage(channel="wecom", chat_id="chat1", content="fail test")
     )
-    # No exception — test passes if we reach here.
+    client.reply_stream.assert_called_once()
 
 
 # ── _process_message() ──────────────────────────────────────────────
@@ -550,6 +550,26 @@ async def test_process_file_message() -> None:
         p = os.path.join(os.path.dirname(saved), "report.pdf")
         if os.path.exists(p):
             os.unlink(p)
+
+
+@pytest.mark.asyncio
+async def test_process_file_message_uses_sdk_filename_when_name_missing(tmp_path: Path) -> None:
+    """Without `file.name`, fall back to SDK fname instead of saving as 'unknown' (#3737)."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    client = _FakeWeComClient()
+    client.download_file.return_value = (b"%PDF-1.4 fake", "real_name.pdf")
+    channel._client = client
+
+    with patch("nanobot.channels.wecom.get_media_dir", return_value=tmp_path):
+        frame = _FakeFrame(body={
+            "msgid": "msg_file_2", "chatid": "chat1", "from": {"userid": "user1"},
+            "file": {"url": "https://example.com/x", "aeskey": "key456"},
+        })
+        await channel._process_message(frame, "file")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.media == [str(tmp_path / "real_name.pdf")]
+    assert "[file: real_name.pdf]" in msg.content
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,16 @@
 """Base class for agent tools."""
+from __future__ import annotations
 
+import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar
+
+if typing.TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from nanobot.agent.tools.context import ToolContext
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
@@ -117,14 +124,7 @@ class Schema(ABC):
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
 
-    _TYPE_MAP = {
-        "string": str,
-        "integer": int,
-        "number": (int, float),
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
+    _TYPE_MAP = _JSON_TYPE_MAP
     _BOOL_TRUE = frozenset(("true", "1", "yes"))
     _BOOL_FALSE = frozenset(("false", "0", "no"))
 
@@ -165,6 +165,24 @@ class Tool(ABC):
     def exclusive(self) -> bool:
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
+
+    # --- Plugin metadata ---
+
+    config_key: str = ""
+    _plugin_discoverable: bool = True
+    _scopes: set[str] = {"core"}
+
+    @classmethod
+    def config_cls(cls) -> type[BaseModel] | None:
+        return None
+
+    @classmethod
+    def enabled(cls, ctx: ToolContext) -> bool:
+        return True
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls()
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:
@@ -267,7 +285,6 @@ def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_To
         def parameters(self: Any) -> dict[str, Any]:
             return deepcopy(frozen)
 
-        cls._tool_parameters_schema = deepcopy(frozen)
         cls.parameters = parameters  # type: ignore[assignment]
 
         abstract = getattr(cls, "__abstractmethods__", None)

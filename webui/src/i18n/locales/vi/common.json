@@ -9,10 +9,25 @@
       "title": "Không thể kết nối tới nanobot",
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
+    "auth": {
+      "title": "Cần xác thực",
+      "hint": "Nhập secret được cấu hình là tokenIssueSecret trong cấu hình gateway.",
+      "placeholder": "Mật khẩu",
+      "submit": "Kết nối",
+      "invalid": "Mật khẩu không hợp lệ. Hãy thử lại."
+    },
+    "account": {
+      "section": "Tài khoản",
+      "logoutHint": "Ngắt kết nối trình duyệt này khỏi gateway.",
+      "logout": "Đăng xuất"
+    },
     "system": {
       "section": "Hệ thống",
       "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
-      "restart": "Khởi động lại nanobot"
+      "restart": "Khởi động lại nanobot",
+      "restarting": "Đang khởi động lại...",
+      "restartEngine": "Khởi động lại engine",
+      "restartingEngine": "Đang khởi động lại engine..."
     },
     "restart": {
       "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
@@ -26,29 +41,664 @@
     }
   },
   "sidebar": {
+    "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
-    "toggleTheme": "Chuyển giao diện",
     "newChat": "Cuộc trò chuyện mới",
+    "searchAria": "Tìm kiếm",
+    "searchPlaceholder": "Tìm kiếm",
+    "searchResults": "Kết quả",
+    "noSearchResults": "Không có cuộc trò chuyện phù hợp.",
     "recent": "Gần đây",
-    "refreshSessions": "Làm mới phiên",
+    "settings": "Cài đặt",
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
+    },
+    "apps": "Ứng dụng",
+    "automations": "Tự động hóa",
+    "skills": {
+      "title": "Kỹ năng"
+    }
+  },
+  "settings": {
+    "backToChat": "Quay lại chat",
+    "sidebar": {
+      "title": "Cài đặt",
+      "ariaLabel": "Mục cài đặt"
+    },
+    "nav": {
+      "general": "Chung",
+      "byok": "BYOK",
+      "overview": "Tổng quan",
+      "appearance": "Giao diện",
+      "models": "Mô hình",
+      "providers": "Nhà cung cấp",
+      "image": "Hình ảnh",
+      "voice": "Giọng nói",
+      "browser": "Trang web",
+      "runtime": "Hệ thống",
+      "advanced": "Bảo mật",
+      "cliApps": "Ứng dụng CLI",
+      "mcp": "MCP",
+      "apps": "Ứng dụng",
+      "automations": "Tự động hóa",
+      "skills": "Kỹ năng"
+    },
+    "sections": {
+      "interface": "Giao diện",
+      "ai": "AI",
+      "system": "Hệ thống",
+      "about": "Giới thiệu",
+      "status": "Trạng thái",
+      "localPreferences": "Tùy chọn cục bộ",
+      "presets": "Preset",
+      "imageGeneration": "Tạo hình ảnh",
+      "imageDefaults": "Mặc định",
+      "webSearch": "Tìm kiếm web",
+      "webBehavior": "Hành vi",
+      "identity": "Danh tính",
+      "webuiSafety": "An toàn WebUI",
+      "capabilities": "Khả năng",
+      "cliApps": "Ứng dụng CLI",
+      "mcp": "Dịch vụ MCP",
+      "apps": "Ứng dụng",
+      "nativeHost": "Host gốc",
+      "hostSafety": "An toàn ứng dụng",
+      "voiceInput": "Nhap giong noi"
+    },
+    "rows": {
+      "theme": "Chủ đề",
+      "language": "Ngôn ngữ",
+      "provider": "Nhà cung cấp",
+      "model": "Mô hình",
+      "restart": "Khởi động lại nanobot",
+      "configPath": "Đường dẫn cấu hình",
+      "activePreset": "Preset đang dùng",
+      "gateway": "Cổng",
+      "restartState": "Trạng thái khởi động lại",
+      "pendingChanges": "Thay đổi chờ áp dụng",
+      "selectedPreset": "Preset đã chọn",
+      "presetModel": "Mô hình preset",
+      "density": "Mật độ",
+      "activityMode": "Chi tiết hoạt động",
+      "codeWrap": "Xuống dòng mã",
+      "maxResults": "Kết quả tối đa",
+      "timeout": "Thời gian chờ",
+      "jinaReader": "Trình đọc Jina",
+      "imageGeneration": "Tạo hình ảnh",
+      "imageProvider": "Nhà cung cấp hình ảnh",
+      "imageProviderStatus": "Trạng thái nhà cung cấp",
+      "imageProviderBase": "Địa chỉ nhà cung cấp",
+      "imageModel": "Mô hình hình ảnh",
+      "defaultAspectRatio": "Tỷ lệ mặc định",
+      "defaultImageSize": "Kích thước mặc định",
+      "maxImagesPerTurn": "Ảnh tối đa mỗi lượt",
+      "imageSaveDir": "Thư mục lưu",
+      "botName": "Tên bot",
+      "botIcon": "Biểu tượng bot",
+      "timezone": "Múi giờ",
+      "workspacePath": "Workspace mặc định",
+      "localServiceAccess": "Dịch vụ cục bộ",
+      "webuiDefaultAccess": "Quyền mặc định",
+      "currentModel": "Cấu hình hiện tại",
+      "brandLogos": "Logo thương hiệu",
+      "cliAppsCatalog": "Danh mục",
+      "cliAppsFilter": "Bộ lọc",
+      "engine": "Bộ máy",
+      "logs": "Nhật ký",
+      "diagnostics": "Chẩn đoán",
+      "contextWindow": "Cửa sổ ngữ cảnh",
+      "transcription": "Phien am",
+      "transcriptionProvider": "Nha cung cap",
+      "transcriptionProviderStatus": "Trang thai nha cung cap",
+      "transcriptionModel": "Mo hinh",
+      "transcriptionLanguage": "Ngon ngu",
+      "voiceLimits": "Gioi han"
+    },
+    "help": {
+      "theme": "Chuyển giữa giao diện sáng và tối.",
+      "language": "Chọn ngôn ngữ dùng trong WebUI.",
+      "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
+      "model": "Define el nombre de modelo predeterminado de nanobot.",
+      "configPath": "Archivo de configuración que usa actualmente el gateway.",
+      "selectedPreset": "Los preajustes con nombre son de solo lectura aquí; edítalos en config.json.",
+      "presetModel": "Chuyển sang Default để chỉnh sửa mô hình và nhà cung cấp từ WebUI.",
+      "density": "Chỉ lưu trong trình duyệt này.",
+      "activityMode": "Chọn mức chi tiết hoạt động agent hiển thị mặc định.",
+      "codeWrap": "Giữ các dòng mã dài dễ đọc trên màn hình nhỏ.",
+      "maxResults": "Resultados devueltos por cada llamada web_search.",
+      "timeout": "Segundos antes de que una solicitud de búsqueda expire.",
+      "jinaReader": "Usa Jina Reader para web_fetch cuando esté disponible.",
+      "imageGeneration": "Expone generate_image en chats cuando hay un proveedor de imagen configurado.",
+      "imageProvider": "Elige el proveedor registrado usado por generate_image.",
+      "imageProviderStatus": "La generación de imágenes reutiliza credenciales de Proveedores.",
+      "imageModel": "Nombre del modelo enviado al proveedor de imágenes seleccionado.",
+      "defaultAspectRatio": "Se usa cuando el prompt no elige una proporción.",
+      "defaultImageSize": "Gợi ý kích thước gửi tới nhà cung cấp hỗ trợ.",
+      "maxImagesPerTurn": "Giới hạn trên cho một yêu cầu generate_image.",
+      "botName": "Se muestra donde nanobot usa un nombre visible.",
+      "botIcon": "Emoji o texto corto junto al nombre del bot.",
+      "timezone": "Se usa para horarios y respuestas con conciencia temporal.",
+      "localServiceAccess": "Cho phép lệnh shell Full Access truy cập dịch vụ localhost.",
+      "webuiDefaultAccess": "Dùng cho chat web không có quyền riêng theo dự án.",
+      "securityManagedControls": "Las capturas web siempre protegen servicios locales, privados y metadata. La seguridad de canales core se gestiona en config.json.",
+      "currentModel": "Dùng cho các phản hồi mới.",
+      "selectedModelProvider": "Definido por el modelo seleccionado.",
+      "selectedModelValue": "Definido por el modelo seleccionado.",
+      "brandLogos": "Hiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
+      "cliAppsCatalog": "Instala solo adaptadores CLI de apps que nanobot puede ejecutar localmente; las apps nativas no se modifican.",
+      "cliAppsFilter": "Busca por app, categoría o capacidad.",
+      "logs": "Abre la carpeta de registros del motor nativo.",
+      "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
+      "localServiceAccessNative": "Permite que comandos shell con Full Access alcancen servicios en este Mac.",
+      "webuiDefaultAccessNative": "Usado por chats nativos sin permiso específico de proyecto.",
+      "contextWindow": "Chọn ngân sách ngữ cảnh mặc định cho cấu hình mô hình này.",
+      "transcription": "Phien am dau vao micro truoc khi gui. Tin nhan giong noi tu kenh chat dung cung cai dat.",
+      "transcriptionProvider": "Dung thong tin xac thuc cua nha cung cap tu Providers.",
+      "transcriptionProviderStatus": "API key nam trong providers, khong nam trong cai dat transcription.",
+      "transcriptionModel": "Giu mac dinh da resolve tru khi nha cung cap can id model tuy chinh.",
+      "transcriptionLanguage": "Goi y ISO-639 tuy chon, nhu en, zh, ja hoac ko."
+    },
+    "values": {
+      "light": "Sáng",
+      "dark": "Tối",
+      "notAvailable": "Không khả dụng",
+      "enabled": "Đã bật",
+      "disabled": "Đã tắt",
+      "restartPending": "Chờ khởi động lại",
+      "ready": "Sẵn sàng",
+      "privateEngine": "Bộ máy riêng",
+      "unixSocket": "Socket Unix",
+      "defaultWorkspace": "Workspace mặc định",
+      "comfortable": "Thoải mái",
+      "compact": "Gọn",
+      "auto": "Tự động",
+      "expanded": "Mở rộng",
+      "on": "Bật",
+      "off": "Tắt",
+      "defaultPermission": "Quyền mặc định",
+      "fullAccess": "Toàn quyền",
+      "configured": "Đã cấu hình",
+      "notConfigured": "Chưa cấu hình",
+      "pending": "Đang chờ",
+      "restartingEngine": "Đang khởi động lại"
+    },
+    "status": {
+      "loading": "Đang tải cài đặt...",
+      "loadError": "Không thể tải cài đặt",
+      "unsaved": "Có thay đổi chưa lưu.",
+      "upToDate": "Đã cập nhật.",
+      "savedRestart": "Guardado. Reinicia nanobot para aplicar.",
+      "restartAfterSaving": "Guarda los cambios y reinicia cuando puedas.",
+      "savedRestartApply": "Guardado. Reinicia cuando puedas.",
+      "imageProviderRestart": "Cambios del proveedor de imagen guardados. Reinicia cuando puedas.",
+      "hostRestartAfterSaving": "Al guardar, nanobot reiniciará su motor.",
+      "hostRestartPending": "Guardado. El motor se reiniciará cuando esté listo.",
+      "hostApiUnavailable": "Las acciones del host solo están disponibles en la app nativa.",
+      "logsOpened": "Carpeta de registros abierta.",
+      "logsOpenFailed": "No se pudo abrir la carpeta de registros.",
+      "diagnosticsExported": "Diagnóstico exportado a {{path}}.",
+      "diagnosticsExportFailed": "No se pudo exportar el diagnóstico."
+    },
+    "actions": {
+      "save": "Lưu",
+      "saving": "Đang lưu",
+      "edit": "Sửa",
+      "cancel": "Hủy",
+      "open": "Mở",
+      "export": "Xuất",
+      "opening": "Đang mở...",
+      "exporting": "Đang xuất..."
+    },
+    "byok": {
+      "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
+      "configured": "Đã cấu hình",
+      "notConfigured": "Chưa cấu hình",
+      "configuredSection": "Đã cấu hình",
+      "notConfiguredSection": "Chưa cấu hình",
+      "showMore": "Hiển thị thêm {{count}}",
+      "showLess": "Thu gọn",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Nhập API key",
+      "apiKeyConfiguredPlaceholder": "Để trống để giữ key hiện tại",
+      "configuredKeyHint": "Key đã cấu hình",
+      "apiBasePlaceholder": "Dùng mặc định của provider",
+      "apiKeyRequired": "Cần API key để cấu hình provider này.",
+      "showApiKey": "Hiển thị API key",
+      "hideApiKey": "Ẩn API key",
+      "noConfiguredProviders": "Chưa có provider đã cấu hình",
+      "configureFirst": "Hãy cấu hình provider trong BYOK trước.",
+      "openByok": "Mở BYOK",
+      "tabs": {
+        "ariaLabel": "Loại thông tin xác thực BYOK",
+        "llm": "LLM",
+        "webSearch": "Tìm kiếm web"
+      },
+      "webSearch": {
+        "provider": "Nhà cung cấp tìm kiếm",
+        "providerHelp": "Chọn backend mà công cụ web search sẽ dùng.",
+        "selectProvider": "Chọn provider",
+        "credentials": "Thông tin xác thực",
+        "noCredentialRequired": "Không cần key",
+        "noCredentialHelp": "DuckDuckGo hoạt động mà không cần lưu API key.",
+        "apiKeyHelp": "Được lưu trong config và chỉ hiện dạng che sau khi lưu.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG cần URL instance của bạn.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider tìm kiếm này cần API key.",
+        "baseUrlRequired": "SearXNG cần Base URL.",
+        "missingCredential": "Thêm thông tin bắt buộc trước khi lưu.",
+        "saveHint": "Thay đổi áp dụng cho các yêu cầu web search mới."
+      }
+    },
+    "overview": {
+      "model": "Mô hình hiện tại",
+      "providers": "Nhà cung cấp",
+      "configuredCount": "{{count}} đã cấu hình",
+      "totalProviders": "{{count}} khả dụng",
+      "webSearch": "Tìm kiếm web",
+      "imageGeneration": "Tạo hình ảnh",
+      "voiceInput": "Nhập bằng giọng nói",
+      "workspace": "Không gian làm việc"
+    },
+    "usage": {
+      "title": "Hoạt động token",
+      "shortTitle": "Token Usage",
+      "subtitle": "Mức dùng do nhà cung cấp báo cáo trong 12 tháng gần nhất.",
+      "empty": "Hoạt động token sẽ xuất hiện sau các phản hồi mô hình mới.",
+      "totalTokens": "Tổng token",
+      "peakTokens": "Đỉnh token",
+      "thirtyDayTokens": "Token 30 ngày",
+      "currentStreak": "Chuỗi hiện tại",
+      "longestStreak": "Chuỗi dài nhất",
+      "daysValue": "{{count}} ngày",
+      "last30": "30 ngày",
+      "activeDays": "Ngày hoạt động",
+      "requests": "Yêu cầu",
+      "estimated": "ước tính",
+      "includesEstimates": "bao gồm ước tính",
+      "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} yêu cầu",
+      "sources": {
+        "user": "Trò chuyện",
+        "api": "API",
+        "cron": "Tự động hóa",
+        "dream": "Bộ nhớ",
+        "system": "Hệ thống"
+      }
+    },
+    "providers": {
+      "searchPlaceholder": "Tìm nhà cung cấp",
+      "noMatches": "Không có nhà cung cấp phù hợp.",
+      "saveProvider": "Lưu nhà cung cấp"
+    },
+    "image": {
+      "selectProvider": "Chọn nhà cung cấp",
+      "selectAspect": "Chọn tỷ lệ",
+      "selectSize": "Chọn kích thước",
+      "configureProvider": "Cấu hình nhà cung cấp",
+      "missingCredential": "Configura este proveedor antes de activar la generación de imágenes."
+    },
+    "models": {
+      "selectModel": "Chọn mô hình",
+      "addConfiguration": "Thêm cấu hình",
+      "newConfiguration": "Cấu hình mô hình mới",
+      "newConfigurationHelp": "Lưu nhà cung cấp và mô hình thành một lựa chọn nhanh.",
+      "configurationName": "Tên cấu hình",
+      "configurationNameHelp": "Đổi tên cấu hình mô hình đã lưu này.",
+      "configurationNamePlaceholder": "Viết nhanh",
+      "searchModels": "Tìm kiếm hoặc nhập ID mô hình",
+      "useCustomModel": "Dùng",
+      "loadingModels": "Đang tải mô hình...",
+      "searchCatalog": "Tìm trong danh mục nhà cung cấp để chọn mô hình.",
+      "modelsAvailable": "khả dụng",
+      "noModelResults": "Không có mô hình phù hợp.",
+      "loadFailed": "Không tải được danh sách mô hình.",
+      "unsupportedModelList": "Nhập ID mô hình thủ công.",
+      "providerNotConfigured": "Hãy cấu hình nhà cung cấp này trước khi tải mô hình.",
+      "autoProviderCustomOnly": "Chế độ nhà cung cấp tự động dùng ID mô hình tùy chỉnh."
+    },
+    "timezone": {
+      "select": "Chọn múi giờ",
+      "search": "Tìm múi giờ",
+      "empty": "Không có múi giờ phù hợp."
+    },
+    "cliApps": {
+      "allCategories": "Tất cả danh mục",
+      "availableCount": "{{count}} ứng dụng",
+      "installedCount": "Đã cài {{count}}",
+      "summary": "Đã cài {{installed}} / {{total}} CLI",
+      "filterAll": "Tất cả",
+      "filterInstalled": "CLI đã cài",
+      "filterNotInstalled": "Chưa cài",
+      "searchPlaceholder": "Tìm CLI",
+      "statusInstalled": "Đã cài",
+      "statusAvailable": "Có sẵn",
+      "statusMissing": "Thiếu phụ thuộc",
+      "statusUnsupported": "Không hỗ trợ",
+      "statusNotInstalled": "Chưa cài",
+      "unsupported": "Không hỗ trợ",
+      "loading": "Đang tải ứng dụng CLI...",
+      "empty": "Không có ứng dụng CLI nào khớp bộ lọc này.",
+      "readyTitle": "@{{name}} đã sẵn sàng",
+      "readyStatus": "Sẵn sàng",
+      "readyPrompt": "Dùng @{{name}} để xem CLI này làm được gì.",
+      "readyTry": "Thử @{{name}}",
+      "readyCopied": "Đã sao chép",
+      "openChat": "Mở chat",
+      "requires": "Yêu cầu",
+      "test": "Kiểm tra CLI",
+      "update": "Cập nhật CLI",
+      "uninstall": "Gỡ CLI",
+      "install": "Cài CLI",
+      "unavailable": "Không khả dụng",
+      "noDescription": "Không có mô tả."
+    },
+    "about": {
+      "version": "Phiên bản",
+      "checking": "Đang kiểm tra...",
+      "checkForUpdates": "Kiểm tra bản cập nhật",
+      "upToDate": "Bạn đang dùng phiên bản mới nhất",
+      "updateAvailable": "Có bản cập nhật v{{version}}"
+    },
+    "mcp": {
+      "allCategories": "Tất cả danh mục",
+      "summary": "Đã bật {{installed}} / {{total}} preset",
+      "filterAll": "Tất cả",
+      "filterInstalled": "Đã bật",
+      "filterNotInstalled": "Chưa bật",
+      "searchPlaceholder": "Tìm preset MCP",
+      "moreOptions": "Tùy chọn MCP khác",
+      "moreOptionsSubtitle": "Thêm máy chủ tùy chỉnh hoặc nhập mcp.json.",
+      "customTitle": "MCP tùy chỉnh",
+      "customSubtitle": "Thêm bất kỳ máy chủ MCP stdio, HTTP hoặc SSE nào.",
+      "customAction": "Tùy chỉnh",
+      "importAction": "Nhập",
+      "serverName": "Tên máy chủ",
+      "serverUrl": "URL",
+      "transport": "Giao thức truyền",
+      "command": "Lệnh",
+      "args": "Args JSON",
+      "headers": "Headers JSON",
+      "env": "Env JSON",
+      "timeout": "Thời gian chờ công cụ",
+      "advancedOptions": "Tùy chọn nâng cao",
+      "hideAdvanced": "Ẩn nâng cao",
+      "saveCustom": "Lưu MCP",
+      "configImport": "Nhập mcp.json",
+      "importConfig": "Nhập",
+      "restartRequired": "Khởi động lại nanobot để kết nối các công cụ MCP đã cập nhật.",
+      "toolsFound": "{{count}} công cụ",
+      "loading": "Đang tải preset MCP...",
+      "empty": "Không có preset MCP nào khớp bộ lọc này.",
+      "openDocs": "Mở tài liệu",
+      "test": "Kiểm tra",
+      "remove": "Xóa",
+      "enable": "Bật",
+      "enabled": "Đã bật",
+      "setup": "Kết nối",
+      "configure": "Kết nối",
+      "connectTitle": "Kết nối {{name}}",
+      "connectHint": "Thêm khóa từ phần cài đặt tài khoản của bạn.",
+      "saveAndEnable": "Lưu và bật",
+      "updateSetup": "Cập nhật thiết lập",
+      "configured": "đã cấu hình",
+      "keepExisting": "Để trống để giữ giá trị hiện tại",
+      "statusConfigured": "Đã cấu hình",
+      "statusMissingCredentials": "Cần khóa",
+      "statusMissingDependency": "Cần phụ thuộc",
+      "statusComingSoon": "Sắp ra mắt",
+      "statusNotInstalled": "Chưa bật",
+      "toolScope": "Công cụ",
+      "allTools": "Tất cả",
+      "noTools": "Không có",
+      "testForTools": "Chạy Kiểm tra để xem và chọn từng công cụ."
+    },
+    "legal": {
+      "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
+    },
+    "apps": {
+      "description": "Thêm CLI ứng dụng và dịch vụ MCP mà nanobot có thể dùng trong chat.",
+      "cliLabel": "CLI",
+      "mcpLabel": "MCP",
+      "filterAll": "Tất cả",
+      "filterCli": "Ứng dụng CLI",
+      "filterMcp": "Dịch vụ MCP",
+      "enabledSummary": "{{count}} đã bật",
+      "caption": "{{cli}} CLI · {{mcp}} MCP",
+      "searchPlaceholder": "Tìm ứng dụng",
+      "featured": "Nổi bật",
+      "loading": "Đang tải ứng dụng...",
+      "empty": "Không có ứng dụng phù hợp."
+    },
+    "automations": {
+      "filters": {
+        "all": "Tất cả",
+        "active": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Cần xử lý",
+        "system": "Hệ thống"
+      },
+      "sort": {
+        "next": "Lần chạy tiếp theo",
+        "last": "Lần chạy trước",
+        "updated": "Đã cập nhật",
+        "name": "Tên"
+      },
+      "search": "Tìm tác vụ, tin nhắn, cuộc trò chuyện liên kết hoặc lịch",
+      "queue": "Hàng đợi",
+      "loading": "Đang tải tự động hóa...",
+      "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
+      "empty": "Chưa có tự động hóa.",
+      "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
+      "oneShot": "Một lần",
+      "systemTask": "Tự động hóa do hệ thống quản lý",
+      "labels": {
+        "schedule": "Lịch",
+        "next": "Tiếp theo",
+        "origin": "Cuộc trò chuyện liên kết",
+        "created": "Đã tạo",
+        "updated": "Đã cập nhật"
+      },
+      "runNow": "Chạy ngay",
+      "pause": "Tạm dừng",
+      "resume": "Tiếp tục",
+      "edit": "Sửa",
+      "delete": "Xóa",
+      "protected": "Được bảo vệ",
+      "editTitle": "Sửa tự động hóa",
+      "save": "Lưu",
+      "deleteTitle": "Xóa tự động hóa",
+      "deleteDescription": "Thao tác này xóa {{name}} khỏi kho cron. Tin nhắn chat trước đó vẫn ở trong phiên.",
+      "cancel": "Hủy",
+      "status": {
+        "system": "Hệ thống",
+        "running": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Thất bại",
+        "completed": "Hoàn tất",
+        "noSchedule": "Không có lịch",
+        "active": "Đang chạy"
+      },
+      "origin": {
+        "system": "Hệ thống",
+        "unknown": "Chưa liên kết cuộc trò chuyện"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "Vào {{time}}",
+        "every": "Mỗi {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Hằng ngày lúc {{time}}",
+        "weekdaysAt": "Ngày làm việc lúc {{time}}",
+        "hourlyAt": "Mỗi giờ tại :{{minute}}",
+        "hourlyWindow": "Mỗi giờ {{start}}-{{end}} tại :{{minute}}",
+        "custom": "Lịch tùy chỉnh"
+      },
+      "next": {
+        "paused": "Đã tạm dừng",
+        "pending": "Đang chạy",
+        "none": "Không có lần chạy tiếp theo"
+      },
+      "message": {
+        "showMore": "Hiển thị toàn bộ tin nhắn",
+        "showLess": "Thu gọn"
+      },
+      "fields": {
+        "name": "Tên",
+        "message": "Tin nhắn",
+        "scheduleType": "Loại lịch",
+        "every": "Mỗi",
+        "unit": "Đơn vị",
+        "cronExpression": "Biểu thức cron",
+        "timezone": "Múi giờ",
+        "runAt": "Chạy lúc"
+      },
+      "scheduleTypes": {
+        "every": "Khoảng lặp",
+        "cron": "Cron",
+        "at": "Một lần"
+      },
+      "everyUnits": {
+        "second": "Giây",
+        "minute": "Phút",
+        "hour": "Giờ",
+        "day": "Ngày"
+      },
+      "validation": {
+        "nameRequired": "Tên là bắt buộc.",
+        "messageRequired": "Tin nhắn là bắt buộc.",
+        "intervalRequired": "Khoảng lặp phải là số dương.",
+        "cronRequired": "Biểu thức cron là bắt buộc.",
+        "timeRequired": "Thời gian chạy là bắt buộc.",
+        "futureRequired": "Thời gian chạy phải ở tương lai."
+      }
+    },
+    "oauth": {
+      "authentication": "Xác thực OAuth",
+      "signIn": "Đăng nhập",
+      "signingIn": "Đang đăng nhập...",
+      "signInAgain": "Đăng nhập lại",
+      "signOut": "Đăng xuất",
+      "signedInAs": "Đã đăng nhập bằng {{account}}",
+      "signInHelp": "Inicia sesión desde este dispositivo; no se guarda API key en config.",
+      "signInRequired": "Cần đăng nhập",
+      "signInBeforeSaving": "Inicia sesión antes de guardar este proveedor OAuth como proveedor activo.",
+      "signedIn": "Đã đăng nhập",
+      "notSignedIn": "Chưa đăng nhập"
+    },
+    "skills": {
+      "description": "Xem các kỹ năng chỉ dẫn mà agent này có thể tải trong cuộc trò chuyện.",
+      "caption": "{{available}} khả dụng · tổng {{total}}",
+      "featured": "Kỹ năng agent",
+      "empty": "Không có kỹ năng nào khả dụng.",
+      "sourceWorkspace": "Tùy chỉnh",
+      "sourceBuiltin": "Tích hợp",
+      "statusAvailable": "Khả dụng",
+      "statusUnavailable": "Không khả dụng",
+      "unavailableReason": "Thiếu: {{reason}}",
+      "openDetails": "Mở chi tiết {{name}}",
+      "loadingDetail": "Đang tải chi tiết kỹ năng...",
+      "loadFailed": "Không tải được chi tiết kỹ năng.",
+      "descriptionTitle": "Mô tả",
+      "source": "Nguồn",
+      "status": "Trạng thái",
+      "requirements": "Yêu cầu",
+      "noRequirements": "Không có yêu cầu rõ ràng.",
+      "commands": "Lệnh",
+      "environment": "Biến môi trường",
+      "missingCommands": "Thiếu CLI",
+      "missingEnvironment": "Thiếu ENV",
+      "unavailableReasonLabel": "Lý do không khả dụng",
+      "rawInstructions": "SKILL.md gốc",
+      "rawInstructionsEmpty": "Không có hướng dẫn gốc.",
+      "detailDescription": "Chi tiết cho {{name}}."
+    },
+    "voice": {
+      "selectProvider": "Chon nha cung cap",
+      "configureProvider": "Cau hinh nha cung cap",
+      "languageAuto": "Tu dong"
     }
   },
   "chat": {
     "fallbackTitle": "Trò chuyện {{id}}",
+    "forkTitle": "Nhánh: {{title}}",
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
+    "showMore": "Hiển thị thêm {{count}}",
+    "collapsed": "Đã thu gọn {{count}} cuộc trò chuyện",
+    "showLess": "Thu gọn",
     "actions": "Tác vụ cho cuộc trò chuyện {{title}}",
+    "newInProject": "Bắt đầu cuộc trò chuyện mới trong {{project}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished",
+      "updated": "New activity"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameProjectTitle": "Rename project",
+    "renameProjectDescription": "Choose a local sidebar name for this project.",
+    "renameProjectPlaceholder": "Project name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "Xóa",
-    "newChat": "Cuộc trò chuyện mới"
+    "newChat": "Cuộc trò chuyện mới",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "projects": "Projects",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",
     "description": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
-    "confirm": "Xóa"
+    "confirm": "Xóa",
+    "automationsDescription": "Cuộc trò chuyện này có các tự động hóa đã lên lịch. Xóa cuộc trò chuyện cũng sẽ xóa chúng.",
+    "moreAutomations": "+ {{count}} mục nữa",
+    "confirmWithAutomations": "Xóa",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Mỗi {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Lịch tùy chỉnh"
+    },
+    "next": {
+      "label": "Tiếp theo: {{time}}",
+      "disabled": "Đã tạm dừng",
+      "none": "Không có lần chạy tiếp theo"
+    }
   },
   "connection": {
     "idle": "Rảnh",
@@ -61,8 +711,12 @@
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới.",
-      "greeting": "Tôi có thể giúp gì cho bạn?",
+      "greetings": {
+        "workOn": "Mình cùng làm gì tiếp?",
+        "start": "Hôm nay bắt đầu từ đâu?",
+        "build": "Hôm nay mình xây dựng gì?",
+        "tackle": "Mình cùng xử lý việc gì?"
+      },
       "quickActions": {
         "plan": {
           "title": "Tạo kế hoạch dự án",
@@ -117,7 +771,34 @@
       }
     },
     "header": {
-      "toggleSidebar": "Bật/tắt thanh bên"
+      "toggleSidebar": "Bật/tắt thanh bên",
+      "newChat": "Bắt đầu chat mới",
+      "toggleTheme": "Chuyển chủ đề từ header",
+      "settings": "Mở cài đặt",
+      "sessionInfo": "Chi tiết phiên"
+    },
+    "sessionInfo": {
+      "title": "Phiên",
+      "untitled": "Chat chưa đặt tên",
+      "automations": "Tự động hóa",
+      "count": "{{count}}",
+      "loading": "Đang tải tự động hóa...",
+      "loadFailed": "Không thể tải tự động hóa.",
+      "empty": "Phiên này chưa có tự động hóa.",
+      "disabled": "Tắt",
+      "schedule": {
+        "at": "Lúc {{time}}",
+        "every": "Mỗi {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "unknown": "Lịch tùy chỉnh"
+      },
+      "next": {
+        "label": "Tiếp theo {{time}}",
+        "pending": "Sắp chạy",
+        "disabled": "Đã tạm dừng",
+        "none": "Không có lần chạy tiếp theo"
+      }
     },
     "composer": {
       "placeholderThread": "Nhập tin nhắn…",
@@ -126,8 +807,23 @@
       "placeholderStreaming": "Mô hình đang trả lời…",
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
+      "runRuntimeTitle": "Đang chạy · {{elapsed}}",
+      "goalStateStrip": "Mục tiêu · {{label}}",
+      "goalStateFallback": "Mục tiêu",
+      "goalStateExpandAria": "Xem đầy đủ mục tiêu",
+      "goalStateSheetTitle": "Mục tiêu",
+      "goalStateCloseAria": "Đóng mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
+      "modelNotConfigured": "Chưa cấu hình mô hình",
+      "configureModel": "Cấu hình mô hình",
+      "queued": {
+        "label": "Hướng dẫn đang chờ",
+        "guide": "Hướng dẫn",
+        "delete": "Xóa hướng dẫn",
+        "edit": "Sửa hướng dẫn",
+        "drag": "Kéo để sắp xếp"
+      },
       "attachImage": "Đính kèm ảnh",
       "imageMode": {
         "label": "Tạo ảnh",
@@ -144,16 +840,26 @@
           "16_9": "Rộng 16:9"
         }
       },
-      "encoding": "Đang xử lý…",
-      "remove": "Xóa tệp đính kèm",
-      "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
-      "imageRejected": {
-        "unsupported_type": "Loại tệp không được hỗ trợ",
-        "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
-        "magic_mismatch": "Tệp này không phải là một ảnh thực",
-        "decode_failed": "Không thể giải mã ảnh này",
-        "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
-        "io": "Không thể đọc tệp này"
+      "tools": {
+        "search": "Tìm kiếm",
+        "reason": "Suy luận",
+        "deepResearch": "Nghiên cứu sâu",
+        "voice": "Nhập bằng giọng nói"
+      },
+      "voice": {
+        "hint": "Bấm để đọc chính tả hoặc nhấn giữ",
+        "stop": "Dừng ghi âm",
+        "transcribing": "Đang chép lời...",
+        "recordingStatus": "Đang ghi {{time}}"
+      },
+      "voiceErrors": {
+        "unsupported": "Trình duyệt này không hỗ trợ nhập bằng giọng nói.",
+        "permission": "Cần quyền truy cập micrô.",
+        "notConfigured": "Hãy cấu hình nhà cung cấp chép lời trước.",
+        "tooLong": "Bản ghi âm quá dài.",
+        "tooShort": "Giữ lâu hơn một chút để ghi âm giọng nói.",
+        "noInput": "Không phát hiện đầu vào micrô.",
+        "failed": "Không thể chép lời âm thanh."
       },
       "slash": {
         "ariaLabel": "Lệnh slash",
@@ -178,6 +884,10 @@
             "title": "Hiển thị trạng thái",
             "description": "Hiển thị trạng thái runtime, provider và channel."
           },
+          "model": {
+            "title": "Mô hình",
+            "description": "Hiển thị hoặc chuyển preset mô hình đang hoạt động."
+          },
           "history": {
             "title": "Hiển thị lịch sử",
             "description": "In N tin nhắn hội thoại đã lưu gần nhất."
@@ -194,21 +904,108 @@
             "title": "Khôi phục bộ nhớ",
             "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
           },
+          "goal": {
+            "title": "Mục tiêu dài hạn",
+            "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."
+          },
           "help": {
             "title": "Hiển thị trợ giúp",
             "description": "Liệt kê các lệnh slash có sẵn."
+          },
+          "pairing": {
+            "title": "Ghép nối",
+            "description": "Quản lý yêu cầu ghép nối."
           }
+        },
+        "badges": {
+          "current": "Hiện tại",
+          "recent": "Gần đây"
+        },
+        "details": {
+          "goalActive": "Mục tiêu đang chạy",
+          "goalReady": "Bắt đầu mục tiêu duy trì",
+          "history": "Hiển thị tin nhắn gần đây",
+          "stopRunning": "Đang chạy"
         }
+      },
+      "encoding": "Đang xử lý…",
+      "remove": "Xóa tệp đính kèm",
+      "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
+      "imageRejected": {
+        "unsupported_type": "Loại tệp không được hỗ trợ",
+        "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
+        "magic_mismatch": "Tệp này không phải là một ảnh thực",
+        "decode_failed": "Không thể giải mã ảnh này",
+        "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
+        "io": "Không thể đọc tệp này"
+      },
+      "mentions": {
+        "ariaLabel": "Ứng dụng",
+        "label": "Ứng dụng",
+        "cliGroup": "Ứng dụng CLI",
+        "mcpGroup": "Dịch vụ MCP",
+        "cliBadge": "CLI",
+        "mcpBadge": "MCP",
+        "cliDescription": "Dùng @{{name}} như ứng dụng CLI cục bộ",
+        "mcpDescription": "Dùng @{{name}} như máy chủ MCP"
+      },
+      "workspace": {
+        "accessAria": "Workspace access mode",
+        "projectAria": "Chọn dự án",
+        "projectPlaceholder": "Chọn dự án",
+        "default": "Default Permission",
+        "full": "Full Access"
       }
     },
-    "scrollToBottom": "Cuộn xuống cuối"
+    "scrollToBottom": "Cuộn xuống cuối",
+    "loadEarlier": "Tải tin nhắn trước đó",
+    "forkedFromHistory": "Tách nhánh từ lịch sử",
+    "promptNavigator": {
+      "open": "Mở trình điều hướng prompt",
+      "title": "Prompt",
+      "search": "Tìm prompt",
+      "noResults": "Không có prompt phù hợp.",
+      "jumpTo": "Nhảy tới prompt: {{label}}"
+    }
   },
   "message": {
     "streaming": "đang truyền",
     "assistantTyping": "Trợ lý đang nhập",
     "toolSingle": "Đang dùng một công cụ",
     "toolMany": "Đã dùng {{count}} công cụ",
-    "imageAttachment": "Tệp hình ảnh đính kèm"
+    "toolSummary": "{{count}} công cụ",
+    "toolSummaryMany": "{{count}} công cụ",
+    "reasoningTools": "Suy luận · {{count}} công cụ",
+    "reasoningToolsSingular": "Suy luận · 1 công cụ",
+    "reasoning": "Suy luận",
+    "reasoningStreaming": "Đang suy nghĩ…",
+    "reasoningSummary": "Suy luận",
+    "agentActivitySummary": "{{reasoning}} bước · {{tools}} lần gọi công cụ",
+    "agentActivityToolsOnly": "{{tools}} lần gọi công cụ",
+    "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
+    "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
+    "imageAttachment": "Tệp hình ảnh đính kèm",
+    "forkFromHere": "Tách nhánh",
+    "copyReply": "Sao chép",
+    "copiedReply": "Đã sao chép",
+    "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
+    "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
+    "activityThought": "Đã suy nghĩ",
+    "activityThoughtFor": "Đã suy nghĩ trong {{duration}}",
+    "activityWorkingFor": "Đang xử lý trong {{duration}}",
+    "activityWorked": "Đã xử lý",
+    "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "cliActivityRunningOne": "Đang dùng @{{name}}",
+    "cliActivityRanOne": "Đã dùng @{{name}}",
+    "cliActivityFailedOne": "@{{name}} thất bại",
+    "cliActivityRunningMany": "Đang dùng {{count}} ứng dụng CLI",
+    "cliActivityRanMany": "Đã dùng {{count}} ứng dụng CLI",
+    "cliActivityFailedMany": "{{count}} ứng dụng CLI thất bại",
+    "cliRunRunning": "Đang dùng",
+    "cliRunRan": "Đã dùng",
+    "cliRunFailed": "Thất bại",
+    "automationSourceFallback": "Tự động hóa",
+    "automationTriggered": "Tự động kích hoạt"
   },
   "lightbox": {
     "title": "Xem trước ảnh",
@@ -216,6 +1013,15 @@
     "prev": "Ảnh trước",
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
+  },
+  "filePreview": {
+    "aria": "Xem trước tệp",
+    "close": "Đóng xem trước tệp",
+    "loading": "Đang tải bản xem trước...",
+    "failed": "Không thể xem trước tệp này.",
+    "routeMissing": "Xem trước tệp cần gateway mới nhất. Hãy khởi động lại nanobot gateway rồi thử lại.",
+    "resize": "Đổi kích thước bản xem trước tệp",
+    "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },
   "code": {
     "fallbackLanguage": "mã",
@@ -230,6 +1036,19 @@
     "messageTooBig": {
       "title": "Tin nhắn quá lớn",
       "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
+    },
+    "workspaceScopeRejected": {
+      "title": "Workspace was not changed",
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    }
+  },
+  "workspace": {
+    "dialog": {
+      "defaultProject": "Default workspace",
+      "manual": "Dán đường dẫn",
+      "manualPlaceholder": "/Users/name/project",
+      "usePath": "Use Path",
+      "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
   }
 }

@@ -15,6 +15,7 @@ If the `generate_image` tool is not available in the current tool list, tell the
 - Image editing: pass the saved artifact path or user image path in `reference_images`.
 - Iterative edits in the same conversation: prefer the most recent generated image artifact if the user says things like "make it brighter", "change the background", or "try another version".
 - Ambiguous edits: ask a short clarifying question if multiple recent images could be the target.
+- After generating images, call the `message` tool with the artifact paths in the `media` parameter to deliver them to the user.
 
 ## Prompt Rules
 
@@ -39,51 +40,7 @@ In normal user-facing replies, do not expose local filesystem paths. Keep the re
 
 For follow-up edits, pass the prior artifact `path` to `reference_images`. If the user provides a new uploaded image, use that path as the reference instead.
 
-## Provider Notes
-
-Do not ask users to paste API keys into chat. If configuration is needed, describe the fields and remind them to restart the gateway after changing config.
-
-For OpenRouter, the image tool expects:
-
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-..."
-    }
-  },
-  "tools": {
-    "imageGeneration": {
-      "enabled": true,
-      "provider": "openrouter",
-      "model": "openai/gpt-5.4-image-2"
-    }
-  }
-}
-```
-
-For AIHubMix, the image tool expects:
-
-```json
-{
-  "providers": {
-    "aihubmix": {
-      "apiKey": "sk-..."
-    }
-  },
-  "tools": {
-    "imageGeneration": {
-      "enabled": true,
-      "provider": "aihubmix",
-      "model": "gpt-image-2-free"
-    }
-  }
-}
-```
-
-AIHubMix `gpt-image-2-free` uses AIHubMix's unified predictions endpoint internally (`/v1/models/openai/gpt-image-2-free/predictions`), not the OpenAI Images `/v1/images/generations` endpoint. If it fails with "Incorrect model ID", do not assume the key lacks permission until the provider config, model name, and gateway restart have been checked.
-
-`providers.aihubmix.extraBody` can be used for provider-specific options. For example, `"extraBody": {"quality": "low"}` is optional but can make `gpt-image-2-free` faster and less likely to time out.
+Do not include internal replay markers such as `[Message Time: ...]`, `[image: /local/path]`, `generate_image(...)`, or `message(...)` in user-facing replies.
 
 ## Examples
 

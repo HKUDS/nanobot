@@ -6,22 +6,26 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.file_state import FileStates
+from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ExecToolConfig, WebToolsConfig
+from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.security.workspace_access import (
+    WorkspaceScope,
+    bind_workspace_scope,
+    reset_workspace_scope,
+    workspace_sandbox_status,
+)
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -77,20 +81,20 @@ class SubagentManager:
         bus: MessageBus,
         max_tool_result_chars: int,
         model: str | None = None,
-        web_config: "WebToolsConfig | None" = None,
-        exec_config: "ExecToolConfig | None" = None,
+        tools_config: ToolsConfig | None = None,
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
+        llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.web_config = web_config or WebToolsConfig()
+        self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
-        self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
         self.max_iterations = (
@@ -98,11 +102,46 @@ class SubagentManager:
             if max_iterations is not None
             else defaults.max_tool_iterations
         )
-        self.max_concurrent_subagents = defaults.max_concurrent_subagents
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
+        )
         self.runner = AgentRunner(provider)
+        self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+
+    def _subagent_tools_config(self) -> ToolsConfig:
+        """Build a ToolsConfig scoped for subagent use."""
+        return ToolsConfig(
+            exec=self.tools_config.exec,
+            web=self.tools_config.web,
+            file=self.tools_config.file,
+            restrict_to_workspace=self.restrict_to_workspace,
+        )
+
+    def _build_tools(
+        self,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+    ) -> ToolRegistry:
+        """Build an isolated subagent tool registry via ToolLoader."""
+        root = self.workspace if workspace is None else workspace
+        registry = ToolRegistry()
+        cfg = tools_config if tools_config is not None else self._subagent_tools_config()
+        ctx = ToolContext(
+            config=cfg,
+            workspace=str(root.resolve()),
+            file_state_store=FileStates(),
+            workspace_sandbox=workspace_sandbox_status(
+                restrict_to_workspace=cfg.restrict_to_workspace,
+                workspace=root,
+            ),
+        )
+        ToolLoader().load(ctx, registry, scope="subagent")
+        return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         self.provider = provider
@@ -117,6 +156,8 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -132,7 +173,16 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id)
+            self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                status,
+                origin_message_id,
+                temperature,
+                workspace_scope,
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -159,6 +209,8 @@ class SubagentManager:
         origin: dict[str, str],
         status: SubagentStatus,
         origin_message_id: str | None = None,
+        temperature: float | None = None,
+        workspace_scope: WorkspaceScope | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -168,64 +220,46 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
-            extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-            # Subagent gets its own FileStates so its read-dedup cache is
-            # isolated from the parent loop's sessions (issue #3571).
-            from nanobot.agent.tools.file_state import FileStates
-            file_states = FileStates()
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read, file_states=file_states))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-            if self.exec_config.enable:
-                tools.register(ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    sandbox=self.exec_config.sandbox,
-                    path_append=self.exec_config.path_append,
-                    allowed_env_keys=self.exec_config.allowed_env_keys,
-                    allow_patterns=self.exec_config.allow_patterns,
-                    deny_patterns=self.exec_config.deny_patterns,
-                ))
-            if self.web_config.enable:
-                tools.register(
-                    WebSearchTool(
-                        config=self.web_config.search,
-                        proxy=self.web_config.proxy,
-                        user_agent=self.web_config.user_agent,
-                    )
-                )
-                tools.register(
-                    WebFetchTool(
-                        config=self.web_config.fetch,
-                        proxy=self.web_config.proxy,
-                        user_agent=self.web_config.user_agent,
-                    )
-                )
-            system_prompt = self._build_subagent_prompt()
+            root = workspace_scope.project_path if workspace_scope is not None else self.workspace
+            cfg = None
+            if workspace_scope is not None:
+                cfg = self._subagent_tools_config()
+                cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
+            tools = self._build_tools(workspace=root, tools_config=cfg)
+            system_prompt = self._build_subagent_prompt(workspace=root)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
-            result = await self.runner.run(AgentRunSpec(
-                initial_messages=messages,
-                tools=tools,
-                model=self.model,
-                max_iterations=self.max_iterations,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id, status),
-                max_iterations_message="Task completed but no final response was generated.",
-                error_message=None,
-                fail_on_tool_error=True,
-                checkpoint_callback=_on_checkpoint,
-            ))
+            sess_key = origin.get("session_key")
+            llm_timeout = (
+                self._llm_wall_timeout_for_session(sess_key)
+                if self._llm_wall_timeout_for_session
+                else None
+            )
+            token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
+            try:
+                result = await self.runner.run(AgentRunSpec(
+                    initial_messages=messages,
+                    tools=tools,
+                    model=self.model,
+                    temperature=temperature,
+                    max_iterations=self.max_iterations,
+                    max_tool_result_chars=self.max_tool_result_chars,
+                    hook=_SubagentHook(task_id, status),
+                    max_iterations_message="Task completed but no final response was generated.",
+                    finalize_on_max_iterations=False,
+                    error_message=None,
+                    fail_on_tool_error=True,
+                    checkpoint_callback=_on_checkpoint,
+                    session_key=sess_key,
+                    workspace=root,
+                    llm_timeout_s=llm_timeout,
+                ))
+            finally:
+                if token is not None:
+                    reset_workspace_scope(token)
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
@@ -319,20 +353,21 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
+        root = workspace or self.workspace
         skills_summary = SkillsLoader(
-            self.workspace,
+            root,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
-            workspace=str(self.workspace),
+            workspace=str(root),
             skills_summary=skills_summary or "",
         )
 

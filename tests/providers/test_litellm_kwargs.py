@@ -54,6 +54,15 @@ def _fake_tool_call_response() -> SimpleNamespace:
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
+def _fake_tool_call_response_with_arguments(arguments) -> SimpleNamespace:
+    """Build a minimal chat response with caller-supplied tool arguments."""
+    function = SimpleNamespace(name="optional_tool", arguments=arguments)
+    tool_call = SimpleNamespace(id="call_123", type="function", function=function)
+    message = SimpleNamespace(content=None, tool_calls=[tool_call], reasoning_content=None)
+    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
+    return SimpleNamespace(choices=[choice], usage=SimpleNamespace())
+
+
 def _fake_responses_response(content: str = "ok") -> MagicMock:
     """Build a minimal Responses API response object."""
     resp = MagicMock()
@@ -98,6 +107,326 @@ def _fake_chat_stream(text: str = "ok"):
     return _stream()
 
 
+def _fake_chat_stream_reasoning_chunks():
+    """Mimic DeepSeek-style ``chat.completions`` stream: ``reasoning_content`` then ``content``."""
+
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content="step1",
+                        reasoning=None,
+                        tool_calls=None,
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content="step2",
+                        reasoning=None,
+                        tool_calls=None,
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content="answer",
+                        reasoning_content=None,
+                        tool_calls=None,
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        tool_calls=None,
+                    ),
+                ),
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+            ),
+        )
+
+    return _stream()
+
+
+def _fake_chat_stream_tool_call_chunks():
+    """Mimic OpenAI-compatible streaming tool-call argument deltas."""
+
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=[
+                            SimpleNamespace(
+                                index=0,
+                                id="call_write",
+                                function=SimpleNamespace(
+                                    name="write_file",
+                                    arguments='{"path":"notes.md","content":"',
+                                ),
+                            )
+                        ],
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=[
+                            SimpleNamespace(
+                                index=0,
+                                id=None,
+                                function=SimpleNamespace(name=None, arguments='line\\n"}'),
+                            )
+                        ],
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="tool_calls",
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=None,
+                    ),
+                ),
+            ],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    return _stream()
+
+
+def _fake_chat_stream_legacy_function_call_chunks():
+    """Mimic older OpenAI-compatible ``delta.function_call`` chunks."""
+
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=None,
+                        function_call=SimpleNamespace(
+                            name="write_file",
+                            arguments='{"path":"notes.md","content":"',
+                        ),
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=None,
+                        function_call=SimpleNamespace(
+                            name=None,
+                            arguments='line\\n"}',
+                        ),
+                    ),
+                ),
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="function_call",
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        reasoning=None,
+                        tool_calls=None,
+                        function_call=None,
+                    ),
+                ),
+            ],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    return _stream()
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
+    """Regression: DeepSeek-V4 / reasoner expose ``delta.reasoning_content`` during streaming."""
+    mock_chat = AsyncMock(return_value=_fake_chat_stream_reasoning_chunks())
+    spec = find_by_name("deepseek")
+    thinking: list[str] = []
+    content: list[str] = []
+
+    async def on_thinking(d: str) -> None:
+        thinking.append(d)
+
+    async def on_content(d: str) -> None:
+        content.append(d)
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        client_instance = mock_openai.return_value
+        client_instance.chat.completions.create = mock_chat
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model="deepseek-v4-pro",
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v4-pro",
+            reasoning_effort="high",
+            on_content_delta=on_content,
+            on_thinking_delta=on_thinking,
+        )
+
+    assert thinking == ["step1", "step2"]
+    assert content == ["answer"]
+    assert result.reasoning_content == "step1step2"
+    assert result.content == "answer"
+    mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_name", "model"),
+    [
+        ("openai", "gpt-4o"),
+        ("deepseek", "deepseek-chat"),
+        ("minimax", "MiniMax-M2.7"),
+        ("zhipu", "glm-4.6"),
+    ],
+)
+async def test_openai_compat_stream_forwards_tool_call_argument_deltas(
+    provider_name: str,
+    model: str,
+) -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_stream_tool_call_chunks())
+    spec = find_by_name(provider_name)
+    deltas: list[dict] = []
+
+    async def on_tool_delta(delta: dict) -> None:
+        deltas.append(delta)
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        client_instance = mock_openai.return_value
+        client_instance.chat.completions.create = mock_chat
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model=model,
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "write"}],
+            tools=[{"type": "function", "function": {"name": "write_file"}}],
+            model=model,
+            on_tool_call_delta=on_tool_delta,
+        )
+
+    assert deltas == [
+        {
+            "index": 0,
+            "call_id": "call_write",
+            "name": "write_file",
+            "arguments_delta": '{"path":"notes.md","content":"',
+        },
+        {"index": 0, "call_id": "", "name": "", "arguments_delta": 'line\\n"}'},
+    ]
+    assert result.tool_calls[0].name == "write_file"
+    assert result.tool_calls[0].arguments == {"path": "notes.md", "content": "line\n"}
+    kwargs = mock_chat.await_args.kwargs
+    if provider_name == "zhipu":
+        assert kwargs["extra_body"]["tool_stream"] is True
+    else:
+        assert kwargs.get("extra_body", {}).get("tool_stream") is None
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_stream_forwards_legacy_function_call_argument_deltas() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_stream_legacy_function_call_chunks())
+    deltas: list[dict] = []
+
+    async def on_tool_delta(delta: dict) -> None:
+        deltas.append(delta)
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        client_instance = mock_openai.return_value
+        client_instance.chat.completions.create = mock_chat
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model="deepseek-chat",
+            spec=find_by_name("deepseek"),
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "write"}],
+            tools=[{"type": "function", "function": {"name": "write_file"}}],
+            model="deepseek-chat",
+            on_tool_call_delta=on_tool_delta,
+        )
+
+    assert deltas == [
+        {
+            "index": 0,
+            "call_id": "",
+            "name": "write_file",
+            "arguments_delta": '{"path":"notes.md","content":"',
+        },
+        {"index": 0, "call_id": "", "name": "", "arguments_delta": 'line\\n"}'},
+    ]
+    assert result.tool_calls[0].name == "write_file"
+    assert result.tool_calls[0].arguments == {"path": "notes.md", "content": "line\n"}
+
+
 class _FakeResponsesError(Exception):
     def __init__(self, status_code: int, text: str):
         super().__init__(text)
@@ -121,6 +450,15 @@ def test_openrouter_spec_is_gateway() -> None:
     assert spec.default_api_base == "https://openrouter.ai/api/v1"
 
 
+def test_novita_spec_uses_openai_compatible_gateway() -> None:
+    spec = find_by_name("novita")
+    assert spec is not None
+    assert spec.is_gateway is True
+    assert spec.backend == "openai_compat"
+    assert spec.env_key == "NOVITA_API_KEY"
+    assert spec.default_api_base == "https://api.novita.ai/openai"
+
+
 def test_gemma_routes_to_gemini_provider() -> None:
     """gemma models (e.g. gemma-3-27b-it) must auto-route to Gemini when GEMINI_API_KEY is set.
     Users running gemma via the Gemini API endpoint expect automatic provider detection."""
@@ -129,27 +467,34 @@ def test_gemma_routes_to_gemini_provider() -> None:
     assert "gemma" in spec.keywords
 
 
-def test_openrouter_sets_default_attribution_headers() -> None:
+def test_gemini_spec_keeps_openai_compat_base() -> None:
+    spec = find_by_name("gemini")
+    assert spec is not None
+    assert spec.default_api_base == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+async def test_openrouter_sets_default_attribution_headers() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
-        OpenAICompatProvider(
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_cls:
+        provider = OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
             default_model="anthropic/claude-sonnet-4-5",
             spec=spec,
         )
+        await provider._ensure_client()
 
-    headers = MockClient.call_args.kwargs["default_headers"]
+    headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
     assert headers["X-OpenRouter-Title"] == "nanobot"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert "x-session-affinity" in headers
 
 
-def test_openrouter_user_headers_override_default_attribution() -> None:
+async def test_openrouter_user_headers_override_default_attribution() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
-        OpenAICompatProvider(
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_cls:
+        provider = OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
             default_model="anthropic/claude-sonnet-4-5",
@@ -160,8 +505,9 @@ def test_openrouter_user_headers_override_default_attribution() -> None:
             },
             spec=spec,
         )
+        await provider._ensure_client()
 
-    headers = MockClient.call_args.kwargs["default_headers"]
+    headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://nanobot.ai"
     assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
@@ -265,12 +611,31 @@ async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
 
     assert len(result.tool_calls) == 1
     tool_call = result.tool_calls[0]
+    assert tool_call.id == "call_123"
     assert tool_call.extra_content == {"google": {"thought_signature": "signed-token"}}
     assert tool_call.function_provider_specific_fields == {"inner": "value"}
 
     serialized = tool_call.to_openai_tool_call()
     assert serialized["extra_content"] == {"google": {"thought_signature": "signed-token"}}
     assert serialized["function"]["provider_specific_fields"] == {"inner": "value"}
+
+
+def test_openai_compat_parse_preserves_malformed_tool_arguments() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('{path:"foo.txt"}'))
+
+    assert result.tool_calls[0].arguments == '{path:"foo.txt"}'
+
+
+def test_openai_compat_parse_preserves_array_tool_arguments() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    result = provider._parse(_fake_tool_call_response_with_arguments('["foo.txt"]'))
+
+    assert result.tool_calls[0].arguments == ["foo.txt"]
 
 
 def test_openai_model_passthrough() -> None:
@@ -564,6 +929,47 @@ def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
     assert "temperature" not in kwargs
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected_key"),
+    [
+        ("gpt-5.4", "max_completion_tokens"),
+        ("o1-mini", "max_completion_tokens"),
+        ("o3-mini", "max_completion_tokens"),
+        ("o4-mini", "max_completion_tokens"),
+        ("gpt-4", "max_tokens"),
+        ("foo3-mini", "max_tokens"),
+        ("foo4-mini", "max_tokens"),
+    ],
+)
+def test_openai_compat_build_kwargs_max_completion_tokens_by_model_name(
+    model_name: str,
+    expected_key: str,
+) -> None:
+    spec = find_by_name("custom")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model=model_name,
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model=model_name,
+        max_tokens=2048,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    other_key = (
+        "max_tokens" if expected_key == "max_completion_tokens" else "max_completion_tokens"
+    )
+    assert kwargs[expected_key] == 2048
+    assert other_key not in kwargs
+
+
 def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
@@ -657,7 +1063,7 @@ def test_deepseek_thinking_keeps_tool_history_with_reasoning_content() -> None:
     assert kwargs["messages"][2]["role"] == "tool"
 
 
-def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -> None:
+def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messages() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -681,8 +1087,71 @@ def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -
 
     assert sanitized[1]["role"] == "assistant"
     assert sanitized[1]["content"] is None
+    assert sanitized[1]["tool_calls"][0]["id"] == "call_function_akxp3wqzn7ph_1"
+    assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
+
+
+def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(spec=find_by_name("mistral"))
+
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "不错"},
+        {"role": "assistant", "content": "对，破 4 万指日可待"},
+        {
+            "role": "assistant",
+            "content": "<think>我再查一下</think>",
+            "tool_calls": [
+                {
+                    "id": "call_function_akxp3wqzn7ph_1",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_function_akxp3wqzn7ph_1", "name": "exec", "content": "ok"},
+        {"role": "user", "content": "多少star了呢"},
+    ])
+
+    assert sanitized[1]["role"] == "assistant"
+    assert sanitized[1]["content"] is None
     assert sanitized[1]["tool_calls"][0]["id"] == "3ec83c30d"
     assert sanitized[2]["tool_call_id"] == "3ec83c30d"
+
+
+def test_openai_compat_deduplicates_duplicate_tool_call_ids_in_history() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "check both files"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "ab1b45c2a",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
+                },
+                {
+                    "id": "ab1b45c2a",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"b.txt"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "ab1b45c2a", "name": "read_file", "content": "a"},
+        {"role": "tool", "tool_call_id": "ab1b45c2a", "name": "read_file", "content": "b"},
+        {"role": "user", "content": "continue"},
+    ])
+
+    tool_call_ids = [tc["id"] for tc in sanitized[1]["tool_calls"]]
+    tool_result_ids = [sanitized[2]["tool_call_id"], sanitized[3]["tool_call_id"]]
+
+    assert tool_call_ids[0] == "ab1b45c2a"
+    assert len(tool_call_ids) == len(set(tool_call_ids)) == 2
+    assert tool_result_ids == tool_call_ids
 
 
 def test_openai_compat_stringifies_dict_tool_arguments() -> None:
@@ -709,7 +1178,7 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "ls -la"}'
 
 
-def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -845,6 +1314,18 @@ def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
 def test_volcengine_thinking_enabled() -> None:
     kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro", reasoning_effort="high")
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_volcengine_uses_max_completion_tokens() -> None:
+    kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro")
+    assert kw["max_completion_tokens"] == 1024
+    assert "max_tokens" not in kw
+
+
+def test_volcengine_coding_plan_uses_max_completion_tokens() -> None:
+    kw = _build_kwargs_for("volcengine_coding_plan", "doubao-seed-2-0-pro")
+    assert kw["max_completion_tokens"] == 1024
+    assert "max_tokens" not in kw
 
 
 def test_byteplus_thinking_disabled_for_minimal() -> None:
@@ -1042,12 +1523,15 @@ def test_kimi_k25_thinking_enabled() -> None:
     """kimi-k2.5 with reasoning_effort set should opt in to thinking."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="medium")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    # Moonshot rejects both 'reasoning_effort' and 'thinking' (#3939)
+    assert "reasoning_effort" not in kw
 
 
 def test_kimi_k25_thinking_disabled_for_minimal() -> None:
     """reasoning_effort='minimal' maps to thinking disabled for kimi-k2.5."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="minimal")
     assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
+    assert "reasoning_effort" not in kw
 
 
 def test_kimi_k25_no_extra_body_when_reasoning_effort_none() -> None:
@@ -1057,26 +1541,78 @@ def test_kimi_k25_no_extra_body_when_reasoning_effort_none() -> None:
 
 
 def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking."""
+    """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking.
+
+    OR drops upstream-provider `thinking` fields, so the same intent also has
+    to go through OR's `reasoning.effort` shape (#3851 follow-up).
+    """
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "medium"},
+    }
+    # Even via OR, reasoning_effort wire kwarg is dropped for kimi models
+    assert "reasoning_effort" not in kw
 
 
 def test_kimi_k26_thinking_enabled() -> None:
     """kimi-k2.6 with reasoning_effort set should opt in to thinking."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort="medium")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in kw
 
 
 def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking."""
+    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking
+    via both upstream `thinking` and OR's `reasoning.effort`."""
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.6", reasoning_effort="medium")
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "medium"},
+    }
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_enabled() -> None:
+    """Kimi K2.7 Code supports native thinking controls."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="medium")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_enabled_with_openrouter_prefix() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should carry both thinking shapes."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="high")
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "high"},
+    }
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_omits_disabled() -> None:
+    """Kimi K2.7 Code is always-thinking; disabled thinking is invalid upstream."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should not request disabled thinking."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
 
 
 def test_moonshot_kimi_k26_temperature_override() -> None:
     """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
+    assert kw["temperature"] == 1.0
+
+
+def test_moonshot_kimi_k27_code_temperature_override() -> None:
+    """Moonshot registry should force temperature 1.0 for Kimi K2.7 Code."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort=None)
     assert kw["temperature"] == 1.0
 
 
@@ -1090,6 +1626,7 @@ def test_kimi_k26_code_preview_thinking_enabled() -> None:
     """k2.6-code-preview also supports thinking; should behave like k2.5."""
     kw = _build_kwargs_for("moonshot", "k2.6-code-preview", reasoning_effort="high")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in kw
 
 
 def test_kimi_k2_series_no_thinking_injection() -> None:
@@ -1119,6 +1656,7 @@ def test_kimi_k25_thinking_disabled_for_none_string() -> None:
     """reasoning_effort='none' maps to thinking disabled for kimi-k2.5."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="none")
     assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
+    assert "reasoning_effort" not in kw
 
 
 def test_dashscope_thinking_disabled_for_none_string() -> None:

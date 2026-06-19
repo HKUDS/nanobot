@@ -25,8 +25,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_new, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import AgentDefaults, Config
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,9 +39,8 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr, \
-         patch("nanobot.agent.loop.Dream"):
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -387,6 +386,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = [{"role": "user", "content": "msg"}]
+        sessions.get_or_create.return_value = session
 
         # Simulate over-budget: estimated > budget
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))
@@ -399,7 +399,6 @@ class TestConsolidationUnaffectedByUnifiedSession:
         # estimate was called (consolidation was attempted)
         consolidator.estimate_session_prompt_tokens.assert_called_once_with(
             session,
-            session_summary=None,
         )
         # but archive was not called (no valid boundary)
         consolidator.archive.assert_not_called()
@@ -416,10 +415,8 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_active_tasks_use_effective_key_in_unified_mode(self, tmp_path: Path):
         """When unified_session=True, tasks are stored under UNIFIED_SESSION_KEY."""
-        from nanobot.agent.loop import UNIFIED_SESSION_KEY
-
         loop = _make_loop(tmp_path, unified_session=True)
-        
+
         # Create a message from telegram channel
         msg = _make_msg(channel="telegram", chat_id="123456")
 
@@ -444,7 +441,6 @@ class TestStopCommandWithUnifiedSession:
     @pytest.mark.asyncio
     async def test_stop_command_finds_task_in_unified_mode(self, tmp_path: Path):
         """cmd_stop can cancel tasks when unified_session=True."""
-        from nanobot.agent.loop import UNIFIED_SESSION_KEY
         from nanobot.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)
@@ -475,9 +471,33 @@ class TestStopCommandWithUnifiedSession:
         assert "Stopped 1 task" in result.content
 
     @pytest.mark.asyncio
+    async def test_stop_command_uses_effective_key_without_session_override(self, tmp_path: Path):
+        """Priority /stop must cancel the unified session even before dispatch rewrites the message."""
+        from nanobot.command.builtin import cmd_stop
+
+        loop = _make_loop(tmp_path, unified_session=True)
+
+        async def long_running():
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(long_running())
+        loop._active_tasks[UNIFIED_SESSION_KEY] = [task]
+        msg = InboundMessage(
+            channel="telegram",
+            chat_id="123456",
+            sender_id="user1",
+            content="/stop",
+        )
+        ctx = CommandContext(msg=msg, session=None, key=UNIFIED_SESSION_KEY, raw="/stop", loop=loop)
+
+        result = await cmd_stop(ctx)
+
+        assert task.cancelled() or task.done()
+        assert "Stopped 1 task" in result.content
+
+    @pytest.mark.asyncio
     async def test_stop_command_cross_channel_in_unified_mode(self, tmp_path: Path):
         """In unified mode, /stop from one channel cancels tasks from another channel."""
-        from nanobot.agent.loop import UNIFIED_SESSION_KEY
         from nanobot.command.builtin import cmd_stop
 
         loop = _make_loop(tmp_path, unified_session=True)

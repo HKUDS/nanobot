@@ -1,4 +1,5 @@
 import type { BootstrapResponse } from "./types";
+import { fetchWithTimeout } from "./http";
 
 const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
 
@@ -37,16 +38,17 @@ export function clearSavedSecret(): void {
 export async function fetchBootstrap(
   baseUrl: string = "",
   secret: string = "",
+  timeoutMs?: number,
 ): Promise<BootstrapResponse> {
   const headers: Record<string, string> = {};
   if (secret) {
     headers["X-Nanobot-Auth"] = secret;
   }
-  const res = await fetch(`${baseUrl}/webui/bootstrap`, {
+  const res = await fetchWithTimeout(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
     headers,
-  });
+  }, timeoutMs);
   if (!res.ok) {
     throw new Error(`bootstrap failed: HTTP ${res.status}`);
   }
@@ -64,9 +66,23 @@ export async function fetchBootstrap(
  * matters because some WS servers dispatch handshakes based on the literal
  * path, not a normalised form.
  */
-export function deriveWsUrl(wsPath: string, token: string): string {
-  const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
+export function deriveWsUrl(
+  wsPath: string,
+  token: string,
+  wsUrl?: string | null,
+): string {
   const query = `?token=${encodeURIComponent(token)}`;
+  const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
+  if (typeof window !== "undefined" && window.location.port === "5173") {
+    const host = window.location.hostname.includes(":")
+      ? `[${window.location.hostname}]`
+      : window.location.hostname;
+    return `ws://${host}:8765${path}${query}`;
+  }
+  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
+    const join = wsUrl.includes("?") ? "&" : "?";
+    return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
+  }
   if (typeof window === "undefined") {
     return `ws://127.0.0.1:8765${path}${query}`;
   }

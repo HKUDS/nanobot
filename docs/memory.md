@@ -54,10 +54,7 @@ Dream reads:
 - the current `USER.md`
 - the current `memory/MEMORY.md`
 
-Then it works in two phases:
-
-1. It studies what is new and what is already known.
-2. It edits the long-term files surgically, not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
+Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
 
 This is why nanobot's memory is not just archival. It is interpretive.
 
@@ -160,21 +157,17 @@ Dream is configured under `agents.defaults.dream`:
 | Field | Meaning |
 |-------|---------|
 | `intervalH` | How often Dream runs, in hours |
-| `modelOverride` | Optional Dream-specific model override |
-| `maxBatchSize` | How many history entries Dream processes per run |
-| `maxIterations` | The tool budget for Dream's editing phase |
+| `cron` | Cron expression override (takes precedence over `intervalH`) |
+| `modelOverride` | Optional Dream-specific model override *(pending implementation)* |
+| `maxBatchSize` | *(Deprecated — not used)* |
+| `maxIterations` | *(Deprecated — not used)* |
 
 In practical terms:
 
-- `modelOverride: null` means Dream uses the same model as the main agent. Set it only if you want Dream to run on a different model.
-- `maxBatchSize` controls how many new `history.jsonl` entries Dream consumes in one run. Larger batches catch up faster; smaller batches are lighter and steadier.
-- `maxIterations` limits how many read/edit steps Dream can take while updating `SOUL.md`, `USER.md`, and `MEMORY.md`. It is a safety budget, not a quality score.
-- `intervalH` is the normal way to configure Dream. Internally it runs as an `every` schedule, not as a cron expression.
-
-Legacy note:
-
-- Older source-based configs may still contain `dream.cron`. nanobot continues to honor it for backward compatibility, but new configs should use `intervalH`.
-- Older source-based configs may still contain `dream.model`. nanobot continues to honor it for backward compatibility, but new configs should use `modelOverride`.
+- `intervalH` is the normal way to configure Dream frequency. Internally it runs as an `every` schedule.
+- `cron` overrides `intervalH` when set, allowing precise cron expressions (e.g. `0 */4 * * *`).
+- `modelOverride` is reserved for a future release. Currently Dream uses the same model as the main agent.
+- `maxBatchSize` and `maxIterations` are preserved for config compatibility but no longer affect behavior.
 
 ## In Practice
 

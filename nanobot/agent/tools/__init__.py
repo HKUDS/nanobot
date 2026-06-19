@@ -1,6 +1,8 @@
 """Agent tools module."""
 
 from nanobot.agent.tools.base import Schema, Tool, tool_parameters
+from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.schema import (
     ArraySchema,
@@ -21,6 +23,8 @@ __all__ = [
     "ObjectSchema",
     "StringSchema",
     "Tool",
+    "ToolContext",
+    "ToolLoader",
     "ToolRegistry",
     "tool_parameters",
     "tool_parameters_schema",

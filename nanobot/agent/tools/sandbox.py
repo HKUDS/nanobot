@@ -26,13 +26,22 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
     except ValueError:
         sandbox_cwd = str(ws)
 
-    required  = ["/usr"]
-    optional  = ["/bin", "/lib", "/lib64", "/etc/alternatives",
-                 "/etc/ssl/certs", "/etc/resolv.conf", "/etc/ld.so.cache"]
+    required = ["/usr"]
+    optional = [
+        "/bin",
+        "/lib",
+        "/lib64",
+        "/etc/alternatives",
+        "/etc/ssl/certs",
+        "/etc/resolv.conf",
+        "/etc/ld.so.cache",
+    ]
 
-    args = ["bwrap", "--new-session", "--die-with-parent"]
-    for p in required: args += ["--ro-bind",     p, p]
-    for p in optional: args += ["--ro-bind-try", p, p]
+    args = ["bwrap", "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws)]
+    for p in required:
+        args += ["--ro-bind", p, p]
+    for p in optional:
+        args += ["--ro-bind-try", p, p]
     args += [
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
         "--tmpfs", str(ws.parent),        # mask config dir

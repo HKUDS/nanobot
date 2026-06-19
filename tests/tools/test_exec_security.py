@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -40,6 +41,70 @@ async def test_exec_blocks_wget_localhost():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
         result = await tool.execute(command="wget http://localhost:8080/secret -O /tmp/out")
     assert "Error" in result
+
+
+def test_exec_full_workspace_scope_allows_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is None
+
+
+def test_exec_core_full_workspace_scope_blocks_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_full_workspace_scope_blocks_loopback_when_local_service_disabled(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), webui_allow_local_service_access=False)
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_restricted_workspace_scope_blocks_loopback(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "restricted", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+            error = tool._guard_command("curl http://localhost:8765/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
+
+
+def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path))
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
+            error = tool._guard_command("curl http://169.254.169.254/latest/meta-data/", str(tmp_path))
+    finally:
+        reset_workspace_scope(token)
+    assert error is not None
+    assert "internal/private" in error
 
 
 @pytest.mark.asyncio
@@ -243,3 +308,90 @@ def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
     blocked = tool._guard_command("echo pwn > /etc/issue", str(workspace))
     assert blocked is not None
     assert "path outside working dir" in blocked
+
+
+# --- format command blocking -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "format C: /q",
+        "format D: /fs:ntfs",
+        "&& format",
+        "| format",
+        "&format",
+        ";format",
+        "|format",
+    ],
+)
+def test_exec_blocks_format_command(command):
+    """The Windows ``format`` disk command must be denied."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is not None
+    assert "deny pattern filter" in result.lower()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # URL parameter &format= must NOT be blocked (regression).
+        'curl -s "wttr.in/xxx?lang=zh&format=%l:+%c+%t+%h+%w&1"',
+        'curl -s "wttr.in/xxx?format=%l:+%c+%t+%h+%w&1"',
+        # format as a non-command word in a normal argument.
+        "echo format",
+        "echo reformat",
+    ],
+)
+def test_exec_allows_format_in_url_and_args(command):
+    """``format`` inside URL parameters or as a non-command arg must be allowed."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is None
+
+
+# --- workspace_root allows paths inside workspace but outside cwd ----------
+
+
+def test_exec_allows_workspace_paths_from_subdirectory(tmp_path):
+    """Absolute paths inside the workspace root must be allowed even when cwd
+    is a subdirectory.  This is the scenario reported in the issue: git
+    commands in ``~/.nanobot/workspace/obsidian_notes`` reference paths
+    under the broader workspace that are outside the subdirectory cwd."""
+    workspace = tmp_path / "workspace"
+    subdir = workspace / "obsidian_notes"
+    subdir.mkdir(parents=True)
+    sibling = workspace / "other_project"
+    sibling.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    # A command run from the subdirectory that references a sibling path
+    # inside the workspace should be allowed.
+    result = tool._guard_command(
+        f"git clone {sibling}",
+        str(subdir),
+        workspace_root=str(workspace),
+    )
+    assert result is None
+
+
+def test_exec_blocks_outside_paths_from_subdirectory(tmp_path):
+    """Paths truly outside the workspace must still be blocked even when
+    workspace_root is provided."""
+    workspace = tmp_path / "workspace"
+    subdir = workspace / "project"
+    subdir.mkdir(parents=True)
+    outside = tmp_path / "secrets"
+    outside.mkdir()
+
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+
+    result = tool._guard_command(
+        f"cat {outside / 'key.pem'}",
+        str(subdir),
+        workspace_root=str(workspace),
+    )
+    assert result is not None
+    assert "path outside working dir" in result

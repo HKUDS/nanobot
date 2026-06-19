@@ -2,6 +2,14 @@
 
 Use nanobot as a library — no CLI, no gateway, just Python.
 
+Before debugging SDK code, prove the same config works from the CLI:
+
+```bash
+nanobot agent -m "Hello!"
+```
+
+`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so provider, model, tools, and workspace behavior match the CLI unless you override them.
+
 ## Quick Start
 
 ```python
@@ -11,15 +19,15 @@ from nanobot import Nanobot
 
 
 async def main() -> None:
-    bot = Nanobot.from_config()
-    result = await bot.run("What time is it in Tokyo?")
+    async with Nanobot.from_config() as bot:
+        result = await bot.run("What time is it in Tokyo?")
     print(result.content)
 
 
 asyncio.run(main())
 ```
 
-`Nanobot.from_config()` reuses your normal `~/.nanobot/config.json`, so the SDK follows the same provider, model, tools, and workspace defaults as the CLI unless you override them.
+Use `async with` when possible so MCP connections and background cleanup work are closed before the event loop exits. If you manage the instance manually, call `await bot.aclose()` in a `finally` block.
 
 ## Common Patterns
 
@@ -82,6 +90,15 @@ Run the agent once and return a `RunResult`.
 | `message` | `str` | *(required)* | The user message to process. |
 | `session_key` | `str` | `"sdk:default"` | Session identifier for conversation isolation. Different keys get independent history. |
 | `hooks` | `list[AgentHook] \| None` | `None` | Lifecycle hooks for this run only. |
+
+### `await bot.aclose()`
+
+Release resources held by the SDK instance, including MCP connections. The async context manager calls this automatically:
+
+```python
+async with Nanobot.from_config() as bot:
+    result = await bot.run("Summarize this repo")
+```
 
 ### `RunResult`
 
