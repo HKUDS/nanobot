@@ -55,6 +55,7 @@ async def _drain_subagent_tasks(sm: SubagentManager) -> None:
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     await asyncio.sleep(0)
+    await asyncio.sleep(0)
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +368,81 @@ class TestAnnounceResult:
         )
 
         assert published[0].metadata["origin_message_id"] == "msg-123"
+
+
+# ---------------------------------------------------------------------------
+# Aggregated result mode
+# ---------------------------------------------------------------------------
+
+
+class TestAggregatedResultMode:
+    @pytest.mark.asyncio
+    async def test_buffers_until_session_tasks_finish(self, tmp_path):
+        sm = _manager(tmp_path, max_concurrent_subagents=2, result_mode="aggregated")
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+
+        first_release = asyncio.Event()
+        second_release = asyncio.Event()
+
+        async def _run(spec):
+            task = spec.initial_messages[-1]["content"]
+            if task == "task 1":
+                await first_release.wait()
+                return AgentRunResult(
+                    final_content="result 1", messages=[], stop_reason="completed"
+                )
+            await second_release.wait()
+            return AgentRunResult(final_content="result 2", messages=[], stop_reason="completed")
+
+        sm.runner.run = _run
+
+        await sm.spawn("task 1", label="A", session_key="s1", origin_message_id="msg-1")
+        await sm.spawn("task 2", label="B", session_key="s1", origin_message_id="msg-1")
+
+        first_release.set()
+        for _ in range(10):
+            if sm._pending_aggregated_results.get("s1"):
+                break
+            await asyncio.sleep(0)
+
+        assert len(sm._pending_aggregated_results["s1"]) == 1
+        assert published == []
+
+        second_release.set()
+        await _drain_subagent_tasks(sm)
+
+        assert len(published) == 1
+        msg = published[0]
+        assert msg.session_key_override == "s1"
+        assert msg.metadata["injected_event"] == "subagent_result"
+        assert msg.metadata["subagent_result_mode"] == "aggregated"
+        assert msg.metadata["subagent_task_id"].startswith("aggregate:")
+        assert len(msg.metadata["subagent_task_ids"]) == 2
+        assert msg.metadata["origin_message_id"] == "msg-1"
+        assert msg.metadata["origin_message_ids"] == ["msg-1"]
+        assert "completed successfully" in msg.content
+        assert "task 1" in msg.content
+        assert "result 1" in msg.content
+        assert "task 2" in msg.content
+        assert "result 2" in msg.content
+
+    @pytest.mark.asyncio
+    async def test_aggregated_mode_announces_immediately_without_session(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+
+        with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
+            await sm._complete_subagent_result(
+                "t1",
+                "label",
+                "task",
+                "result",
+                {"channel": "cli", "chat_id": "direct"},
+                "ok",
+            )
+
+        mock_announce.assert_called_once()
+        assert sm._pending_aggregated_results == {}
 
 
 # ---------------------------------------------------------------------------

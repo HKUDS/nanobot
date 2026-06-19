@@ -1855,15 +1855,22 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 {
   "agents": {
     "defaults": {
-      "maxConcurrentSubagents": 2
+      "maxConcurrentSubagents": 2,
+      "subagentResultMode": "aggregated"
     }
   }
 }
 ```
 
+By default, each subagent result is announced as soon as it finishes. Set
+`subagentResultMode` to `aggregated` when a session can spawn several concurrent
+subagents and you want nanobot to wait until all subagents in that session finish,
+then inject one combined report.
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
+| `agents.defaults.subagentResultMode` | `realtime` | `realtime` announces each subagent result immediately. `aggregated` waits for all subagents in the same session to finish, then announces one combined result. |
 
 
 ## Auto Compact

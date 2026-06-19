@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from loguru import logger
 
@@ -28,6 +28,9 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.utils.prompt_templates import render_template
 
+SubagentResultMode = Literal["realtime", "aggregated"]
+SubagentResultStatus = Literal["ok", "error", "mixed"]
+
 
 @dataclass(slots=True)
 class SubagentStatus:
@@ -43,6 +46,19 @@ class SubagentStatus:
     usage: dict = field(default_factory=dict)          # token usage
     stop_reason: str | None = None
     error: str | None = None
+
+
+@dataclass(slots=True)
+class _SubagentResult:
+    """Completed subagent result waiting for announcement."""
+
+    task_id: str
+    label: str
+    task: str
+    result: str
+    origin: dict[str, str | None]
+    status: SubagentResultStatus
+    origin_message_id: str | None = None
 
 
 class _SubagentHook(AgentHook):
@@ -86,13 +102,17 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        result_mode: SubagentResultMode = "realtime",
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
+        if result_mode not in ("realtime", "aggregated"):
+            raise ValueError("result_mode must be 'realtime' or 'aggregated'")
         defaults = AgentDefaults()
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.result_mode = result_mode
         self.tools_config = tools_config or ToolsConfig()
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
@@ -112,6 +132,7 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._pending_aggregated_results: dict[str, list[_SubagentResult]] = {}
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -162,7 +183,11 @@ class SubagentManager:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        origin: dict[str, str | None] = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+        }
 
         status = SubagentStatus(
             task_id=task_id,
@@ -189,12 +214,16 @@ class SubagentManager:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
         def _cleanup(_: asyncio.Task) -> None:
+            should_flush = False
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
                     del self._session_tasks[session_key]
+                    should_flush = self.result_mode == "aggregated"
+            if should_flush and session_key:
+                asyncio.create_task(self._flush_aggregated_results(session_key))
 
         bg_task.add_done_callback(_cleanup)
 
@@ -206,7 +235,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str,
-        origin: dict[str, str],
+        origin: dict[str, str | None],
         status: SubagentStatus,
         origin_message_id: str | None = None,
         temperature: float | None = None,
@@ -265,13 +294,13 @@ class SubagentManager:
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
-                await self._announce_result(
+                await self._complete_subagent_result(
                     task_id, label, task,
                     self._format_partial_progress(result),
                     origin, "error", origin_message_id,
                 )
             elif result.stop_reason == "error":
-                await self._announce_result(
+                await self._complete_subagent_result(
                     task_id, label, task,
                     result.error or "Error: subagent execution failed.",
                     origin, "error", origin_message_id,
@@ -279,13 +308,92 @@ class SubagentManager:
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+                await self._complete_subagent_result(
+                    task_id, label, task, final_result, origin, "ok", origin_message_id
+                )
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            await self._complete_subagent_result(
+                task_id, label, task, f"Error: {e}", origin, "error", origin_message_id
+            )
+
+    async def _complete_subagent_result(
+        self,
+        task_id: str,
+        label: str,
+        task: str,
+        result: str,
+        origin: dict[str, str | None],
+        status: SubagentResultStatus,
+        origin_message_id: str | None = None,
+    ) -> None:
+        """Announce immediately or buffer until all session subagents finish."""
+        session_key = origin.get("session_key")
+        if self.result_mode != "aggregated" or not session_key:
+            await self._announce_result(
+                task_id, label, task, result, origin, status, origin_message_id
+            )
+            return
+
+        self._pending_aggregated_results.setdefault(session_key, []).append(
+            _SubagentResult(
+                task_id=task_id,
+                label=label,
+                task=task,
+                result=result,
+                origin=origin,
+                status=status,
+                origin_message_id=origin_message_id,
+            )
+        )
+
+        active_task_ids = self._session_tasks.get(session_key)
+        if not active_task_ids or task_id not in active_task_ids:
+            await self._flush_aggregated_results(session_key)
+
+    async def _flush_aggregated_results(self, session_key: str) -> None:
+        """Publish one combined result for all completed subagents in a session."""
+        results = self._pending_aggregated_results.pop(session_key, [])
+        if not results:
+            return
+        if len(results) == 1:
+            result = results[0]
+            await self._announce_result(
+                result.task_id,
+                result.label,
+                result.task,
+                result.result,
+                result.origin,
+                result.status,
+                result.origin_message_id,
+            )
+            return
+
+        task_ids = [result.task_id for result in results]
+        origin_message_ids = list(dict.fromkeys(
+            origin_id for origin_id in (result.origin_message_id for result in results) if origin_id
+        ))
+        primary_origin_message_id = origin_message_ids[0] if origin_message_ids else None
+        extra_metadata: dict[str, Any] = {
+            "subagent_result_mode": "aggregated",
+            "subagent_task_ids": task_ids,
+        }
+        if origin_message_ids:
+            extra_metadata["origin_message_ids"] = origin_message_ids
+
+        await self._announce_result(
+            "aggregate:" + ",".join(task_ids),
+            f"{len(results)} background tasks",
+            f"Aggregated report for {len(results)} background tasks.",
+            self._format_aggregated_results(results),
+            results[0].origin,
+            self._aggregate_status(results),
+            primary_origin_message_id,
+            extra_metadata=extra_metadata,
+        )
 
     async def _announce_result(
         self,
@@ -293,12 +401,17 @@ class SubagentManager:
         label: str,
         task: str,
         result: str,
-        origin: dict[str, str],
-        status: str,
+        origin: dict[str, str | None],
+        status: SubagentResultStatus,
         origin_message_id: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
-        status_text = "completed successfully" if status == "ok" else "failed"
+        status_text = {
+            "ok": "completed successfully",
+            "error": "failed",
+            "mixed": "completed with mixed results",
+        }[status]
 
         announce_content = render_template(
             "agent/subagent_announce.md",
@@ -320,6 +433,8 @@ class SubagentManager:
         }
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
+        if extra_metadata:
+            metadata.update(extra_metadata)
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
@@ -331,6 +446,30 @@ class SubagentManager:
 
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+
+    @staticmethod
+    def _aggregate_status(results: list[_SubagentResult]) -> SubagentResultStatus:
+        statuses = {result.status for result in results}
+        if statuses == {"ok"}:
+            return "ok"
+        if statuses == {"error"}:
+            return "error"
+        return "mixed"
+
+    @staticmethod
+    def _format_aggregated_results(results: list[_SubagentResult]) -> str:
+        lines: list[str] = []
+        for idx, result in enumerate(results, start=1):
+            status_text = "completed successfully" if result.status == "ok" else "failed"
+            lines.append(f"### {idx}. {result.label} ({status_text})")
+            lines.append("")
+            lines.append(f"Task: {result.task}")
+            lines.append("")
+            lines.append("Result:")
+            lines.append(result.result)
+            if idx != len(results):
+                lines.append("")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_partial_progress(result) -> str:
