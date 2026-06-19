@@ -1430,6 +1430,86 @@ def agent(
 
 
 # ============================================================================
+# Heartbeat Commands
+# ============================================================================
+
+
+heartbeat_app = typer.Typer(help="Debug and trigger heartbeat tasks")
+app.add_typer(heartbeat_app, name="heartbeat")
+
+
+@heartbeat_app.command("trigger")
+def heartbeat_trigger(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Run Phase 1 only and print the skip/run decision without executing tasks",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render Phase 2 output as Markdown"),
+):
+    """Trigger the heartbeat check on demand."""
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import SessionManager
+
+    config_obj = _load_runtime_config(config, workspace)
+    sync_workspace_templates(config_obj.workspace_path)
+
+    heartbeat_file = config_obj.workspace_path / "HEARTBEAT.md"
+    try:
+        content = heartbeat_file.read_text(encoding="utf-8")
+    except OSError:
+        console.print("[yellow]No HEARTBEAT.md found, or it is empty.[/yellow]")
+        raise typer.Exit(1)
+
+    has_active_tasks = _heartbeat_has_active_tasks(content)
+
+    if dry_run:
+        table = Table(title="Heartbeat Dry Run")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Action", "run" if has_active_tasks else "skip")
+        table.add_row("Tasks", content if has_active_tasks else "(none)")
+        console.print(table)
+        return
+
+    if not has_active_tasks:
+        console.print("[green]Heartbeat completed: nothing to run.[/green]")
+        return
+
+    bus = MessageBus()
+    session_manager = SessionManager(config_obj.workspace_path)
+    agent_loop = AgentLoop.from_config(
+        config_obj,
+        bus,
+        session_manager=session_manager,
+    )
+    prompt = (
+        _HEARTBEAT_PREAMBLE
+        + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
+    )
+
+    async def _run_trigger() -> str:
+        try:
+            result = await agent_loop.process_direct(
+                prompt,
+                session_key="heartbeat",
+                channel="cli",
+                chat_id="direct",
+            )
+            return result.content if result else ""
+        finally:
+            await agent_loop.close_mcp()
+
+    response = asyncio.run(_run_trigger())
+    if response:
+        _print_agent_response(response, render_markdown=markdown)
+    else:
+        console.print("[green]Heartbeat completed: nothing to run.[/green]")
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 
