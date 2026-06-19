@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-import socket
 import shutil
+import socket
 import sys
 from unittest.mock import patch
 
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.security.workspace_access import bind_workspace_scope, build_workspace_scope, reset_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
