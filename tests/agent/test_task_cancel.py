@@ -10,11 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.config.schema import AgentDefaults
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
-def _make_loop(*, exec_config=None):
+def _make_loop(*, tools_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -27,9 +28,9 @@ def _make_loop(*, exec_config=None):
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, exec_config=exec_config)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
     return loop, bus
 
 
@@ -103,9 +104,10 @@ class TestHandleStop:
 
 class TestDispatch:
     def test_exec_tool_not_registered_when_disabled(self):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.agent.tools.shell import ExecToolConfig
+        from nanobot.config.schema import ToolsConfig
 
-        loop, _bus = _make_loop(exec_config=ExecToolConfig(enable=False))
+        loop, _bus = _make_loop(tools_config=ToolsConfig(exec=ExecToolConfig(enable=False)))
 
         assert loop.tools.get("exec") is None
 
@@ -165,10 +167,14 @@ class TestDispatch:
 
         loop, bus = _make_loop()
         order = []
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
 
         async def mock_process(m, **kwargs):
             order.append(f"start-{m.content}")
-            await asyncio.sleep(0.05)
+            if m.content == "a":
+                first_started.set()
+                await release_first.wait()
             order.append(f"end-{m.content}")
             return OutboundMessage(channel="test", chat_id="c1", content=m.content)
 
@@ -177,7 +183,12 @@ class TestDispatch:
         msg2 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="b")
 
         t1 = asyncio.create_task(loop._dispatch(msg1))
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
         t2 = asyncio.create_task(loop._dispatch(msg2))
+        await asyncio.sleep(0)
+        assert order == ["start-a"]
+
+        release_first.set()
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
@@ -285,8 +296,9 @@ class TestSubagentCancellation:
     @pytest.mark.asyncio
     async def test_subagent_exec_tool_not_registered_when_disabled(self, tmp_path):
         from nanobot.agent.subagent import SubagentManager
+        from nanobot.agent.tools.shell import ExecToolConfig
         from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ToolsConfig
 
         bus = MessageBus()
         provider = MagicMock()
@@ -296,7 +308,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-            exec_config=ExecToolConfig(enable=False),
+            tools_config=ToolsConfig(exec=ExecToolConfig(enable=False)),
         )
         mgr._announce_result = AsyncMock()
 
@@ -439,12 +451,12 @@ class TestSubagentAnnounceSessionKey:
         so the result matches the pending queue key."""
         mgr, bus = self._make_mgr()
 
-        origin = {"channel": "telegram", "chat_id": "111", "session_key": "unified:default"}
+        origin = {"channel": "telegram", "chat_id": "111", "session_key": UNIFIED_SESSION_KEY}
         await mgr._announce_result("sub-1", "label", "task", "result", origin, "ok")
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == "unified:default"
-        assert msg.session_key == "unified:default"
+        assert msg.session_key_override == UNIFIED_SESSION_KEY
+        assert msg.session_key == UNIFIED_SESSION_KEY
 
     @pytest.mark.asyncio
     async def test_announce_uses_raw_key_in_normal_mode(self):
@@ -494,9 +506,9 @@ class TestSubagentAnnounceSessionKey:
         )
         await mgr._run_subagent(
             "sub-4", "task", "label",
-            {"channel": "telegram", "chat_id": "444", "session_key": "unified:default"},
+            {"channel": "telegram", "chat_id": "444", "session_key": UNIFIED_SESSION_KEY},
             status,
         )
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == "unified:default"
+        assert msg.session_key_override == UNIFIED_SESSION_KEY

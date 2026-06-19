@@ -34,10 +34,6 @@ class TestToolHintKnownTools:
         assert "main.py" in result
         assert "edit " in result
 
-    def test_glob_shows_pattern(self):
-        result = _hint([_tc("glob", {"pattern": "**/*.py", "path": "src"})])
-        assert result == 'glob "**/*.py"'
-
     def test_grep_shows_pattern(self):
         result = _hint([_tc("grep", {"pattern": "TODO|FIXME", "path": "src"})])
         assert result == 'grep "TODO|FIXME"'

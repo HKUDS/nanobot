@@ -52,8 +52,14 @@ if MSTEAMS_AVAILABLE:
     import jwt
 
 MSTEAMS_REF_TTL_DAYS = 30
-MSTEAMS_REF_TTL_S = MSTEAMS_REF_TTL_DAYS * 24 * 60 * 60
 MSTEAMS_WEBCHAT_HOST = "webchat.botframework.com"
+MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS = [
+    "smba.trafficmanager.net",
+    "smba.infra.gcc.teams.microsoft.com",
+    "smba.infra.gov.teams.microsoft.us",
+    "smba.infra.dod.teams.microsoft.us",
+    "*.botframework.com",
+]
 MSTEAMS_REF_META_FILENAME = "msteams_conversations_meta.json"
 MSTEAMS_REF_LOCK_FILENAME = "msteams_conversations.lock"
 MSTEAMS_REF_TOUCH_INTERVAL_S = 300
@@ -77,6 +83,9 @@ class MSTeamsConfig(Base):
     prune_web_chat_refs: bool = True
     prune_non_personal_refs: bool = True
     ref_touch_interval_s: int = Field(default=MSTEAMS_REF_TOUCH_INTERVAL_S, ge=0)
+    trusted_service_url_hosts: list[str] = Field(
+        default_factory=lambda: MSTEAMS_DEFAULT_TRUSTED_SERVICE_URL_HOSTS.copy()
+    )
 
 
 @dataclass
@@ -243,6 +252,11 @@ class MSTeamsChannel(BaseChannel):
         if not ref:
             raise RuntimeError(f"MSTeams conversation ref not found for chat_id={msg.chat_id}")
 
+        if not self._is_trusted_service_url(ref.service_url):
+            raise RuntimeError(
+                f"MSTeams conversation ref has untrusted service_url for chat_id={msg.chat_id}"
+            )
+
         token = await self._get_access_token()
         base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
@@ -283,6 +297,13 @@ class MSTeamsChannel(BaseChannel):
         conversation_type = str(conversation.get("conversationType") or "").strip()
 
         if not sender_id or not conversation_id or not service_url:
+            return
+
+        if not self._is_trusted_service_url(service_url):
+            self.logger.warning(
+                "Ignoring MSTeams activity with untrusted serviceUrl host: {}",
+                service_url,
+            )
             return
 
         if recipient.get("id") and from_user.get("id") == recipient.get("id"):
@@ -627,6 +648,29 @@ class MSTeamsChannel(BaseChannel):
             return host == MSTEAMS_WEBCHAT_HOST or host.endswith(f".{MSTEAMS_WEBCHAT_HOST}")
         return MSTEAMS_WEBCHAT_HOST in normalized.lower()
 
+    def _is_trusted_service_url(self, service_url: str) -> bool:
+        """Return True for HTTPS Bot Framework service URLs trusted for bearer replies."""
+        parsed = urlparse(service_url.strip())
+        if parsed.scheme.lower() != "https":
+            return False
+
+        host = (parsed.hostname or "").strip().lower().rstrip(".")
+        if not host:
+            return False
+
+        for pattern in self.config.trusted_service_url_hosts:
+            trusted_host = str(pattern or "").strip().lower().rstrip(".")
+            if not trusted_host:
+                continue
+            if trusted_host.startswith("*."):
+                suffix = trusted_host[1:]
+                if host.endswith(suffix) and host != suffix.lstrip("."):
+                    return True
+                continue
+            if host == trusted_host:
+                return True
+        return False
+
     def _prune_conversation_refs(self, *, now: float | None = None) -> bool:
         """Remove stale and unsupported conversation refs from memory."""
         if not self._conversation_refs:
@@ -638,6 +682,10 @@ class MSTeamsChannel(BaseChannel):
         keys_to_drop: list[str] = []
 
         for key, ref in self._conversation_refs.items():
+            if not self._is_trusted_service_url(ref.service_url):
+                keys_to_drop.append(key)
+                continue
+
             if self.config.prune_web_chat_refs and self._is_webchat_service_url(ref.service_url):
                 keys_to_drop.append(key)
                 continue

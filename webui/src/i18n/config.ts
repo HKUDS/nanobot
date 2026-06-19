@@ -71,7 +71,7 @@ export function detectNavigatorLocale(): SupportedLocale {
 }
 
 export function resolveInitialLocale(): SupportedLocale {
-  return readStoredLocale() ?? detectNavigatorLocale();
+  return readStoredLocale() ?? defaultLocale;
 }
 
 export function persistLocale(locale: SupportedLocale): void {

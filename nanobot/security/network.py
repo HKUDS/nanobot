@@ -36,14 +36,35 @@ def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     _allowed_networks = nets
 
 
+def _normalize_addr(
+    addr: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Normalize IPv6-mapped IPv4 addresses to their IPv4 form.
+
+    ``::ffff:127.0.0.1`` is semantically identical to ``127.0.0.1`` but
+    Python's ipaddress treats it as an IPv6Address that matches neither
+    ``127.0.0.0/8`` nor ``::1/128``.  Converting it to IPv4 ensures
+    blocklist/allowlist checks work correctly.
+    """
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    return addr
+
+
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if _allowed_networks and any(addr in net for net in _allowed_networks):
+    normalized = _normalize_addr(addr)
+    if _allowed_networks and any(normalized in net for net in _allowed_networks):
         return False
-    return any(addr in net for net in _BLOCKED_NETWORKS)
+    return any(normalized in net for net in _BLOCKED_NETWORKS)
 
 
-def validate_url_target(url: str) -> tuple[bool, str]:
+def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool, str]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs.
+
+    ``allow_loopback`` is intentionally narrow: it only permits literal
+    loopback hosts (localhost, 127.0.0.0/8, ::1) when every resolved address is
+    loopback. It does not allow RFC1918, link-local, metadata, or public DNS
+    names that happen to resolve to loopback.
 
     Returns (ok, error_message).  When ok is True, error_message is empty.
     """
@@ -66,11 +87,16 @@ def validate_url_target(url: str) -> tuple[bool, str]:
     except socket.gaierror:
         return False, f"Cannot resolve hostname: {hostname}"
 
+    addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
         try:
             addr = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
+        addrs.append(addr)
+    if allow_loopback and _is_allowed_loopback_target(hostname, addrs):
+        return True, ""
+    for addr in addrs:
         if _is_private(addr):
             return False, f"Blocked: {hostname} resolves to private/internal address {addr}"
 
@@ -109,11 +135,25 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-def contains_internal_url(command: str) -> bool:
+def contains_internal_url(command: str, *, allow_loopback: bool = False) -> bool:
     """Return True if the command string contains a URL targeting an internal/private address."""
     for m in _URL_RE.finditer(command):
         url = m.group(0)
-        ok, _ = validate_url_target(url)
+        ok, _ = validate_url_target(url, allow_loopback=allow_loopback)
         if not ok:
             return True
+    return False
+
+
+def _is_allowed_loopback_target(
+    hostname: str,
+    addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address],
+) -> bool:
+    if not addrs or not all(_normalize_addr(addr).is_loopback for addr in addrs):
+        return False
+    normalized = hostname.rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    with suppress(ValueError):
+        return ipaddress.ip_address(hostname).is_loopback
     return False

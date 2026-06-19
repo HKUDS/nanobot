@@ -27,6 +27,11 @@ export interface AttachedImage {
   error?: AttachmentError;
 }
 
+export interface RestoredReadyImage {
+  dataUrl: string;
+  name?: string;
+}
+
 /** Machine-readable rejection reasons surfaced as inline chip errors.
  *
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
@@ -47,6 +52,27 @@ const ACCEPTED_MIMES: ReadonlySet<string> = new Set([
   "image/webp",
   "image/gif",
 ]);
+
+function dataUrlMime(dataUrl: string): string {
+  const match = /^data:([^;,]+)[;,]/.exec(dataUrl);
+  return match?.[1] || "image/png";
+}
+
+function dataUrlToFile(dataUrl: string, name?: string): File {
+  const mime = dataUrlMime(dataUrl);
+  const fallbackName = `image.${mime.split("/")[1] || "png"}`;
+  try {
+    const [, base64 = ""] = dataUrl.split(",", 2);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], name || fallbackName, { type: mime });
+  } catch {
+    return new File([], name || fallbackName, { type: mime });
+  }
+}
 
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -84,6 +110,10 @@ export interface UseAttachedImagesApi {
    * successful submit — the optimistic bubble holds onto an independent
    * ``data:`` URL so tearing down blob previews here is safe. */
   clear: () => void;
+  /** Restore already-encoded images, e.g. a queued composer draft moving back
+   * into the input. These entries are immediately sendable and use their
+   * ``data:`` URL as a stable preview. */
+  restoreReadyImages: (images: RestoredReadyImage[]) => void;
   /** ``true`` when at least one image is still encoding — Send should wait. */
   encoding: boolean;
   /** ``true`` when we've hit ``MAX_IMAGES_PER_MESSAGE``. */
@@ -211,6 +241,34 @@ export function useAttachedImages(): UseAttachedImagesApi {
     });
   }, []);
 
+  const restoreReadyImages = useCallback((restored: RestoredReadyImage[]) => {
+    const toRestore = restored
+      .filter((img) => ACCEPTED_MIMES.has(dataUrlMime(img.dataUrl)))
+      .slice(0, MAX_IMAGES_PER_MESSAGE)
+      .map((img): AttachedImage => {
+        const file = dataUrlToFile(img.dataUrl, img.name);
+        return {
+          id: uuid(),
+          file,
+          previewUrl: img.dataUrl,
+          status: "ready",
+          dataUrl: img.dataUrl,
+          encodedBytes: file.size,
+        };
+      });
+    setImages((prev) => {
+      for (const img of prev) {
+        try {
+          URL.revokeObjectURL(img.previewUrl);
+        } catch {
+          // revoke is best-effort
+        }
+      }
+      imagesRef.current = toRestore;
+      return toRestore;
+    });
+  }, []);
+
   // Final safety net: revoke any outstanding blob URLs on unmount. Safe
   // under StrictMode double-invoke because revoked blob URLs are only
   // referenced from in-hook chip state, which is rebuilt on remount.
@@ -229,5 +287,5 @@ export function useAttachedImages(): UseAttachedImagesApi {
   const encoding = images.some((img) => img.status === "encoding");
   const full = images.length >= MAX_IMAGES_PER_MESSAGE;
 
-  return { images, enqueue, remove, clear, encoding, full };
+  return { images, enqueue, remove, clear, restoreReadyImages, encoding, full };
 }

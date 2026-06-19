@@ -56,6 +56,35 @@ def test_custom_provider_parse_chunks_accepts_plain_text_chunks() -> None:
     assert result.content == "hello world"
 
 
+def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> None:
+    chunks = [{
+        "choices": [{
+            "finish_reason": "tool_calls",
+            "delta": {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_dup",
+                        "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
+                    },
+                    {
+                        "index": 1,
+                        "id": "call_dup",
+                        "function": {"name": "read_file", "arguments": '{"path":"b.txt"}'},
+                    },
+                ],
+            },
+        }],
+    }]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+    ids = [tool_call.id for tool_call in result.tool_calls or []]
+
+    assert ids[0] == "call_dup"
+    assert len(ids) == 2
+    assert len(set(ids)) == 2
+
+
 def test_local_provider_502_error_includes_reachability_hint() -> None:
     spec = find_by_name("ollama")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):

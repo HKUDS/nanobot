@@ -1,4 +1,4 @@
-"""Search tools: grep and glob."""
+"""Search tools: file discovery and grep."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import Any, Iterable, TypeVar
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
 
 _DEFAULT_HEAD_LIMIT = 250
+_DEFAULT_FILE_HEAD_LIMIT = 200
 T = TypeVar("T")
 _TYPE_GLOB_MAP = {
     "py": ("*.py", "*.pyi"),
@@ -88,13 +89,22 @@ def _matches_type(name: str, file_type: str | None) -> bool:
     return any(fnmatch.fnmatch(name.lower(), pattern.lower()) for pattern in patterns)
 
 
+def _matches_query(rel_path: str, query: str | None) -> bool:
+    if not query:
+        return True
+    haystack = rel_path.lower()
+    terms = [part for part in query.lower().split() if part]
+    return all(term in haystack for term in terms)
+
+
 class _SearchTool(_FsTool):
     _IGNORE_DIRS = set(ListDirTool._IGNORE_DIRS)
 
     def _display_path(self, target: Path, root: Path) -> str:
-        if self._workspace:
+        workspace = self._display_workspace()
+        if workspace:
             with suppress(ValueError):
-                return target.relative_to(self._workspace).as_posix()
+                return target.relative_to(workspace).as_posix()
         return target.relative_to(root).as_posix()
 
     def _iter_files(self, root: Path) -> Iterable[Path]:
@@ -108,42 +118,23 @@ class _SearchTool(_FsTool):
             for filename in sorted(filenames):
                 yield current / filename
 
-    def _iter_entries(
-        self,
-        root: Path,
-        *,
-        include_files: bool,
-        include_dirs: bool,
-    ) -> Iterable[Path]:
-        if root.is_file():
-            if include_files:
-                yield root
-            return
 
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames if d not in self._IGNORE_DIRS)
-            current = Path(dirpath)
-            if include_dirs:
-                for dirname in dirnames:
-                    yield current / dirname
-            if include_files:
-                for filename in sorted(filenames):
-                    yield current / filename
-
-
-class GlobTool(_SearchTool):
-    """Find files matching a glob pattern."""
+class FindFilesTool(_SearchTool):
+    """Find files by path fragment, glob, or type."""
+    _scopes = {"core", "subagent"}
 
     @property
     def name(self) -> str:
-        return "glob"
+        return "find_files"
 
     @property
     def description(self) -> str:
         return (
-            "Find files matching a glob pattern (e.g. '*.py', 'tests/**/test_*.py'). "
-            "Results are sorted by modification time (newest first). "
-            "Skips .git, node_modules, __pycache__, and other noise directories."
+            "Find files by path fragment, glob, or file type. "
+            "Use this before read_file when you need to locate files, and "
+            "prefer it over shell find/ls for ordinary workspace discovery. "
+            "Returns workspace-relative paths and skips common dependency/build "
+            "directories."
         )
 
     @property
@@ -155,93 +146,129 @@ class GlobTool(_SearchTool):
         return {
             "type": "object",
             "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern to match, e.g. '*.py' or 'tests/**/test_*.py'",
-                    "minLength": 1,
-                },
                 "path": {
                     "type": "string",
-                    "description": "Directory to search from (default '.')",
+                    "description": "Directory or file to search in (default '.')",
                 },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Legacy alias for head_limit",
-                    "minimum": 1,
-                    "maximum": 1000,
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Optional case-insensitive path fragment search. "
+                        "Whitespace-separated terms must all be present."
+                    ),
+                },
+                "glob": {
+                    "type": "string",
+                    "description": "Optional file filter, e.g. '*.py' or 'tests/**/test_*.py'",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Optional file type shorthand, e.g. 'py', 'ts', 'md', 'json'",
+                },
+                "include_dirs": {
+                    "type": "boolean",
+                    "description": "Include matching directories as well as files (default false)",
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["path", "modified"],
+                    "description": "Sort by path or most recently modified first (default path)",
                 },
                 "head_limit": {
                     "type": "integer",
-                    "description": "Maximum number of matches to return (default 250)",
+                    "description": "Maximum number of paths to return (default 200, 0 for all, max 1000)",
                     "minimum": 0,
                     "maximum": 1000,
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "Skip the first N matching entries before returning results",
+                    "description": "Skip the first N results before applying head_limit",
                     "minimum": 0,
                     "maximum": 100000,
                 },
-                "entry_type": {
-                    "type": "string",
-                    "enum": ["files", "dirs", "both"],
-                    "description": "Whether to match files, directories, or both (default files)",
-                },
             },
-            "required": ["pattern"],
         }
+
+    def _iter_paths(self, root: Path, *, include_dirs: bool) -> Iterable[Path]:
+        if root.is_file():
+            yield root
+            return
+        if include_dirs:
+            yield root
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in self._IGNORE_DIRS)
+            current = Path(dirpath)
+            if include_dirs and current != root:
+                yield current
+            for filename in sorted(filenames):
+                yield current / filename
 
     async def execute(
         self,
-        pattern: str,
         path: str = ".",
-        max_results: int | None = None,
+        query: str | None = None,
+        glob: str | None = None,
+        type: str | None = None,
+        include_dirs: bool = False,
+        sort: str = "path",
         head_limit: int | None = None,
         offset: int = 0,
-        entry_type: str = "files",
         **kwargs: Any,
     ) -> str:
         try:
-            root = self._resolve(path or ".")
-            if not root.exists():
+            target = self._resolve(path or ".")
+            if not target.exists():
                 return f"Error: Path not found: {path}"
-            if not root.is_dir():
-                return f"Error: Not a directory: {path}"
+            if not (target.is_dir() or target.is_file()):
+                return f"Error: Unsupported path: {path}"
 
-            if head_limit is not None:
-                limit = None if head_limit == 0 else head_limit
-            elif max_results is not None:
-                limit = max_results
-            else:
-                limit = _DEFAULT_HEAD_LIMIT
-            include_files = entry_type in {"files", "both"}
-            include_dirs = entry_type in {"dirs", "both"}
+            if sort not in {"path", "modified"}:
+                return "Error: sort must be 'path' or 'modified'"
+
+            limit = (
+                _DEFAULT_FILE_HEAD_LIMIT
+                if head_limit is None
+                else None if head_limit == 0 else head_limit
+            )
+            root = target if target.is_dir() else target.parent
             matches: list[tuple[str, float]] = []
-            for entry in self._iter_entries(
-                root,
-                include_files=include_files,
-                include_dirs=include_dirs,
-            ):
-                rel_path = entry.relative_to(root).as_posix()
-                if _match_glob(rel_path, entry.name, pattern):
-                    display = self._display_path(entry, root)
-                    if entry.is_dir():
-                        display += "/"
-                    try:
-                        mtime = entry.stat().st_mtime
-                    except OSError:
-                        mtime = 0.0
-                    matches.append((display, mtime))
 
-            if not matches:
-                return f"No paths matched pattern '{pattern}' in {path}"
+            for candidate in self._iter_paths(target, include_dirs=include_dirs):
+                if candidate.is_dir() and not include_dirs:
+                    continue
+                rel_path = candidate.relative_to(root).as_posix()
+                display_path = self._display_path(candidate, root)
+                name = candidate.name
 
-            matches.sort(key=lambda item: (-item[1], item[0]))
-            ordered = [name for name, _ in matches]
-            paged, truncated = _paginate(ordered, limit, offset)
+                if glob and not _match_glob(rel_path, name, glob):
+                    continue
+                if candidate.is_file() and not _matches_type(name, type):
+                    continue
+                if candidate.is_dir() and type:
+                    continue
+                if not _matches_query(display_path, query):
+                    continue
+                try:
+                    mtime = candidate.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                suffix = "/" if candidate.is_dir() else ""
+                matches.append((display_path + suffix, mtime))
+
+            if sort == "modified":
+                matches.sort(key=lambda item: (-item[1], item[0]))
+            else:
+                matches.sort(key=lambda item: item[0])
+
+            paths = [item[0] for item in matches]
+            paged, truncated = _paginate(paths, limit, offset)
+            if not paged:
+                return "No files found"
+
             result = "\n".join(paged)
-            if note := _pagination_note(limit, offset, truncated):
-                result += f"\n\n{note}"
+            note = _pagination_note(limit, offset, truncated)
+            if note:
+                result += "\n\n" + note
             return result
         except PermissionError as e:
             return f"Error: {e}"
@@ -251,6 +278,8 @@ class GlobTool(_SearchTool):
 
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
+    _scopes = {"core", "subagent"}
+
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
 
@@ -263,7 +292,8 @@ class GrepTool(_SearchTool):
         return (
             "Search file contents with a regex pattern. "
             "Default output_mode is files_with_matches (file paths only); "
-            "use content mode for matching lines with context. "
+            "use content mode for matching lines with context. Prefer this "
+            "over shell grep for ordinary workspace searches. "
             "Skips binary and files >2 MB. Supports glob/type filtering."
         )
 

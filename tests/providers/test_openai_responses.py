@@ -1,10 +1,10 @@
 """Tests for the shared openai_responses converters and parsers."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -13,10 +13,11 @@ from nanobot.providers.openai_responses.converters import (
 )
 from nanobot.providers.openai_responses.parsing import (
     consume_sdk_stream,
+    consume_sse,
+    consume_sse_with_reasoning,
     map_finish_reason,
     parse_response_output,
 )
-
 
 # ======================================================================
 # converters - split_tool_call_id
@@ -154,6 +155,62 @@ class TestConvertMessages:
         assert items[0]["call_id"] == "call_abc"
         assert items[0]["id"] == "fc_1"
         assert items[0]["name"] == "get_weather"
+        assert items[0]["arguments"] == '{"city": "SF"}'
+
+    def test_assistant_tool_call_history_repairs_malformed_arguments(self):
+        _, items = convert_messages([{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_abc|fc_1",
+                "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
+            }],
+        }])
+
+        assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
+
+    def test_duplicate_response_item_ids_are_made_unique(self):
+        """Codex rejects replayed Responses input items with duplicate ids."""
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_a|rs_same",
+                    "function": {"name": "first", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_a|rs_same", "content": "ok"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_b|rs_same",
+                    "function": {"name": "second", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_b|rs_same", "content": "ok"},
+        ])
+        function_call_ids = [
+            item["id"] for item in items if item.get("type") == "function_call"
+        ]
+        assert function_call_ids == ["rs_same", "rs_same_2"]
+        assert len(function_call_ids) == len(set(function_call_ids))
+
+    def test_fallback_response_item_ids_are_unique_with_multiple_tool_calls(self):
+        _, items = convert_messages([{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_a", "function": {"name": "first", "arguments": "{}"}},
+                {"id": "call_b", "function": {"name": "second", "arguments": "{}"}},
+            ],
+        }])
+        function_call_ids = [
+            item["id"] for item in items if item.get("type") == "function_call"
+        ]
+        assert function_call_ids == ["fc_0", "fc_0_2"]
+        assert len(function_call_ids) == len(set(function_call_ids))
 
     def test_assistant_with_tool_calls_no_id(self):
         """Fallback IDs when tool_call.id is missing."""
@@ -323,7 +380,7 @@ class TestParseResponseOutput:
         assert result.tool_calls[0].id == "call_1|fc_1"
 
     def test_malformed_tool_arguments_logged(self):
-        """Malformed JSON arguments should log a warning and fallback."""
+        """Malformed JSON arguments should log a warning and remain non-object."""
         resp = {
             "output": [{
                 "type": "function_call",
@@ -334,9 +391,28 @@ class TestParseResponseOutput:
         }
         with patch("nanobot.providers.openai_responses.parsing.logger") as mock_logger:
             result = parse_response_output(resp)
-        assert result.tool_calls[0].arguments == {"raw": "{bad json"}
+        assert result.tool_calls[0].arguments == "{bad json"
         mock_logger.warning.assert_called_once()
         assert "Failed to parse tool call arguments" in str(mock_logger.warning.call_args)
+
+    @pytest.mark.parametrize("arguments", [[], False, 0])
+    def test_falsy_non_object_tool_arguments_preserved(self, arguments):
+        resp = {
+            "output": [{
+                "type": "function_call",
+                "call_id": "c1",
+                "id": "fc1",
+                "name": "f",
+                "arguments": arguments,
+            }],
+            "status": "completed",
+            "usage": {},
+        }
+
+        result = parse_response_output(resp)
+
+        assert result.tool_calls[0].arguments == arguments
+        assert type(result.tool_calls[0].arguments) is type(arguments)
 
     def test_reasoning_content_extracted(self):
         resp = {
@@ -389,6 +465,215 @@ class TestParseResponseOutput:
         assert result.usage["prompt_tokens"] == 100
         assert result.usage["completion_tokens"] == 50
         assert result.usage["total_tokens"] == 150
+
+
+# ======================================================================
+# parsing - consume_sse
+# ======================================================================
+
+
+class _SseResponse:
+    def __init__(self, events: list[dict]):
+        self._events = events
+
+    async def aiter_lines(self):
+        for event in self._events:
+            yield f"data: {json.dumps(event)}"
+            yield ""
+
+
+class TestConsumeSse:
+    @pytest.mark.asyncio
+    async def test_legacy_consume_sse_returns_three_tuple(self):
+        response = _SseResponse([
+            {"type": "response.output_text.delta", "delta": "hi"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+
+        content, tool_calls, finish_reason = await consume_sse(response)
+
+        assert content == "hi"
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_delta_extracted(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
+            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {"type": "response.output_text.delta", "delta": "answer"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, usage, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert content == "answer"
+        assert tool_calls == []
+        assert finish_reason == "stop"
+        assert usage == {}
+        assert reasoning == "thinking briefly"
+        assert deltas == ["thinking ", "briefly"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_from_completed_response(self):
+        response = _SseResponse([
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [
+                        {"type": "reasoning", "summary": [
+                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "summary"},
+                        ]},
+                    ],
+                },
+            },
+        ])
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
+
+        assert reasoning == "cached summary"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_from_done_item(self):
+        response = _SseResponse([
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "done summary"}],
+                },
+            },
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "done summary"
+        assert deltas == ["done summary"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_summary_part_done_extracted(self):
+        response = _SseResponse([
+            {
+                "type": "response.reasoning_summary_part.done",
+                "part": {"type": "summary_text", "text": "part summary"},
+            },
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
+
+        assert reasoning == "part summary"
+
+    @pytest.mark.asyncio
+    async def test_raw_sse_usage_extracted(self):
+        response = _SseResponse([
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                },
+            },
+        ])
+
+        _, _, _, usage, _ = await consume_sse_with_reasoning(response)
+
+        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+    @pytest.mark.asyncio
+    async def test_tool_call_done_arguments_callback(self):
+        response = _SseResponse([
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "write_file",
+                    "arguments": "",
+                },
+            },
+            {
+                "type": "response.function_call_arguments.done",
+                "call_id": "c1",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "write_file",
+                    "arguments": '{"path":"a.txt","content":"hello\\n"}',
+                },
+            },
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        await consume_sse_with_reasoning(response, on_tool_call_delta=cb)
+
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arguments", [[], False, 0])
+    async def test_falsy_non_object_tool_arguments_preserved(self, arguments):
+        response = _SseResponse([
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "f",
+                    "arguments": "",
+                },
+            },
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "f",
+                    "arguments": arguments,
+                },
+            },
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ])
+
+        _, tool_calls, _, _, _ = await consume_sse_with_reasoning(response)
+
+        assert tool_calls[0].arguments == arguments
+        assert type(tool_calls[0].arguments) is type(arguments)
 
 
 # ======================================================================
@@ -454,6 +739,118 @@ class TestConsumeSdkStream:
         assert tool_calls[0].arguments == {"city": "SF"}
 
     @pytest.mark.asyncio
+    async def test_tool_call_argument_delta_callback(self):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "write_file"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        ev2 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='{"path":"a.txt","content":"',
+        )
+        ev3 = MagicMock(
+            type="response.function_call_arguments.delta",
+            call_id="c1",
+            delta='hello\\n',
+        )
+        ev4 = MagicMock(
+            type="response.function_call_arguments.done",
+            call_id="c1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done = MagicMock(
+            type="function_call",
+            call_id="c1",
+            id="fc1",
+            arguments='{"path":"a.txt","content":"hello\\n"}',
+        )
+        item_done.name = "write_file"
+        ev5 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev6 = MagicMock(type="response.completed", response=resp_obj)
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for e in [ev1, ev2, ev3, ev4, ev5, ev6]:
+                yield e
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=cb)
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments_delta": '{"path":"a.txt","content":"',
+            },
+            {"call_id": "c1", "name": "write_file", "arguments_delta": "hello\\n"},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"a.txt","content":"hello\\n"}',
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tool_call_done_item_arguments_callback_without_delta(self):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "write_file"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        item_done = MagicMock(
+            type="function_call",
+            call_id="c1",
+            id="fc1",
+            arguments='{"path":"late.txt","content":"done\\n"}',
+        )
+        item_done.name = "write_file"
+        ev2 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev3 = MagicMock(type="response.completed", response=resp_obj)
+        deltas: list[dict] = []
+
+        async def cb(delta: dict) -> None:
+            deltas.append(delta)
+
+        async def stream():
+            for e in [ev1, ev2, ev3]:
+                yield e
+
+        await consume_sdk_stream(stream(), on_tool_call_delta=cb)
+
+        assert deltas == [
+            {"call_id": "c1", "name": "write_file", "arguments_delta": ""},
+            {
+                "call_id": "c1",
+                "name": "write_file",
+                "arguments": '{"path":"late.txt","content":"done\\n"}',
+            },
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arguments", [[], False, 0])
+    async def test_falsy_non_object_tool_arguments_preserved(self, arguments):
+        item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
+        item_added.name = "f"
+        ev1 = MagicMock(type="response.output_item.added", item=item_added)
+        item_done = MagicMock(type="function_call", call_id="c1", id="fc1")
+        item_done.name = "f"
+        item_done.arguments = arguments
+        ev2 = MagicMock(type="response.output_item.done", item=item_done)
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev3 = MagicMock(type="response.completed", response=resp_obj)
+
+        async def stream():
+            for e in [ev1, ev2, ev3]:
+                yield e
+
+        _, tool_calls, _, _, _ = await consume_sdk_stream(stream())
+
+        assert tool_calls[0].arguments == arguments
+        assert type(tool_calls[0].arguments) is type(arguments)
+
+    @pytest.mark.asyncio
     async def test_usage_extracted(self):
         usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
         resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
@@ -500,7 +897,7 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_malformed_tool_args_logged(self):
-        """Malformed JSON in streaming tool args should log a warning."""
+        """Malformed JSON in streaming tool args should log a warning and remain non-object."""
         item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
         item_added.name = "f"
         ev1 = MagicMock(type="response.output_item.added", item=item_added)
@@ -517,6 +914,6 @@ class TestConsumeSdkStream:
 
         with patch("nanobot.providers.openai_responses.parsing.logger") as mock_logger:
             _, tool_calls, _, _, _ = await consume_sdk_stream(stream())
-        assert tool_calls[0].arguments == {"raw": "{bad"}
+        assert tool_calls[0].arguments == "{bad"
         mock_logger.warning.assert_called_once()
         assert "Failed to parse tool call arguments" in str(mock_logger.warning.call_args)

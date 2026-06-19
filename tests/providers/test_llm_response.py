@@ -44,9 +44,15 @@ class TestShouldExecuteTools:
         resp = _response("stop")
         assert resp.should_execute_tools is True
 
+    def test_legacy_function_call_reason_executes(self) -> None:
+        # Older OpenAI-compatible streaming APIs can still use the singular
+        # function_call finish reason while carrying a tool-call-shaped payload.
+        resp = _response("function_call")
+        assert resp.should_execute_tools is True
+
     @pytest.mark.parametrize(
         "anomalous_reason",
-        ["refusal", "content_filter", "error", "length", "function_call", ""],
+        ["refusal", "content_filter", "error", "length", ""],
     )
     def test_tool_calls_under_anomalous_reason_blocked(self, anomalous_reason: str) -> None:
         # This is the #3220 bug: gateways injecting tool_calls under any of these

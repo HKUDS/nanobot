@@ -63,3 +63,83 @@ def test_safe_key_matches_internal_path(tmp_path: Path) -> None:
     key = "telegram:abc/def"
     expected = sm._get_session_path(key).name
     assert SessionManager.safe_key(key) + ".jsonl" == expected
+
+
+def _write_legacy_session(legacy_dir: Path, key: str, roles: list[str]) -> Path:
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    safe = SessionManager.safe_key(key)
+    path = legacy_dir / f"{safe}.jsonl"
+    metadata_line = (
+        '{"_type":"metadata","key":"' + key + '",'
+        '"created_at":"2025-01-01T00:00:00",'
+        '"updated_at":"2025-01-01T00:00:00",'
+        '"metadata":{}}'
+    )
+    lines = [metadata_line]
+    for role in roles:
+        lines.append('{"role":"' + role + '","content":"msg"}')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_delete_session_cleans_legacy_file(tmp_path: Path, monkeypatch) -> None:
+    """A session that only exists at the legacy location must also be deleted."""
+    legacy = tmp_path / "legacy_sessions"
+    monkeypatch.setattr(
+        "nanobot.session.manager.get_legacy_sessions_dir",
+        lambda: legacy,
+    )
+    key = "telegram:only-legacy"
+    legacy_path = _write_legacy_session(legacy, key, ["user", "assistant"])
+    assert legacy_path.exists()
+
+    sm = SessionManager(tmp_path / "workspace")
+    new_path = sm._get_session_path(key)
+    assert not new_path.exists()
+
+    assert sm.delete_session(key) is True
+    assert not legacy_path.exists(), "legacy session file should have been removed"
+
+
+def test_delete_session_cleans_both_locations(tmp_path: Path, monkeypatch) -> None:
+    """When files exist at both the new and legacy paths, both must be removed."""
+    legacy = tmp_path / "legacy_sessions"
+    monkeypatch.setattr(
+        "nanobot.session.manager.get_legacy_sessions_dir",
+        lambda: legacy,
+    )
+    workspace = tmp_path / "workspace"
+    key = "telegram:both-paths"
+    _write_legacy_session(legacy, key, ["user", "assistant"])
+
+    sm = SessionManager(workspace)
+    session = Session(key=key)
+    session.add_message("user", "recent")
+    sm.save(session)
+
+    assert sm._get_session_path(key).exists()
+    assert (legacy / f"{SessionManager.safe_key(key)}.jsonl").exists()
+
+    assert sm.delete_session(key) is True
+
+    assert not sm._get_session_path(key).exists()
+    assert not (legacy / f"{SessionManager.safe_key(key)}.jsonl").exists()
+
+
+def test_delete_session_prevents_legacy_revival(tmp_path: Path, monkeypatch) -> None:
+    """After delete_session, a subsequent get_or_create must not resurrect history."""
+    legacy = tmp_path / "legacy_sessions"
+    monkeypatch.setattr(
+        "nanobot.session.manager.get_legacy_sessions_dir",
+        lambda: legacy,
+    )
+    workspace = tmp_path / "workspace"
+    key = "telegram:no-revival"
+    _write_legacy_session(legacy, key, ["user", "assistant"])
+
+    sm = SessionManager(workspace)
+    assert sm.delete_session(key) is True
+    assert not (legacy / f"{SessionManager.safe_key(key)}.jsonl").exists()
+
+    fresh = sm.get_or_create(key)
+    assert fresh.messages == []

@@ -16,8 +16,9 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import ExecToolConfig
+    from nanobot.config.schema import ToolsConfig
 
     bus = MessageBus()
     provider = MagicMock()
@@ -27,7 +28,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        exec_config=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"]),
+        tools_config=ToolsConfig(exec=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"])),
     )
     mgr._announce_result = AsyncMock()
 
@@ -94,6 +95,39 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
+    """A temperature passed to spawn() should reach the AgentRunSpec."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["temperature"] = spec.temperature
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", temperature=0.9)
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["temperature"] == 0.9
+
+
+@pytest.mark.asyncio
 async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager
@@ -125,8 +159,10 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
+    from nanobot.agent.tools.context import RequestContext
+
     tool = SpawnTool(mgr)
-    tool.set_context("test", "c1", "test:c1")
+    tool.set_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1"))
 
     # First spawn succeeds
     result = await tool.execute(task="first task")
@@ -304,8 +340,8 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     # With sub-agents running and an empty queue, it should block
     drain_task = asyncio.create_task(injection_callback())
 
-    # Give it a moment to enter the blocking wait
-    await asyncio.sleep(0.05)
+    # Let the task enter the blocking queue wait.
+    await asyncio.sleep(0)
 
     # Should still be running (blocked on pending_queue.get())
     assert not drain_task.done(), "drain should block while sub-agents are running"
@@ -431,9 +467,12 @@ async def test_drain_pending_timeout(tmp_path):
 
     assert injection_callback is not None
 
-    # Patch the timeout to be very short for testing
-    with patch("nanobot.agent.loop.asyncio.wait_for") as mock_wait:
-        mock_wait.side_effect = asyncio.TimeoutError
+    # Patch the timeout path without leaking the queue.get() coroutine.
+    async def _timeout(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
         results = await injection_callback()
         assert results == []
 

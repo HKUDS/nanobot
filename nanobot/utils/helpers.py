@@ -78,6 +78,93 @@ def strip_think(text: str) -> str:
     return text.strip()
 
 
+def extract_think(text: str) -> tuple[str | None, str]:
+    """Extract thinking content from inline ``<think>`` / ``<thought>`` blocks.
+
+    Returns ``(thinking_text, cleaned_text)``. Only closed blocks are
+    extracted; unclosed streaming prefixes are stripped from the cleaned
+    text but not surfaced — :func:`strip_think` handles that case.
+    """
+    parts: list[str] = []
+    for m in re.finditer(r"<think>([\s\S]*?)</think>", text):
+        parts.append(m.group(1).strip())
+    for m in re.finditer(r"<thought>([\s\S]*?)</thought>", text):
+        parts.append(m.group(1).strip())
+    thinking = "\n\n".join(parts) if parts else None
+    return thinking, strip_think(text)
+
+
+class IncrementalThinkExtractor:
+    """Stateful inline ``<think>`` extractor for streaming buffers.
+
+    Streaming providers expose only a single content delta channel. When a
+    model embeds reasoning in ``<think>...</think>`` blocks inside that
+    channel, callers need to surface the reasoning incrementally as it
+    arrives without re-emitting earlier text. This holds the "already
+    emitted" cursor so the runner and the loop hook share one shape.
+    """
+
+    __slots__ = ("_emitted",)
+
+    def __init__(self) -> None:
+        self._emitted = ""
+
+    def reset(self) -> None:
+        self._emitted = ""
+
+    async def feed(self, buf: str, emit: Any) -> bool:
+        """Emit any new thinking text found in ``buf``.
+
+        Returns True if anything was emitted this call. ``emit`` is an
+        async callable taking a single string (typically
+        ``hook.emit_reasoning``).
+        """
+        thinking, _ = extract_think(buf)
+        if not thinking or thinking == self._emitted:
+            return False
+        new = thinking[len(self._emitted):].strip()
+        self._emitted = thinking
+        if not new:
+            return False
+        await emit(new)
+        return True
+
+
+def extract_reasoning(
+    reasoning_content: str | None,
+    thinking_blocks: list[dict[str, Any]] | None,
+    content: str | None,
+) -> tuple[str | None, str | None]:
+    """Return ``(reasoning_text, cleaned_content)`` from one model response.
+
+    Single source of truth for "what reasoning did this response carry, and
+    what answer text remains after we peel it out". Fallback order:
+
+    1. Dedicated ``reasoning_content`` (DeepSeek-R1, Kimi, MiMo, OpenAI
+       reasoning models, Bedrock).
+    2. Anthropic ``thinking_blocks``.
+    3. Inline ``<think>`` / ``<thought>`` blocks in ``content``.
+
+    Only one source contributes per response; lower-priority sources are
+    ignored if a higher-priority one is present, but inline ``<think>``
+    tags are still stripped from ``content`` so they never leak into the
+    final answer.
+    """
+    if reasoning_content:
+        return reasoning_content, strip_think(content) if content else content
+    if thinking_blocks:
+        parts = [
+            tb.get("thinking", "")
+            for tb in thinking_blocks
+            if isinstance(tb, dict) and tb.get("type") == "thinking"
+        ]
+        joined = "\n\n".join(p for p in parts if p)
+        return (joined or None), strip_think(content) if content else content
+    if content:
+        return extract_think(content)
+    return None, content
+
+
 def detect_image_mime(data: bytes) -> str | None:
     """Detect image MIME type from magic bytes, ignoring file extension."""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -138,6 +225,7 @@ _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
+_TRUNCATED_SUFFIX = "\n... (truncated)"
 
 
 def safe_filename(name: str) -> str:
@@ -154,7 +242,67 @@ def truncate_text(text: str, max_chars: int) -> str:
     """Truncate text with a stable suffix."""
     if max_chars <= 0 or len(text) <= max_chars:
         return text
-    return text[:max_chars] + "\n... (truncated)"
+    return text[:max_chars] + _TRUNCATED_SUFFIX
+
+
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to a token budget with a stable suffix.
+
+    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
+    regardless of language or content (CJK and code cost more tokens per char).
+    Falls back to a char-based estimate (~4 chars/token) if tiktoken is
+    unavailable.
+    """
+    if max_tokens <= 0:
+        return text
+    try:
+        enc = get_local_cl100k_encoding()
+        if enc is None:
+            raise RuntimeError("cl100k_base is unavailable locally")
+        tokens = enc.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
+        body_budget = max_tokens - len(suffix_tokens)
+        if body_budget <= 0:
+            return enc.decode(tokens[:max_tokens])
+        for candidate_budget in range(body_budget, -1, -1):
+            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+            if len(enc.encode(result)) <= max_tokens:
+                return result
+        return enc.decode(tokens[:max_tokens])
+    except Exception:
+        max_chars = max_tokens * 4
+        suffix_chars = len(_TRUNCATED_SUFFIX)
+        if max_chars <= suffix_chars:
+            return text[:max_chars]
+        return truncate_text(text, max_chars - suffix_chars)
+
+
+def recent_message_start_index(
+    messages: list[dict[str, Any]],
+    max_messages: int,
+    *,
+    extend_to_user: bool = False,
+) -> int:
+    """Return the start index for a recent replay window."""
+    if max_messages <= 0:
+        return len(messages)
+    start_idx = max(0, len(messages) - max_messages)
+    if not extend_to_user or len(messages) <= max_messages:
+        return start_idx
+    if any(messages[i].get("role") == "user" for i in range(start_idx, len(messages))):
+        return start_idx
+
+    recovered_user = next(
+        (i for i in range(start_idx - 1, -1, -1) if messages[i].get("role") == "user"),
+        None,
+    )
+    if recovered_user is None:
+        return start_idx
+    if recovered_user > 0 and messages[recovered_user - 1].get("_channel_delivery"):
+        return recovered_user - 1
+    return recovered_user
 
 
 def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
@@ -172,11 +320,6 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
             if tid and str(tid) not in declared:
                 start = i + 1
                 declared.clear()
-                for prev in messages[start : i + 1]:
-                    if prev.get("role") == "assistant":
-                        for tc in prev.get("tool_calls") or []:
-                            if isinstance(tc, dict) and tc.get("id"):
-                                declared.add(str(tc["id"]))
     return start
 
 
@@ -537,7 +680,7 @@ def build_status_content(
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
-    """Sync bundled templates to workspace. Only creates missing files."""
+    """Sync bundled templates to workspace. Creates missing files without overwriting user files."""
     from importlib.resources import files as pkg_files
 
     try:
@@ -550,10 +693,11 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     added: list[str] = []
 
     def _write(src, dest: Path):
+        content = src.read_text(encoding="utf-8") if src else ""
         if dest.exists():
             return
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
+        dest.write_text(content, encoding="utf-8")
         added.append(str(dest.relative_to(workspace)))
 
     for item in tpl.iterdir():
@@ -586,3 +730,14 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         logger.exception("Failed to initialize git store for {}", workspace)
 
     return added
+
+
+def load_bundled_template(template_name: str) -> str | None:
+    """Read a bundled template file from the nanobot package."""
+    from importlib.resources import files as pkg_files
+
+    with suppress(Exception):
+        tpl = pkg_files("nanobot") / "templates" / template_name
+        if tpl.is_file():
+            return tpl.read_text(encoding="utf-8")
+    return None

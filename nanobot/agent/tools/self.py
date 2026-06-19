@@ -7,11 +7,19 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.subagent import SubagentStatus
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.runtime_state import RuntimeState
+from nanobot.config_base import Base
 
 if TYPE_CHECKING:
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.subagent import SubagentStatus
+
+
+class MyToolConfig(Base):
+    """Self-inspection tool configuration."""
+    enable: bool = True
+    allow_set: bool = False
 
 
 def _has_real_attr(obj: Any, key: str) -> bool:
@@ -27,8 +35,25 @@ def _has_real_attr(obj: Any, key: str) -> bool:
     return False
 
 
-class MyTool(Tool):
+def _is_subagent_status(value: Any) -> bool:
+    from nanobot.agent.subagent import SubagentStatus
+
+    return isinstance(value, SubagentStatus)
+
+
+class MyTool(Tool, ContextAware):
     """Check and set the agent loop's runtime configuration."""
+
+    _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
+    config_key = "my"
+
+    @classmethod
+    def config_cls(cls):
+        return MyToolConfig
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.config.my.enable
 
     BLOCKED = frozenset({
         # Core infrastructure
@@ -51,6 +76,7 @@ class MyTool(Tool):
         "_current_iteration",  # updated by runner only
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
+        "workspace_sandbox",  # read-only view of workspace enforcement level
     })
 
     _DENIED_ATTRS = frozenset({
@@ -82,8 +108,8 @@ class MyTool(Tool):
 
     _MAX_RUNTIME_KEYS = 64
 
-    def __init__(self, loop: AgentLoop, modify_allowed: bool = True) -> None:
-        self._loop = loop
+    def __init__(self, runtime_state: RuntimeState, modify_allowed: bool = True) -> None:
+        self._runtime_state = runtime_state
         self._modify_allowed = modify_allowed
         self._channel = ""
         self._chat_id = ""
@@ -92,15 +118,15 @@ class MyTool(Tool):
         cls = self.__class__
         result = cls.__new__(cls)
         memo[id(self)] = result
-        result._loop = self._loop
+        result._runtime_state = self._runtime_state
         result._modify_allowed = self._modify_allowed
         result._channel = self._channel
         result._chat_id = self._chat_id
         return result
 
-    def set_context(self, channel: str, chat_id: str) -> None:
-        self._channel = channel
-        self._chat_id = chat_id
+    def set_context(self, ctx: RequestContext) -> None:
+        self._channel = ctx.channel
+        self._chat_id = ctx.chat_id
 
     @property
     def name(self) -> str:
@@ -122,6 +148,7 @@ class MyTool(Tool):
             "\n"
             "When to use:\n"
             "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
             "- About to start a large task → check context_window_tokens and max_iterations first."
@@ -149,9 +176,9 @@ class MyTool(Tool):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "For check without key, shows all config values.",
+                    "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model)."},
+                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
             },
             "required": ["action"],
         }
@@ -166,7 +193,7 @@ class MyTool(Tool):
 
     def _resolve_path(self, path: str) -> tuple[Any, str | None]:
         parts = path.split(".")
-        obj = self._loop
+        obj = self._runtime_state
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
@@ -197,7 +224,7 @@ class MyTool(Tool):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_status(st: SubagentStatus, indent: str = "  ") -> str:
+    def _format_status(st: "SubagentStatus", indent: str = "  ") -> str:
         elapsed = time.monotonic() - st.started_at
         tool_summary = ", ".join(
             f"{e.get('name', '?')}({e.get('status', '?')})" for e in st.tool_events[-5:]
@@ -215,14 +242,14 @@ class MyTool(Tool):
 
     @staticmethod
     def _format_value(val: Any, key: str = "") -> str:
-        if isinstance(val, SubagentStatus):
+        if _is_subagent_status(val):
             header = f"Subagent [{val.task_id}] '{val.label}'"
             detail = MyTool._format_status(val, "  ")
             return f"{header}\n  task: {val.task_description}\n{detail}"
         # SubagentManager: delegate to its _task_statuses dict
         if hasattr(val, "_task_statuses") and isinstance(val._task_statuses, dict):
             return MyTool._format_value(val._task_statuses, key)
-        if isinstance(val, dict) and val and isinstance(next(iter(val.values())), SubagentStatus):
+        if isinstance(val, dict) and val and _is_subagent_status(next(iter(val.values()))):
             prefix = f"{key}: " if key else ""
             lines = [f"{prefix}{len(val)} subagent(s):"]
             for tid, st in val.items():
@@ -311,34 +338,35 @@ class MyTool(Tool):
         if err:
             # "scratchpad" alias for _runtime_vars
             if key == "scratchpad":
-                rv = self._loop._runtime_vars
+                rv = self._runtime_state._runtime_vars
                 return self._format_value(rv, "scratchpad") if rv else "scratchpad is empty"
             # Fallback: check _runtime_vars for simple keys stored by modify
-            if "." not in key and key in self._loop._runtime_vars:
-                return self._format_value(self._loop._runtime_vars[key], key)
+            if "." not in key and key in self._runtime_state._runtime_vars:
+                return self._format_value(self._runtime_state._runtime_vars[key], key)
             return f"Error: {err}"
         # Guard against mock auto-generated attributes
-        if "." not in key and not _has_real_attr(self._loop, key):
-            if key in self._loop._runtime_vars:
-                return self._format_value(self._loop._runtime_vars[key], key)
+        if "." not in key and not _has_real_attr(self._runtime_state, key):
+            if key in self._runtime_state._runtime_vars:
+                return self._format_value(self._runtime_state._runtime_vars[key], key)
             return f"Error: '{key}' not found"
         return self._format_value(obj, key)
 
     def _inspect_all(self) -> str:
-        loop = self._loop
+        state = self._runtime_state
         parts: list[str] = []
         # RESTRICTED keys
         for k in self.RESTRICTED:
-            parts.append(self._format_value(getattr(loop, k, None), k))
+            parts.append(self._format_value(getattr(state, k, None), k))
+        parts.append(self._format_value(state.model_preset, "model_preset"))
         # Other useful top-level keys shown in description
-        for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "subagents"):
-            if _has_real_attr(loop, k):
-                parts.append(self._format_value(getattr(loop, k, None), k))
+        for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "workspace_sandbox", "subagents"):
+            if _has_real_attr(state, k):
+                parts.append(self._format_value(getattr(state, k, None), k))
         # Token usage
-        usage = loop._last_usage
+        usage = state._last_usage
         if usage:
             parts.append(self._format_value(usage, "_last_usage"))
-        rv = loop._runtime_vars
+        rv = state._runtime_vars
         if rv:
             parts.append(self._format_value(rv, "scratchpad"))
         return "\n".join(parts)
@@ -372,9 +400,23 @@ class MyTool(Tool):
                 setattr(parent, leaf, value)
             self._audit("modify", f"{key} = {value!r}")
             return f"Set {key} = {value!r}"
+        if key == "model_preset":
+            return self._modify_model_preset(value)
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_model_preset(self, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return "Error: 'model_preset' must be a non-empty string"
+        name = value.strip()
+        result = self._modify_free("model_preset", name)
+        if result.startswith("Error:"):
+            return result if result.endswith((".", "!", "?")) else f"{result}."
+        return (
+            f"{result}; model is now {self._runtime_state.model!r}; "
+            f"context_window_tokens is now {self._runtime_state.context_window_tokens!r}"
+        )
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
@@ -386,22 +428,24 @@ class MyTool(Tool):
                 value = expected(value)
             except (ValueError, TypeError):
                 return f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}"
-        old = getattr(self._loop, key)
+        old = getattr(self._runtime_state, key)
         if "min" in spec and value < spec["min"]:
             return f"Error: '{key}' must be >= {spec['min']}"
         if "max" in spec and value > spec["max"]:
             return f"Error: '{key}' must be <= {spec['max']}"
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
             return f"Error: '{key}' must be at least {spec['min_len']} characters"
-        setattr(self._loop, key, value)
-        if key == "max_iterations" and hasattr(self._loop, "_sync_subagent_runtime_limits"):
-            self._loop._sync_subagent_runtime_limits()
+        setattr(self._runtime_state, key, value)
+        if key == "model":
+            self._runtime_state._active_preset = None
+        if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
+            self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
         return f"Set {key} = {value!r} (was {old!r})"
 
     def _modify_free(self, key: str, value: Any) -> str:
-        if _has_real_attr(self._loop, key):
-            old = getattr(self._loop, key)
+        if _has_real_attr(self._runtime_state, key):
+            old = getattr(self._runtime_state, key)
             if isinstance(old, (str, int, float, bool)):
                 old_t, new_t = type(old), type(value)
                 if old_t is float and new_t is int:
@@ -412,7 +456,12 @@ class MyTool(Tool):
                         f"REJECTED type mismatch {key}: expects {old_t.__name__}, got {new_t.__name__}",
                     )
                     return f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}"
-            setattr(self._loop, key, value)
+            try:
+                setattr(self._runtime_state, key, value)
+            except (ValueError, KeyError) as e:
+                message = str(e.args[0] if isinstance(e, KeyError) and e.args else e).strip('"')
+                self._audit("modify", f"REJECTED {key}: {message}")
+                return f"Error: {message}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):
@@ -422,11 +471,11 @@ class MyTool(Tool):
         if err:
             self._audit("modify", f"REJECTED {key}: {err}")
             return f"Error: {err}"
-        if key not in self._loop._runtime_vars and len(self._loop._runtime_vars) >= self._MAX_RUNTIME_KEYS:
+        if key not in self._runtime_state._runtime_vars and len(self._runtime_state._runtime_vars) >= self._MAX_RUNTIME_KEYS:
             self._audit("modify", f"REJECTED {key}: max keys ({self._MAX_RUNTIME_KEYS}) reached")
             return f"Error: scratchpad is full (max {self._MAX_RUNTIME_KEYS} keys). Remove unused keys first."
-        old = self._loop._runtime_vars.get(key)
-        self._loop._runtime_vars[key] = value
+        old = self._runtime_state._runtime_vars.get(key)
+        self._runtime_state._runtime_vars[key] = value
         self._audit("modify", f"scratchpad.{key}: {old!r} -> {value!r}")
         return f"Set scratchpad.{key} = {value!r}"
 

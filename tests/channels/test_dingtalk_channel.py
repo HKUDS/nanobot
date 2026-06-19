@@ -99,6 +99,55 @@ async def test_group_message_keeps_sender_id_and_routes_chat_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_user_isolation_false_uses_shared_session() -> None:
+    """By default group messages share the same session_key."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=False
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    for user_id in ("user1", "user2"):
+        await channel._on_message(
+            "hello",
+            sender_id=user_id,
+            sender_name=user_id,
+            conversation_type="2",
+            conversation_id="conv123",
+        )
+
+    msg1 = await bus.consume_inbound()
+    msg2 = await bus.consume_inbound()
+    assert msg1.session_key == msg2.session_key == "dingtalk:group:conv123"
+    assert msg1.chat_id == msg2.chat_id == "group:conv123"
+
+
+@pytest.mark.asyncio
+async def test_group_user_isolation_true_separates_sessions() -> None:
+    """When group_user_isolation is True, each user gets their own session_key."""
+    config = DingTalkConfig(
+        client_id="app", client_secret="secret", allow_from=["*"], group_user_isolation=True
+    )
+    bus = MessageBus()
+    channel = DingTalkChannel(config, bus)
+
+    for user_id in ("user1", "user2"):
+        await channel._on_message(
+            "hello",
+            sender_id=user_id,
+            sender_name=user_id,
+            conversation_type="2",
+            conversation_id="conv123",
+        )
+
+    msg1 = await bus.consume_inbound()
+    msg2 = await bus.consume_inbound()
+    assert msg1.session_key == "dingtalk:group:conv123:user1"
+    assert msg2.session_key == "dingtalk:group:conv123:user2"
+    assert msg1.chat_id == msg2.chat_id == "group:conv123"
+
+
+@pytest.mark.asyncio
 async def test_group_send_uses_group_messages_api() -> None:
     config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
     channel = DingTalkChannel(config, MessageBus())

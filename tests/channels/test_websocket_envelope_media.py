@@ -18,8 +18,10 @@ import pytest
 
 from nanobot.channels.websocket import (
     WebSocketChannel,
+    WebSocketConfig,
     _extract_data_url_mime,
 )
+from nanobot.webui.gateway_services import build_gateway_services
 
 
 def _tiny_png_data_url() -> str:
@@ -41,10 +43,20 @@ def _data_url(mime: str, payload: bytes) -> str:
 def _make_channel() -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False},
-        bus,
+    cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
+    parsed = WebSocketConfig.model_validate(cfg)
+    gateway = build_gateway_services(
+        config=parsed,
+        bus=bus,
+        session_manager=None,
+        static_dist_path=None,
+        workspace_path=Path.cwd(),
+        default_restrict_to_workspace=False,
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
     )
+    channel = WebSocketChannel(cfg, bus, gateway=gateway)
     channel._handle_message = AsyncMock()  # type: ignore[method-assign]
     return channel
 
@@ -57,6 +69,7 @@ def _make_channel() -> WebSocketChannel:
     [
         ("data:image/png;base64,AAAA", "image/png"),
         ("data:image/jpeg;base64,AAAA", "image/jpeg"),
+        ("data:audio/webm;codecs=opus;base64,AAAA", "audio/webm"),
         ("data:IMAGE/PNG;base64,AAAA", "image/png"),
         ("data:image/svg+xml;base64,AAAA", "image/svg+xml"),
         ("data:text/plain;base64,AAAA", "text/plain"),
@@ -103,6 +116,43 @@ async def test_message_without_media_backward_compatible() -> None:
     assert call.kwargs["content"] == "hello"
     # When no media, we pass ``media=None`` so downstream treats it as absent.
     assert call.kwargs["media"] is None
+
+
+@pytest.mark.asyncio
+async def test_message_forwards_normalized_cli_app_attachments() -> None:
+    channel = _make_channel()
+    mock_conn = AsyncMock()
+    envelope = {
+        "type": "message",
+        "chat_id": "abc123",
+        "content": "please use @drawio",
+        "webui": True,
+        "cli_apps": [
+            {
+                "name": "DrawIO",
+                "display_name": "Draw.io",
+                "category": "diagram",
+                "entry_point": "cli-anything-drawio",
+                "logo_url": "https://example.invalid/drawio.svg",
+                "brand_color": "#F08705",
+            },
+            {"name": "bad name", "entry_point": "nope"},
+        ],
+    }
+
+    await channel._dispatch_envelope(mock_conn, "client-1", envelope)
+
+    channel._handle_message.assert_awaited_once()
+    metadata = channel._handle_message.call_args.kwargs["metadata"]
+    assert metadata["webui"] is True
+    assert metadata["cli_apps"] == [{
+        "name": "drawio",
+        "display_name": "Draw.io",
+        "category": "diagram",
+        "entry_point": "cli-anything-drawio",
+        "logo_url": "https://example.invalid/drawio.svg",
+        "brand_color": "#F08705",
+    }]
 
 
 @pytest.mark.asyncio
