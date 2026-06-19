@@ -41,7 +41,7 @@ class TestStripImageContent:
         assert "/tmp/screenshot.png" not in placeholder
         assert "screenshot" not in placeholder
         # Must clearly indicate the image was not delivered
-        assert "not delivered" in placeholder.lower() or "not describe" in placeholder.lower()
+        assert "not delivered" in placeholder.lower()
 
     def test_returns_none_when_no_images(self):
         messages = [
@@ -93,7 +93,7 @@ class TestStripImageContent:
         result = LLMProvider._strip_image_content(messages)
         assert result is not None
         placeholder = result[0]["content"][0]["text"]
-        assert "[image" not in placeholder.lower() or "not delivered" in placeholder.lower()
+        assert "not delivered" in placeholder.lower()
 
     def test_preserves_non_image_content(self):
         messages = [
@@ -148,7 +148,7 @@ class TestStripImageContentInplace:
         assert len(content) == 2
         placeholder = content[1]["text"]
         assert "/tmp/photo.jpg" not in placeholder
-        assert "not delivered" in placeholder.lower() or "not describe" in placeholder.lower()
+        assert "not delivered" in placeholder.lower()
 
     def test_returns_false_when_no_images(self):
         messages = [
