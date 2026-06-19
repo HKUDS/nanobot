@@ -213,6 +213,8 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        authors: dict | None = None,
+        bot_name: str | None = None,
     ):
         from blackcat.config.schema import ToolsConfig
 
@@ -268,7 +270,14 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            authors=authors,
+            bot_name=bot_name,
+        )
+        self._bot_name = self.context.bot_name
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -392,6 +401,8 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            authors=config.authors,
+            bot_name=defaults.bot_name,
             **extra,
         )
 
@@ -514,7 +525,7 @@ class AgentLoop:
     def _set_tool_context(
         self, channel: str, chat_id: str,
         message_id: str | None = None, metadata: dict | None = None,
-        session_key: str | None = None,
+        session_key: str | None = None, sender_id: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
         from blackcat.agent.tools.context import ContextAware
@@ -529,6 +540,7 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             session_key=effective_key,
+            sender_id=sender_id,
             metadata=dict(metadata or {}),
         )
 
@@ -598,13 +610,15 @@ class AgentLoop:
             if text_override is not None:
                 text = text_override
             extra.update(cron_extra)
+            extra["author"] = self.context.resolve_author(msg.sender_id, msg.channel)
+            extra["sender_id"] = msg.sender_id
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
             return True
         return False
 
-    def _build_initial_messages(
+    async def _build_initial_messages(
         self,
         msg: InboundMessage,
         session: Session,
@@ -614,7 +628,7 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return self.context.build_messages(
+        return await self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
             media=msg.media if msg.media else None,
@@ -694,6 +708,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        sender_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -790,6 +805,7 @@ class AgentLoop:
             chat_id=chat_id,
             message_id=message_id,
             session_key=active_session_key,
+            sender_id=sender_id,
             metadata=dict(metadata or {}),
         )
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
@@ -1178,7 +1194,7 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
             channel=channel,
@@ -1201,6 +1217,7 @@ class AgentLoop:
             metadata=msg.metadata,
             session_key=key,
             pending_queue=pending_queue,
+            sender_id=msg.sender_id,
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
@@ -1420,7 +1437,7 @@ class AgentLoop:
                     ctx.msg, ctx.session, _command=True
                 )
                 ctx.session.add_message(
-                    "assistant", result.content, _command=True
+                    "assistant", result.content, _command=True, author=self._bot_name
                 )
                 self.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
@@ -1456,7 +1473,7 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = self._build_initial_messages(
+        ctx.initial_messages = await self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
@@ -1498,6 +1515,7 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            sender_id=ctx.msg.sender_id,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1663,6 +1681,12 @@ class AgentLoop:
                         continue
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
+            if role == "assistant":
+                entry.setdefault("author", self._bot_name)
+            elif role == "user":
+                entry.setdefault("author", self.context.resolve_author(
+                    entry.get("sender_id"), session.key.split(":", 1)[0] if ":" in session.key else None
+                ))
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
@@ -1690,10 +1714,17 @@ class AgentLoop:
             for m in session.messages
         ):
             return False
+        meta = msg.metadata if isinstance(msg.metadata, dict) else {}
+        origin_sender_id = meta.get("origin_sender_id")
+        # Persist the originating user's sender_id (who triggered the spawn) so
+        # the subagent-result message traces back to that user. The author stays
+        # as the bot's name — the bot is the one announcing the result.
+        sender_id = origin_sender_id or msg.sender_id
         session.add_message(
             "assistant",
             msg.content,
-            sender_id=msg.sender_id,
+            author=self._bot_name,
+            sender_id=sender_id,
             injected_event="subagent_result",
             subagent_task_id=task_id,
         )
@@ -1792,6 +1823,7 @@ class AgentLoop:
                 {
                     "role": "assistant",
                     "content": "Error: Task interrupted before a response was generated.",
+                    "author": self._bot_name,
                     "timestamp": datetime.now().isoformat(),
                 }
             )
