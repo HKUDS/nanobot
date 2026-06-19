@@ -1847,6 +1847,25 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 | `gateway.heartbeat.keepRecentMessages` | `8` | Number of recent heartbeat-session messages to retain after each run. |
 
 
+## Cron Job Model Presets
+
+User-created cron jobs inherit the agent's active model preset when they run.
+For recurring tasks that need a specific preset, pass `model_preset` when adding
+the job:
+
+```json
+{
+  "action": "add",
+  "message": "Summarize the overnight alerts and send a concise report.",
+  "cron_expr": "0 8 * * *",
+  "model_preset": "deep"
+}
+```
+
+The preset applies only to that scheduled turn. It does not change the parent
+agent's active model preset for live conversations or later jobs.
+
+
 ## Subagent Concurrency
 
 By default, nanobot only allows one spawned subagent at a time. When the limit is reached, the `spawn` tool returns an error so the agent can decide to wait or rearrange its work. This protects local LLM servers from loading multiple KV caches at once. If your provider can handle more parallel work, raise the limit:

@@ -52,6 +52,24 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+def test_add_job_persists_model_preset(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+
+    job = service.add_job(
+        name="preset job",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        model_preset=" fast ",
+        **_bound_chat(),
+    )
+
+    assert job.payload.model_preset == "fast"
+    reloaded = CronService(store_path).get_job(job.id)
+    assert reloaded is not None
+    assert reloaded.payload.model_preset == "fast"
+
+
 @pytest.mark.asyncio
 async def test_unbound_agent_jobs_are_disabled_on_add(tmp_path) -> None:
     called: list[str] = []

@@ -32,6 +32,7 @@ class CronPayload:
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    model_preset: str | None = None
 
 
 @dataclass
@@ -73,8 +74,11 @@ class CronJob:
             record if isinstance(record, CronRunRecord) else CronRunRecord(**record)
             for record in state_kwargs.get("run_history", [])
         ]
+        payload_kwargs = dict(kwargs.get("payload", {}))
+        if "modelPreset" in payload_kwargs and "model_preset" not in payload_kwargs:
+            payload_kwargs["model_preset"] = payload_kwargs.pop("modelPreset")
         kwargs["schedule"] = CronSchedule(**kwargs.get("schedule", {"kind": "every"}))
-        kwargs["payload"] = CronPayload(**kwargs.get("payload", {}))
+        kwargs["payload"] = CronPayload(**payload_kwargs)
         kwargs["state"] = CronJobState(**state_kwargs)
         return cls(**kwargs)
 

@@ -41,6 +41,7 @@ from nanobot.bus.runtime_events import (
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.cron.session_turns import (
+    CRON_TRIGGER_META,
     cron_history_overrides,
 )
 from nanobot.providers.base import LLMProvider
@@ -129,6 +130,9 @@ class TurnContext:
 
     ephemeral: bool = False
     tools: ToolRegistry | None = None
+    provider_override: LLMProvider | None = None
+    model_override: str | None = None
+    context_window_tokens_override: int | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
@@ -576,6 +580,23 @@ class AgentLoop:
     def pending_cron_job_ids_for_session(self, session_key: str) -> set[str]:
         return self._cron_turns.pending_job_ids_for_session(session_key)
 
+    @staticmethod
+    def _message_model_preset_override(metadata: dict[str, Any] | None) -> str | None:
+        if not isinstance(metadata, dict):
+            return None
+        if not isinstance(metadata.get(CRON_TRIGGER_META), dict):
+            return None
+        trigger = metadata[CRON_TRIGGER_META]
+        value = (
+            metadata.get("model_preset")
+            or metadata.get("modelPreset")
+            or trigger.get("model_preset")
+            or trigger.get("modelPreset")
+        )
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -665,17 +686,28 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
-    def _replay_token_budget(self) -> int:
+    def _replay_token_budget(
+        self,
+        *,
+        provider: LLMProvider | None = None,
+        context_window_tokens: int | None = None,
+    ) -> int:
         """Derive a token budget for session history replay from the context window."""
-        if self.context_window_tokens <= 0:
+        context_window_tokens = (
+            context_window_tokens
+            if context_window_tokens is not None
+            else self.context_window_tokens
+        )
+        provider = provider or self.provider
+        if context_window_tokens <= 0:
             return 0
-        max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        max_output = getattr(getattr(provider, "generation", None), "max_tokens", 4096)
         try:
             reserved_output = int(max_output)
         except (TypeError, ValueError):
             reserved_output = 4096
-        budget = self.context_window_tokens - max(1, reserved_output) - 1024
-        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
+        budget = context_window_tokens - max(1, reserved_output) - 1024
+        return budget if budget > 0 else max(128, context_window_tokens // 2)
 
     async def _run_agent_loop(
         self,
@@ -694,6 +726,9 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        provider_override: LLMProvider | None = None,
+        model_override: str | None = None,
+        context_window_tokens_override: int | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -705,6 +740,10 @@ class AgentLoop:
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
         self._sync_subagent_runtime_limits()
+        run_provider = provider_override or self.provider
+        run_model = model_override or self.model
+        run_context_window_tokens = context_window_tokens_override or self.context_window_tokens
+        runner = self.runner if provider_override is None else AgentRunner(run_provider)
 
         loop_hook = AgentProgressHook(
             on_progress=on_progress,
@@ -809,10 +848,10 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
-            result = await self.runner.run(AgentRunSpec(
+            result = await runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=tools or self.tools,
-                model=self.model,
+                model=run_model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
@@ -820,7 +859,7 @@ class AgentLoop:
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
-                context_window_tokens=self.context_window_tokens,
+                context_window_tokens=run_context_window_tokens,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 progress_callback=on_progress,
@@ -1001,9 +1040,21 @@ class AgentLoop:
                             ))
                             stream_segment += 1
 
+                    provider_override = None
+                    model_override = None
+                    context_window_tokens_override = None
+                    if preset_name := self._message_model_preset_override(msg.metadata):
+                        snapshot = self._build_model_preset_snapshot(preset_name)
+                        provider_override = snapshot.provider
+                        model_override = snapshot.model
+                        context_window_tokens_override = snapshot.context_window_tokens
+
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
                         pending_queue=pending,
+                        provider_override=provider_override,
+                        model_override=model_override,
+                        context_window_tokens_override=context_window_tokens_override,
                     )
                     completed_channel = msg.channel
                     completed_chat_id = msg.chat_id
@@ -1240,6 +1291,9 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        provider_override: LLMProvider | None = None,
+        model_override: str | None = None,
+        context_window_tokens_override: int | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
@@ -1272,6 +1326,9 @@ class AgentLoop:
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             tools=tools,
+            provider_override=provider_override,
+            model_override=model_override,
+            context_window_tokens_override=context_window_tokens_override,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1446,14 +1503,17 @@ class AgentLoop:
 
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
+            "max_tokens": self._replay_token_budget(
+                provider=ctx.provider_override,
+                context_window_tokens=ctx.context_window_tokens_override,
+            ),
             "include_timestamps": True,
             "extend_to_user": False,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
-            self.llm_runtime(),
+            LLMRuntime(ctx.provider_override or self.provider, ctx.model_override or self.model),
         )
 
         ctx.initial_messages = self._build_initial_messages(
@@ -1498,6 +1558,9 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            provider_override=ctx.provider_override,
+            model_override=ctx.model_override,
+            context_window_tokens_override=ctx.context_window_tokens_override,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

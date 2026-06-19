@@ -19,6 +19,9 @@ from nanobot.agent.tools.registry import ToolRegistry
 class _SvcStub:
     """Minimal CronService stand-in; we only exercise schema/dispatch paths."""
 
+    def __init__(self) -> None:
+        self.added: list[dict] = []
+
     def list_jobs(self):
         return []
 
@@ -29,6 +32,8 @@ class _SvcStub:
         return "not-found"
 
     def add_job(self, **kwargs):
+        self.added.append(kwargs)
+
         class _J:
             pass
 
@@ -94,9 +99,36 @@ class TestSchemaSelfDescribesRequirements:
         desc = tool.parameters["properties"]["job_id"]["description"]
         assert "REQUIRED" in desc and "action='remove'" in desc
 
+    def test_model_preset_is_optional_add_parameter(self) -> None:
+        tool = CronTool(_SvcStub())
+        assert "model_preset" in tool.parameters["properties"]
+        assert "model_preset" not in tool.parameters["required"]
+
     def test_top_level_required_stays_narrow(self) -> None:
         # If 'message' or 'job_id' ever creep back into top-level required,
         # list/remove start failing schema validation (the bug PR #3163 v1
         # accidentally introduced).
         tool = CronTool(_SvcStub())
         assert tool.parameters["required"] == ["action"]
+
+
+def test_add_forwards_model_preset_to_service() -> None:
+    import asyncio
+
+    svc = _SvcStub()
+    tool = CronTool(svc, default_timezone="UTC")
+    tool.set_context(
+        RequestContext(channel="channel", chat_id="chat-id", session_key="channel:chat-id")
+    )
+
+    out = asyncio.run(
+        tool.execute(
+            action="add",
+            message="ping",
+            at="2030-01-01T00:00:00",
+            model_preset="fast",
+        )
+    )
+
+    assert "Created job" in out
+    assert svc.added[-1]["model_preset"] == "fast"
