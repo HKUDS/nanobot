@@ -83,8 +83,14 @@ def _patch_async_openai():
 @pytest.fixture(autouse=True)
 def _auto_patch_async_openai():
     """Auto-patch AsyncOpenAI for all tests that call _build_client()."""
+    import blackcat.providers.openai_compat_provider as ocp
+
+    saved = ocp.AsyncOpenAI
     _patch_async_openai()
-    yield
+    try:
+        yield
+    finally:
+        ocp.AsyncOpenAI = saved
 
 
 # ── Registry integrity ─────────────────────────────────────────────

@@ -192,10 +192,10 @@ async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
     tools = MagicMock()
     tools.get_definitions.return_value = [{"type": "function", "function": {"name": "lookup"}}]
     monkeypatch.setattr(
-        "nanobot.agent.runner.estimate_prompt_tokens_chain",
+        "blackcat.agent.runner.estimate_prompt_tokens_chain",
         lambda provider, model, messages, tools: (123, "test"),
     )
-    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda message: 7)
+    monkeypatch.setattr("blackcat.agent.runner.estimate_message_tokens", lambda message: 7)
 
     runner = AgentRunner(provider)
     result = await runner.run(AgentRunSpec(

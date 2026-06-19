@@ -22,6 +22,8 @@ from blackcat.utils.tool_hints import format_tool_hints
 class AgentProgressHook(AgentHook):
     """Translate runner lifecycle events into user-visible progress signals."""
 
+    _reraise = True
+
     def __init__(
         self,
         on_progress: Callable[..., Awaitable[None]] | None = None,
@@ -37,7 +39,7 @@ class AgentProgressHook(AgentHook):
         set_tool_context: Callable[..., None] | None = None,
         on_iteration: Callable[[int], None] | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(reraise=True)
         self._on_progress = on_progress
         self._on_stream = on_stream
         self._on_stream_end = on_stream_end

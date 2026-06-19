@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import inspect
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from blackcat.agent.hook import AgentHookContext
-
-logger = logging.getLogger(__name__)
 
 
 def on_progress_accepts_tool_events(cb: Callable[..., Any]) -> bool:
@@ -37,13 +34,10 @@ async def invoke_on_progress(
     tool_hint: bool = False,
     tool_events: list[dict[str, Any]] | None = None,
 ) -> None:
-    try:
-        if tool_events and on_progress_accepts_tool_events(on_progress):
-            await on_progress(content, tool_hint=tool_hint, tool_events=tool_events)
-            return
-        await on_progress(content, tool_hint=tool_hint)
-    except Exception:
-        logger.exception("Error in on_progress callback")
+    if tool_events and on_progress_accepts_tool_events(on_progress):
+        await on_progress(content, tool_hint=tool_hint, tool_events=tool_events)
+        return
+    await on_progress(content, tool_hint=tool_hint)
 
 
 async def invoke_file_edit_progress(

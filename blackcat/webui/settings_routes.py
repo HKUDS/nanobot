@@ -41,7 +41,7 @@ from blackcat.webui.version_check import check_for_update
 
 QueryParams = dict[str, list[str]]
 
-_MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
+_MCP_VALUES_HEADER = "X-Blackcat-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
 
 _MCP_PRESET_ACTIONS_BY_PATH = {

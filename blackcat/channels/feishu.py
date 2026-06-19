@@ -1632,7 +1632,7 @@ class FeishuChannel(BaseChannel):
                 )
                 buf.card_id = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
             self.logger.warning("client not initialized")

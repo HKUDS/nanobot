@@ -500,7 +500,7 @@ async def test_openrouter_user_headers_override_default_attribution() -> None:
             default_model="anthropic/claude-sonnet-4-5",
             extra_headers={
                 "HTTP-Referer": "https://blackcat.ai",
-                "X-OpenRouter-Title": "Nanobot Pro",
+                "X-OpenRouter-Title": "Blackcat Pro",
                 "X-Custom-App": "enabled",
             },
             spec=spec,
@@ -509,7 +509,7 @@ async def test_openrouter_user_headers_override_default_attribution() -> None:
 
     headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://blackcat.ai"
-    assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
+    assert headers["X-OpenRouter-Title"] == "Blackcat Pro"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert headers["X-Custom-App"] == "enabled"
 
@@ -946,7 +946,7 @@ def test_openai_compat_build_kwargs_max_completion_tokens_by_model_name(
     expected_key: str,
 ) -> None:
     spec = find_by_name("custom")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="sk-test-key",
             default_model=model_name,

@@ -20,12 +20,12 @@ class RunResult:
     messages: list[dict[str, Any]]
 
 
-class Nanobot:
+class Blackcat:
     """Programmatic facade for running the blackcat agent.
 
     Usage::
 
-        bot = Nanobot.from_config()
+        bot = Blackcat.from_config()
         result = await bot.run("Summarize this repo", hooks=[MyHook()])
         print(result.content)
     """
@@ -39,8 +39,8 @@ class Nanobot:
         config_path: str | Path | None = None,
         *,
         workspace: str | Path | None = None,
-    ) -> Nanobot:
-        """Create a Nanobot instance from a config file.
+    ) -> Blackcat:
+        """Create a Blackcat instance from a config file.
 
         Args:
             config_path: Path to ``config.json``.  Defaults to
@@ -105,7 +105,7 @@ class Nanobot:
         """Release resources held by this instance (MCP connections, etc.)."""
         await self._loop.close_mcp()
 
-    async def __aenter__(self) -> Nanobot:
+    async def __aenter__(self) -> Blackcat:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

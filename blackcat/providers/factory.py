@@ -62,7 +62,8 @@ def _make_provider_core(
         raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
         needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
+        is_cloud_model = ":cloud" in model
+        exempt = spec and (spec.is_oauth or (spec.is_local and not is_cloud_model) or spec.is_direct)
         if needs_key and not exempt:
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
 

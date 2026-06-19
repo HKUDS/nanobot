@@ -305,7 +305,7 @@ def test_stepfun_in_registry() -> None:
     spec = get_transcription_provider("stepfun")
     assert spec is not None
     assert spec.default_model == "stepaudio-2.5-asr"
-    assert spec.adapter == "nanobot.providers.transcription:StepFunTranscriptionProvider"
+    assert spec.adapter == "blackcat.providers.transcription:StepFunTranscriptionProvider"
 
 
 def test_config_resolves_stepfun() -> None:

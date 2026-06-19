@@ -127,7 +127,7 @@ def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> No
 
 
 def test_fetch_new_messages_rejected_returns_skipped_uid(monkeypatch) -> None:
-    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+    raw = _make_raw_email(from_addr="Blackcat <bot@example.com>", subject="Loop test")
 
     class FakeIMAP:
         def login(self, _user: str, _pw: str):
@@ -311,7 +311,7 @@ def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypat
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(
         _make_config(post_action="move", post_action_move_mailbox="Processed"),
@@ -365,7 +365,7 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("blackcat.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])
@@ -490,7 +490,7 @@ async def test_start_keeps_post_actions_for_successful_emails_when_later_deliver
 
 
 def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
-    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+    raw = _make_raw_email(from_addr="Blackcat <bot@example.com>", subject="Loop test")
 
     class FakeIMAP:
         def __init__(self) -> None:

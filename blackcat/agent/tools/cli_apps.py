@@ -8,10 +8,16 @@ from typing import Any
 from pydantic import Field
 
 from blackcat.agent.tools.base import Tool, tool_parameters
-from blackcat.agent.tools.schema import ArraySchema, BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from blackcat.security.workspace_access import current_tool_workspace
+from blackcat.agent.tools.schema import (
+    ArraySchema,
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from blackcat.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from blackcat.config_base import Base
+from blackcat.security.workspace_access import current_tool_workspace
 
 
 class CliAppsToolConfig(Base):

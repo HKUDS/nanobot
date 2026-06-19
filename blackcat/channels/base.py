@@ -89,7 +89,7 @@ class BaseChannel(ABC):
         pass
 
     @abstractmethod
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
 
@@ -100,6 +100,10 @@ class BaseChannel(ABC):
         can apply any retry policy in one place.
         """
         pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        """Delegate to the channel-specific ``_send_impl``."""
+        await self._send_impl(msg)
 
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         """Deliver a streaming text chunk.

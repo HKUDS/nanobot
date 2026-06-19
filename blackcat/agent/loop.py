@@ -59,10 +59,10 @@ from blackcat.session.goal_state import (
 from blackcat.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from blackcat.session.manager import Session, SessionManager
 from blackcat.utils.document import extract_documents, reference_non_image_attachments
-from blackcat.utils.helpers import image_placeholder_text
 from blackcat.utils.helpers import truncate_text as truncate_text_fn
 from blackcat.utils.image_generation_intent import image_generation_prompt
 from blackcat.utils.llm_runtime import LLMRuntime
+from blackcat.utils.media import image_placeholder_text
 from blackcat.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )

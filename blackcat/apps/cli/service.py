@@ -944,7 +944,7 @@ Prefer machine-readable output when the CLI supports `--json`.
             return content
         name = str(app.get("name") or "unknown")
         note = f"""{marker}
-## Nanobot execution
+## Blackcat execution
 
 Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not invoke this CLI through shell unless the user explicitly asks. Prefer this skill when Runtime Context mentions `@{name}` as a CLI App Attachment.
 """

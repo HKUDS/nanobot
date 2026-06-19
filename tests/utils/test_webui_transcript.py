@@ -25,8 +25,8 @@ def test_append_and_read_roundtrip(tmp_path, monkeypatch) -> None:
 
 
 def _force_small_transcript_budget(monkeypatch, *, limit: int = 520, target: int = 260) -> None:
-    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_FILE_BYTES", limit)
-    monkeypatch.setattr("nanobot.webui.transcript._TARGET_ACTIVE_TRANSCRIPT_BYTES", target)
+    monkeypatch.setattr("blackcat.webui.transcript._MAX_TRANSCRIPT_FILE_BYTES", limit)
+    monkeypatch.setattr("blackcat.webui.transcript._TARGET_ACTIVE_TRANSCRIPT_BYTES", target)
 
 
 def _append_numbered_turn(key: str, chat_id: str, idx: int) -> None:
@@ -42,7 +42,7 @@ def _append_numbered_turn(key: str, chat_id: str, idx: int) -> None:
 
 
 def _write_segmented_turns(tmp_path, monkeypatch, key: str, chat_id: str, count: int) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     _force_small_transcript_budget(monkeypatch)
     for idx in range(1, count + 1):
         _append_numbered_turn(key, chat_id, idx)
@@ -161,7 +161,7 @@ def test_fork_transcript_reads_across_segments(tmp_path, monkeypatch) -> None:
 
 
 def test_fork_transcript_before_user_index_copies_only_prefix(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     source = "websocket:source"
     for ev in (
         {"event": "user", "chat_id": "source", "text": "round1"},
@@ -184,7 +184,7 @@ def test_fork_transcript_before_user_index_copies_only_prefix(tmp_path, monkeypa
 
 
 def test_fork_transcript_rejects_out_of_range_user_index(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     source = "websocket:source"
     append_transcript_object(source, {"event": "user", "chat_id": "source", "text": "round1"})
 
@@ -193,7 +193,7 @@ def test_fork_transcript_rejects_out_of_range_user_index(tmp_path, monkeypatch) 
 
 
 def test_build_response_reports_fork_boundary_from_marker(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:fork"
     for ev in (
         {"event": "user", "chat_id": "fork", "text": "round1"},
@@ -211,7 +211,7 @@ def test_build_response_reports_fork_boundary_from_marker(tmp_path, monkeypatch)
 
 
 def test_nested_fork_drops_inherited_fork_marker(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     source = "websocket:source"
     for ev in (
         {"event": "user", "chat_id": "source", "text": "round1"},
@@ -248,7 +248,7 @@ def test_write_session_messages_as_transcript_builds_canonical_prefix(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
 
     write_session_messages_as_transcript(
         "websocket:fork",
@@ -294,7 +294,7 @@ def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:cron-tail"
     turn_id = "cron:job:run"
     for ev in (
@@ -357,7 +357,7 @@ def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
 
 
 def test_thread_response_marks_unfinished_tool_tail_pending(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:active-tail"
     append_transcript_object(
         key,

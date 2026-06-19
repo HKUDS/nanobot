@@ -248,3 +248,91 @@ def load_bundled_template(template_name: str) -> str | None:
         if tpl.is_file():
             return tpl.read_text(encoding="utf-8")
     return None
+
+
+_TRUNCATED_SUFFIX = "\n... (truncated)"
+
+
+def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to a token budget with a stable suffix.
+
+    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
+    regardless of language or content (CJK and code cost more tokens per char).
+    Falls back to a char-based estimate (~4 chars/token) if tiktoken is
+    unavailable.
+    """
+    if max_tokens <= 0:
+        return text
+    try:
+        import tiktoken
+
+        enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
+        body_budget = max_tokens - len(suffix_tokens)
+        if body_budget <= 0:
+            return enc.decode(tokens[:max_tokens])
+        for candidate_budget in range(body_budget, -1, -1):
+            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+            if len(enc.encode(result)) <= max_tokens:
+                return result
+        return enc.decode(tokens[:max_tokens])
+    except Exception:
+        max_chars = max_tokens * 4
+        suffix_chars = len(_TRUNCATED_SUFFIX)
+        if max_chars <= suffix_chars:
+            return text[:max_chars]
+        return truncate_text(text, max_chars - suffix_chars)
+
+
+def recent_message_start_index(
+    messages: list[dict[str, Any]],
+    max_messages: int,
+    *,
+    extend_to_user: bool = False,
+) -> int:
+    """Return the start index for a recent replay window."""
+    if max_messages <= 0:
+        return len(messages)
+    start_idx = max(0, len(messages) - max_messages)
+    if not extend_to_user or len(messages) <= max_messages:
+        return start_idx
+    if any(messages[i].get("role") == "user" for i in range(start_idx, len(messages))):
+        return start_idx
+
+    recovered_user = next(
+        (i for i in range(start_idx - 1, -1, -1) if messages[i].get("role") == "user"),
+        None,
+    )
+    if recovered_user is None:
+        return start_idx
+    if recovered_user > 0 and messages[recovered_user - 1].get("_channel_delivery"):
+        return recovered_user - 1
+    return recovered_user
+
+
+# Re-exports: functions moved to dedicated modules by upstream refactors
+from blackcat.utils.formatting import (  # noqa: E402, F401
+    IncrementalThinkExtractor,
+    build_assistant_message,
+    extract_reasoning,
+    split_message,
+    stringify_text_blocks,
+    strip_think,
+    truncate_text,
+)
+from blackcat.utils.media import (  # noqa: E402, F401
+    build_image_content_blocks,
+    detect_image_mime,
+    image_placeholder_text,
+)
+from blackcat.utils.tokens import (  # noqa: E402, F401
+    estimate_message_tokens,
+    estimate_prompt_tokens,
+    estimate_prompt_tokens_chain,
+)
+from blackcat.utils.tools import (  # noqa: E402, F401
+    maybe_persist_tool_result,
+)

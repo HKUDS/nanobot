@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import AliasChoices, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 
+from blackcat.config.paths import get_workspace_path
 from blackcat.config_base import Base
 from blackcat.cron.types import CronSchedule
 
@@ -141,7 +142,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     bot_name: str = "blackcat"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
-    bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
+    bot_icon: str = "🐈‍⬛"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
@@ -290,6 +291,57 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+class WorkspaceConfig(Base):
+    """Per-workspace Lens configuration."""
+
+    path: str  # absolute path to workspace
+    diagnostics_source: Literal["cli", "vscode"] | None = None
+    """Override global diagnostics_source for this workspace. None = use global default."""
+
+
+class LensConfig(Base):
+    """Lens LSP bridge configuration."""
+
+    enabled: bool = False
+    workspaces: dict[str, str | WorkspaceConfig] = Field(default_factory=dict)
+    """Workspace name -> path (str) or full config (WorkspaceConfig).
+
+    Examples:
+        # Simple: just a path
+        "black-cat-py": "/path/to/black-cat-py"
+
+        # Full config with overrides
+        "Nomad's Map": {"path": "/path/to/NomadsMap", "diagnostics_source": "vscode"}
+    """
+    diagnostics_source: Literal["cli", "vscode"] = "cli"
+    """Default source for diagnostics.
+
+    - "cli": Run pyright/tsc directly (fresh results, works for healthy codebases)
+    - "vscode": Use VSCode extension (faster but may be stale, fallback for broken codebases)
+
+    Default is "cli" since most projects are healthy. Use "vscode" for large/complex
+    TypeScript projects where tsc --noEmit would be slow or fail.
+
+    Can be overridden per-workspace via WorkspaceConfig.diagnostics_source.
+    """
+
+    def get_workspace_paths(self) -> dict[str, str]:
+        """Get workspace name -> path mapping (normalizes str | WorkspaceConfig)."""
+        return {
+            name: str(get_workspace_path(
+                cfg.path if isinstance(cfg, WorkspaceConfig) else cfg
+            ))
+            for name, cfg in self.workspaces.items()
+        }
+
+    def get_workspace_source(self, workspace: str) -> Literal["cli", "vscode"]:
+        """Get diagnostics_source for a workspace (with per-workspace override)."""
+        ws_config = self.workspaces.get(workspace)
+        if isinstance(ws_config, WorkspaceConfig) and ws_config.diagnostics_source:
+            return ws_config.diagnostics_source
+        return self.diagnostics_source
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -310,6 +362,13 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     module = importlib.import_module(module_path)
     return getattr(module, class_name)()
 
+class PlatformIdentity(Base): # TODO: add all the other platforms
+    """Platform identifiers for a single author (user IDs per channel)."""
+
+    whatsapp: str | int | None = None
+    telegram: str | int | None = None
+    discord: str | int | None = None
+    cli: str | int | None = None
 
 class ToolsConfig(Base):
     """Tools configuration.
@@ -351,6 +410,8 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    lens: LensConfig = Field(default_factory=LensConfig)
+    authors: dict[str, PlatformIdentity] = Field(default_factory=dict)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
@@ -547,7 +608,7 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = ConfigDict(env_prefix="BLACKCAT_", env_nested_delimiter="__")
 
 
 def _resolve_tool_config_refs() -> None:

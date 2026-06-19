@@ -497,7 +497,7 @@ class WebSearchTool(Tool):
         headers = {
             "Content-Type": "application/json",
             "User-Agent": self.user_agent,
-            "X-Keenable-Title": "nanobot",
+            "X-Keenable-Title": "blackcat",
             "X-API-Key": api_key,
         }
         try:

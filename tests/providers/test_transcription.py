@@ -191,7 +191,7 @@ def test_resolver_accepts_legacy_xiaomi_transcription_alias() -> None:
 def test_transcription_registry_lists_providers_and_aliases() -> None:
     siliconflow = get_transcription_provider("siliconflow")
     assert siliconflow is not None
-    assert siliconflow.adapter == "nanobot.providers.transcription:OpenAITranscriptionProvider"
+    assert siliconflow.adapter == "blackcat.providers.transcription:OpenAITranscriptionProvider"
     assert siliconflow.load_adapter() is OpenAITranscriptionProvider
     assert siliconflow.default_model == "FunAudioLLM/SenseVoiceSmall"
     assert resolve_transcription_provider("silicon").name == "siliconflow"

@@ -83,7 +83,7 @@ from blackcat.webui.transcript import build_webui_thread_response
 from blackcat.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
-_AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+_AUTOMATION_VALUES_HEADER = "X-Blackcat-Automation-Values"
 
 if TYPE_CHECKING:
     from blackcat.bus.queue import MessageBus

@@ -1206,7 +1206,7 @@ def replay_transcript_to_ui_messages(
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
-    Mirrors the core fold in ``useNanobotStream.ts`` (delta, reasoning,
+    Mirrors the core fold in ``useBlackcatStream.ts`` (delta, reasoning,
     message+kind, turn_end). ``augment_user_media`` maps persisted filesystem
     paths to ``{url, name?}`` / attachment dicts the client expects. Assistant
     media gets a separate hook so replay can re-sign outbound attachments after

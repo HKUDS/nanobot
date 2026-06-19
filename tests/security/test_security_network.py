@@ -126,7 +126,7 @@ def test_allows_public_ip():
 
 def test_allows_normal_https():
     with patch("blackcat.security.network.socket.getaddrinfo", _fake_resolve("github.com", ["140.82.121.3"])):
-        ok, err = validate_url_target("https://github.com/HKUDS/nanobot")
+        ok, err = validate_url_target("https://github.com/HKUDS/blackcat")
         assert ok
 
 

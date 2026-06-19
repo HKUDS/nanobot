@@ -492,7 +492,7 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         release.wait(2.0)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
-    monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
+    monkeypatch.setattr("blackcat.webui.settings_routes.cli_apps_payload", slow_payload)
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29935)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -535,7 +535,7 @@ async def test_cli_apps_route_supports_installed_only_payload(
         calls.append(installed_only)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
-    monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", payload)
+    monkeypatch.setattr("blackcat.webui.settings_routes.cli_apps_payload", payload)
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=29936)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -652,7 +652,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"browserbase_api_key": "bb_live_secret"}
                 ),
             },
@@ -667,7 +667,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         bad_header = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/enable?name=browserbase",
-            headers={**auth, "X-Nanobot-MCP-Values": "[]"},
+            headers={**auth, "X-Blackcat-MCP-Values": "[]"},
         )
         assert bad_header.status_code == 400
 
@@ -675,7 +675,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/custom",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"name": "docs", "command": "npx"}
                 ),
             },
@@ -686,7 +686,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 
         imported = await _http_get(
             "http://127.0.0.1:29913/api/settings/mcp-presets/import",
-            headers={**auth, "X-Nanobot-MCP-Values": json.dumps({"config": "{}"})},
+            headers={**auth, "X-Blackcat-MCP-Values": json.dumps({"config": "{}"})},
         )
         assert imported.status_code == 200
         assert imported.json()["last_action"]["message"] == "import:config MCP config reloaded."
@@ -695,7 +695,7 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
             "http://127.0.0.1:29913/api/settings/mcp-presets/tools",
             headers={
                 **auth,
-                "X-Nanobot-MCP-Values": json.dumps(
+                "X-Blackcat-MCP-Values": json.dumps(
                     {"name": "docs", "enabled_tools": []}
                 ),
             },
@@ -924,7 +924,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
+                "X-Blackcat-Automation-Values": json.dumps(
                     {
                         "name": "Daily quiz",
                         "message": "Ask the daily quiz",
@@ -949,7 +949,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": quote(
+                "X-Blackcat-Automation-Values": quote(
                     json.dumps(
                         {
                             "name": "每日测验",
@@ -969,7 +969,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"message": ["bad"]}),
+                "X-Blackcat-Automation-Values": json.dumps({"message": ["bad"]}),
             },
         )
         assert malformed_update.status_code == 400
@@ -979,7 +979,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id={user_job.id}",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
+                "X-Blackcat-Automation-Values": json.dumps(
                     {"schedule": {"kind": "cron", "expr": "not a cron", "tz": "UTC"}}
                 ),
             },
@@ -991,7 +991,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id={past_one_shot_job.id}",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": json.dumps(
+                "X-Blackcat-Automation-Values": json.dumps(
                     {
                         "message": "Updated one-shot message",
                         "schedule": {"kind": "at", "at_ms": 1},
@@ -1007,7 +1007,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
             f"{base_url}/api/webui/automations/update?id=heartbeat",
             headers={
                 **auth,
-                "X-Nanobot-Automation-Values": json.dumps({"name": "bad"}),
+                "X-Blackcat-Automation-Values": json.dumps({"name": "bad"}),
             },
         )
         assert protected_update.status_code == 403
@@ -1510,7 +1510,7 @@ def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
 def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 
@@ -1604,7 +1604,7 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
 def test_bootstrap_accepts_x_blackcat_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(
-        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+        _REMOTE, _FakeReq({"X-Blackcat-Auth": "s3cret"})
     )
     assert resp.status_code == 200
 

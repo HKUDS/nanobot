@@ -361,7 +361,7 @@ def test_exec_allows_format_in_url_and_args(command):
 def test_exec_allows_workspace_paths_from_subdirectory(tmp_path):
     """Absolute paths inside the workspace root must be allowed even when cwd
     is a subdirectory.  This is the scenario reported in the issue: git
-    commands in ``~/.nanobot/workspace/obsidian_notes`` reference paths
+    commands in ``~/.blackcat/workspace/obsidian_notes`` reference paths
     under the broader workspace that are outside the subdirectory cwd."""
     workspace = tmp_path / "workspace"
     subdir = workspace / "obsidian_notes"

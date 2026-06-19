@@ -15,9 +15,9 @@ from typing import Any
 import json_repair
 from loguru import logger
 
-from blackcat.utils.helpers import image_placeholder_text
+from blackcat.utils.media import image_placeholder_text
 
-STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
+STREAM_IDLE_TIMEOUT_ENV = "BLACKCAT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 

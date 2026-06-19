@@ -822,7 +822,7 @@ def test_update_uses_uv_pip_reinstall_when_pip_unavailable(
     manager = _manager(tmp_path)
     monkeypatch.setattr(CliAppManager, "_pip_available", staticmethod(lambda: False))
     monkeypatch.setattr(
-        "nanobot.apps.cli.service.shutil.which",
+        "blackcat.apps.cli.service.shutil.which",
         lambda command: "/usr/bin/uv" if command == "uv" else None,
     )
 

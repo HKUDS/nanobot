@@ -497,7 +497,7 @@ class MatrixChannel(BaseChannel):
             return fail
         return None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send outbound content; clear typing for non-progress messages."""
         if not self.client:
             return
