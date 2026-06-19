@@ -123,9 +123,9 @@ async def test_suspend_ends_turn_without_a_second_model_call():
 
 
 @pytest.mark.asyncio
-async def test_suspend_records_every_tool_result_in_the_batch():
-    """A turn that fans out several tools (e.g. one grouped approval covering
-    multiple services) records all their results and suspends once."""
+async def test_all_suspended_batch_records_every_result_and_ends_turn():
+    """When EVERY tool in a fanned-out batch suspends (e.g. one grouped approval
+    covering multiple services), all results are recorded and the turn ends."""
     provider = MagicMock()
     calls = {"n": 0}
 
@@ -141,7 +141,7 @@ async def test_suspend_records_every_tool_result_in_the_batch():
                 finish_reason="tool_calls",
                 usage={},
             )
-        raise AssertionError("model must not be re-invoked after a suspended turn")
+        raise AssertionError("model must not be re-invoked when the whole batch suspended")
 
     provider.chat_with_retry = chat_with_retry
     tools = ToolRegistry()
@@ -155,6 +155,43 @@ async def test_suspend_records_every_tool_result_in_the_batch():
     assert result.final_content is None
     assert _tool_message(result, "a")["content"] == "Approval A pending."
     assert _tool_message(result, "b")["content"] == "Approval B pending."
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_continues_and_responds_about_completed_tools():
+    """A MIXED batch (one normal result + one SuspendTurn) does NOT end the turn:
+    the model is called again to respond using the completed result, while the
+    suspended tool's placeholder is recorded and it defers/resumes later."""
+    provider = MagicMock()
+    calls = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="A", name="echo", arguments={}),            # normal
+                    ToolCallRequest(id="B", name="needs_approval", arguments={}),   # suspends
+                ],
+                finish_reason="tool_calls",
+                usage={},
+            )
+        return LLMResponse(content="Here is the calendar.", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = ToolRegistry()
+    tools.register(_EchoTool())
+    tools.register(_SuspendingTool("needs_approval", "Approval requested; handled separately."))
+
+    result = await AgentRunner(provider).run(_spec(tools))
+
+    assert calls["n"] == 2                     # turn CONTINUED: model was re-invoked
+    assert result.stop_reason == "completed"   # not "suspended"
+    assert result.final_content == "Here is the calendar."
+    # Both results are in history: the completed one and the suspended placeholder.
+    assert _tool_message(result, "A")["content"] == "ok"
+    assert _tool_message(result, "B")["content"] == "Approval requested; handled separately."
 
 
 @pytest.mark.asyncio

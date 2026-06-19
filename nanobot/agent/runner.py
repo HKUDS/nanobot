@@ -489,15 +489,23 @@ class AgentRunner:
                         had_injections = True
                         continue
                     break
-                if any(isinstance(result, SuspendTurn) for result in results):
-                    # A tool asked to suspend the turn (human-in-the-loop /
-                    # async continuation). The tool results are already in
-                    # `messages` above, so the assistant tool_call stays
-                    # answered and history is valid for the resuming turn.
-                    # End the turn now: do NOT call the model again (so it
-                    # cannot emit a stray "waiting…" narration) and leave
-                    # `final_content` None so nothing is published. The next
-                    # inbound message continues the conversation normally.
+                if results and all(isinstance(result, SuspendTurn) for result in results):
+                    # Every tool in this batch suspended (human-in-the-loop /
+                    # async continuation), so there is nothing for the model to
+                    # respond about. End the turn now: do NOT call the model
+                    # again (so it cannot emit a stray "waiting…" narration) and
+                    # leave `final_content` None so nothing is published. The
+                    # results are already in `messages`, so the assistant
+                    # tool_calls stay answered and history is valid; the next
+                    # inbound message continues the conversation.
+                    #
+                    # A *mixed* batch (some suspended, some not) deliberately
+                    # does NOT end the turn — it falls through to the normal
+                    # continuation below so the model can respond using the
+                    # completed tools' results while the suspended ones defer
+                    # and resume later. Their recorded `tool_content` should
+                    # tell the model they are handled separately so it does not
+                    # wait on or dwell on them.
                     stop_reason = "suspended"
                     final_content = None
                     context.final_content = None

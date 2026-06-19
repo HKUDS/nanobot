@@ -20,12 +20,23 @@ _ToolT = TypeVar("_ToolT", bound="Tool")
 class SuspendTurn:
     """Sentinel a tool returns to *suspend* the current agent turn.
 
-    When ``Tool.execute`` returns ``SuspendTurn``, the runner finishes the
-    current tool batch, records ``tool_content`` as this tool call's result,
-    and then **ends the turn**: the model is not invoked again, no final
-    assistant message is produced, and nothing is sent to the user. The
-    conversation resumes when a future inbound message arrives — the ordinary
-    message path, with no special resume machinery.
+    When ``Tool.execute`` returns ``SuspendTurn``, the runner records
+    ``tool_content`` as that tool call's result so history stays well-formed,
+    then behaves based on the rest of the batch:
+
+    * If **every** tool in the batch suspended, the turn **ends**: the model is
+      not invoked again, no final assistant message is produced, and nothing is
+      sent to the user. (This is the common single-gated-action case — e.g. a
+      lone ``send_email`` awaiting approval.)
+    * If the batch is **mixed** (other tools returned normal results), the turn
+      **continues** so the model can respond using the completed results; the
+      suspended tools defer and resume later. Phrase ``tool_content`` so the
+      model treats the suspended action as handled separately (the application
+      usually surfaces it to the user itself, e.g. an approval card) and does
+      not wait on or dwell on it.
+
+    Either way the conversation resumes when a future inbound message arrives —
+    the ordinary message path, with no special resume machinery.
 
     It is the building block for *human-in-the-loop* and *asynchronous*
     continuations, where a turn must wait on something outside the agent loop:
@@ -67,10 +78,15 @@ class SuspendTurn:
 
     ``tool_content`` is the placeholder recorded as the tool call's result;
     keep it short and factual (e.g. ``"Approval requested; awaiting user."``).
-    The model only sees it if it reads back history on the resuming turn.
+    In an all-suspended turn the model never reads it; in a mixed batch it does,
+    so phrase it to convey that the action is handled separately and should not
+    be waited on or described.
     """
 
-    tool_content: str = "Turn suspended; awaiting external input. It will resume when the input arrives."
+    tool_content: str = (
+        "Awaiting external input; handled separately and will resume when it arrives. "
+        "Do not wait on or describe this action; continue with any other results."
+    )
 
 
 # Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
