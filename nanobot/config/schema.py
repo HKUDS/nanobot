@@ -77,6 +77,8 @@ class DreamConfig(Base):
 
     def describe_schedule(self) -> str:
         """Return a human-readable summary for logs and startup output."""
+        if not self.enabled:
+            return "disabled"
         if self.cron:
             return f"cron {self.cron} (legacy)"
         hours = self.interval_h
