@@ -14,6 +14,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.base import SuspendTurn
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -487,6 +488,21 @@ class AgentRunner:
                     if should_continue:
                         had_injections = True
                         continue
+                    break
+                if any(isinstance(result, SuspendTurn) for result in results):
+                    # A tool asked to suspend the turn (human-in-the-loop /
+                    # async continuation). The tool results are already in
+                    # `messages` above, so the assistant tool_call stays
+                    # answered and history is valid for the resuming turn.
+                    # End the turn now: do NOT call the model again (so it
+                    # cannot emit a stray "waiting…" narration) and leave
+                    # `final_content` None so nothing is published. The next
+                    # inbound message continues the conversation normally.
+                    stop_reason = "suspended"
+                    final_content = None
+                    context.final_content = None
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
                     break
                 await self._emit_checkpoint(
                     spec,
@@ -1332,6 +1348,11 @@ class AgentRunner:
         tool_name: str,
         result: Any,
     ) -> Any:
+        if isinstance(result, SuspendTurn):
+            # The turn is being suspended; record the short placeholder as the
+            # tool call's result so the assistant tool_call stays answered and
+            # history remains well-formed for the resuming turn.
+            result = result.tool_content
         result = ensure_nonempty_tool_result(tool_name, result)
         if tool_name in _TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             # Exempt tools bound their own output; skip generic offload and truncation.

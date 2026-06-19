@@ -1,6 +1,6 @@
 """Agent tools module."""
 
-from nanobot.agent.tools.base import Schema, Tool, tool_parameters
+from nanobot.agent.tools.base import Schema, SuspendTurn, Tool, tool_parameters
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
@@ -22,6 +22,7 @@ __all__ = [
     "NumberSchema",
     "ObjectSchema",
     "StringSchema",
+    "SuspendTurn",
     "Tool",
     "ToolContext",
     "ToolLoader",

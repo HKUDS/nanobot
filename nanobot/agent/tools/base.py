@@ -5,6 +5,7 @@ import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 if typing.TYPE_CHECKING:
@@ -13,6 +14,64 @@ if typing.TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
+
+
+@dataclass(frozen=True)
+class SuspendTurn:
+    """Sentinel a tool returns to *suspend* the current agent turn.
+
+    When ``Tool.execute`` returns ``SuspendTurn``, the runner finishes the
+    current tool batch, records ``tool_content`` as this tool call's result,
+    and then **ends the turn**: the model is not invoked again, no final
+    assistant message is produced, and nothing is sent to the user. The
+    conversation resumes when a future inbound message arrives — the ordinary
+    message path, with no special resume machinery.
+
+    It is the building block for *human-in-the-loop* and *asynchronous*
+    continuations, where a turn must wait on something outside the agent loop:
+    approval gates, webhooks/callbacks, long-running external jobs, or hand-off
+    to another agent or a person.
+
+    Resuming is the application's job and uses the ordinary message path — the
+    framework keeps no suspension state. The suspended turn is persisted with
+    the ``tool_call`` answered by ``tool_content``, so history is well-formed.
+    When the awaited event arrives, the application sends a normal inbound
+    message on the same session (carrying whatever result it wants the model to
+    act on). Because the suspended turn has already ended, that inbound starts a
+    fresh turn which sees the saved history plus the new input and continues the
+    conversation. The application is responsible for persisting whatever it
+    needs to produce that inbound (e.g. a pending-approval record); ``nanobot``
+    only ends the turn cleanly and leaves valid history behind.
+
+    Why a return-value sentinel, rather than the obvious alternatives:
+
+    * **vs. blocking the tool until the event arrives** — blocking holds the
+      per-session turn open for an unbounded time: the session lock stays
+      pinned, LLM/turn resources stay allocated, tool timeouts fire, and
+      nothing survives a process restart. ``SuspendTurn`` instead *ends* the
+      turn, so idle waits cost nothing, scale to many concurrent suspensions,
+      and are naturally restart-safe — the framework keeps no suspension
+      state; the application persists whatever it needs and re-enters with a
+      normal inbound, like any other message.
+
+    * **vs. letting the model reply and filtering it afterwards** — once a tool
+      returns a normal result the loop calls the model again, and the model
+      narrates ("I've requested approval, waiting…"). Filtering that out after
+      the fact is racy and easy to get wrong (drop the real reply, or leak the
+      stale one). Never calling the model removes the failure mode entirely.
+
+    * **vs. raising an exception** — a raise unwinds before the tool result is
+      recorded, leaving the assistant ``tool_call`` unanswered and the
+      conversation history invalid for the next turn. Returning a value keeps
+      the ``tool_call``/result pair intact, so history stays well-formed.
+
+    ``tool_content`` is the placeholder recorded as the tool call's result;
+    keep it short and factual (e.g. ``"Approval requested; awaiting user."``).
+    The model only sees it if it reads back history on the resuming turn.
+    """
+
+    tool_content: str = "Turn suspended; awaiting external input. It will resume when the input arrives."
+
 
 # Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
