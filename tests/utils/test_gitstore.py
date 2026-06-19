@@ -1,7 +1,6 @@
 """Tests for GitStore — line_ages() and core git operations."""
 
 import subprocess
-import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -71,25 +70,32 @@ class TestLineAges:
 
     def test_partial_edit_only_updates_changed_lines(self, git, tmp_path):
         """Only modified lines should reflect the new commit's timestamp."""
+        now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        old = now - timedelta(days=30)
+
         (tmp_path / "MEMORY.md").write_text(
             "# Memory\n\n## A\n- old\n\n## B\n- keep\n", encoding="utf-8"
         )
-        git.auto_commit("commit1")
-        time.sleep(1.1)
+        with patch("dulwich.worktree.time.time", return_value=old.timestamp()):
+            git.auto_commit("commit1")
 
         # Only modify section A
         (tmp_path / "MEMORY.md").write_text(
             "# Memory\n\n## A\n- new\n\n## B\n- keep\n", encoding="utf-8"
         )
-        git.auto_commit("commit2")
+        with patch("dulwich.worktree.time.time", return_value=now.timestamp()):
+            git.auto_commit("commit2")
 
-        ages = git.line_ages("MEMORY.md")
+        with patch("nanobot.utils.gitstore.datetime") as mock_dt:
+            mock_dt.now.return_value = now
+            mock_dt.fromtimestamp = datetime.fromtimestamp
+            ages = git.line_ages("MEMORY.md")
+
         lines = (tmp_path / "MEMORY.md").read_text(encoding="utf-8").splitlines()
-        # All lines are from today, but verify line-level tracking works
         assert len(ages) == len(lines)
-        # "- new" line and "- keep" line both age=0 (same day), but
-        # the key point is we get per-line results
-        assert len(ages) == 7
+        age_by_line = {line: age.age_days for line, age in zip(lines, ages, strict=True)}
+        assert age_by_line["- new"] == 0
+        assert age_by_line["- keep"] == 30
 
 
 class TestNestedRepoProtection:

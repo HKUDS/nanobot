@@ -207,6 +207,16 @@ if DISCORD_AVAILABLE:
                 ) -> None:
                     await self._forward_slash_command(interaction, _command_text)
 
+            @self.tree.command(name="model", description="Show or switch runtime model preset")
+            @app_commands.describe(preset="Optional model preset name, such as default")
+            async def model_command(
+                interaction: discord.Interaction,
+                preset: str | None = None,
+            ) -> None:
+                preset = (preset or "").strip()
+                command_text = f"/model {preset}" if preset else "/model"
+                await self._forward_slash_command(interaction, command_text)
+
             @self.tree.command(name="help", description="Show available commands")
             async def help_command(interaction: discord.Interaction) -> None:
                 sender_id = str(interaction.user.id)
@@ -577,6 +587,7 @@ class DiscordChannel(BaseChannel):
                 media=media_paths,
                 metadata=metadata,
                 session_key=session_key,
+                is_dm=message.guild is None,
             )
         except Exception:
             await self._clear_reactions(channel_id)

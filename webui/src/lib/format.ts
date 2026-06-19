@@ -1,10 +1,35 @@
 import i18n, { currentLocale } from "@/i18n";
 
+const LOW_INFORMATION_TITLE_PREVIEWS = new Set([
+  "hi",
+  "hello",
+  "hey",
+  "hello nano",
+  "hello nanobot",
+  "hi nano",
+  "hi nanobot",
+  "你好",
+  "您好",
+  "嗨",
+  "哈喽",
+  "哈啰",
+  "在吗",
+]);
+
+function isLowInformationTitlePreview(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[.!?。！？~～\s]+$/g, "").trim();
+  return (
+    normalized.startsWith("/") ||
+    LOW_INFORMATION_TITLE_PREVIEWS.has(normalized)
+  );
+}
+
 /** Truncate the first user message into a chat title. */
 export function deriveTitle(preview: string | undefined, fallback: string): string {
   if (!preview) return fallback;
   const oneLine = preview.replace(/\s+/g, " ").trim();
   if (!oneLine) return fallback;
+  if (isLowInformationTitlePreview(oneLine)) return fallback;
   return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
 }
 
@@ -74,4 +99,34 @@ export function fmtDateTime(
 ): string {
   const date = parseDate(value);
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
+}
+
+/** Human-readable turn duration (wall-clock), locale-aware via ``Intl`` (seconds/minutes). */
+export function formatTurnLatency(ms: number, locale?: string): string {
+  const loc = activeLocale(locale);
+  const msClamped = Math.max(0, ms);
+  const secTotal = msClamped / 1000;
+  if (secTotal < 60) {
+    return new Intl.NumberFormat(loc, {
+      style: "unit",
+      unit: "second",
+      unitDisplay: "narrow",
+      maximumFractionDigits: secTotal < 10 ? 1 : 0,
+      minimumFractionDigits: 0,
+    }).format(secTotal);
+  }
+  const wholeMin = Math.floor(secTotal / 60);
+  const remSec = Math.max(0, Math.round(secTotal - wholeMin * 60));
+  const minStr = new Intl.NumberFormat(loc, {
+    style: "unit",
+    unit: "minute",
+    unitDisplay: "narrow",
+  }).format(wholeMin);
+  const secStr = new Intl.NumberFormat(loc, {
+    style: "unit",
+    unit: "second",
+    unitDisplay: "narrow",
+    maximumFractionDigits: 0,
+  }).format(remSec);
+  return `${minStr}\u00a0${secStr}`;
 }

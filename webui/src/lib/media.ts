@@ -8,6 +8,7 @@ const IMAGE_EXTENSIONS = new Set([
   ".webp",
   ".bmp",
   ".ico",
+  ".svg",
   ".tif",
   ".tiff",
 ]);
@@ -34,15 +35,20 @@ function extensionOf(value?: string): string {
   return path.slice(dot);
 }
 
-export function inferMediaKind(media: { url?: string; name?: string }): UIMediaKind {
+function explicitMediaKind(media: { url?: string; name?: string }): UIMediaKind | null {
   const url = media.url ?? "";
   if (url.startsWith("data:image/")) return "image";
   if (url.startsWith("data:video/")) return "video";
 
   const ext = extensionOf(media.name) || extensionOf(url);
+  if (!ext) return null;
   if (IMAGE_EXTENSIONS.has(ext)) return "image";
   if (VIDEO_EXTENSIONS.has(ext)) return "video";
   return "file";
+}
+
+export function inferMediaKind(media: { url?: string; name?: string }): UIMediaKind {
+  return explicitMediaKind(media) ?? "file";
 }
 
 export function toMediaAttachment(media: {
@@ -51,9 +57,8 @@ export function toMediaAttachment(media: {
   kind?: UIMediaKind;
 }): UIMediaAttachment {
   return {
-    kind: media.kind ?? inferMediaKind(media),
+    kind: explicitMediaKind(media) ?? media.kind ?? "file",
     url: media.url,
     name: media.name,
   };
 }
-

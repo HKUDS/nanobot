@@ -10,13 +10,21 @@ from nanobot.agent.hook import AgentHookContext
 
 
 def on_progress_accepts_tool_events(cb: Callable[..., Any]) -> bool:
+    return _on_progress_accepts(cb, "tool_events")
+
+
+def on_progress_accepts_file_edit_events(cb: Callable[..., Any]) -> bool:
+    return _on_progress_accepts(cb, "file_edit_events")
+
+
+def _on_progress_accepts(cb: Callable[..., Any], name: str) -> bool:
     try:
         sig = inspect.signature(cb)
     except (TypeError, ValueError):
         return False
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
         return True
-    return "tool_events" in sig.parameters
+    return name in sig.parameters
 
 
 async def invoke_on_progress(
@@ -32,13 +40,27 @@ async def invoke_on_progress(
     await on_progress(content, tool_hint=tool_hint)
 
 
+async def invoke_file_edit_progress(
+    on_progress: Callable[..., Awaitable[None]],
+    file_edit_events: list[dict[str, Any]],
+) -> None:
+    if not file_edit_events or not on_progress_accepts_file_edit_events(on_progress):
+        return
+    await on_progress("", file_edit_events=file_edit_events)
+
+
+def _tool_event_arguments(tool_call: Any) -> dict[str, Any]:
+    arguments = getattr(tool_call, "arguments", {}) or {}
+    return arguments if isinstance(arguments, dict) else {}
+
+
 def build_tool_event_start_payload(tool_call: Any) -> dict[str, Any]:
     return {
         "version": 1,
         "phase": "start",
         "call_id": str(getattr(tool_call, "id", "") or ""),
         "name": getattr(tool_call, "name", ""),
-        "arguments": getattr(tool_call, "arguments", {}) or {},
+        "arguments": _tool_event_arguments(tool_call),
         "result": None,
         "error": None,
         "files": [],
@@ -69,7 +91,7 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
             "phase": phase,
             "call_id": str(getattr(tool_call, "id", "") or ""),
             "name": getattr(tool_call, "name", ""),
-            "arguments": getattr(tool_call, "arguments", {}) or {},
+            "arguments": _tool_event_arguments(tool_call),
             "result": result if phase == "end" else None,
             "error": None,
             "files": files,

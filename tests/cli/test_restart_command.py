@@ -32,15 +32,6 @@ def _make_loop():
     return loop, bus
 
 
-async def _wait_until(predicate, *, timeout: float = 0.2, interval: float = 0.01) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        await asyncio.sleep(interval)
-    assert predicate()
-
-
 class TestRestartCommand:
 
     @pytest.mark.asyncio
@@ -91,13 +82,29 @@ class TestRestartCommand:
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+
+        def _capture_task(coro):
+            task = asyncio.create_task(coro)
+            scheduled.append(task)
+            return task
+
+        fake_asyncio = SimpleNamespace(
+            sleep=_fast_sleep,
+            create_task=_capture_task,
+        )
+
         with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
+             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
              patch("nanobot.command.builtin.os.execv"):
             await bus.publish_inbound(msg)
 
             loop._running = True
             run_task = asyncio.create_task(loop.run())
-            await asyncio.sleep(0.1)
+            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
             loop._running = False
             run_task.cancel()
             try:
@@ -106,8 +113,9 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
-            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
             assert "Restarting" in out.content
+            assert scheduled
+            await scheduled[0]
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):
@@ -120,7 +128,7 @@ class TestRestartCommand:
 
             loop._running = True
             run_task = asyncio.create_task(loop.run())
-            await asyncio.sleep(0.1)
+            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
             loop._running = False
             run_task.cancel()
             try:
@@ -129,7 +137,6 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
-            out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
             assert "nanobot" in out.content.lower() or "Model" in out.content
 
     @pytest.mark.asyncio
@@ -138,7 +145,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
 
         run_task = asyncio.create_task(loop.run())
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         run_task.cancel()
 
         with pytest.raises(asyncio.CancelledError):
@@ -207,8 +214,16 @@ class TestRestartCommand:
         assert "Tasks: 3 active" in response.content
 
     @pytest.mark.asyncio
-    async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
+    async def test_run_agent_loop_estimates_usage_when_provider_omits_it(self, monkeypatch):
         loop, _bus = _make_loop()
+        monkeypatch.setattr(
+            "nanobot.agent.runner.estimate_prompt_tokens_chain",
+            lambda *_args, **_kwargs: (123, "test"),
+        )
+        monkeypatch.setattr(
+            "nanobot.agent.runner.estimate_message_tokens",
+            lambda _message: 7,
+        )
         loop.provider.chat_with_retry = AsyncMock(side_effect=[
             LLMResponse(content="first", usage={"prompt_tokens": 9, "completion_tokens": 4}),
             LLMResponse(content="second", usage={}),
@@ -219,8 +234,9 @@ class TestRestartCommand:
         assert loop._last_usage["completion_tokens"] == 4
 
         await loop._run_agent_loop([])
-        assert loop._last_usage["prompt_tokens"] == 0
-        assert loop._last_usage["completion_tokens"] == 0
+        assert loop._last_usage["prompt_tokens"] == 123
+        assert loop._last_usage["completion_tokens"] == 7
+        assert loop._last_usage["estimated_tokens"] == 130
 
     @pytest.mark.asyncio
     async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):

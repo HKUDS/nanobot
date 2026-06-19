@@ -8,8 +8,8 @@ import pytest
 
 from nanobot.utils.media_decode import (
     DEFAULT_MAX_BYTES,
-    FileSizeExceeded,
     MAX_FILE_SIZE,
+    FileSizeExceeded,
     save_base64_data_url,
 )
 
@@ -23,6 +23,31 @@ def test_saves_png_with_correct_extension(tmp_path) -> None:
     assert result is not None
     assert result.endswith(".png")
     assert (tmp_path / result.split("/")[-1]).read_bytes() == b"fake png"
+
+
+def test_saves_data_url_with_mime_parameters(tmp_path) -> None:
+    result = save_base64_data_url(_data_url(b"voice", mime="audio/webm;codecs=opus"), tmp_path)
+    assert result is not None
+    assert result.endswith(".webm")
+    assert (tmp_path / result.split("/")[-1]).read_bytes() == b"voice"
+
+
+@pytest.mark.parametrize(
+    ("mime", "suffix"),
+    [
+        ("audio/webm", ".webm"),
+        ("video/webm", ".webm"),
+        ("audio/ogg", ".ogg"),
+        ("audio/wav", ".wav"),
+        ("audio/mpga", ".mpga"),
+    ],
+)
+def test_saves_common_audio_with_api_friendly_extension(
+    tmp_path, mime: str, suffix: str
+) -> None:
+    result = save_base64_data_url(_data_url(b"voice", mime=mime), tmp_path)
+    assert result is not None
+    assert result.endswith(suffix)
 
 
 def test_returns_none_for_malformed_data_url(tmp_path) -> None:

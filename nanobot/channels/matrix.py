@@ -8,30 +8,39 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
+from urllib.parse import quote, urlparse
 
 from pydantic import Field
 
+from nanobot.security.workspace_policy import is_path_within
+
 try:
+    import aiohttp
     import nh3
     from mistune import create_markdown
     from nio import (
         AsyncClient,
         AsyncClientConfig,
-        DownloadError,
         InviteEvent,
         JoinError,
+        KeyVerificationCancel,
+        KeyVerificationEvent,
+        KeyVerificationKey,
+        KeyVerificationMac,
+        KeyVerificationStart,
         LoginResponse,
         MatrixRoom,
-        MemoryDownloadResponse,
         RoomEncryptedMedia,
         RoomMessage,
         RoomMessageMedia,
         RoomMessageText,
         RoomSendError,
+        RoomSendResponse,
         RoomTypingError,
         SyncError,
-        UploadError, RoomSendResponse,
-)
+        ToDeviceError,
+        UploadError,
+    )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
 except ImportError as e:
@@ -60,6 +69,10 @@ _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.f
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
 MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
+
+
+class _MediaTooLargeError(Exception):
+    """Raised when an inbound Matrix media download exceeds the configured cap."""
 
 MATRIX_MARKDOWN = create_markdown(
     escape=True,
@@ -107,7 +120,7 @@ class _StreamBuf:
 
     :ivar text: Stores the text content of the buffer.
     :type text: str
-    :ivar event_id: Identifier for the associated event. None indicates no 
+    :ivar event_id: Identifier for the associated event. None indicates no
         specific event association.
     :type event_id: str | None
     :ivar last_edit: Timestamp of the most recent edit to the buffer.
@@ -140,19 +153,19 @@ def _build_matrix_text_content(
 ) -> dict[str, object]:
     """
     Constructs and returns a dictionary representing the matrix text content with optional
-    HTML formatting and reference to an existing event for replacement. This function is 
+    HTML formatting and reference to an existing event for replacement. This function is
     primarily used to create content payloads compatible with the Matrix messaging protocol.
 
     :param text: The plain text content to include in the message.
     :type text: str
-    :param event_id: Optional ID of the event to replace. If provided, the function will 
-        include information indicating that the message is a replacement of the specified 
+    :param event_id: Optional ID of the event to replace. If provided, the function will
+        include information indicating that the message is a replacement of the specified
         event.
     :type event_id: str | None
     :param thread_relates_to: Optional Matrix thread relation metadata. For edits this is
         stored in ``m.new_content`` so the replacement remains in the same thread.
     :type thread_relates_to: dict[str, object] | None
-    :return: A dictionary containing the matrix text content, potentially enriched with 
+    :return: A dictionary containing the matrix text content, potentially enriched with
         HTML formatting and replacement metadata if applicable.
     :rtype: dict[str, object]
     """
@@ -187,8 +200,10 @@ class MatrixConfig(Base):
     access_token: str = ""
     device_id: str = ""
     e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
+    sas_verification: bool = Field(default=False, alias="sasVerification")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
+    max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -230,6 +245,9 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._started_at_ms: int = 0
+        self._media_download_semaphore = asyncio.Semaphore(
+            max(1, int(self.config.max_concurrent_media_downloads))
+        )
 
 
     async def start(self) -> None:
@@ -257,6 +275,7 @@ class MatrixChannel(BaseChannel):
         )
 
         self._register_event_callbacks()
+        self._register_to_device_callbacks()
         self._register_response_callbacks()
 
         if not self.config.e2ee_enabled:
@@ -343,11 +362,7 @@ class MatrixChannel(BaseChannel):
         """Check path is inside workspace (when restriction enabled)."""
         if not self._restrict_to_workspace or not self._workspace:
             return True
-        try:
-            path.resolve(strict=False).relative_to(self._workspace)
-            return True
-        except ValueError:
-            return False
+        return is_path_within(path, self._workspace)
 
     def _collect_outbound_media_candidates(self, media: list[str]) -> list[Path]:
         """Deduplicate and resolve outbound attachment paths."""
@@ -412,6 +427,7 @@ class MatrixChannel(BaseChannel):
         try:
             response = await self.client.content_repository_config()
         except Exception:
+            self.logger.error("Failed to fetch server upload limit", exc_info=True)
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -457,6 +473,7 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
+            self.logger.error("Matrix media upload failed for %s", filename, exc_info=True)
             return fail
 
         upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
@@ -476,6 +493,7 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
+            self.logger.error("Matrix room content send failed for room_id=%s", room_id, exc_info=True)
             return fail
         return None
 
@@ -520,7 +538,7 @@ class MatrixChannel(BaseChannel):
                 return
 
             await self._stop_typing_keepalive(chat_id, clear_typing=True)
-            
+
             content = _build_matrix_text_content(
                 buf.text,
                 buf.event_id,
@@ -534,7 +552,7 @@ class MatrixChannel(BaseChannel):
             buf = _StreamBuf()
             self._stream_bufs[chat_id] = buf
         buf.text += delta
-    
+
         if not buf.text.strip():
             return
 
@@ -553,8 +571,8 @@ class MatrixChannel(BaseChannel):
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
             except Exception:
+                self.logger.error("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
-                pass
 
 
     def _register_event_callbacks(self) -> None:
@@ -562,10 +580,76 @@ class MatrixChannel(BaseChannel):
         self.client.add_event_callback(self._on_media_message, MATRIX_MEDIA_EVENT_FILTER)
         self.client.add_event_callback(self._on_room_invite, InviteEvent)
 
+    def _register_to_device_callbacks(self) -> None:
+        if self.config.e2ee_enabled and self.config.sas_verification:
+            self.client.add_to_device_callback(
+                self._on_key_verification_event,
+                (KeyVerificationEvent,),
+            )
+
     def _register_response_callbacks(self) -> None:
         self.client.add_response_callback(self._on_sync_error, SyncError)
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
+
+    def _is_sas_sender_allowed(self, sender: str) -> bool:
+        return bool(sender and self.is_allowed(sender))
+
+    async def _on_key_verification_event(self, event: KeyVerificationEvent) -> None:
+        try:
+            await self._handle_key_verification_event(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.exception("Matrix SAS verification handling failed")
+
+    async def _handle_key_verification_event(self, event: KeyVerificationEvent) -> None:
+        if not (self.config.e2ee_enabled and self.config.sas_verification):
+            return
+        if not self.client:
+            return
+
+        sender = str(getattr(event, "sender", "") or "")
+        transaction_id = str(getattr(event, "transaction_id", "") or "")
+        if not transaction_id or not self._is_sas_sender_allowed(sender):
+            return
+
+        if isinstance(event, KeyVerificationStart):
+            if "emoji" not in (getattr(event, "short_authentication_string", None) or []):
+                self.logger.info(
+                    "Ignoring Matrix SAS verification from {} without emoji support",
+                    sender,
+                )
+                return
+
+            response = await self.client.accept_key_verification(transaction_id)
+            if isinstance(response, ToDeviceError):
+                self.logger.warning("Matrix SAS accept failed for {}: {}", sender, response)
+            return
+
+        if isinstance(event, KeyVerificationKey):
+            responses = await self.client.send_to_device_messages()
+            if any(isinstance(response, ToDeviceError) for response in responses):
+                self.logger.warning("Matrix SAS key share failed for {}", sender)
+                return
+
+            response = await self.client.confirm_short_auth_string(transaction_id)
+            if isinstance(response, ToDeviceError):
+                self.logger.warning("Matrix SAS confirm failed for {}: {}", sender, response)
+            return
+
+        if isinstance(event, KeyVerificationMac):
+            sas = getattr(self.client, "key_verifications", {}).get(transaction_id)
+            if sas is not None and getattr(sas, "verified", False):
+                self.logger.info("Matrix SAS verification completed for {}", sender)
+            return
+
+        if isinstance(event, KeyVerificationCancel):
+            self.logger.info(
+                "Matrix SAS verification cancelled by {}: {}",
+                sender,
+                getattr(event, "reason", ""),
+            )
 
     def _is_fatal_auth_response(self, response: Any) -> bool:
         code = getattr(response, "status_code", None)
@@ -739,7 +823,7 @@ class MatrixChannel(BaseChannel):
     def _event_declared_size_bytes(self, event: MatrixMediaEvent) -> int | None:
         info = self._event_source_content(event).get("info")
         size = info.get("size") if isinstance(info, dict) else None
-        return size if isinstance(size, int) and size >= 0 else None
+        return size if type(size) is int and size >= 0 else None
 
     def _event_mime(self, event: MatrixMediaEvent) -> str | None:
         info = self._event_source_content(event).get("info")
@@ -768,26 +852,48 @@ class MatrixChannel(BaseChannel):
         event_prefix = (event_id[:24] or "evt").strip("_")
         return self._media_dir() / f"{event_prefix}_{stem}{suffix}"
 
-    async def _download_media_bytes(self, mxc_url: str) -> bytes | None:
-        if not self.client:
+    async def _download_media_bytes(self, mxc_url: str, limit_bytes: int) -> bytes | None:
+        if not self.client or limit_bytes <= 0:
+            raise _MediaTooLargeError
+
+        parsed = urlparse(mxc_url)
+        if parsed.scheme != "mxc" or not parsed.netloc or not parsed.path.strip("/"):
             return None
-        response = await self.client.download(mxc=mxc_url)
-        if isinstance(response, DownloadError):
-            self.logger.warning("download failed for {}: {}", mxc_url, response)
+
+        homeserver = str(getattr(self.client, "homeserver", "") or self.config.homeserver).rstrip("/")
+        media_url = (
+            f"{homeserver}/_matrix/client/v1/media/download/"
+            f"{quote(parsed.netloc, safe='')}/{quote(parsed.path.strip('/'), safe='')}"
+        )
+        token = getattr(self.client, "access_token", None) or self.config.access_token
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        timeout = aiohttp.ClientTimeout(total=None)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.get(media_url, params={"allow_remote": "true"}) as response:
+                    if response.status >= 400:
+                        self.logger.warning("download failed for {}: HTTP {}", mxc_url, response.status)
+                        return None
+                    content_length = response.headers.get("Content-Length")
+                    if content_length is not None:
+                        try:
+                            if int(content_length) > limit_bytes:
+                                raise _MediaTooLargeError
+                        except ValueError:
+                            pass
+
+                    chunks = bytearray()
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        chunks.extend(chunk)
+                        if len(chunks) > limit_bytes:
+                            raise _MediaTooLargeError
+                    return bytes(chunks)
+        except _MediaTooLargeError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            self.logger.warning("download failed for {}", mxc_url, exc_info=True)
             return None
-        body = getattr(response, "body", None)
-        if isinstance(body, (bytes, bytearray)):
-            return bytes(body)
-        if isinstance(response, MemoryDownloadResponse):
-            return bytes(response.body)
-        if isinstance(body, (str, Path)):
-            path = Path(body)
-            if path.is_file():
-                try:
-                    return path.read_bytes()
-                except OSError:
-                    return None
-        return None
 
     def _decrypt_media_bytes(self, event: MatrixMediaEvent, ciphertext: bytes) -> bytes | None:
         key_obj, hashes, iv = getattr(event, "key", None), getattr(event, "hashes", None), getattr(event, "iv", None)
@@ -816,10 +922,14 @@ class MatrixChannel(BaseChannel):
 
         limit_bytes = await self._effective_media_limit_bytes()
         declared = self._event_declared_size_bytes(event)
-        if declared is not None and declared > limit_bytes:
+        if declared is None or declared > limit_bytes:
             return None, _ATTACH_TOO_LARGE.format(filename)
 
-        downloaded = await self._download_media_bytes(mxc_url)
+        try:
+            async with self._media_download_semaphore:
+                downloaded = await self._download_media_bytes(mxc_url, limit_bytes)
+        except _MediaTooLargeError:
+            return None, _ATTACH_TOO_LARGE.format(filename)
         if downloaded is None:
             return None, fail
 
@@ -867,6 +977,7 @@ class MatrixChannel(BaseChannel):
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
                 content=event.body, metadata=self._base_metadata(room, event),
+                is_dm=self._is_direct_room(room),
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
@@ -904,6 +1015,7 @@ class MatrixChannel(BaseChannel):
                 content="\n".join(parts),
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
+                is_dm=self._is_direct_room(room),
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)

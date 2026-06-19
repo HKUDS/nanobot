@@ -4,10 +4,13 @@ import asyncio
 
 import pytest
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.cron.service import CronService
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 
 
 @pytest.mark.asyncio
@@ -23,14 +26,14 @@ async def test_message_tool_keeps_task_local_context() -> None:
     tool = MessageTool(send_callback=send_callback)
 
     async def task_one() -> str:
-        tool.set_context("feishu", "chat-a")
+        tool.set_context(RequestContext(channel="feishu", chat_id="chat-a"))
         entered.set()
         await release.wait()
         return await tool.execute(content="one")
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("email", "chat-b")
+        tool.set_context(RequestContext(channel="email", chat_id="chat-b"))
         release.set()
         return await tool.execute(content="two")
 
@@ -63,6 +66,8 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
+            temperature: float | None = None,
+            workspace_scope=None,
         ) -> str:
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"{origin_channel}:{origin_chat_id}:{task}"
@@ -70,14 +75,14 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
     tool = SpawnTool(_Manager())
 
     async def task_one() -> str:
-        tool.set_context("whatsapp", "chat-a")
+        tool.set_context(RequestContext(channel="whatsapp", chat_id="chat-a"))
         entered.set()
         await release.wait()
         return await tool.execute(task="one")
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("telegram", "chat-b")
+        tool.set_context(RequestContext(channel="telegram", chat_id="chat-b"))
         release.set()
         return await tool.execute(task="two")
 
@@ -96,14 +101,18 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     release = asyncio.Event()
 
     async def task_one() -> str:
-        tool.set_context("feishu", "chat-a")
+        tool.set_context(
+            RequestContext(channel="feishu", chat_id="chat-a", session_key="feishu:chat-a")
+        )
         entered.set()
         await release.wait()
         return await tool.execute(action="add", message="first", every_seconds=60)
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("email", "chat-b")
+        tool.set_context(
+            RequestContext(channel="email", chat_id="chat-b", session_key="email:chat-b")
+        )
         release.set()
         return await tool.execute(action="add", message="second", every_seconds=60)
 
@@ -113,8 +122,11 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     assert result_two.startswith("Created job")
 
     jobs = tool._cron.list_jobs()
-    assert {job.payload.channel for job in jobs} == {"feishu", "email"}
-    assert {job.payload.to for job in jobs} == {"chat-a", "chat-b"}
+    assert {job.payload.session_key for job in jobs} == {"feishu:chat-a", "email:chat-b"}
+    assert {(job.payload.origin_channel, job.payload.origin_chat_id) for job in jobs} == {
+        ("feishu", "chat-a"),
+        ("email", "chat-b"),
+    }
 
 
 # --- Basic single-task regression tests ---
@@ -129,7 +141,7 @@ async def test_message_tool_basic_set_context_and_execute() -> None:
         seen.append((msg.channel, msg.chat_id, msg.content))
 
     tool = MessageTool(send_callback=send_callback)
-    tool.set_context("telegram", "chat-123", "msg-456")
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-123", message_id="msg-456"))
 
     result = await tool.execute(content="hello")
     assert result == "Message sent to telegram:chat-123"
@@ -175,12 +187,14 @@ async def test_spawn_tool_basic_set_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            temperature=None,
+            workspace_scope=None,
         ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"ok: {task}"
 
     tool = SpawnTool(_Manager())
-    tool.set_context("feishu", "chat-abc")
+    tool.set_context(RequestContext(channel="feishu", chat_id="chat-abc"))
 
     result = await tool.execute(task="do something")
     assert result == "ok: do something"
@@ -207,6 +221,8 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            temperature=None,
+            workspace_scope=None,
         ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return "ok"
@@ -221,15 +237,74 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
 async def test_cron_tool_basic_set_context_and_execute(tmp_path) -> None:
     """Single task: set_context then add job should use correct target."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
-    tool.set_context("wechat", "user-789")
+    tool.set_context(
+        RequestContext(channel="wechat", chat_id="user-789", session_key="wechat:user-789")
+    )
 
     result = await tool.execute(action="add", message="standup", every_seconds=300)
     assert result.startswith("Created job")
 
     jobs = tool._cron.list_jobs()
     assert len(jobs) == 1
-    assert jobs[0].payload.channel == "wechat"
-    assert jobs[0].payload.to == "user-789"
+    assert jobs[0].payload.session_key == "wechat:user-789"
+    assert jobs[0].payload.origin_channel == "wechat"
+    assert jobs[0].payload.origin_chat_id == "user-789"
+
+
+@pytest.mark.asyncio
+async def test_webui_cron_tool_uses_origin_session_when_unified_enabled(tmp_path) -> None:
+    """WebUI-created cron jobs stay attached to the creating chat."""
+    tool = CronTool(CronService(tmp_path / "jobs.json"))
+
+    class _Tools:
+        tool_names = ["cron"]
+
+        def get(self, name: str):
+            return tool if name == "cron" else None
+
+    loop = object.__new__(AgentLoop)
+    loop._unified_session = True
+    loop.tools = _Tools()
+    loop._set_tool_context(
+        "websocket",
+        "chat-123",
+        metadata={"webui": True},
+        session_key=UNIFIED_SESSION_KEY,
+    )
+
+    result = await tool.execute(action="add", message="standup", every_seconds=300)
+    assert result.startswith("Created job")
+
+    jobs = tool._cron.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.session_key == "websocket:chat-123"
+    assert jobs[0].payload.origin_channel == "websocket"
+    assert jobs[0].payload.origin_chat_id == "chat-123"
+    assert jobs[0].payload.origin_metadata == {"webui": True}
+
+
+@pytest.mark.asyncio
+async def test_cron_tool_preserves_thread_scoped_session_key(tmp_path) -> None:
+    """Channel-provided thread session keys should remain the cron owner."""
+    tool = CronTool(CronService(tmp_path / "jobs.json"))
+    tool.set_context(
+        RequestContext(
+            channel="slack",
+            chat_id="C123",
+            metadata={"slack": {"thread_ts": "1700.42"}},
+            session_key="slack:C123:1700.42",
+        )
+    )
+
+    result = await tool.execute(action="add", message="check thread", every_seconds=300)
+    assert result.startswith("Created job")
+
+    jobs = tool._cron.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.session_key == "slack:C123:1700.42"
+    assert jobs[0].payload.origin_channel == "slack"
+    assert jobs[0].payload.origin_chat_id == "C123"
+    assert jobs[0].payload.origin_metadata == {"slack": {"thread_ts": "1700.42"}}
 
 
 @pytest.mark.asyncio
@@ -238,4 +313,4 @@ async def test_cron_tool_no_context_returns_error(tmp_path) -> None:
     tool = CronTool(CronService(tmp_path / "jobs.json"))
 
     result = await tool.execute(action="add", message="test", every_seconds=60)
-    assert result == "Error: no session context (channel/chat_id)"
+    assert result == "Error: scheduled cron jobs must be created from a chat session"

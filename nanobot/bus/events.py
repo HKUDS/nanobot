@@ -4,6 +4,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+# Optional ``OutboundMessage.metadata`` key for structured, channel-agnostic UI
+# payloads. Value is JSON-serializable with at least ``kind``; rich clients may
+# render it and other channels may ignore unknown keys.
+OUTBOUND_META_AGENT_UI = "_agent_ui"
+
+# Internal-only inbound metadata used by in-process channels to ask the agent
+# loop to update runtime state without going through a user session.
+INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
+RUNTIME_CONTROL_ACK = "_ack"
+RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
+
 
 @dataclass
 class InboundMessage:
@@ -26,7 +37,12 @@ class InboundMessage:
 
 @dataclass
 class OutboundMessage:
-    """Message to send to a chat channel."""
+    """Message to send to a chat channel.
+
+    ``metadata`` can carry routing (``message_id``, …), trace flags (``_progress``),
+    and optional ``OUTBOUND_META_AGENT_UI`` blobs for rich clients; non-WebUI
+    channels may ignore unknown keys.
+    """
 
     channel: str
     chat_id: str
@@ -35,4 +51,3 @@ class OutboundMessage:
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     buttons: list[list[str]] = field(default_factory=list)
-

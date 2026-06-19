@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from nanobot.providers.base import tool_arguments_json_for_replay
+
 
 def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """Convert Chat Completions messages to Responses API input items.
@@ -15,6 +17,7 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
     """
     system_prompt = ""
     input_items: list[dict[str, Any]] = []
+    used_item_ids: set[str] = set()
 
     for idx, msg in enumerate(messages):
         role = msg.get("role")
@@ -30,20 +33,22 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
 
         if role == "assistant":
             if isinstance(content, str) and content:
+                message_id = _unique_item_id(f"msg_{idx}", used_item_ids)
                 input_items.append({
                     "type": "message", "role": "assistant",
                     "content": [{"type": "output_text", "text": content}],
-                    "status": "completed", "id": f"msg_{idx}",
+                    "status": "completed", "id": message_id,
                 })
             for tool_call in msg.get("tool_calls", []) or []:
                 fn = tool_call.get("function") or {}
                 call_id, item_id = split_tool_call_id(tool_call.get("id"))
+                response_item_id = _unique_item_id(item_id or f"fc_{idx}", used_item_ids)
                 input_items.append({
                     "type": "function_call",
-                    "id": item_id or f"fc_{idx}",
+                    "id": response_item_id,
                     "call_id": call_id or f"call_{idx}",
                     "name": fn.get("name"),
-                    "arguments": fn.get("arguments") or "{}",
+                    "arguments": tool_arguments_json_for_replay(fn.get("arguments")),
                 })
             continue
 
@@ -95,6 +100,20 @@ def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "parameters": params if isinstance(params, dict) else {},
         })
     return converted
+
+
+def _unique_item_id(item_id: str, used: set[str]) -> str:
+    """Return a Responses input item id that is unique within one request."""
+    if item_id not in used:
+        used.add(item_id)
+        return item_id
+
+    suffix = 2
+    while f"{item_id}_{suffix}" in used:
+        suffix += 1
+    unique = f"{item_id}_{suffix}"
+    used.add(unique)
+    return unique
 
 
 def split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:

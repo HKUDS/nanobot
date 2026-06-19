@@ -44,8 +44,8 @@ async def test_generate_image_tool_stores_artifact_and_source_images(
     set_config_path(tmp_path / "config.json")
     FakeImageClient.instances = []
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.OpenRouterImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "openrouter" else None,
     )
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
@@ -98,8 +98,8 @@ async def test_generate_image_tool_selects_aihubmix_provider(
     set_config_path(tmp_path / "config.json")
     FakeImageClient.instances = []
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.AIHubMixImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "aihubmix" else None,
     )
     tool = ImageGenerationTool(
         workspace=tmp_path,
@@ -136,6 +136,56 @@ async def test_generate_image_tool_reports_missing_aihubmix_key(tmp_path: Path) 
     result = await tool.execute(prompt="draw")
 
     assert result.startswith("Error: AIHubMix API key is not configured")
+
+
+@pytest.mark.asyncio
+async def test_generate_image_tool_allows_ollama_without_api_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_config_path(tmp_path / "config.json")
+    FakeImageClient.instances = []
+    monkeypatch.setattr(
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "ollama" else None,
+    )
+    tool = ImageGenerationTool(
+        workspace=tmp_path,
+        config=ImageGenerationToolConfig(
+            enabled=True,
+            provider="ollama",
+            model="x/z-image-turbo",
+        ),
+        provider_configs={"ollama": ProviderConfig(api_base="http://localhost:11434/v1")},
+    )
+
+    result = await tool.execute(prompt="draw a cat")
+
+    payload = json.loads(result)
+    assert len(payload["artifacts"]) == 1
+
+    fake = FakeImageClient.instances[0]
+    assert fake.kwargs["api_key"] is None
+    assert fake.kwargs["api_base"] == "http://localhost:11434/v1"
+    assert fake.calls[0]["aspect_ratio"] == "1:1"
+    assert fake.calls[0]["image_size"] == "1K"
+
+
+@pytest.mark.asyncio
+async def test_generate_image_tool_reports_missing_zhipu_key(tmp_path: Path) -> None:
+    tool = ImageGenerationTool(
+        workspace=tmp_path,
+        config=ImageGenerationToolConfig(
+            enabled=True,
+            provider="zhipu",
+            model="glm-image",
+        ),
+        provider_configs={"zhipu": ProviderConfig(api_base="https://open.bigmodel.cn/api/paas/v4")},
+    )
+
+    result = await tool.execute(prompt="draw a cat")
+
+    assert result.startswith("Error: Zhipu API key is not configured")
 
 
 @pytest.mark.asyncio

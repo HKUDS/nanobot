@@ -205,7 +205,8 @@ class TestRepairCorruptFile:
 
         session = mgr._load("test:badts")
         assert session is not None
-        assert session.last_consolidated == 5
+        # offset 5 exceeds the single loaded message; reset to avoid hiding history (#4066)
+        assert session.last_consolidated == 0
         assert isinstance(session.created_at, datetime)
 
     def test_read_session_file_repairs_corrupt_jsonl(self, tmp_path: Path):

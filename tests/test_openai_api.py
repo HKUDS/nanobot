@@ -33,6 +33,7 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
     agent.process_direct = AsyncMock(return_value=response_text)
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
     return agent
 
 
@@ -78,6 +79,25 @@ def test_chat_completion_response() -> None:
     assert result["choices"][0]["message"]["content"] == "hello world"
     assert result["choices"][0]["finish_reason"] == "stop"
     assert result["id"].startswith("chatcmpl-")
+    assert result["usage"]["prompt_tokens"] == 0
+    assert result["usage"]["completion_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 0
+
+
+def test_chat_completion_response_with_usage() -> None:
+    usage = {"prompt_tokens": 150, "completion_tokens": 42}
+    result = _chat_completion_response("hello world", "test-model", usage)
+    assert result["usage"]["prompt_tokens"] == 150
+    assert result["usage"]["completion_tokens"] == 42
+    assert result["usage"]["total_tokens"] == 192
+
+
+def test_chat_completion_response_preserves_provider_total_usage() -> None:
+    usage = {"total_tokens": 77}
+    result = _chat_completion_response("hello world", "test-model", usage)
+    assert result["usage"]["prompt_tokens"] == 0
+    assert result["usage"]["completion_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 77
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -213,6 +233,7 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     agent.process_direct = fake_process
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -235,10 +256,14 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 @pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
 
     async def slow_process(content, session_key="", channel="", chat_id="", **kwargs):
         order.append(f"start:{content}")
-        await asyncio.sleep(0.1)
+        if content == "first":
+            first_started.set()
+            await release_first.wait()
         order.append(f"end:{content}")
         return content
 
@@ -246,6 +271,7 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     agent.process_direct = slow_process
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -256,14 +282,17 @@ async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
             json={"messages": [{"role": "user", "content": msg}]},
         )
 
-    r1, r2 = await asyncio.gather(send("first"), send("second"))
+    first = asyncio.create_task(send("first"))
+    await asyncio.wait_for(first_started.wait(), timeout=1.0)
+    second = asyncio.create_task(send("second"))
+    await asyncio.sleep(0)
+    assert order == ["start:first"]
+
+    release_first.set()
+    r1, r2 = await asyncio.gather(first, second)
     assert r1.status == 200
     assert r2.status == 200
-    # Verify serialization: one process must fully finish before the other starts
-    if order[0] == "start:first":
-        assert order.index("end:first") < order.index("start:second")
-    else:
-        assert order.index("end:second") < order.index("start:first")
+    assert order == ["start:first", "end:first", "start:second", "end:second"]
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -357,6 +386,7 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     agent.process_direct = sometimes_empty
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -368,6 +398,32 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == "recovered response"
     assert call_count == 2
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_empty_response_retry_does_not_duplicate_user_turn(aiohttp_client) -> None:
+    persist_flags = []
+
+    async def record(content, session_key="", channel="", chat_id="", **kwargs):
+        persist_flags.append(kwargs.get("persist_user_message", True))
+        return "" if len(persist_flags) == 1 else "recovered response"
+
+    agent = MagicMock()
+    agent.process_direct = record
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert resp.status == 200
+    # first call persists the user turn; the retry must not persist it again
+    assert persist_flags == [True, False]
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -386,6 +442,7 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     agent.process_direct = always_empty
     agent._connect_mcp = AsyncMock()
     agent.close_mcp = AsyncMock()
+    agent._last_usage = {}
 
     app = create_app(agent, model_name="m")
     client = await aiohttp_client(app)
@@ -406,10 +463,11 @@ async def test_process_direct_accepts_media() -> None:
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._connect_mcp = AsyncMock()
+    loop._session_locks = {}
 
     captured_msg = None
 
-    async def fake_process(msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None):
+    async def fake_process(msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False):
         nonlocal captured_msg
         captured_msg = msg
         return None

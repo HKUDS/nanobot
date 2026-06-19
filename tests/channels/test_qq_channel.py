@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -56,6 +56,51 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
     msg = await channel.bus.consume_inbound()
     assert msg.sender_id == "user1"
     assert msg.chat_id == "group123"
+
+
+@pytest.mark.asyncio
+async def test_on_c2c_message_passes_is_dm_true_to_base_handler() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["user1"]), MessageBus())
+    channel._handle_message = AsyncMock()
+
+    data = SimpleNamespace(
+        id="msg-c2c",
+        content="hello",
+        author=SimpleNamespace(user_openid="user1"),
+        attachments=[],
+    )
+
+    await channel._on_message(data, is_group=False)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "user1"
+    assert kwargs["chat_id"] == "user1"
+    assert kwargs["content"] == "hello"
+    assert kwargs["is_dm"] is True
+
+
+@pytest.mark.asyncio
+async def test_on_group_message_passes_is_dm_false_to_base_handler() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["user1"]), MessageBus())
+    channel._handle_message = AsyncMock()
+
+    data = SimpleNamespace(
+        id="msg-group",
+        content="hello",
+        group_openid="group123",
+        author=SimpleNamespace(member_openid="user1"),
+        attachments=[],
+    )
+
+    await channel._on_message(data, is_group=True)
+
+    channel._handle_message.assert_awaited_once()
+    kwargs = channel._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "user1"
+    assert kwargs["chat_id"] == "group123"
+    assert kwargs["content"] == "hello"
+    assert kwargs["is_dm"] is False
 
 
 @pytest.mark.asyncio

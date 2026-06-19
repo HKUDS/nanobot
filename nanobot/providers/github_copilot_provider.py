@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 import httpx
@@ -207,8 +207,9 @@ class GitHubCopilotProvider(OpenAICompatProvider):
 
     async def _refresh_client_api_key(self) -> str:
         token = await self._get_copilot_access_token()
+        client = await self._ensure_client()
         self.api_key = token
-        self._client.api_key = token
+        client.api_key = token
         return token
 
     async def chat(
@@ -242,6 +243,8 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, object] | None = None,
         on_content_delta: Callable[[str], None] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, object]], Awaitable[None]] | None = None,
     ):
         await self._refresh_client_api_key()
         return await super().chat_stream(
@@ -253,4 +256,6 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
             on_content_delta=on_content_delta,
+            on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
         )

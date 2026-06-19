@@ -6,9 +6,9 @@ from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,
+    WriteFileTool,
     _find_match,
 )
-
 
 # ---------------------------------------------------------------------------
 # ReadFileTool
@@ -284,7 +284,7 @@ class TestListDirTool:
 
 
 # ---------------------------------------------------------------------------
-# Workspace restriction + extra_allowed_dirs
+# Workspace restriction + extra read/write allowed dirs
 # ---------------------------------------------------------------------------
 
 class TestWorkspaceRestriction:
@@ -315,7 +315,7 @@ class TestWorkspaceRestriction:
 
         tool = ReadFileTool(
             workspace=workspace, allowed_dir=workspace,
-            extra_allowed_dirs=[skills_dir],
+            extra_read_allowed_dirs=[skills_dir],
         )
         result = await tool.execute(path=str(skill_file))
         assert "Test Skill" in result
@@ -330,7 +330,7 @@ class TestWorkspaceRestriction:
         media_file = media_dir / "photo.txt"
         media_file.write_text("shared media", encoding="utf-8")
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.get_media_dir", lambda: media_dir)
+        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
 
         tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
         result = await tool.execute(path=str(media_file))
@@ -338,18 +338,76 @@ class TestWorkspaceRestriction:
         assert "Error" not in result
 
     @pytest.mark.asyncio
-    async def test_extra_dirs_does_not_widen_write(self, tmp_path):
-        from nanobot.agent.tools.filesystem import WriteFileTool
+    async def test_write_blocked_in_media_dir_by_default(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
 
+        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+
+        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(path=str(media_dir / "hack.txt"), content="pwned")
+        assert "Error" in result
+        assert "outside" in result.lower()
+        assert not (media_dir / "hack.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_legacy_extra_allowed_dirs_does_not_widen_write(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+
+        tool = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
+        result = await tool.execute(path=str(skills_dir / "hack.txt"), content="pwned")
+        assert "Error" in result
+        assert "outside" in result.lower()
+        assert not (skills_dir / "hack.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_write_allowed_with_extra_write_dir(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        writable = tmp_path / "writable"
+        writable.mkdir()
+
+        tool = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_write_allowed_dirs=[writable],
+        )
+        result = await tool.execute(path=str(writable / "ok.txt"), content="allowed")
+        assert "Successfully wrote" in result
+        assert (writable / "ok.txt").read_text(encoding="utf-8") == "allowed"
+
+    @pytest.mark.asyncio
+    async def test_extra_write_allowed_files_allow_only_exact_file(self, tmp_path):
         workspace = tmp_path / "ws"
         workspace.mkdir()
         outside = tmp_path / "outside"
         outside.mkdir()
+        allowed_file = outside / "allowed.txt"
+        child_path = allowed_file / "child.txt"
 
-        tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
-        result = await tool.execute(path=str(outside / "hack.txt"), content="pwned")
-        assert "Error" in result
-        assert "outside" in result.lower()
+        tool = WriteFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_write_allowed_files=[allowed_file],
+        )
+
+        exact = await tool.execute(path=str(allowed_file), content="allowed")
+        child = await tool.execute(path=str(child_path), content="blocked")
+
+        assert "Successfully wrote" in exact
+        assert allowed_file.read_text(encoding="utf-8") == "allowed"
+        assert "Error" in child
+        assert "outside" in child.lower()
+        assert not child_path.exists()
 
     @pytest.mark.asyncio
     async def test_read_still_blocked_for_unrelated_dir(self, tmp_path):
@@ -399,7 +457,11 @@ class TestWorkspaceRestriction:
         skill_file.parent.mkdir()
         skill_file.write_text("# Weather\nOriginal content.")
 
-        tool = EditFileTool(workspace=workspace, allowed_dir=workspace)
+        tool = EditFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_allowed_dirs=[skills_dir],
+        )
         result = await tool.execute(
             path=str(skill_file),
             old_text="Original content.",
@@ -408,3 +470,25 @@ class TestWorkspaceRestriction:
         assert "Error" in result
         assert "outside" in result.lower()
         assert skill_file.read_text() == "# Weather\nOriginal content."
+
+    @pytest.mark.asyncio
+    async def test_edit_allowed_with_extra_write_dir(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        writable = tmp_path / "writable"
+        writable.mkdir()
+        target = writable / "note.txt"
+        target.write_text("before\n", encoding="utf-8")
+
+        tool = EditFileTool(
+            workspace=workspace,
+            allowed_dir=workspace,
+            extra_write_allowed_dirs=[writable],
+        )
+        result = await tool.execute(
+            path=str(target),
+            old_text="before",
+            new_text="after",
+        )
+        assert "Successfully edited" in result
+        assert target.read_text(encoding="utf-8") == "after\n"
