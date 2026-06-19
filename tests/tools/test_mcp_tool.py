@@ -656,12 +656,27 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     async def _reachable(_url: str) -> bool:
         return True
 
+    def _safe_url(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    async def _open_connection(_host: str, _port: int):
+        class _Writer:
+            def close(self) -> None:
+                pass
+
+            async def wait_closed(self) -> None:
+                pass
+
+        return object(), _Writer()
+
     @asynccontextmanager
     async def _capturing_streamable_http_client(_url: str, http_client=None):
         captured["timeout"] = http_client.timeout
         yield object(), object(), object()
 
     monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _safe_url)
+    monkeypatch.setattr(mcp_mod.asyncio, "open_connection", _open_connection)
     monkeypatch.setattr(
         sys.modules["mcp.client.streamable_http"],
         "streamable_http_client",

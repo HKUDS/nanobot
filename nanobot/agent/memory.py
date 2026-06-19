@@ -465,7 +465,12 @@ class MemoryStore:
     def set_last_dream_cursor(self, cursor: int) -> None:
         self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
-    def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
+    def build_dream_prompt(
+        self,
+        *,
+        max_entries: int = 20,
+        update_scope: str = "all",
+    ) -> tuple[str, int] | None:
         """Build the Dream prompt with unprocessed history context.
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
@@ -483,13 +488,37 @@ class MemoryStore:
             for e in batch
         )
         skill_creator_path = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
+        allow_context_files = update_scope in {"memory_context", "all"}
+        allow_skills = update_scope == "all"
         template = render_template(
-            "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
+            "agent/dream.md",
+            strip=True,
+            skill_creator_path=skill_creator_path,
+            allow_context_files=allow_context_files,
+            allow_skills=allow_skills,
+            allowed_file_labels=", ".join(
+                ["MEMORY", *(["SOUL", "USER"] if allow_context_files else [])]
+            ),
         )
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
+        allowed_paths = ["memory/MEMORY.md"]
+        if allow_context_files:
+            allowed_paths.extend(["SOUL.md", "USER.md"])
+        if allow_skills:
+            allowed_paths.append("skills/<name>/SKILL.md")
+        scope_lines = [
+            "## Update Scope",
+            "Allowed files:",
+            *[f"- {path}" for path in allowed_paths],
+        ]
+        if not allow_context_files:
+            scope_lines.append("Do not propose USER.md or SOUL.md updates.")
+        if not allow_skills:
+            scope_lines.append("Skill creation is disabled; do not output [SKILL] findings.")
+        scope_text = "\n".join(scope_lines)
+        prompt = f"{template}\n\n{scope_text}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
 
-    def build_dream_tools(self):
+    def build_dream_tools(self, *, update_scope: str = "all"):
         """Build the restricted tool registry used by Dream runs."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
@@ -501,34 +530,41 @@ class MemoryStore:
         file_states = FileStates()
         workspace = self.workspace
         skills_dir = workspace / "skills"
-        skills_dir.mkdir(parents=True, exist_ok=True)
 
-        extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
-        editable_files = [self.memory_file, self.soul_file, self.user_file]
+        allow_context_files = update_scope in {"memory_context", "all"}
+        allow_skills = update_scope == "all"
+        extra_read_dirs = [BUILTIN_SKILLS_DIR] if allow_skills and BUILTIN_SKILLS_DIR.exists() else None
+        editable_files = [self.memory_file]
+        if allow_context_files:
+            editable_files.extend([self.soul_file, self.user_file])
+        if allow_skills:
+            skills_dir.mkdir(parents=True, exist_ok=True)
 
         tools.register(ReadFileTool(
             workspace=workspace,
-            allowed_dir=workspace,
-            extra_read_allowed_dirs=extra_read,
+            allowed_dir=skills_dir if allow_skills else None,
+            extra_read_allowed_dirs=extra_read_dirs,
+            extra_read_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(EditFileTool(
             workspace=workspace,
-            allowed_dir=skills_dir,
+            allowed_dir=skills_dir if allow_skills else None,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
-            allowed_dir=skills_dir,
+            allowed_dir=skills_dir if allow_skills else None,
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
-        tools.register(WriteFileTool(
-            workspace=workspace,
-            allowed_dir=skills_dir,
-            file_states=file_states,
-        ))
+        if allow_skills:
+            tools.register(WriteFileTool(
+                workspace=workspace,
+                allowed_dir=skills_dir,
+                file_states=file_states,
+            ))
         return tools
 
     @staticmethod

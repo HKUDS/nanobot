@@ -4,8 +4,10 @@ from nanobot.config.schema import DreamConfig
 def test_dream_config_defaults_to_interval_hours() -> None:
     cfg = DreamConfig()
 
+    assert cfg.enabled is True
     assert cfg.interval_h == 2
     assert cfg.cron is None
+    assert cfg.update_scope == "all"
 
 
 def test_dream_config_builds_every_schedule_from_interval() -> None:
@@ -46,3 +48,16 @@ def test_dream_config_uses_model_override_name_and_accepts_legacy_model() -> Non
     assert cfg.model_override == "openrouter/sonnet"
     assert dumped["modelOverride"] == "openrouter/sonnet"
     assert "model" not in dumped
+
+
+def test_dream_config_accepts_update_scope_alias() -> None:
+    cfg = DreamConfig.model_validate({"updateScope": "memory_context"})
+
+    assert cfg.update_scope == "memory_context"
+    assert cfg.model_dump(by_alias=True)["updateScope"] == "memory_context"
+
+
+def test_dream_config_describes_disabled_schedule() -> None:
+    cfg = DreamConfig(enabled=False)
+
+    assert cfg.describe_schedule() == "disabled"

@@ -866,10 +866,11 @@ def _run_gateway(
             build_dream_commit_message = MemoryStore.build_dream_commit_message
             prune_dream_sessions = MemoryStore.prune_dream_sessions
 
+            dream_cfg = config.agents.defaults.dream
             store = agent.context.memory
             resp = None
             try:
-                result = store.build_dream_prompt()
+                result = store.build_dream_prompt(update_scope=dream_cfg.update_scope)
                 if result is None:
                     logger.info("Dream: nothing to process")
                     return None
@@ -879,7 +880,7 @@ def _run_gateway(
                     prompt,
                     session_key=key,
                     ephemeral=True,
-                    tools=store.build_dream_tools(),
+                    tools=store.build_dream_tools(update_scope=dream_cfg.update_scope),
                     on_progress=_silent,
                 )
                 if MemoryStore.dream_run_completed(resp):

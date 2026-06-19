@@ -119,6 +119,16 @@ class TestBuildDreamPrompt:
         assert "[correction]: replace the older conflicting fact" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
 
+    def test_memory_scope_disables_context_and_skill_updates(self, store):
+        store.append_history("remember project detail")
+        result = store.build_dream_prompt(update_scope="memory")
+
+        assert result is not None
+        prompt, _ = result
+        assert "- memory/MEMORY.md" in prompt
+        assert "Do not propose USER.md or SOUL.md updates." in prompt
+        assert "Skill creation is disabled" in prompt
+
 
 class TestDreamTools:
     def test_dream_tools_are_restricted_to_file_edits(self, store):
@@ -177,6 +187,38 @@ class TestDreamTools:
 
         assert "Successfully wrote" in result
         assert target.read_text(encoding="utf-8").startswith("---\nname: demo")
+
+    @pytest.mark.asyncio
+    async def test_memory_scope_restricts_writes_to_memory_file(self, store):
+        tools = store.build_dream_tools(update_scope="memory")
+
+        memory_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "memory/MEMORY.md",
+                "old_text": "Project X active",
+                "new_text": "Project Z active",
+            },
+        )
+        soul_result = await tools.execute(
+            "edit_file",
+            {
+                "path": "SOUL.md",
+                "old_text": "Helpful",
+                "new_text": "Verbose",
+            },
+        )
+        skill_result = await tools.execute(
+            "write_file",
+            {
+                "path": "skills/nope/SKILL.md",
+                "content": "---\nname: nope\n---\n",
+            },
+        )
+
+        assert "Successfully edited" in memory_result
+        assert "outside allowed directory" in soul_result
+        assert "Tool 'write_file' not found" in skill_result
 
     @pytest.mark.asyncio
     async def test_dream_tools_keep_internal_write_scope_under_full_access(self, store):
