@@ -36,6 +36,24 @@ def _mcp_notification(method: str, params: dict[str, Any] | None = None) -> Sess
     )
 
 
+def test_mcp_progress_detection_accepts_flattened_sdk_message_shape():
+    malformed = SimpleNamespace(
+        message=SimpleNamespace(
+            method="notifications/progress",
+            params={"progress": 20, "total": 600},
+        )
+    )
+    valid = SimpleNamespace(
+        message=SimpleNamespace(
+            method="notifications/progress",
+            params={"progressToken": "req-1", "progress": 25},
+        )
+    )
+
+    assert mcp_runtime._is_malformed_mcp_progress_notification(malformed) is True
+    assert mcp_runtime._is_malformed_mcp_progress_notification(valid) is False
+
+
 class _FakeMcpTool(Tool):
     def __init__(self, name: str) -> None:
         self._name = name

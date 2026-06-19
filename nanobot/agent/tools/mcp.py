@@ -47,12 +47,30 @@ _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 
 
 def _is_malformed_mcp_progress_notification(message: Any) -> bool:
-    root = getattr(getattr(message, "message", None), "root", None)
-    if getattr(root, "method", None) != "notifications/progress":
+    payload = _mcp_jsonrpc_payload(message)
+    if _payload_value(payload, "method") != "notifications/progress":
         return False
 
-    params = getattr(root, "params", None)
-    return not isinstance(params, Mapping) or "progressToken" not in params
+    params = _payload_value(payload, "params")
+    return not _progress_params_have_token(params)
+
+
+def _mcp_jsonrpc_payload(message: Any) -> Any:
+    """Return the JSON-RPC payload across current and future MCP SDK shapes."""
+    envelope = getattr(message, "message", message)
+    return getattr(envelope, "root", None) or envelope
+
+
+def _payload_value(payload: Any, key: str) -> Any:
+    if isinstance(payload, Mapping):
+        return payload.get(key)
+    return getattr(payload, key, None)
+
+
+def _progress_params_have_token(params: Any) -> bool:
+    if isinstance(params, Mapping):
+        return "progressToken" in params
+    return hasattr(params, "progressToken") or hasattr(params, "progress_token")
 
 
 class _MalformedProgressNotificationFilter:
