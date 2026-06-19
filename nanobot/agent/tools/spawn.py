@@ -18,6 +18,10 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        model=StringSchema(
+            "Optional model identifier for this subagent run. "
+            "When omitted, the subagent inherits the current agent model."
+        ),
         temperature=NumberSchema(
             description=(
                 "Optional sampling temperature for the subagent "
@@ -73,6 +77,7 @@ class SpawnTool(Tool, ContextAware):
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
@@ -92,5 +97,6 @@ class SpawnTool(Tool, ContextAware):
             session_key=self._session_key.get(),
             origin_message_id=self._origin_message_id.get(),
             temperature=temperature,
+            model=model,
             workspace_scope=current_workspace_scope(),
         )

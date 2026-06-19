@@ -1865,6 +1865,11 @@ By default, nanobot only allows one spawned subagent at a time. When the limit i
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 
+The `spawn` tool also accepts an optional `model` parameter for a single
+subagent run. When omitted, the subagent inherits the current agent model. When
+provided, only that subagent uses the requested model; the parent agent's active
+model is not changed.
+
 
 ## Auto Compact
 

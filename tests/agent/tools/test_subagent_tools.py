@@ -128,6 +128,86 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("strong-model", "strong-model"),
+        ("  ", "test-model"),
+    ],
+)
+async def test_spawn_forwards_model_override_to_run_spec(tmp_path, model, expected):
+    """A model passed to spawn() should override only that subagent run."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        model="test-model",
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    seen = {}
+
+    async def fake_run(spec):
+        seen["model"] = spec.model
+        return SimpleNamespace(
+            stop_reason="done", final_content="done", error=None, tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn(task="do task", model=model)
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+    assert seen["model"] == expected
+    assert mgr.model == "test-model"
+
+
+def test_spawn_tool_parameters_include_optional_model():
+    """The spawn tool schema should expose model as an optional parameter."""
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    tool = SpawnTool(MagicMock())
+
+    assert "model" in tool.parameters["properties"]
+    assert "current agent model" in tool.parameters["properties"]["model"]["description"]
+    assert "model" not in tool.parameters["required"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_tool_forwards_model_to_manager():
+    """SpawnTool should pass the optional model override to SubagentManager."""
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    class Manager:
+        max_concurrent_subagents = 4
+
+        def __init__(self) -> None:
+            self.seen = None
+
+        def get_running_count(self) -> int:
+            return 0
+
+        async def spawn(self, **kwargs):
+            self.seen = kwargs
+            return "spawned"
+
+    manager = Manager()
+    tool = SpawnTool(manager)  # type: ignore[arg-type]
+
+    result = await tool.execute(task="do task", model="strong-model")
+
+    assert result == "spawned"
+    assert manager.seen["model"] == "strong-model"
+
+
+@pytest.mark.asyncio
 async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager
