@@ -1,18 +1,25 @@
 """Utility functions for nanobot."""
 
 import base64
+import hashlib
 import json
+import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from contextlib import suppress
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import tiktoken
 from loguru import logger
+
+_CL100K_BASE_BLOB = "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
+_CL100K_BASE_ENCODING = "cl100k_base"
 
 
 def strip_think(text: str) -> str:
@@ -249,7 +256,9 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     if max_tokens <= 0:
         return text
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = get_local_cl100k_encoding()
+        if enc is None:
+            raise RuntimeError("cl100k_base is unavailable locally")
         tokens = enc.encode(text)
         if len(tokens) <= max_tokens:
             return text
@@ -476,17 +485,53 @@ def build_assistant_message(
     return msg
 
 
+def _get_tiktoken_cache_dir() -> Path | None:
+    """Return tiktoken's cache dir without triggering network reads."""
+    if "TIKTOKEN_CACHE_DIR" in os.environ:
+        cache_dir = os.environ["TIKTOKEN_CACHE_DIR"]
+    elif "DATA_GYM_CACHE_DIR" in os.environ:
+        cache_dir = os.environ["DATA_GYM_CACHE_DIR"]
+    else:
+        cache_dir = str(Path(tempfile.gettempdir()) / "data-gym-cache")
+    if cache_dir == "":
+        return None
+    return Path(cache_dir)
+
+
+@lru_cache(maxsize=1)
+def get_local_cl100k_encoding() -> tiktoken.Encoding | None:
+    """Return cl100k_base only when tiktoken can load it locally."""
+    try:
+        if _CL100K_BASE_ENCODING in tiktoken.registry.ENCODINGS:
+            return tiktoken.get_encoding(_CL100K_BASE_ENCODING)
+
+        cache_dir = _get_tiktoken_cache_dir()
+        cache_key = hashlib.sha1(_CL100K_BASE_BLOB.encode()).hexdigest()
+        if cache_dir is None or not (cache_dir / cache_key).exists():
+            return None
+
+        return tiktoken.get_encoding(_CL100K_BASE_ENCODING)
+    except Exception:
+        return None
+
+
+def _estimate_payload_tokens(payload: str) -> int:
+    enc = get_local_cl100k_encoding()
+    if enc is not None:
+        return len(enc.encode(payload))
+    return len(payload) // 4
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Estimate prompt tokens with tiktoken.
+    """Estimate prompt tokens, using a cached local tiktoken encoder when available.
 
     Counts all fields that providers send to the LLM: content, tool_calls,
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")
@@ -516,7 +561,7 @@ def estimate_prompt_tokens(
             parts.append(json.dumps(tools, ensure_ascii=False))
 
         per_message_overhead = len(messages) * 4
-        return len(enc.encode("\n".join(parts))) + per_message_overhead
+        return _estimate_payload_tokens("\n".join(parts)) + per_message_overhead
     except Exception:
         return 0
 
@@ -553,8 +598,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if not payload:
         return 4
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
-        return max(4, len(enc.encode(payload)) + 4)
+        return max(4, _estimate_payload_tokens(payload) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)
 
@@ -574,7 +618,8 @@ def estimate_prompt_tokens_chain(
                 return int(tokens), str(source or "provider_counter")
     estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
-        return int(estimated), "tiktoken"
+        source = "tiktoken" if get_local_cl100k_encoding() is not None else "char_estimate"
+        return int(estimated), source
     return 0, "none"
 
 
