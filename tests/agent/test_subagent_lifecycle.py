@@ -13,6 +13,7 @@ from nanobot.agent.subagent import (
     SubagentManager,
     SubagentStatus,
     _SubagentHook,
+    _SubagentResult,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -443,6 +444,42 @@ class TestAggregatedResultMode:
 
         mock_announce.assert_called_once()
         assert sm._pending_aggregated_results == {}
+
+    def test_aggregated_report_limits_displayed_results(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        results = [
+            _SubagentResult(
+                task_id=f"t{i}",
+                label=f"task {i}",
+                task=f"task {i}",
+                result=f"result {i}",
+                origin={"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                status="ok",
+            )
+            for i in range(25)
+        ]
+
+        text = sm._format_aggregated_results(results)
+
+        assert "### 20. task 19" in text
+        assert "### 21." not in text
+        assert "5 additional subagent results omitted" in text
+
+    def test_aggregated_report_truncates_large_result(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        text = sm._format_aggregated_results([
+            _SubagentResult(
+                task_id="t1",
+                label="large",
+                task="large task",
+                result="x" * 5_000,
+                origin={"channel": "cli", "chat_id": "direct", "session_key": "s1"},
+                status="ok",
+            )
+        ])
+
+        assert "... (truncated)" in text
+        assert len(text) < 4_200
 
 
 # ---------------------------------------------------------------------------

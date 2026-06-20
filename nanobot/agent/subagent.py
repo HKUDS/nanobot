@@ -26,10 +26,15 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.utils.helpers import truncate_text
 from nanobot.utils.prompt_templates import render_template
 
 SubagentResultMode = Literal["realtime", "aggregated"]
 SubagentResultStatus = Literal["ok", "error", "mixed"]
+_AGGREGATED_RESULT_MAX_ITEMS = 20
+_AGGREGATED_RESULT_MAX_TASK_CHARS = 500
+_AGGREGATED_RESULT_MAX_RESULT_CHARS = 4_000
+_AGGREGATED_RESULT_MAX_REPORT_CHARS = 32_000
 
 
 @dataclass(slots=True)
@@ -456,20 +461,35 @@ class SubagentManager:
             return "error"
         return "mixed"
 
-    @staticmethod
-    def _format_aggregated_results(results: list[_SubagentResult]) -> str:
+    def _format_aggregated_results(self, results: list[_SubagentResult]) -> str:
         lines: list[str] = []
-        for idx, result in enumerate(results, start=1):
+        visible_results = results[:_AGGREGATED_RESULT_MAX_ITEMS]
+        for idx, result in enumerate(visible_results, start=1):
             status_text = "completed successfully" if result.status == "ok" else "failed"
             lines.append(f"### {idx}. {result.label} ({status_text})")
             lines.append("")
-            lines.append(f"Task: {result.task}")
+            lines.append(f"Task: {truncate_text(result.task, _AGGREGATED_RESULT_MAX_TASK_CHARS)}")
             lines.append("")
             lines.append("Result:")
-            lines.append(result.result)
-            if idx != len(results):
+            lines.append(truncate_text(result.result, _AGGREGATED_RESULT_MAX_RESULT_CHARS))
+            if idx != len(visible_results):
                 lines.append("")
-        return "\n".join(lines)
+        omitted = len(results) - len(visible_results)
+        if omitted > 0:
+            if lines:
+                lines.append("")
+            lines.append(
+                f"... {omitted} additional subagent result"
+                f"{'s' if omitted != 1 else ''} omitted from this aggregated report."
+            )
+        report = "\n".join(lines)
+        max_report_chars = min(
+            self.max_tool_result_chars
+            if self.max_tool_result_chars > 0
+            else _AGGREGATED_RESULT_MAX_REPORT_CHARS,
+            _AGGREGATED_RESULT_MAX_REPORT_CHARS,
+        )
+        return truncate_text(report, max_report_chars)
 
     @staticmethod
     def _format_partial_progress(result) -> str:
