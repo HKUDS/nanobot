@@ -597,6 +597,29 @@ class AgentLoop:
             return value.strip()
         return None
 
+    def _message_model_preset_snapshot(
+        self,
+        metadata: dict[str, Any] | None,
+    ) -> ProviderSnapshot | None:
+        preset_name = self._message_model_preset_override(metadata)
+        if not preset_name:
+            return None
+        available = ", ".join(self.model_presets) or "(none)"
+        missing_message = (
+            f"cron model_preset {preset_name!r} is not configured; "
+            f"available presets: {available}"
+        )
+        try:
+            normalized = preset_helpers.normalize_preset_name(preset_name, self.model_presets)
+        except (KeyError, ValueError) as exc:
+            logger.warning(missing_message)
+            raise ValueError(missing_message) from exc
+        try:
+            return self._build_model_preset_snapshot(normalized)
+        except KeyError as exc:
+            logger.warning(missing_message)
+            raise ValueError(missing_message) from exc
+
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -1043,19 +1066,10 @@ class AgentLoop:
                     provider_override = None
                     model_override = None
                     context_window_tokens_override = None
-                    if preset_name := self._message_model_preset_override(msg.metadata):
-                        try:
-                            snapshot = self._build_model_preset_snapshot(preset_name)
-                        except (KeyError, ValueError) as exc:
-                            logger.warning(
-                                "Cron model preset '{}' is unavailable; using current agent model ({})",
-                                preset_name,
-                                exc,
-                            )
-                        else:
-                            provider_override = snapshot.provider
-                            model_override = snapshot.model
-                            context_window_tokens_override = snapshot.context_window_tokens
+                    if snapshot := self._message_model_preset_snapshot(msg.metadata):
+                        provider_override = snapshot.provider
+                        model_override = snapshot.model
+                        context_window_tokens_override = snapshot.context_window_tokens
 
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,

@@ -85,3 +85,39 @@ async def test_bound_cron_job_forwards_model_preset_metadata() -> None:
     assert msg.metadata["model_preset"] == "fast"
     assert msg.metadata[CRON_TRIGGER_META]["model_preset"] == "fast"
     assert any(record.get("model_preset") == "fast" for record in cron.records)
+
+
+@pytest.mark.asyncio
+async def test_bound_cron_job_records_model_preset_errors() -> None:
+    class Agent:
+        tools = {}
+
+        async def submit_cron_turn(self, _msg):
+            raise ValueError("cron model_preset 'deleted' is not configured")
+
+    class Cron:
+        def __init__(self) -> None:
+            self.records = []
+
+        def write_run_record(self, run_id, record):
+            self.records.append(record)
+
+    cron = Cron()
+    job = CronJob(
+        id="preset-job",
+        name="Preset job",
+        payload=CronPayload(
+            message="check",
+            session_key="websocket:chat-1",
+            origin_channel="websocket",
+            origin_chat_id="chat-1",
+            model_preset="deleted",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="cron model_preset 'deleted' is not configured"):
+        await run_bound_cron_job(job, agent=Agent(), cron=cron)
+
+    assert cron.records[-1]["status"] == "error"
+    assert cron.records[-1]["model_preset"] == "deleted"
+    assert cron.records[-1]["error"] == "cron model_preset 'deleted' is not configured"

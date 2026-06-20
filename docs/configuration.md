@@ -1863,7 +1863,9 @@ the job:
 ```
 
 The preset applies only to that scheduled turn. It does not change the parent
-agent's active model preset for live conversations or later jobs.
+agent's active model preset for live conversations or later jobs. If the named
+preset is later removed from config, the scheduled run records a configuration
+error instead of silently falling back to the agent's current model.
 
 
 ## Subagent Concurrency

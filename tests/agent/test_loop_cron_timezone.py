@@ -6,8 +6,9 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.cron import CronTool
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import ModelPresetConfig
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_TRIGGER_META
 
@@ -48,14 +49,13 @@ def test_agent_loop_reads_cron_model_preset_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_ignores_missing_cron_model_preset(
+async def test_agent_loop_errors_on_missing_cron_model_preset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    seen = {}
 
     loop = AgentLoop(
         bus=bus,
@@ -64,29 +64,50 @@ async def test_agent_loop_ignores_missing_cron_model_preset(
         model="test-model",
     )
 
-    async def _capture_process_message(*_args, **kwargs):
-        seen["provider_override"] = kwargs["provider_override"]
-        seen["model_override"] = kwargs["model_override"]
-        seen["context_window_tokens_override"] = kwargs["context_window_tokens_override"]
-        return OutboundMessage(channel="cli", chat_id="cron", content="ok")
+    async def _fail_process_message(*_args, **_kwargs):
+        pytest.fail("_process_message should not run when cron model_preset is missing")
 
-    monkeypatch.setattr(loop, "_process_message", _capture_process_message)
+    monkeypatch.setattr(loop, "_process_message", _fail_process_message)
 
-    await loop._dispatch(
-        InboundMessage(
-            channel="cli",
-            sender_id="cron",
-            chat_id="cron",
-            content="scheduled",
-            metadata={CRON_TRIGGER_META: {"job_id": "job-1", "model_preset": "deleted"}},
+    with pytest.raises(ValueError, match="cron model_preset 'deleted' is not configured"):
+        await loop.submit_cron_turn(
+            InboundMessage(
+                channel="cli",
+                sender_id="cron",
+                chat_id="cron",
+                content="scheduled",
+                metadata={
+                    CRON_TRIGGER_META: {
+                        "job_id": "job-1",
+                        "run_id": "run-1",
+                        "model_preset": "deleted",
+                    }
+                },
+            )
         )
+
+
+def test_agent_loop_cron_model_preset_keeps_loader_errors(tmp_path: Path) -> None:
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    def _raise_loader_error(_name: str):
+        raise ValueError("provider config is invalid")
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        model_presets={"fast": ModelPresetConfig(model="fast-model")},
+        preset_snapshot_loader=_raise_loader_error,
     )
 
-    assert seen == {
-        "provider_override": None,
-        "model_override": None,
-        "context_window_tokens_override": None,
-    }
+    with pytest.raises(ValueError, match="provider config is invalid"):
+        loop._message_model_preset_snapshot(
+            {CRON_TRIGGER_META: {"job_id": "job-1", "model_preset": "fast"}}
+        )
 
 
 @pytest.mark.asyncio
