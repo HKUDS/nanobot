@@ -967,6 +967,33 @@ class TestMainMenuUpdate:
         assert config.model_presets["primary"].provider == "openrouter"
         assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
 
+    def test_quick_start_openai_fetches_models_without_storing_base(self, monkeypatch):
+        """OpenAI should still support key-only setup via its SDK default endpoint."""
+        config = Config()
+        calls: dict[str, str] = {}
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenAI")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-openai-test")
+
+        def fake_fetch(api_base, api_key):
+            calls["api_base"] = api_base
+            calls["api_key"] = api_key
+            return "gpt-4o-mini"
+
+        monkeypatch.setattr(onboard_wizard, "_fetch_first_quick_start_model", fake_fetch)
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert calls == {
+            "api_base": "https://api.openai.com/v1",
+            "api_key": "sk-openai-test",
+        }
+        assert config.providers.openai.api_key == "sk-openai-test"
+        assert config.providers.openai.api_base is None
+        assert config.model_presets["primary"].provider == "openai"
+        assert config.model_presets["primary"].model == "gpt-4o-mini"
+
     def test_quick_start_custom_base_url_fetches_first_model(self, monkeypatch):
         """Unknown providers should use only the user-provided base URL to fetch models."""
         config = Config()

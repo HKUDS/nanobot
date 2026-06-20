@@ -65,6 +65,9 @@ _QUICK_START_PROVIDER_KEYS = (
     "zhipu",
 )
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
+_QUICK_START_MODEL_FETCH_API_BASES = {
+    "openai": "https://api.openai.com/v1",
+}
 
 _QUICK_START_STEPS = ("Provider + key", "WebUI", "Review")
 
@@ -1513,8 +1516,11 @@ def _configure_quick_start_provider(config: Config) -> bool:
         provider_config.api_base = api_base
 
     model = None
-    if provider_config.api_base:
-        model = _fetch_first_quick_start_model(provider_config.api_base, api_key)
+    model_api_base = provider_config.api_base or _QUICK_START_MODEL_FETCH_API_BASES.get(
+        provider_name
+    )
+    if model_api_base:
+        model = _fetch_first_quick_start_model(model_api_base, api_key)
     if not model:
         model = _input_model_with_autocomplete("Model ID", "", provider_name)
     if not model or not model.strip():
