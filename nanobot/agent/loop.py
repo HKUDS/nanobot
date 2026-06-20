@@ -728,7 +728,9 @@ class AgentLoop:
         )
         hook: AgentHook = loop_hook
         per_call = _per_call_hooks.get()
-        extra_hooks = per_call if per_call is not None else (self._extra_hooks if not ephemeral else None)
+        extra_hooks = None
+        if not ephemeral:
+            extra_hooks = per_call if per_call is not None else self._extra_hooks
         if extra_hooks:
             hook = CompositeHook([loop_hook] + extra_hooks)
 

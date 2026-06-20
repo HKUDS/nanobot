@@ -184,8 +184,10 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(message, *, session_key):
-        # Whatever hooks the SDK installed are now on the loop.
-        extras = bot._loop._extra_hooks
+        # Whatever hooks the SDK installed are now in the contextvar.
+        from nanobot.agent.loop import _per_call_hooks
+
+        extras = _per_call_hooks.get() or []
         messages = [{"role": "user", "content": message}]
         ctx1 = AgentHookContext(iteration=0, messages=messages)
         ctx1.tool_calls = [
@@ -217,7 +219,9 @@ async def test_run_populates_final_messages(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
     async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
+        from nanobot.agent.loop import _per_call_hooks
+
+        extras = _per_call_hooks.get() or []
         messages = [
             {"role": "user", "content": message},
             {"role": "assistant", "content": "hi there"},
@@ -266,7 +270,9 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
             seen_iterations.append(context.iteration)
 
     async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
+        from nanobot.agent.loop import _per_call_hooks
+
+        extras = _per_call_hooks.get() or []
         assert len(extras) == 2, f"expected capture + user hook, got {len(extras)}"
         ctx = AgentHookContext(iteration=7, messages=[])
         for h in extras:
