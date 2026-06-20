@@ -639,9 +639,8 @@ class TelegramChannel(BaseChannel):
         err = str(exc).lower()
         return (
             "method not found" in err
-            or "not found" in err
-            or "bad request: invalid parameter" in err
             or "unknown method" in err
+            or "bad request: invalid parameter" in err
         )
 
     async def _try_send_rich(
@@ -694,7 +693,7 @@ class TelegramChannel(BaseChannel):
             err_str = str(exc).lower()
             is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
             if is_timeout:
-                self.logger.warning("sendRichMessage timeout, not retrying legacy")
+                self.logger.debug("sendRichMessage timeout, falling back to legacy path")
                 return False
             self.logger.debug("sendRichMessage failed: {}", exc)
             return False
