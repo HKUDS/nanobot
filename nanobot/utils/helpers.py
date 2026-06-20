@@ -44,6 +44,7 @@ def _estimate_tools_tokens(
     leading_separator: bool,
 ) -> int:
     """Estimate stable tool definition tokens without re-encoding every loop."""
+    # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
     cached = _TOOLS_TOKEN_CACHE.get(tools_id)
