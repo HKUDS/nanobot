@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import os
 import time
@@ -74,6 +75,12 @@ if TYPE_CHECKING:
         ToolsConfig,
     )
     from nanobot.cron.service import CronService
+
+# Per-call hooks for SDK Nanobot.run() — avoids mutating shared _extra_hooks
+# when multiple run() calls execute concurrently on the same AgentLoop.
+_per_call_hooks: contextvars.ContextVar[list[AgentHook] | None] = contextvars.ContextVar(
+    "_per_call_hooks", default=None,
+)
 
 
 class TurnState(Enum):
@@ -720,8 +727,10 @@ class AgentLoop:
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        per_call = _per_call_hooks.get()
+        extra_hooks = per_call if per_call is not None else (self._extra_hooks if not ephemeral else None)
+        if extra_hooks:
+            hook = CompositeHook([loop_hook] + extra_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
