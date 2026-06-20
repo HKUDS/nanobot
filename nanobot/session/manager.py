@@ -275,6 +275,9 @@ class Session:
                 # Tight token budgets can otherwise leave assistant-only tails.
                 # If a user turn exists in the unsliced output, recover the
                 # nearest one even if it slightly exceeds the token budget.
+                # In this fallback branch, max_tokens is a soft budget: a
+                # coherent user-anchored replay window is preferred over an
+                # assistant-only tail that happens to fit.
                 recovered_user = next(
                     (i for i in range(len(out) - 1, -1, -1) if out[i].get("role") == "user"),
                     None,

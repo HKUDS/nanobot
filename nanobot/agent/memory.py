@@ -743,6 +743,9 @@ class Consolidator:
             return len(session.messages)
 
         first_visible = visible_messages[0]
+        # ``recent_replay_messages`` returns references into ``tail_messages``;
+        # this identity lookup intentionally maps that visible boundary back
+        # to the original session index without relying on duplicate content.
         first_visible_idx = next(
             idx for idx, message in tail if message is first_visible
         )
