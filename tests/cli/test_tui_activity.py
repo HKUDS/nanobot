@@ -33,11 +33,9 @@ def test_format_activity_rows_formats_tool_and_file_events() -> None:
     )
 
     assert rows == [
-        "[bright_black]●[/bright_black] [bold]Running[/bold] pytest tests/test_example.py",
-        "[green]●[/green] [bold]Read[/bold] README.md\n"
-        "  [dim]└ read 12 lines[/dim]",
-        "[green]●[/green] [bold]Edited[/bold] nanobot/a.py\n"
-        "  [dim]└ +3 -1[/dim]",
+        "[bright_black]· Running pytest tests/test_example.py[/bright_black]",
+        "[green]✓ Read[/green] README.md [dim]— read 12 lines[/dim]",
+        "[green]✓ Edited[/green] nanobot/a.py [dim]— +3 -1[/dim]",
     ]
 
 
@@ -62,8 +60,8 @@ def test_format_activity_rows_skips_start_events_when_requested() -> None:
     )
 
     assert rows == [
-        "[green]●[/green] [bold]Read[/bold] README.md\n  [dim]└ read 12 lines[/dim]",
-        "[green]●[/green] [bold]Edited[/bold] nanobot/a.py\n  [dim]└ +3 -1[/dim]",
+        "[green]✓ Read[/green] README.md [dim]— read 12 lines[/dim]",
+        "[green]✓ Edited[/green] nanobot/a.py [dim]— +3 -1[/dim]",
     ]
 
 
@@ -88,10 +86,26 @@ def test_format_activity_rows_summarizes_list_dir_results() -> None:
     )
 
     assert rows == [
-        "[green]●[/green] [bold]Explored[/bold] .\n"
-        "  [dim]└ 5 entries[/dim]\n"
-        "  [dim]└ .gitignore, AGENTS.md, nanobot, tests, +1 more[/dim]",
+        "[green]✓ Explored[/green] . "
+        "[dim]— 5 entries: .gitignore, AGENTS.md, nanobot, tests, +1 more[/dim]",
     ]
+
+
+def test_format_activity_rows_keeps_errors_visible() -> None:
+    rows = format_activity_rows(
+        {
+            "_tool_events": [
+                {
+                    "phase": "error",
+                    "name": "exec",
+                    "arguments": {"command": "pytest"},
+                    "error": "command timed out",
+                },
+            ],
+        }
+    )
+
+    assert rows == ["[red]✕ Failed[/red] pytest [red]— command timed out[/red]"]
 
 
 def test_should_use_tui_respects_flags(monkeypatch) -> None:

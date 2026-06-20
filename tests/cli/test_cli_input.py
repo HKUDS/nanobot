@@ -61,6 +61,7 @@ def test_init_prompt_session_creates_session():
         mock_session_cls.assert_called_once()
         _, kwargs = mock_session_cls.call_args
         assert kwargs["multiline"] is False
+        assert kwargs["erase_when_done"] is False
         assert kwargs["enable_open_in_editor"] is False
         assert kwargs["placeholder"] == [("class:placeholder", "Message nanobot...")]
         assert isinstance(kwargs["completer"], SlashCommandCompleter)
@@ -74,6 +75,21 @@ def test_init_prompt_session_creates_session():
         assert "bottom_toolbar" not in kwargs
         assert "key_bindings" not in kwargs
         assert "key_bindings" not in kwargs
+
+
+def test_init_prompt_session_can_erase_tui_input_line():
+    commands._PROMPT_SESSION = None
+
+    with (
+        patch("nanobot.cli.commands.PromptSession") as mock_session_cls,
+        patch("pathlib.Path.home") as mock_home,
+    ):
+        mock_home.return_value = MagicMock()
+
+        commands._init_prompt_session(erase_when_done=True)
+
+        _, kwargs = mock_session_cls.call_args
+        assert kwargs["erase_when_done"] is True
 
 
 def test_thinking_spinner_pause_stops_and_restarts():

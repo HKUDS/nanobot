@@ -341,6 +341,7 @@ def _init_prompt_session(
     key_bindings: Any | None = None,
     rprompt: Any | None = None,
     refresh_interval: float | None = None,
+    erase_when_done: bool = False,
 ) -> None:
     """Create the inline prompt_toolkit session with persistent file history.
 
@@ -381,6 +382,7 @@ def _init_prompt_session(
         placeholder=[("class:placeholder", "Message nanobot...")],
         enable_open_in_editor=False,
         multiline=False,  # Enter submits (single line mode)
+        erase_when_done=erase_when_done,
         reserve_space_for_menu=12,
         **extra,
     )
@@ -1646,6 +1648,7 @@ def agent(
                 ),
                 rprompt=build_rprompt(tui_app.state),
                 refresh_interval=0.5,
+                erase_when_done=True,
             )
         else:
             _init_prompt_session()
@@ -1738,6 +1741,7 @@ def agent(
                             # session's pending queue for mid-turn injection.
                             await tui_output.print_queued(user_input)
                         else:
+                            await tui_output.print_user_input(user_input)
                             tui_output.start_user_turn()
                             tui_app.state.begin_turn()
                         if media:

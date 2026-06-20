@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from nanobot.cli.tui.output import MarkdownStreamBuffer, TuiOutput
+from nanobot.cli.tui.output import (
+    MarkdownStreamBuffer,
+    ReasoningBuffer,
+    TuiOutput,
+    _message_styles,
+)
 from nanobot.cli.tui.state import CliTuiState
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -37,6 +42,36 @@ def _output(state: CliTuiState):
     return TuiOutput(state, render_markdown=True, bot_name="nanobot", emit=_emit), sink
 
 
+def test_message_styles_default_to_light_safe_palette(monkeypatch):
+    monkeypatch.delenv("NANOBOT_TUI_THEME", raising=False)
+    monkeypatch.delenv("COLORFGBG", raising=False)
+
+    user_style, _marker_style, assistant_style, _queued_style = _message_styles()
+
+    assert user_style.endswith("on #e8f3ff")
+    assert assistant_style == "#111827 on #f3f4f6"
+
+
+def test_message_styles_respect_dark_terminal_hint(monkeypatch):
+    monkeypatch.delenv("NANOBOT_TUI_THEME", raising=False)
+    monkeypatch.setenv("COLORFGBG", "15;0")
+
+    user_style, _marker_style, assistant_style, _queued_style = _message_styles()
+
+    assert user_style.endswith("on #102033")
+    assert assistant_style == "#e5e7eb on #15171a"
+
+
+def test_message_styles_allow_theme_override(monkeypatch):
+    monkeypatch.setenv("NANOBOT_TUI_THEME", "dark")
+    monkeypatch.setenv("COLORFGBG", "0;15")
+
+    user_style, _marker_style, assistant_style, _queued_style = _message_styles()
+
+    assert user_style.endswith("on #102033")
+    assert assistant_style == "#e5e7eb on #15171a"
+
+
 def test_markdown_stream_buffer_commits_blocks_on_blank_lines():
     buf = MarkdownStreamBuffer()
     assert buf.feed("first paragraph") == []
@@ -52,6 +87,39 @@ def test_markdown_stream_buffer_keeps_fenced_code_together():
     blocks = buf.feed("```python\ncode line 1\n\ncode line 2\n```\n\nafter")
     assert blocks == ["```python\ncode line 1\n\ncode line 2\n```"]
     assert buf.flush() == "after"
+
+
+def test_reasoning_buffer_keeps_split_dangling_word():
+    buf = ReasoningBuffer()
+
+    first = buf.add("* **Fetching current star count**\n\nI")
+    second = buf.add(" need to check the current star count.")
+
+    assert first == "* **Fetching current star count**"
+    assert second == "I need to check the current star count."
+
+
+@pytest.mark.asyncio
+async def test_print_user_input_renders_submitted_message():
+    state = _state()
+    output, sink = _output(state)
+
+    await output.print_user_input("cool")
+
+    text = _plain(sink)
+    assert "› cool" in text
+
+
+@pytest.mark.asyncio
+async def test_print_reasoning_prefixes_each_line():
+    state = _state()
+    output, sink = _output(state)
+
+    await output.print_reasoning("first thought\nsecond thought")
+
+    text = _plain(sink)
+    assert "✻ first thought" in text
+    assert "✻ second thought" in text
 
 
 @pytest.mark.asyncio

@@ -9,9 +9,11 @@ progress lines print as they arrive.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from typing import Any
 
 from prompt_toolkit import print_formatted_text
@@ -20,6 +22,7 @@ from prompt_toolkit.formatted_text import ANSI
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.padding import Padding
 from rich.text import Text
 
 from nanobot.cli.tui.activity import current_activity_name, format_activity_rows
@@ -27,6 +30,7 @@ from nanobot.cli.tui.state import CliTuiState
 
 _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
+_REASONING_DANGLING_WORD_CHARS = 2
 
 _probe_console: Console | None = None
 
@@ -66,6 +70,33 @@ def response_renderable(content: str, render_markdown: bool, metadata: Mapping |
     return Markdown(content)
 
 
+def _terminal_theme() -> str:
+    """Best-effort terminal theme, overridable with NANOBOT_TUI_THEME."""
+    override = os.environ.get("NANOBOT_TUI_THEME", "").strip().lower()
+    if override in {"light", "dark"}:
+        return override
+    value = os.environ.get("COLORFGBG", "")
+    with suppress(ValueError, IndexError):
+        return "light" if int(value.split(";")[-1]) >= 7 else "dark"
+    # Unknown terminals should prefer the readable light-safe palette. Dark
+    # terminals can opt into dark blocks with NANOBOT_TUI_THEME=dark.
+    return "light"
+
+
+def _message_styles() -> tuple[str, str, str, str]:
+    """Return user, marker, assistant, and queued styles for the current terminal."""
+    if _terminal_theme() == "light":
+        user = "#0f172a on #e8f3ff"
+        return user, "bold #0284c7 on #e8f3ff", "#111827 on #f3f4f6", "#0369a1 on #e8f3ff"
+    user = "#dbeafe on #102033"
+    return user, "bold #67e8f9 on #102033", "#e5e7eb on #15171a", "#93c5fd on #102033"
+
+
+def _message_block(renderable: Any, style: str) -> Padding:
+    """Return a subtle full-width block without adding a terminal-heavy border."""
+    return Padding(renderable, (0, 1), style=style)
+
+
 class ReasoningBuffer:
     """Batch reasoning deltas into readable sentence-sized chunks."""
 
@@ -77,7 +108,7 @@ class ReasoningBuffer:
             return None
         self._text += text
         if self._should_flush(text):
-            return self.flush()
+            return self._take_flushable()
         return None
 
     def flush(self) -> str | None:
@@ -95,6 +126,25 @@ class ReasoningBuffer:
             or stripped.endswith(_REASONING_SENTENCE_ENDINGS)
             or len(self._text) >= _REASONING_FLUSH_CHARS
         )
+
+    def _take_flushable(self) -> str | None:
+        """Flush readable text while keeping tiny split words for the next delta."""
+        flushable = self._text
+        keep = ""
+        candidate = self._text.rstrip()
+        newline = candidate.rfind("\n")
+        if newline >= 0:
+            tail = candidate[newline + 1 :].strip()
+            tail_word = tail.replace("'", "")
+            if (
+                0 < len(tail) <= _REASONING_DANGLING_WORD_CHARS
+                and tail_word.isalpha()
+            ):
+                flushable = candidate[: newline + 1]
+                keep = tail
+        self._text = keep
+        text = flushable.strip()
+        return text or None
 
 
 class MarkdownStreamBuffer:
@@ -268,13 +318,26 @@ class TuiOutput:
 
         await self._print(_render)
 
+    async def print_user_input(self, content: str) -> None:
+        """Render the submitted user input after prompt_toolkit erases the edit line."""
+        text = content.strip()
+        if not text:
+            return
+        user_style, marker_style, _assistant_style, _queued_style = _message_styles()
+        body = Text.assemble(
+            ("› ", marker_style),
+            (text, user_style),
+        )
+        await self._print(lambda c: c.print(_message_block(body, user_style)))
+
     async def print_response(self, content: str, metadata: Mapping | None = None) -> None:
         tail = self._stream.flush()
         if tail:
             await self._print_answer_block(tail)
         await self._ensure_header()
         body = response_renderable(content, self._md, metadata)
-        await self._print(lambda c: (c.print(body), c.print()))
+        _user_style, _marker_style, assistant_style, _queued_style = _message_styles()
+        await self._print(lambda c: (c.print(_message_block(body, assistant_style)), c.print()))
         self._end_turn()
 
     async def print_progress(self, text: str) -> None:
@@ -287,16 +350,27 @@ class TuiOutput:
         if not text.strip():
             return
         await self._ensure_header()
-        await self._print(lambda c: c.print(f"[dim italic]✻ {escape(text)}[/dim italic]"))
+
+        def _render(console: Console) -> None:
+            for line in text.splitlines():
+                if line.strip():
+                    console.print(f"[dim italic]✻ {escape(line)}[/dim italic]")
+                else:
+                    console.print()
+
+        await self._print(_render)
 
     async def print_notice(self, text: str) -> None:
         await self._print(lambda c: c.print(f"[bright_black]· {escape(text)}[/bright_black]"))
 
     async def print_queued(self, text: str) -> None:
         """Acknowledge a follow-up typed while a turn is still running."""
-        await self._print(
-            lambda c: c.print(f"[bright_black]▸ queued:[/bright_black] [dim]{escape(text)}[/dim]")
+        user_style, _marker_style, _assistant_style, queued_style = _message_styles()
+        body = Text.assemble(
+            ("↳ queued  ", queued_style),
+            (text.strip(), user_style),
         )
+        await self._print(lambda c: c.print(_message_block(body, user_style)))
 
     async def toggle_reasoning(self) -> None:
         """Flip reasoning visibility; reveal what was buffered while hidden."""
@@ -323,11 +397,11 @@ class TuiOutput:
     async def _print_answer_block(self, block: str) -> None:
         await self._ensure_header()
         body = Markdown(block) if self._md else Text(block)
-        await self._print(lambda c: (c.print(body), c.print()))
+        _user_style, _marker_style, assistant_style, _queued_style = _message_styles()
+        await self._print(lambda c: (c.print(_message_block(body, assistant_style)), c.print()))
 
     async def _print_rows(self, rows: list[str]) -> None:
-        await self._ensure_header()
-        await self._print(lambda c: [c.print(row) for row in rows])
+        await self._print(lambda c: [c.print(row, highlight=False) for row in rows])
 
     async def _ensure_header(self) -> None:
         if self._header_printed:
