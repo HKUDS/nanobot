@@ -232,6 +232,51 @@ async def test_message_tool_rejects_outside_workspace_absolute_media_when_restri
 
 
 @pytest.mark.asyncio
+async def test_message_tool_requires_outbound_recipient_authorization() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(
+        send_callback=_send,
+        authorize_callback=lambda channel, chat_id: channel == "telegram" and chat_id == "allowed",
+    )
+
+    denied = await tool.execute(content="hi", channel="telegram", chat_id="blocked")
+    allowed = await tool.execute(content="hi", channel="telegram", chat_id="allowed")
+
+    assert denied == "Error: outbound recipient is not authorized: telegram:blocked"
+    assert allowed == "Message sent to telegram:allowed"
+    assert [msg.chat_id for msg in sent] == ["allowed"]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_rejects_unrestricted_absolute_media_outside_workspace(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_text("image", encoding="utf-8")
+    tool = MessageTool(send_callback=_send, workspace=workspace, restrict_to_workspace=False)
+
+    result = await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[str(outside)],
+    )
+
+    assert result.startswith("Error: media path is not allowed:")
+    assert "outside workspace" in result
+    assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_message_tool_allows_workspace_absolute_media_when_restricted(tmp_path) -> None:
     sent: list[OutboundMessage] = []
 

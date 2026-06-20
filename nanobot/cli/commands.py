@@ -1008,6 +1008,13 @@ def _run_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
     )
 
+    if isinstance(message_tool, MessageTool):
+        def _authorize_message_target(channel: str, chat_id: str) -> bool:
+            target = channels.channels.get(channel)
+            return bool(target and target.is_allowed(chat_id))
+
+        message_tool.set_authorize_callback(_authorize_message_target)
+
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)

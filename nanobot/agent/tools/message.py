@@ -1,6 +1,7 @@
 """Message tool for sending messages to users."""
 
 from contextvars import ContextVar
+import inspect
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -12,7 +13,8 @@ from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.bus.events import OutboundMessage
-from nanobot.config.paths import get_workspace_path
+from nanobot.config.paths import get_media_dir, get_workspace_path
+from nanobot.security.workspace_policy import is_path_within
 
 
 @tool_parameters(
@@ -56,8 +58,11 @@ class MessageTool(Tool, ContextAware):
         default_message_id: str | None = None,
         workspace: str | Path | None = None,
         restrict_to_workspace: bool = False,
+        authorize_callback: Callable[[str, str], bool | Awaitable[bool]] | None = None,
     ):
         self._send_callback = send_callback
+        self._authorize_callback = authorize_callback
+        self._explicit_workspace = workspace is not None
         self._workspace = (
             Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         )
@@ -109,6 +114,13 @@ class MessageTool(Tool, ContextAware):
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
         self._send_callback = callback
+
+    def set_authorize_callback(
+        self,
+        callback: Callable[[str, str], bool | Awaitable[bool]] | None,
+    ) -> None:
+        """Set the callback used to authorize proactive delivery targets."""
+        self._authorize_callback = callback
 
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
@@ -174,6 +186,17 @@ class MessageTool(Tool, ContextAware):
                 resolved.append(p)
             elif not access.restrict_to_workspace:
                 path = Path(p).expanduser()
+                if self._explicit_workspace and path.is_absolute() and path.exists():
+                    media_root = get_media_dir().resolve(strict=False)
+                    resolved_path = path.resolve(strict=False)
+                    workspace_root = Path(workspace).expanduser().resolve(strict=False)
+                    if not (
+                        is_path_within(resolved_path, workspace_root)
+                        or is_path_within(resolved_path, media_root)
+                    ):
+                        raise PermissionError(
+                            f"absolute media path {path} is outside workspace and media directory"
+                        )
                 resolved.append(p if path.is_absolute() else str(workspace / path))
             else:
                 resolved.append(str(resolve_workspace_path(p, workspace, access.allowed_root)))
@@ -233,6 +256,13 @@ class MessageTool(Tool, ContextAware):
 
         if not self._send_callback:
             return "Error: Message sending not configured"
+
+        if self._authorize_callback is not None:
+            authorized = self._authorize_callback(channel, chat_id)
+            if inspect.isawaitable(authorized):
+                authorized = await authorized
+            if not authorized:
+                return f"Error: outbound recipient is not authorized: {channel}:{chat_id}"
 
         if media:
             try:
