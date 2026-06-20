@@ -14,6 +14,15 @@ from typing import Any
 import tiktoken
 from loguru import logger
 
+# Cache for tool-definition JSON strings.  Tool definitions are constant for
+# the lifetime of a session but ``estimate_prompt_tokens`` can be called
+# several times per agent turn.  Re-serialising and re-encoding the full tools
+# list with tiktoken on every call is wasteful when the list hasn't changed.
+# Keyed by ``id(tools)`` — safe because ``ToolRegistry.get_definitions()``
+# returns the *same* list object for a given session.
+_tools_json_cache: dict[int, str] = {}
+_TOOLS_CACHE_MAX = 32
+
 
 def strip_think(text: str) -> str:
     """Remove thinking blocks, unclosed trailing tags, and tokenizer-level
@@ -476,6 +485,24 @@ def build_assistant_message(
     return msg
 
 
+def _cached_tools_json(tools: list[dict[str, Any]]) -> str:
+    """Return the JSON serialisation of *tools*, using a cache.
+
+    ``ToolRegistry.get_definitions()`` returns the same list object for the
+    entire session, so caching by ``id(tools)`` avoids re-serialising an
+    immutable tool manifest on every ``estimate_prompt_tokens`` call.
+    """
+    tid = id(tools)
+    cached = _tools_json_cache.get(tid)
+    if cached is not None:
+        return cached
+    result = json.dumps(tools, ensure_ascii=False)
+    if len(_tools_json_cache) >= _TOOLS_CACHE_MAX:
+        _tools_json_cache.clear()
+    _tools_json_cache[tid] = result
+    return result
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
@@ -513,7 +540,7 @@ def estimate_prompt_tokens(
                     parts.append(value)
 
         if tools:
-            parts.append(json.dumps(tools, ensure_ascii=False))
+            parts.append(_cached_tools_json(tools))
 
         per_message_overhead = len(messages) * 4
         return len(enc.encode("\n".join(parts))) + per_message_overhead
