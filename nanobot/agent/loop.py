@@ -1825,21 +1825,52 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        pending: asyncio.Queue | None = None
         try:
             async with lock:
-                kwargs: dict[str, Any] = {
-                    "session_key": session_key,
-                    "on_progress": on_progress,
-                    "on_stream": on_stream,
-                    "on_stream_end": on_stream_end,
-                    "ephemeral": ephemeral,
-                }
-                if tools is not None:
-                    kwargs["tools"] = tools
-                return await self._process_message(
-                    msg,
-                    **kwargs,
-                )
+                # Create a pending queue so mid-turn subagent results are
+                # injected into the active runner loop instead of being
+                # dispatched as a competing independent task after the turn
+                # ends.  Mirrors the pattern in _dispatch().
+                pending = asyncio.Queue(maxsize=20)
+                self._pending_queues[session_key] = pending
+                try:
+                    kwargs: dict[str, Any] = {
+                        "session_key": session_key,
+                        "on_progress": on_progress,
+                        "on_stream": on_stream,
+                        "on_stream_end": on_stream_end,
+                        "ephemeral": ephemeral,
+                        "pending_queue": pending,
+                    }
+                    if tools is not None:
+                        kwargs["tools"] = tools
+                    return await self._process_message(
+                        msg,
+                        **kwargs,
+                    )
+                finally:
+                    # Drain leftover messages and re-publish to bus (same
+                    # cleanup pattern as _dispatch).
+                    queue = None
+                    if self._pending_queues.get(session_key) is pending:
+                        queue = self._pending_queues.pop(session_key, None)
+                    else:
+                        queue = pending
+                    if queue is not None:
+                        leftover = 0
+                        while True:
+                            try:
+                                item = queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                            await self.bus.publish_inbound(item)
+                            leftover += 1
+                        if leftover:
+                            logger.info(
+                                "Re-published {} leftover message(s) to bus for session {}",
+                                leftover, session_key,
+                            )
         finally:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
             self._runtime_events().clear_turn(session_key)
