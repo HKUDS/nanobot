@@ -1044,10 +1044,18 @@ class AgentLoop:
                     model_override = None
                     context_window_tokens_override = None
                     if preset_name := self._message_model_preset_override(msg.metadata):
-                        snapshot = self._build_model_preset_snapshot(preset_name)
-                        provider_override = snapshot.provider
-                        model_override = snapshot.model
-                        context_window_tokens_override = snapshot.context_window_tokens
+                        try:
+                            snapshot = self._build_model_preset_snapshot(preset_name)
+                        except (KeyError, ValueError) as exc:
+                            logger.warning(
+                                "Cron model preset '{}' is unavailable; using current agent model ({})",
+                                preset_name,
+                                exc,
+                            )
+                        else:
+                            provider_override = snapshot.provider
+                            model_override = snapshot.model
+                            context_window_tokens_override = snapshot.context_window_tokens
 
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
