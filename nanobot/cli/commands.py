@@ -1661,7 +1661,7 @@ def agent(
             console.print(f"\nReceived {sig_name}, goodbye!")
             sys.exit(0)
 
-        signal.signal(signal.SIGINT, _handle_signal)
+        # Let Ctrl+C flow through prompt_toolkit/asyncio so cleanup can close MCP stacks first.
         signal.signal(signal.SIGTERM, _handle_signal)
         # SIGHUP is not available on Windows
         if hasattr(signal, 'SIGHUP'):
@@ -1852,16 +1852,21 @@ def agent(
                 await asyncio.gather(outbound_task, return_exceptions=True)
 
         async def run_interactive():
-            await _connect_mcp_with_startup_log()
-            bus_task = asyncio.create_task(agent_loop.run())
+            bus_task: asyncio.Task | None = None
             try:
+                await _connect_mcp_with_startup_log()
+                bus_task = asyncio.create_task(agent_loop.run())
                 if use_tui:
                     await _run_tui_session()
                 else:
                     await _run_classic_session()
+            except KeyboardInterrupt:
+                _restore_terminal()
+                console.print("\nGoodbye!")
             finally:
                 agent_loop.stop()
-                await asyncio.gather(bus_task, return_exceptions=True)
+                if bus_task is not None:
+                    await asyncio.gather(bus_task, return_exceptions=True)
                 await agent_loop.close_mcp()
                 mcp_stdio_errlog.close()
                 with suppress(OSError):
