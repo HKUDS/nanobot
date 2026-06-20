@@ -138,6 +138,8 @@ class SubagentManager:
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self._pending_aggregated_results: dict[str, list[_SubagentResult]] = {}
+        self._pending_aggregated_omitted_counts: dict[str, int] = {}
+        self._pending_aggregated_omitted_statuses: dict[str, set[SubagentResultStatus]] = {}
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -343,8 +345,9 @@ class SubagentManager:
             )
             return
 
-        self._pending_aggregated_results.setdefault(session_key, []).append(
-            _SubagentResult(
+        pending_results = self._pending_aggregated_results.setdefault(session_key, [])
+        if len(pending_results) < _AGGREGATED_RESULT_MAX_ITEMS:
+            pending_results.append(_SubagentResult(
                 task_id=task_id,
                 label=label,
                 task=task,
@@ -352,8 +355,12 @@ class SubagentManager:
                 origin=origin,
                 status=status,
                 origin_message_id=origin_message_id,
+            ))
+        else:
+            self._pending_aggregated_omitted_counts[session_key] = (
+                self._pending_aggregated_omitted_counts.get(session_key, 0) + 1
             )
-        )
+            self._pending_aggregated_omitted_statuses.setdefault(session_key, set()).add(status)
 
         active_task_ids = self._session_tasks.get(session_key)
         if not active_task_ids or task_id not in active_task_ids:
@@ -362,9 +369,11 @@ class SubagentManager:
     async def _flush_aggregated_results(self, session_key: str) -> None:
         """Publish one combined result for all completed subagents in a session."""
         results = self._pending_aggregated_results.pop(session_key, [])
-        if not results:
+        omitted_count = self._pending_aggregated_omitted_counts.pop(session_key, 0)
+        omitted_statuses = self._pending_aggregated_omitted_statuses.pop(session_key, set())
+        if not results and not omitted_count:
             return
-        if len(results) == 1:
+        if len(results) == 1 and not omitted_count:
             result = results[0]
             await self._announce_result(
                 result.task_id,
@@ -377,6 +386,7 @@ class SubagentManager:
             )
             return
 
+        total_count = len(results) + omitted_count
         task_ids = [result.task_id for result in results]
         origin_message_ids = list(dict.fromkeys(
             origin_id for origin_id in (result.origin_message_id for result in results) if origin_id
@@ -385,17 +395,20 @@ class SubagentManager:
         extra_metadata: dict[str, Any] = {
             "subagent_result_mode": "aggregated",
             "subagent_task_ids": task_ids,
+            "subagent_result_count": total_count,
         }
+        if omitted_count:
+            extra_metadata["subagent_omitted_result_count"] = omitted_count
         if origin_message_ids:
             extra_metadata["origin_message_ids"] = origin_message_ids
 
         await self._announce_result(
             "aggregate:" + ",".join(task_ids),
-            f"{len(results)} background tasks",
-            f"Aggregated report for {len(results)} background tasks.",
-            self._format_aggregated_results(results),
+            f"{total_count} background tasks",
+            f"Aggregated report for {total_count} background tasks.",
+            self._format_aggregated_results(results, omitted_count=omitted_count),
             results[0].origin,
-            self._aggregate_status(results),
+            self._aggregate_status(results, omitted_statuses),
             primary_origin_message_id,
             extra_metadata=extra_metadata,
         )
@@ -453,15 +466,24 @@ class SubagentManager:
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
     @staticmethod
-    def _aggregate_status(results: list[_SubagentResult]) -> SubagentResultStatus:
+    def _aggregate_status(
+        results: list[_SubagentResult],
+        omitted_statuses: set[SubagentResultStatus] | None = None,
+    ) -> SubagentResultStatus:
         statuses = {result.status for result in results}
-        if statuses == {"ok"}:
+        statuses.update(omitted_statuses or set())
+        if not statuses or statuses == {"ok"}:
             return "ok"
         if statuses == {"error"}:
             return "error"
         return "mixed"
 
-    def _format_aggregated_results(self, results: list[_SubagentResult]) -> str:
+    def _format_aggregated_results(
+        self,
+        results: list[_SubagentResult],
+        *,
+        omitted_count: int = 0,
+    ) -> str:
         lines: list[str] = []
         visible_results = results[:_AGGREGATED_RESULT_MAX_ITEMS]
         for idx, result in enumerate(visible_results, start=1):
@@ -474,7 +496,7 @@ class SubagentManager:
             lines.append(truncate_text(result.result, _AGGREGATED_RESULT_MAX_RESULT_CHARS))
             if idx != len(visible_results):
                 lines.append("")
-        omitted = len(results) - len(visible_results)
+        omitted = omitted_count + len(results) - len(visible_results)
         if omitted > 0:
             if lines:
                 lines.append("")

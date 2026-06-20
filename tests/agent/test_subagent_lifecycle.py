@@ -465,6 +465,39 @@ class TestAggregatedResultMode:
         assert "### 21." not in text
         assert "5 additional subagent results omitted" in text
 
+    @pytest.mark.asyncio
+    async def test_aggregated_mode_caps_buffered_results(self, tmp_path):
+        sm = _manager(tmp_path, result_mode="aggregated")
+        origin = {"channel": "cli", "chat_id": "direct", "session_key": "s1"}
+        sm._session_tasks["s1"] = {f"t{i}" for i in range(25)}
+
+        for i in range(25):
+            await sm._complete_subagent_result(
+                f"t{i}",
+                f"task {i}",
+                f"task {i}",
+                f"result {i}",
+                origin,
+                "error" if i == 24 else "ok",
+            )
+
+        assert len(sm._pending_aggregated_results["s1"]) == 20
+        assert sm._pending_aggregated_omitted_counts["s1"] == 5
+        assert sm._pending_aggregated_omitted_statuses["s1"] == {"ok", "error"}
+
+        with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
+            await sm._flush_aggregated_results("s1")
+
+        assert sm._pending_aggregated_results == {}
+        assert sm._pending_aggregated_omitted_counts == {}
+        assert sm._pending_aggregated_omitted_statuses == {}
+        args, kwargs = mock_announce.call_args
+        assert args[1] == "25 background tasks"
+        assert "5 additional subagent results omitted" in args[3]
+        assert args[5] == "mixed"
+        assert kwargs["extra_metadata"]["subagent_result_count"] == 25
+        assert kwargs["extra_metadata"]["subagent_omitted_result_count"] == 5
+
     def test_aggregated_report_truncates_large_result(self, tmp_path):
         sm = _manager(tmp_path, result_mode="aggregated")
         text = sm._format_aggregated_results([
