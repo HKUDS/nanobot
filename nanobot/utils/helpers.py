@@ -8,11 +8,60 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import tiktoken
 from loguru import logger
+
+_TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
+_TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+
+
+@lru_cache(maxsize=1)
+def _get_token_encoding() -> Any:
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def _cache_tools_token_count(
+    tools_id: int,
+    fingerprint: tuple[int, ...],
+    counts: dict[bool, int],
+) -> None:
+    if (
+        tools_id not in _TOOLS_TOKEN_CACHE
+        and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
+    ):
+        _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
+    _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
+
+
+def _estimate_tools_tokens(
+    enc: Any,
+    tools: list[dict[str, Any]],
+    *,
+    leading_separator: bool,
+) -> int:
+    """Estimate stable tool definition tokens without re-encoding every loop."""
+    tools_id = id(tools)
+    fingerprint = tuple(id(tool) for tool in tools)
+    cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+    if cached and cached[0] == fingerprint:
+        token_count = cached[1].get(leading_separator)
+        if token_count is not None:
+            return token_count
+        counts = cached[1]
+    else:
+        counts = {}
+
+    rendered = json.dumps(tools, ensure_ascii=False)
+    if leading_separator:
+        rendered = "\n" + rendered
+    token_count = len(enc.encode(rendered))
+    counts[leading_separator] = token_count
+    _cache_tools_token_count(tools_id, fingerprint, counts)
+    return token_count
 
 
 def strip_think(text: str) -> str:
@@ -115,7 +164,7 @@ class IncrementalThinkExtractor:
         thinking, _ = extract_think(buf)
         if not thinking or thinking == self._emitted:
             return False
-        new = thinking[len(self._emitted):].strip()
+        new = thinking[len(self._emitted) :].strip()
         self._emitted = thinking
         if not new:
             return False
@@ -249,7 +298,7 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     if max_tokens <= 0:
         return text
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_token_encoding()
         tokens = enc.encode(text)
         if len(tokens) <= max_tokens:
             return text
@@ -486,7 +535,7 @@ def estimate_prompt_tokens(
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_token_encoding()
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")
@@ -512,11 +561,13 @@ def estimate_prompt_tokens(
                 if isinstance(value, str) and value:
                     parts.append(value)
 
-        if tools:
-            parts.append(json.dumps(tools, ensure_ascii=False))
+        tool_tokens = (
+            _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
+        )
 
         per_message_overhead = len(messages) * 4
-        return len(enc.encode("\n".join(parts))) + per_message_overhead
+        message_tokens = len(enc.encode("\n".join(parts))) if parts else 0
+        return message_tokens + tool_tokens + per_message_overhead
     except Exception:
         return 0
 
@@ -553,7 +604,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if not payload:
         return 4
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_token_encoding()
         return max(4, len(enc.encode(payload)) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)
