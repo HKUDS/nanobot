@@ -117,6 +117,8 @@ class TestBuildDreamPrompt:
         assert "History attribute tags" in prompt
         assert "[skip]: audit-only" in prompt
         assert "[correction]: replace the older conflicting fact" in prompt
+        assert "agent-inferred" in prompt
+        assert "Do not promote them to USER.md or SOUL.md" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
 
 

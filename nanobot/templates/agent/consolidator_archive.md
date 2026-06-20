@@ -18,7 +18,12 @@ Marks (choose the best match):
 
 Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
 
-Do not mark something [skip] merely because it might already exist in long-term memory; Dream handles cross-file deduplication later.
+Source discipline:
+- Facts stated or explicitly confirmed by the user may receive [permanent], [durable], [ephemeral], or [correction].
+- Tool outputs and source-code observations may receive [durable] when they are concrete project facts, not agent speculation.
+- Agent-only guesses, inferred preferences, proposed options, and interpretations that the user did not confirm must be [skip], or [ephemeral] only when needed to resume the active task and marked "(agent-inferred)".
+- If a Current long-term memory excerpt is provided, mark facts already captured there as [skip] unless the conversation corrects, narrows, or supersedes them.
+- Preserve the narrowest true scope. Do not broaden a project-specific or task-specific observation into a global user preference.
 
 Output concise bullet points only. No preamble, no commentary.
 If nothing noteworthy happened, output: (nothing)
