@@ -104,7 +104,7 @@ class TestNextCursorRecovery:
 
 
 class TestReadUnprocessedWithCorruption:
-    """``read_unprocessed_history`` must skip entries with non-int cursors
+    """``read_unprocessed_history`` must skip entries with invalid cursors
     instead of crashing on comparison."""
 
     def test_skips_string_cursor_entries(self, store):
@@ -153,6 +153,7 @@ class TestCursorValidationInvariant:
         """
         assert MemoryStore._valid_cursor(True) is None
         assert MemoryStore._valid_cursor(False) is None
+        assert MemoryStore._valid_cursor(-1) is None
         assert MemoryStore._valid_cursor(5) == 5
         assert MemoryStore._valid_cursor(0) == 0
 
@@ -166,6 +167,18 @@ class TestCursorValidationInvariant:
 
         entries = store.read_unprocessed_history(since_cursor=0)
         assert [e["cursor"] for e in entries] == [4, 5]
+
+    def test_negative_history_cursor_rejected(self, store):
+        """A negative history cursor is corrupt and must not seed new writes."""
+        store.history_file.write_text(
+            '{"cursor": -5, "timestamp": "2026-04-01 10:00", "content": "negative"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.unlink(missing_ok=True)
+
+        assert store.append_history("next") == 1
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [e["cursor"] for e in entries] == [1]
 
     def test_next_cursor_returns_max_not_just_last_int(self, store):
         """Under adversarial corruption, file order ≠ numeric order.  The
@@ -187,7 +200,7 @@ class TestCursorValidationInvariant:
         assert store.append_history("safe next") == 101
 
     def test_corruption_is_logged_exactly_once_per_store(self, store, caplog):
-        """Observability without spam: the first non-int cursor emits one
+        """Observability without spam: the first invalid cursor emits one
         warning, subsequent reads on the same store stay quiet.  Without
         this, a poisoned file produces one warning per agent turn."""
         import logging
@@ -213,7 +226,7 @@ class TestCursorValidationInvariant:
             loguru_logger.remove(handler_id)
 
         corruption_warnings = [
-            r for r in caplog.records if "non-int cursor" in r.getMessage()
+            r for r in caplog.records if "invalid cursor" in r.getMessage()
         ]
         assert len(corruption_warnings) == 1, (
             "Expected exactly one corruption warning per store instance; "
