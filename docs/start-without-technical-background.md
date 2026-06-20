@@ -59,15 +59,15 @@ If `python3` works but `python` does not, replace `python` with `python3` in the
 
 ## 3. Get a Provider API Key
 
-nanobot does not create AI accounts or API keys for you. Use an AI provider account, company endpoint, subscription endpoint, or local model server that you already control. The steps below use OpenRouter because it is the recommended beginner path in the wizard; it is not a ranking or endorsement.
+nanobot does not create AI accounts or API keys for you. Use an AI provider account, company endpoint, subscription endpoint, or local model server that you already control. The steps below use DeepSeek because it is the recommended beginner path in the wizard and avoids making OpenRouter a first-run dependency; it is not a ranking or endorsement.
 
 For the example path:
 
-1. Open [openrouter.ai/keys](https://openrouter.ai/keys).
+1. Open [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys).
 2. Create or copy an API key.
 3. Keep the key private.
 
-An OpenRouter key usually starts with `sk-or-v1-`. Other providers use different key shapes. Keep the key nearby because the setup wizard will ask you to paste it.
+Keep the key nearby because the setup wizard will ask you to paste it.
 
 ## 4. Install nanobot
 
@@ -167,15 +167,15 @@ Move through the wizard like this:
 | When you see | Do this |
 |---|---|
 | A menu | Use the arrow keys to highlight an option, then press `Enter`. |
-| The OpenRouter API key field | Paste the key, then press `Enter`. |
+| The DeepSeek API key field | Paste the key, then press `Enter`. |
 | A back option in Advanced Settings | Choose it to return to the previous menu. |
 
 For the first setup, choose `[Q] Quick Start (API key only)`. It configures the recommended local browser UI and default AI settings for you. Use `Advanced Settings` later only if you need a different provider, chat app, or tool setup.
 
-If you are following the OpenRouter example:
+If you are following the DeepSeek example:
 
 1. Choose `[Q] Quick Start (API key only)`.
-2. Paste your OpenRouter API key.
+2. Paste your DeepSeek API key.
 3. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
 
 The recommended path enables the local WebUI and default AI settings. You do not need to choose a model, endpoint, or chat channel for the first run.
@@ -211,8 +211,8 @@ Merge them into one object:
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-your-key-here"
+    "deepseek": {
+      "apiKey": "your-deepseek-api-key"
     }
   },
   "channels": {
@@ -256,15 +256,15 @@ If this is a brand-new install and you have not configured anything else yet, re
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-your-key-here"
+    "deepseek": {
+      "apiKey": "your-deepseek-api-key"
     }
   },
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-sonnet-4.5",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -283,9 +283,9 @@ If this is a brand-new install and you have not configured anything else yet, re
 }
 ```
 
-Replace `sk-or-v1-your-key-here` with your real OpenRouter key.
+Replace `your-deepseek-api-key` with your real DeepSeek key.
 
-If you use another provider, replace `openrouter`, `sk-or-v1-your-key-here`, and the `model` value with that provider's values. If the provider needs `apiBase`, add it under that provider's config block.
+If you use another provider, replace `deepseek`, `your-deepseek-api-key`, and the `model` value with that provider's values. If the provider needs `apiBase`, add it under that provider's config block.
 
 Save the file.
 

@@ -920,7 +920,7 @@ class TestMainMenuUpdate:
 
         monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
-        monkeypatch.setattr(onboard_wizard, "_input_with_existing", lambda *a, **kw: "sk-or-test")
+        monkeypatch.setattr(onboard_wizard, "_input_with_existing", lambda *a, **kw: "sk-ds-test")
         monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fail_model_input)
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_websocket_config)
         monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
@@ -929,10 +929,10 @@ class TestMainMenuUpdate:
         assert onboard_wizard._configure_quick_start(config) is True
 
         assert pause_messages == ["Press Enter to save and exit..."]
-        assert config.providers.openrouter.api_key == "sk-or-test"
-        assert config.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+        assert config.providers.deepseek.api_key == "sk-ds-test"
+        assert config.providers.deepseek.api_base == "https://api.deepseek.com"
         assert config.agents.defaults.model_preset == "primary"
-        assert config.model_presets["primary"].provider == "openrouter"
+        assert config.model_presets["primary"].provider == "deepseek"
         assert config.model_presets["primary"].model == onboard_wizard._QUICK_START_RECOMMENDED_MODEL
         websocket = getattr(config.channels, "websocket")
         assert websocket["enabled"] is True
@@ -947,8 +947,8 @@ class TestMainMenuUpdate:
 
         assert onboard_wizard._configure_recommended_provider(config) is False
 
-        assert config.providers.openrouter.api_key is None
-        assert config.providers.openrouter.api_base is None
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
@@ -956,7 +956,7 @@ class TestMainMenuUpdate:
         config = Config()
         config.model_presets["primary"] = ModelPresetConfig(
             model=onboard_wizard._QUICK_START_RECOMMENDED_MODEL,
-            provider="openrouter",
+            provider="deepseek",
         )
 
         captured: dict[str, list[tuple[str, str]]] = {}
@@ -972,7 +972,7 @@ class TestMainMenuUpdate:
 
         labels = [label for label, _value in captured["rows"]]
         rows = dict(captured["rows"])
-        assert rows["Status"] == "OpenRouter API key missing"
+        assert rows["Status"] == "DeepSeek API key missing"
         assert "API key" in rows["Next"]
         assert "nanobot gateway" in rows["Next"]
         assert labels.index("Next") < labels.index("Open")

@@ -54,8 +54,8 @@ _BACK_PRESSED = object()  # Sentinel value for back navigation
 # offer existing presets as choices (e.g. AgentDefaults.model_preset).
 _MODEL_PRESET_CACHE: set[str] = set()
 
-_QUICK_START_RECOMMENDED_PROVIDER = "openrouter"
-_QUICK_START_RECOMMENDED_MODEL = "anthropic/claude-sonnet-4.5"
+_QUICK_START_RECOMMENDED_PROVIDER = "deepseek"
+_QUICK_START_RECOMMENDED_MODEL = "deepseek-v4-flash"
 
 _QUICK_START_STEPS = ("API key", "WebUI", "Review")
 
@@ -388,7 +388,7 @@ def _show_main_menu_header() -> None:
     body = Table.grid(expand=True)
     body.add_column(ratio=1)
     body.add_row(f"{__logo__} [bold {_UI_TEXT}]nanobot[/] [{_UI_MUTED}]v{__version__}[/]")
-    body.add_row(f"[{_UI_ACCENT}]Quick Start only needs an OpenRouter API key.[/]")
+    body.add_row(f"[{_UI_ACCENT}]Quick Start only needs a DeepSeek API key.[/]")
     body.add_row(
         f"[{_UI_MUTED}]Use Advanced later for other providers or chat apps.[/]"
     )
@@ -1424,14 +1424,14 @@ def _configure_recommended_provider(config: Config) -> bool:
     )
 
     api_key = _input_with_existing(
-        "OpenRouter API key (get one at https://openrouter.ai/keys)",
+        "DeepSeek API key (get one at https://platform.deepseek.com/api_keys)",
         provider_config.api_key,
         "str",
     )
     if api_key is not None:
         provider_config.api_key = api_key.strip() or None
     if not provider_config.api_key:
-        console.print("[yellow]! OpenRouter API key is required for Quick Start[/yellow]")
+        console.print("[yellow]! DeepSeek API key is required for Quick Start[/yellow]")
         return False
     if default_api_base and not provider_config.api_base:
         provider_config.api_base = default_api_base

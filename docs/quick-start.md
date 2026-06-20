@@ -9,7 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use OpenRouter only so the snippets are concrete; any supported provider works when the key, provider name, and model ID match.
+- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use DeepSeek only so the snippets are concrete and the compact path does not depend on OpenRouter; any supported provider works when the key, provider name, and model ID match.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -128,8 +128,8 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "deepseek": {
+      "apiKey": "your-deepseek-api-key"
     }
   }
 }
@@ -142,8 +142,8 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4.5",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
       "maxTokens": 8192,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -161,7 +161,7 @@ The provider and model inside a preset must match. The snippet above is only an 
 
 | Replace | Where |
 |---|---|
-| Provider config key, such as `openrouter` | `providers.<provider>` |
+| Provider config key, such as `deepseek` | `providers.<provider>` |
 | API key or environment variable | `providers.<provider>.apiKey` |
 | Preset provider name | `modelPresets.primary.provider` |
 | Model ID | `modelPresets.primary.model` |
@@ -207,8 +207,8 @@ If you prefer not to store secrets in `config.json`, reference an environment va
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "${OPENROUTER_API_KEY}"
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}"
     }
   }
 }
@@ -260,7 +260,7 @@ Example prompt:
 
 ```text
 Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
-Then update ~/.nanobot/config.json to add an OpenRouter model preset named "primary".
+Then update ~/.nanobot/config.json to add a DeepSeek model preset named "primary".
 Tell me exactly what changed and whether I need to run /restart.
 ```
 
