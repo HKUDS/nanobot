@@ -167,6 +167,7 @@ Move through the wizard like this:
 |---|---|
 | A menu | Use the arrow keys to highlight an option, then press `Enter`. |
 | The provider menu | Choose the company or service you want to use. |
+| An endpoint menu | Choose the standard API or subscription plan endpoint that matches your key. |
 | An API key field | Paste the key, then press `Enter`. |
 | A provider base URL field | Paste the provider base URL from its docs, then press `Enter`. |
 | The Model ID field | Paste a model name from your provider, then press `Enter`. |
@@ -176,12 +177,15 @@ For the first setup, choose `[Q] Quick Start`. It configures the recommended loc
 
 1. Choose `[Q] Quick Start`.
 2. Choose the provider you want to use.
-3. Paste your API key if the wizard asks for one.
-4. Paste the provider base URL if the wizard asks for one.
-5. Paste a model ID that provider can run.
-6. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
+3. Choose the endpoint if the wizard asks, such as Standard API, Coding Plan, Token Plan, or Step Plan.
+4. Paste your API key if the wizard asks for one.
+5. Paste the provider base URL if the wizard asks for one.
+6. Paste a model ID that provider can run.
+7. Confirm that Quick Start should enable the WebSocket channel for the local WebUI.
+8. Set the WebUI password when prompted.
+9. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
 
-The recommended path enables the local WebUI and default AI settings. You do not need to choose a chat channel for the first run.
+The recommended path enables `channels.websocket` for the local WebUI, requires a WebUI password, and writes default AI settings. You do not need to choose a separate chat app for the first run.
 
 If you already know that you need custom headers, provider-specific request fields, a chat app, or tools, choose `Advanced Settings` instead. [`provider-cookbook.md`](./provider-cookbook.md) has copyable examples for several common provider setups. After you change advanced settings, a save option appears in the main menu. Choose `[S] Save and Exit`.
 
@@ -192,7 +196,7 @@ The wizard creates or updates:
 | `~/.nanobot/config.json` | Settings file. |
 | `~/.nanobot/workspace/` | Working folder for memory, sessions, and generated files. |
 
-If Quick Start finished successfully, skip to [Send the First Message](#7-send-the-first-message). The next two sections are only for manual setup.
+If Quick Start finished successfully, skip to [Open the WebUI](#7-open-the-webui). The next two sections are only for manual setup.
 
 ## Manual Setup: How to Merge JSON Snippets
 
@@ -294,7 +298,7 @@ For copyable provider-specific examples, use [`provider-cookbook.md`](./provider
 
 Save the file.
 
-## 7. Send the First Message
+## 7. Open the WebUI
 
 First check that nanobot can read the saved setup:
 
@@ -312,7 +316,9 @@ Start the local browser UI:
 nanobot gateway
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser and send:
+Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. If Quick Start enabled the WebSocket channel, enter the WebUI password you set in the wizard.
+
+Send this first message in the browser:
 
 ```text
 Hello!

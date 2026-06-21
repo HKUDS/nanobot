@@ -942,6 +942,13 @@ class TestMainMenuUpdate:
 
         pause_messages: list[str] = []
 
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
         monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
@@ -950,6 +957,14 @@ class TestMainMenuUpdate:
             onboard_wizard,
             "_input_model_with_autocomplete",
             lambda *a, **kw: "deepseek-v4-flash",
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt("webui-secret"),
+            ),
         )
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_websocket_config)
         monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
@@ -966,6 +981,7 @@ class TestMainMenuUpdate:
         websocket = getattr(config.channels, "websocket")
         assert websocket["enabled"] is True
         assert websocket["websocketRequiresToken"] is True
+        assert websocket["tokenIssueSecret"] == "webui-secret"
 
     def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
         """Known providers should ask users for the model instead of fetching one."""
@@ -1034,6 +1050,90 @@ class TestMainMenuUpdate:
         assert config.model_presets["primary"].provider == "openai"
         assert config.model_presets["primary"].model == "gpt-4o-mini"
 
+    def test_quick_start_zhipu_coding_plan_uses_coding_base_url(self, monkeypatch):
+        """Zhipu Coding Plan should not use the standard Zhipu base URL."""
+        config = Config()
+        choices = iter(["Zhipu AI", "Coding Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "zhipu-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "glm-4.6",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.zhipu.api_key == "zhipu-key"
+        assert config.providers.zhipu.api_base == "https://open.bigmodel.cn/api/coding/paas/v4"
+        assert config.model_presets["primary"].provider == "zhipu"
+        assert config.model_presets["primary"].model == "glm-4.6"
+
+    def test_quick_start_minimax_mainland_token_plan_uses_mainland_base_url(self, monkeypatch):
+        """MiniMax mainland token plan should not use the global MiniMax base URL."""
+        config = Config()
+        choices = iter(["MiniMax", "Mainland China Token Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "minimax-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "MiniMax-M2",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.minimax.api_key == "minimax-key"
+        assert config.providers.minimax.api_base == "https://api.minimaxi.com/v1"
+        assert config.model_presets["primary"].provider == "minimax"
+        assert config.model_presets["primary"].model == "MiniMax-M2"
+
+    def test_quick_start_stepfun_step_plan_uses_plan_base_url(self, monkeypatch):
+        """StepFun Step Plan should not use the standard StepFun base URL."""
+        config = Config()
+        choices = iter(["Step Fun", "Step Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "stepfun-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "step-3.5-flash",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.stepfun.api_key == "stepfun-key"
+        assert config.providers.stepfun.api_base == "https://api.stepfun.ai/step_plan/v1"
+        assert config.model_presets["primary"].provider == "stepfun"
+        assert config.model_presets["primary"].model == "step-3.5-flash"
+
+    def test_quick_start_xiaomi_mimo_token_plan_uses_token_plan_base_url(self, monkeypatch):
+        """Xiaomi MiMo Token Plan should not use the standard MiMo base URL."""
+        config = Config()
+        choices = iter(["Xiaomi MIMO", "Token Plan"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: next(choices))
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "mimo-key")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "mimo-v2.5-pro",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.xiaomi_mimo.api_key == "mimo-key"
+        assert config.providers.xiaomi_mimo.api_base == "https://token-plan-sgp.xiaomimimo.com/v1"
+        assert config.model_presets["primary"].provider == "xiaomi_mimo"
+        assert config.model_presets["primary"].model == "mimo-v2.5-pro"
+
     def test_quick_start_custom_base_url_asks_for_model_id(self, monkeypatch):
         """Custom providers should ask for base URL and model ID."""
         config = Config()
@@ -1079,6 +1179,85 @@ class TestMainMenuUpdate:
         assert config.providers.azure_openai.api_base == "https://azure.example.test/openai"
         assert config.model_presets["primary"].provider == "azure_openai"
         assert config.model_presets["primary"].model == "deployment-name"
+
+    def test_quick_start_websocket_step_explains_channel_enablement(self, monkeypatch):
+        """Quick Start should confirm and protect WebSocket for WebUI."""
+        config = Config()
+        messages: list[str] = []
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda message="", *a, **kw: messages.append(str(message)))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt("webui-secret"),
+            ),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is True
+
+        assert any("WebSocket channel" in message for message in messages)
+        assert any("http://127.0.0.1:8765" in message for message in messages)
+        websocket = getattr(config.channels, "websocket")
+        assert websocket["enabled"] is True
+        assert websocket["websocketRequiresToken"] is True
+        assert websocket["tokenIssueSecret"] == "webui-secret"
+
+    def test_quick_start_websocket_step_can_be_declined(self, monkeypatch):
+        """Declining WebSocket should stop Quick Start before changing channel config."""
+        config = Config()
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(confirm=lambda *a, **kw: FakePrompt(False)),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is False
+        assert getattr(config.channels, "websocket", None) is None
+
+    def test_quick_start_websocket_requires_password(self, monkeypatch):
+        """Accepting WebSocket with an empty password should not enable the channel."""
+        config = Config()
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(
+                confirm=lambda *a, **kw: FakePrompt(True),
+                password=lambda *a, **kw: FakePrompt(""),
+            ),
+        )
+
+        assert onboard_wizard._enable_quick_start_websocket_defaults(config) is False
+        assert getattr(config.channels, "websocket", None) is None
 
     def test_quick_start_requires_api_key_before_setting_defaults(self, monkeypatch):
         """Quick Start should not create a ready-looking config without an API key."""
@@ -1135,6 +1314,7 @@ class TestMainMenuUpdate:
         assert rows["Status"] == "DeepSeek API key missing"
         assert "API key" in rows["Next"]
         assert "nanobot gateway" in rows["Next"]
+        assert "agent -m" not in rows["Next"]
         assert labels.index("Next") < labels.index("Open")
         assert "Model" not in rows
         assert "Entry point" not in rows

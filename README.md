@@ -217,7 +217,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps below and go straight to **Test one message**.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -336,7 +336,17 @@ For another provider, the same config shape still applies:
 | Model ID | `modelPresets.primary.model` |
 | Endpoint URL, only when needed | `providers.<provider>.apiBase` |
 
-**3. Test one message**
+**3. Open the WebUI**
+
+If Quick Start enabled the WebSocket channel, start the gateway:
+
+```bash
+nanobot gateway
+```
+
+Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
+
+For manual or terminal-only setup, test one CLI message:
 
 ```bash
 nanobot status

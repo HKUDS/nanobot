@@ -46,6 +46,13 @@ class _QuickStartProviderInfo(NamedTuple):
     is_direct: bool
 
 
+class _QuickStartEndpointChoice(NamedTuple):
+    """Provider endpoint option used by Quick Start."""
+
+    label: str
+    api_base: str
+
+
 # --- Field Hints for Select Fields ---
 # Maps field names to (choices, hint_text)
 # To add a new select field with hints, add an entry:
@@ -69,7 +76,32 @@ _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
 
 _CLEAR_CHOICE = "Clear value"
 _QUICK_START_MENU_CHOICE = "[Q] Quick Start"
-_QUICK_START_STEPS = ("Provider + model", "WebUI", "Review")
+_QUICK_START_STEPS = ("Provider setup", "WebSocket channel", "Review")
+_QUICK_START_ENDPOINT_CHOICES: dict[str, tuple[_QuickStartEndpointChoice, ...]] = {
+    "zhipu": (
+        _QuickStartEndpointChoice("Standard API", "https://open.bigmodel.cn/api/paas/v4"),
+        _QuickStartEndpointChoice("Coding Plan", "https://open.bigmodel.cn/api/coding/paas/v4"),
+    ),
+    "minimax": (
+        _QuickStartEndpointChoice("Global API", "https://api.minimax.io/v1"),
+        _QuickStartEndpointChoice("Mainland China Token Plan", "https://api.minimaxi.com/v1"),
+    ),
+    "minimax_anthropic": (
+        _QuickStartEndpointChoice("Global Anthropic API", "https://api.minimax.io/anthropic"),
+        _QuickStartEndpointChoice(
+            "Mainland China Anthropic Token Plan",
+            "https://api.minimaxi.com/anthropic",
+        ),
+    ),
+    "stepfun": (
+        _QuickStartEndpointChoice("Standard API", "https://api.stepfun.com/v1"),
+        _QuickStartEndpointChoice("Step Plan", "https://api.stepfun.ai/step_plan/v1"),
+    ),
+    "xiaomi_mimo": (
+        _QuickStartEndpointChoice("Standard API", "https://api.xiaomimimo.com/v1"),
+        _QuickStartEndpointChoice("Token Plan", "https://token-plan-sgp.xiaomimimo.com/v1"),
+    ),
+}
 
 # Low-contrast terminal palette inspired by JetBrains Darcula/Islands.
 _UI_ACCENT = "#6B9BFA"
@@ -485,6 +517,17 @@ def _input_text(display_name: str, current: Any, field_type: str, field_info=Non
             return None
 
     return value
+
+
+def _input_secret(display_name: str) -> str | None:
+    """Get a secret value without echoing it when questionary supports password input."""
+    prompt_factory = getattr(_get_questionary(), "password", None)
+    if prompt_factory is None:
+        prompt_factory = _get_questionary().text
+    value = prompt_factory(f"{display_name}:").ask()
+    if value is None:
+        return None
+    return str(value).strip()
 
 
 def _input_with_existing(
@@ -1467,11 +1510,50 @@ def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProvider
     """Return whether Quick Start must ask for a provider base URL."""
     if provider_name == "custom":
         return True
+    if provider_name in _QUICK_START_ENDPOINT_CHOICES:
+        return False
     if info is None or info.default_api_base:
         return False
     return info.backend == "azure_openai" or (
         info.backend == "openai_compat" and (info.is_direct or info.is_local)
     )
+
+
+def _select_quick_start_api_base(
+    provider_name: str,
+    provider_display: str,
+    info: _QuickStartProviderInfo | None,
+) -> tuple[str, bool] | None:
+    """Return the api_base and whether the user explicitly selected or entered it."""
+    endpoint_choices = _QUICK_START_ENDPOINT_CHOICES.get(provider_name)
+    if endpoint_choices:
+        choices = {choice.label: choice.api_base for choice in endpoint_choices}
+        answer = _select_with_back(
+            f"Which {provider_display} endpoint should Quick Start use?",
+            list(choices) + ["<- Back"],
+            default=endpoint_choices[0].label,
+        )
+        if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
+            return None
+        assert isinstance(answer, str)
+        return choices[answer], True
+
+    api_base = info.default_api_base if info else ""
+    if not _quick_start_requires_base_url(provider_name, info):
+        return api_base, False
+
+    base_answer = _input_text(
+        "Provider base URL",
+        api_base,
+        "str",
+    )
+    if base_answer is None:
+        return None
+    api_base = base_answer.strip().rstrip("/")
+    if not api_base:
+        console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
+        return None
+    return api_base, True
 
 
 def _configure_quick_start_provider(config: Config) -> bool:
@@ -1489,6 +1571,14 @@ def _configure_quick_start_provider(config: Config) -> bool:
     provider_name = provider_choices[answer]
     provider_info = _get_quick_start_provider_info().get(provider_name)
 
+    api_base = provider_info.default_api_base if provider_info else ""
+    base_was_prompted = False
+    if provider_name in _QUICK_START_ENDPOINT_CHOICES:
+        api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+        if api_base_result is None:
+            return False
+        api_base, base_was_prompted = api_base_result
+
     api_key: str | None = None
     if _quick_start_requires_api_key(provider_name, provider_info):
         api_key = _input_text(f"{answer} API key", "", "str")
@@ -1499,21 +1589,14 @@ def _configure_quick_start_provider(config: Config) -> bool:
             console.print("[yellow]! API key is required for Quick Start[/yellow]")
             return False
 
-    api_base = provider_info.default_api_base if provider_info else ""
-    base_was_prompted = False
-    if _quick_start_requires_base_url(provider_name, provider_info):
-        base_answer = _input_text(
-            "Provider base URL",
-            api_base,
-            "str",
-        )
-        if base_answer is None:
+    if (
+        provider_name not in _QUICK_START_ENDPOINT_CHOICES
+        and _quick_start_requires_base_url(provider_name, provider_info)
+    ):
+        api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+        if api_base_result is None:
             return False
-        base_was_prompted = True
-        api_base = base_answer.strip().rstrip("/")
-        if not api_base:
-            console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
-            return False
+        api_base, base_was_prompted = api_base_result
 
     provider_config = getattr(config.providers, provider_name, None)
     if provider_config is None:
@@ -1545,6 +1628,25 @@ def _configure_quick_start_provider(config: Config) -> bool:
 def _enable_quick_start_websocket_defaults(config: Config) -> bool:
     """Enable local WebUI with the default WebSocket settings."""
     _show_quick_start_progress(2)
+    console.print(
+        f"[{_UI_ACCENT}]Quick Start will enable the WebSocket channel for the local WebUI.[/]"
+    )
+    console.print(
+        f"[{_UI_MUTED}]This lets the browser UI at http://127.0.0.1:8765 connect to nanobot.[/]"
+    )
+    console.print()
+    answer = _get_questionary().confirm(
+        "Enable WebSocket channel now?",
+        default=True,
+    ).ask()
+    if not answer:
+        console.print("[yellow]! Quick Start needs the WebSocket channel for the local WebUI[/yellow]")
+        return False
+    webui_secret = _input_secret("Set a WebUI password")
+    if not webui_secret:
+        console.print("[yellow]! WebUI password is required when enabling WebSocket[/yellow]")
+        return False
+
     config_cls = _get_channel_config_class("websocket")
     if config_cls is None:
         console.print("[red]No configuration class found for websocket[/red]")
@@ -1554,6 +1656,10 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
     model = config_cls.model_validate(current)
     if hasattr(model, "enabled"):
         setattr(model, "enabled", True)
+    if hasattr(model, "token_issue_secret"):
+        setattr(model, "token_issue_secret", webui_secret)
+    if hasattr(model, "websocket_requires_token"):
+        setattr(model, "websocket_requires_token", True)
     setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
     return True
 
@@ -1581,6 +1687,7 @@ def _show_quick_start_summary(config: Config) -> None:
     rows = [
         ("Status", status),
         ("Next", next_step),
+        ("WebSocket channel", "enabled"),
         ("Open", "http://127.0.0.1:8765"),
     ]
     _print_summary_panel(rows, "Quick Start")
@@ -1591,7 +1698,7 @@ def _configure_quick_start(config: Config) -> bool:
     console.clear()
     _show_section_header(
         "Quick Start",
-        "Choose the API provider, paste the key, enter the model, then use the local WebUI.",
+        "Choose provider endpoint, add credentials and model, then enable the local WebUI channel.",
     )
     if not _configure_quick_start_provider(config):
         _pause()
