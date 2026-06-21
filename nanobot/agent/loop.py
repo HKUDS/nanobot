@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import dataclasses
 import os
 import time
@@ -76,13 +75,6 @@ if TYPE_CHECKING:
     )
     from nanobot.cron.service import CronService
 
-# Per-call hooks for SDK Nanobot.run() — avoids mutating shared _extra_hooks
-# when multiple run() calls execute concurrently on the same AgentLoop.
-_per_call_hooks: contextvars.ContextVar[list[AgentHook] | None] = contextvars.ContextVar(
-    "_per_call_hooks", default=None,
-)
-
-
 class TurnState(Enum):
     RESTORE = auto()
     COMPACT = auto()
@@ -136,6 +128,7 @@ class TurnContext:
 
     ephemeral: bool = False
     tools: ToolRegistry | None = None
+    extra_hooks: list[AgentHook] | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
@@ -701,6 +694,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -727,16 +721,9 @@ class AgentLoop:
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
         hook: AgentHook = loop_hook
-        per_call = _per_call_hooks.get()
-        extra_hooks = None
-        # NOTE: SDK callers always go through run() → process_direct(ephemeral=False),
-        # so per_call hooks are intentionally excluded from ephemeral turns. If a future
-        # caller sets the contextvar and then calls process_direct(ephemeral=True), the
-        # hooks will correctly NOT fire (ephemeral guard takes precedence).
-        if not ephemeral:
-            extra_hooks = per_call if per_call is not None else self._extra_hooks
-        if extra_hooks:
-            hook = CompositeHook([loop_hook] + extra_hooks)
+        turn_hooks = extra_hooks if extra_hooks is not None else self._extra_hooks
+        if not ephemeral and turn_hooks:
+            hook = CompositeHook([loop_hook] + turn_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -1255,6 +1242,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
@@ -1287,6 +1275,7 @@ class AgentLoop:
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             tools=tools,
+            extra_hooks=extra_hooks,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1513,6 +1502,7 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            extra_hooks=ctx.extra_hooks,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1828,6 +1818,7 @@ class AgentLoop:
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -1851,6 +1842,8 @@ class AgentLoop:
                 }
                 if tools is not None:
                     kwargs["tools"] = tools
+                if extra_hooks is not None:
+                    kwargs["extra_hooks"] = extra_hooks
                 return await self._process_message(
                     msg,
                     **kwargs,

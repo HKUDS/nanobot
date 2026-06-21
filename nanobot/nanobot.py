@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.hook import AgentHook, SDKCaptureHook
-from nanobot.agent.loop import AgentLoop, _per_call_hooks
+from nanobot.agent.loop import AgentLoop
 from nanobot.providers.image_generation import image_gen_provider_configs
 
 
@@ -85,13 +85,11 @@ class Nanobot:
         """
         capture = SDKCaptureHook()
         base_hooks = list(hooks) if hooks is not None else list(self._loop._extra_hooks or [])
-        token = _per_call_hooks.set([capture, *base_hooks])
-        try:
-            response = await self._loop.process_direct(
-                message, session_key=session_key,
-            )
-        finally:
-            _per_call_hooks.reset(token)
+        response = await self._loop.process_direct(
+            message,
+            session_key=session_key,
+            extra_hooks=[capture, *base_hooks],
+        )
 
         content = (response.content if response else None) or ""
         return RunResult(
@@ -109,4 +107,3 @@ class Nanobot:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.aclose()
-

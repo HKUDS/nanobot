@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -65,12 +65,14 @@ async def test_run_returns_result(tmp_path):
 
     assert isinstance(result, RunResult)
     assert result.content == "Hello back!"
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="sdk:default")
+    bot._loop.process_direct.assert_awaited_once_with(
+        "hi", session_key="sdk:default", extra_hooks=ANY
+    )
 
 
 @pytest.mark.asyncio
 async def test_run_with_hooks(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.hook import AgentHook, AgentHookContext, SDKCaptureHook
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -89,6 +91,10 @@ async def test_run_with_hooks(tmp_path):
 
     assert result.content == "done"
     assert bot._loop._extra_hooks == []
+    extra_hooks = bot._loop.process_direct.await_args.kwargs["extra_hooks"]
+    assert len(extra_hooks) == 2
+    assert isinstance(extra_hooks[0], SDKCaptureHook)
+    assert isinstance(extra_hooks[1], TestHook)
 
 
 @pytest.mark.asyncio
@@ -160,7 +166,9 @@ async def test_run_custom_session_key(tmp_path):
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     await bot.run("hi", session_key="user-alice")
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="user-alice")
+    bot._loop.process_direct.assert_awaited_once_with(
+        "hi", session_key="user-alice", extra_hooks=ANY
+    )
 
 
 def test_import_from_top_level():
@@ -184,11 +192,8 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        # Whatever hooks the SDK installed are now in the contextvar.
-        from nanobot.agent.loop import _per_call_hooks
-
-        extras = _per_call_hooks.get() or []
+    async def fake_process_direct(message, *, session_key, extra_hooks=None):
+        extras = extra_hooks or []
         messages = [{"role": "user", "content": message}]
         ctx1 = AgentHookContext(iteration=0, messages=messages)
         ctx1.tool_calls = [
@@ -219,10 +224,8 @@ async def test_run_populates_final_messages(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        from nanobot.agent.loop import _per_call_hooks
-
-        extras = _per_call_hooks.get() or []
+    async def fake_process_direct(message, *, session_key, extra_hooks=None):
+        extras = extra_hooks or []
         messages = [
             {"role": "user", "content": message},
             {"role": "assistant", "content": "hi there"},
@@ -270,10 +273,8 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
         async def after_iteration(self, context: AgentHookContext) -> None:
             seen_iterations.append(context.iteration)
 
-    async def fake_process_direct(message, *, session_key):
-        from nanobot.agent.loop import _per_call_hooks
-
-        extras = _per_call_hooks.get() or []
+    async def fake_process_direct(message, *, session_key, extra_hooks=None):
+        extras = extra_hooks or []
         assert len(extras) == 2, f"expected capture + user hook, got {len(extras)}"
         ctx = AgentHookContext(iteration=7, messages=[])
         for h in extras:
@@ -306,16 +307,14 @@ async def test_concurrent_run_hooks_are_isolated_per_call(tmp_path):
     started = 0
     both_started = asyncio.Event()
 
-    async def fake_process_direct(message, *, session_key):
+    async def fake_process_direct(message, *, session_key, extra_hooks=None):
         nonlocal started
-        from nanobot.agent.loop import _per_call_hooks
-
         started += 1
         if started == 2:
             both_started.set()
         await both_started.wait()
 
-        extras = _per_call_hooks.get() or []
+        extras = extra_hooks or []
         messages = [{"role": "user", "content": message}]
         ctx = AgentHookContext(iteration=0, messages=messages)
         ctx.tool_calls = [
@@ -351,9 +350,9 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
     sentinel_hook = AgentHook()
     bot._loop._extra_hooks = [sentinel_hook]
 
-    async def fake_process_direct(message, *, session_key):
+    async def fake_process_direct(message, *, session_key, extra_hooks=None):
         ctx = AgentHookContext(iteration=0, messages=[])
-        for h in bot._loop._extra_hooks:
+        for h in extra_hooks or []:
             await h.after_iteration(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="done")
 
