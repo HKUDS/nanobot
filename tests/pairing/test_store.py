@@ -174,6 +174,34 @@ class TestHandlePairingCommand:
         assert "Pending pairing requests:" in reply
 
 
+class TestNonStringSenderId:
+    """Sender IDs may be numeric (e.g. Telegram/QQ). The store normalizes them
+    to str so writes/reads/removals stay consistent with is_approved()."""
+
+    def test_numeric_sender_id_round_trip(self) -> None:
+        code = store.generate_code("telegram", 12345)
+        assert store.approve_code(code) == ("telegram", "12345")
+        # Approved regardless of whether the caller passes int or str.
+        assert store.is_approved("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is True
+        assert store.get_approved("telegram") == ["12345"]
+        # Revoke also works with a numeric id.
+        assert store.revoke("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is False
+
+    def test_numeric_id_in_hand_edited_store(self) -> None:
+        # Operators may edit pairing.json directly; a numeric entry must still
+        # match the str() lookup that is_approved() performs.
+        store._store_path().write_text(
+            '{"approved": {"telegram": [12345]}, "pending": {}}',
+            encoding="utf-8",
+        )
+        assert store.is_approved("telegram", "12345") is True
+        assert store.is_approved("telegram", 12345) is True
+        assert store.revoke("telegram", 12345) is True
+        assert store.is_approved("telegram", "12345") is False
+
+
 class TestStoreDurability:
     def test_corruption_recovery(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "pairing.json"
