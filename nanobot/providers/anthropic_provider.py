@@ -10,6 +10,8 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from loguru import logger
+
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -523,10 +525,21 @@ class AnthropicProvider(LLMProvider):
         tool_calls: list[ToolCallRequest] = []
         thinking_blocks: list[dict[str, Any]] = []
 
+        seen_tool_ids: set[str] = set()
         for block in response.content:
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
+                # Guard against duplicate tool_use ids from mis-assembled
+                # streams: keep only the first occurrence of each id so the
+                # session history never contains duplicates that would brick
+                # subsequent turns with "tool_use ids must be unique" (HTTP 400).
+                if block.id in seen_tool_ids:
+                    logger.warning(
+                        "Dropping duplicate tool_use id {} from response", block.id
+                    )
+                    continue
+                seen_tool_ids.add(block.id)
                 tool_calls.append(ToolCallRequest(
                     id=block.id,
                     name=block.name,

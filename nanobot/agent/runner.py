@@ -373,12 +373,14 @@ class AgentRunner:
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._drop_orphan_tool_results(messages)
+                messages_for_model = self._dedupe_tool_calls(messages)
+                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
                 messages_for_model = self._snip_history(spec, messages_for_model)
                 # Snipping may have created new orphans; clean them up.
+                messages_for_model = self._dedupe_tool_calls(messages_for_model)
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
             except Exception:
@@ -388,7 +390,8 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
+                    messages_for_model = self._dedupe_tool_calls(messages)
+                    messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
@@ -1354,6 +1357,54 @@ class AgentRunner:
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
+
+    @staticmethod
+    def _dedupe_tool_calls(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove duplicate tool_use ids within each assistant message.
+
+        A mis-assembled stream can persist the same tool_use id twice in one
+        assistant turn.  Providers reject this with ``tool_use ids must be
+        unique`` (HTTP 400), permanently bricking the session.  This sanitizer
+        keeps only the first occurrence of each tool_call id per message.
+        """
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            if msg.get("role") != "assistant":
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls:
+                if updated is not None:
+                    updated.append(msg)
+                continue
+            seen: set[str] = set()
+            deduped: list[dict[str, Any]] = []
+            for tc in tool_calls:
+                tc_id = str(tc.get("id", "")) if isinstance(tc, dict) else ""
+                if tc_id and tc_id in seen:
+                    if updated is None:
+                        updated = [dict(m) for m in messages[:idx]]
+                    logger.warning(
+                        "Dropping duplicate tool_call id {} from session history", tc_id
+                    )
+                    continue
+                if tc_id:
+                    seen.add(tc_id)
+                deduped.append(tc)
+            if len(deduped) != len(tool_calls):
+                if updated is None:
+                    updated = [dict(m) for m in messages[:idx]]
+                fixed = dict(msg)
+                fixed["tool_calls"] = deduped
+                updated.append(fixed)
+            elif updated is not None:
+                updated.append(msg)
+        if updated is None:
+            return messages
+        return updated
 
     @staticmethod
     def _drop_orphan_tool_results(

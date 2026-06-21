@@ -580,3 +580,111 @@ async def test_runner_passes_reasoning_effort_to_provider():
     ))
 
     assert captured["reasoning_effort"] == "high"
+
+
+def test_dedupe_tool_calls_removes_duplicate_ids():
+    """Duplicate tool_use ids within an assistant message are dropped (keep first)."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "tc_1", "function": {"name": "a"}, "type": "function"},
+                {"id": "tc_1", "function": {"name": "b"}, "type": "function"},
+                {"id": "tc_2", "function": {"name": "c"}, "type": "function"},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "tc_1", "content": "ok"},
+        {"role": "tool", "tool_call_id": "tc_2", "content": "ok"},
+    ]
+
+    result = AgentRunner._dedupe_tool_calls(messages)
+
+    # The duplicate tc_1 should be removed; tc_2 and the rest kept.
+    assistant = result[1]
+    assert len(assistant["tool_calls"]) == 2
+    assert assistant["tool_calls"][0]["id"] == "tc_1"
+    assert assistant["tool_calls"][1]["id"] == "tc_2"
+
+
+def test_dedupe_tool_calls_noop_when_no_duplicates():
+    """When there are no duplicates, messages are returned unchanged."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "tc_1", "function": {"name": "a"}, "type": "function"},
+                {"id": "tc_2", "function": {"name": "b"}, "type": "function"},
+            ],
+        },
+    ]
+
+    result = AgentRunner._dedupe_tool_calls(messages)
+    assert result is messages
+
+
+def test_dedupe_tool_calls_multiple_duplicates():
+    """Multiple duplicates across the same message are all removed."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "tc_1", "function": {"name": "a"}, "type": "function"},
+                {"id": "tc_1", "function": {"name": "a"}, "type": "function"},
+                {"id": "tc_2", "function": {"name": "b"}, "type": "function"},
+                {"id": "tc_2", "function": {"name": "b"}, "type": "function"},
+                {"id": "tc_3", "function": {"name": "c"}, "type": "function"},
+            ],
+        },
+    ]
+
+    result = AgentRunner._dedupe_tool_calls(messages)
+    tcs = result[0]["tool_calls"]
+    assert len(tcs) == 3
+    assert [tc["id"] for tc in tcs] == ["tc_1", "tc_2", "tc_3"]
+
+
+def test_anthropic_parse_response_drops_duplicate_tool_use_ids():
+    """AnthropicProvider._parse_response drops duplicate tool_use blocks."""
+    from unittest.mock import MagicMock
+
+    from nanobot.providers.anthropic_provider import AnthropicProvider
+
+    block1 = MagicMock()
+    block1.type = "tool_use"
+    block1.id = "toolu_abc"
+    block1.name = "search"
+    block1.input = {"q": "test"}
+
+    block2 = MagicMock()
+    block2.type = "tool_use"
+    block2.id = "toolu_abc"  # duplicate
+    block2.name = "search"
+    block2.input = {"q": "test"}
+
+    block3 = MagicMock()
+    block3.type = "tool_use"
+    block3.id = "toolu_def"
+    block3.name = "write"
+    block3.input = {"path": "/tmp/x"}
+
+    response = MagicMock()
+    response.content = [block1, block2, block3]
+    response.stop_reason = "tool_use"
+    response.usage = None
+
+    result = AnthropicProvider._parse_response(response)
+
+    assert len(result.tool_calls) == 2
+    assert result.tool_calls[0].id == "toolu_abc"
+    assert result.tool_calls[1].id == "toolu_def"
