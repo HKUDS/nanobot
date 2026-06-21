@@ -866,7 +866,7 @@ class TestMainMenuUpdate:
         dirty_choices = _get_main_menu_choices(True)
 
         assert clean_choices == [
-            "[Q] Quick Start (provider + key)",
+            "[Q] Quick Start (provider + key + model)",
             "[A] Advanced Settings",
             "[X] Exit",
         ]
@@ -880,7 +880,7 @@ class TestMainMenuUpdate:
         initial_config = Config()
 
         responses = iter([
-            "[Q] Quick Start (provider + key)",
+            "[Q] Quick Start (provider + key + model)",
         ])
 
         class FakePrompt:
@@ -907,11 +907,8 @@ class TestMainMenuUpdate:
         assert result.config.agents.defaults.bot_name == "quickbot"
 
     def test_quick_start_provider_choice_skips_advanced_prompts(self, monkeypatch):
-        """The beginner path should ask for provider and API key without advanced settings."""
+        """The beginner path should ask for provider, API key, and model."""
         config = Config()
-
-        def fail_model_input(*_args, **_kwargs):
-            raise AssertionError("Quick Start should not ask for a model ID when /models works")
 
         def fail_websocket_config(*_args, **_kwargs):
             raise AssertionError("Quick Start should not open WebSocket settings")
@@ -922,8 +919,11 @@ class TestMainMenuUpdate:
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
         monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
-        monkeypatch.setattr(onboard_wizard, "_fetch_first_quick_start_model", lambda *a, **kw: "deepseek-v4-flash")
-        monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fail_model_input)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deepseek-v4-flash",
+        )
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_websocket_config)
         monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": pause_messages.append(message))
@@ -940,70 +940,53 @@ class TestMainMenuUpdate:
         assert websocket["enabled"] is True
         assert websocket["websocketRequiresToken"] is True
 
-    def test_quick_start_provider_choice_fetches_models_from_selected_provider(self, monkeypatch):
-        """Known providers should fetch models only from the selected provider base URL."""
+    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
+        """Known providers should ask users for the model instead of fetching one."""
         config = Config()
-        calls: dict[str, str] = {}
+        model_prompts: list[tuple[str, str, str]] = []
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenRouter")
         monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-or-test")
 
-        def fake_fetch(api_base, api_key):
-            calls["api_base"] = api_base
-            calls["api_key"] = api_key
+        def fake_model_input(prompt, current, provider):
+            model_prompts.append((prompt, current, provider))
             return "openai/gpt-4o-mini"
 
-        monkeypatch.setattr(onboard_wizard, "_fetch_first_quick_start_model", fake_fetch)
+        monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fake_model_input)
 
         assert onboard_wizard._configure_quick_start_provider(config) is True
 
-        assert calls == {
-            "api_base": "https://openrouter.ai/api/v1",
-            "api_key": "sk-or-test",
-        }
+        assert model_prompts == [("Model ID", "", "openrouter")]
         assert config.providers.openrouter.api_key == "sk-or-test"
         assert config.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
         assert config.model_presets["primary"].provider == "openrouter"
         assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
 
-    def test_quick_start_openai_fetches_models_without_storing_base(self, monkeypatch):
-        """OpenAI should still support key-only setup via its SDK default endpoint."""
+    def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
+        """OpenAI should support key-only setup without storing a default base URL."""
         config = Config()
-        calls: dict[str, str] = {}
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenAI")
         monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-openai-test")
-
-        def fake_fetch(api_base, api_key):
-            calls["api_base"] = api_base
-            calls["api_key"] = api_key
-            return "gpt-4o-mini"
-
-        monkeypatch.setattr(onboard_wizard, "_fetch_first_quick_start_model", fake_fetch)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "gpt-4o-mini",
+        )
 
         assert onboard_wizard._configure_quick_start_provider(config) is True
 
-        assert calls == {
-            "api_base": "https://api.openai.com/v1",
-            "api_key": "sk-openai-test",
-        }
         assert config.providers.openai.api_key == "sk-openai-test"
         assert config.providers.openai.api_base is None
         assert config.model_presets["primary"].provider == "openai"
         assert config.model_presets["primary"].model == "gpt-4o-mini"
 
-    def test_quick_start_custom_base_url_fetches_first_model(self, monkeypatch):
-        """Unknown providers should use only the user-provided base URL to fetch models."""
+    def test_quick_start_custom_base_url_asks_for_model_id(self, monkeypatch):
+        """Custom providers should ask for base URL and model ID."""
         config = Config()
         text_answers = iter(["sk-custom-test", "https://api.example.test/v1"])
-        calls: dict[str, str] = {}
-
-        def fake_fetch(api_base, api_key):
-            calls["api_base"] = api_base
-            calls["api_key"] = api_key
-            return "custom-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
         monkeypatch.setattr(
@@ -1012,11 +995,14 @@ class TestMainMenuUpdate:
             lambda *a, **kw: onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE,
         )
         monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(text_answers))
-        monkeypatch.setattr(onboard_wizard, "_fetch_first_quick_start_model", fake_fetch)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "custom-model",
+        )
 
         assert onboard_wizard._configure_quick_start_provider(config) is True
 
-        assert calls == {"api_base": "https://api.example.test/v1", "api_key": "sk-custom-test"}
         assert config.providers.custom.api_key == "sk-custom-test"
         assert config.providers.custom.api_base == "https://api.example.test/v1"
         assert config.model_presets["primary"].provider == "custom"
@@ -1036,6 +1022,21 @@ class TestMainMenuUpdate:
         assert config.providers.deepseek.api_base is None
         assert config.providers.custom.api_key is None
         assert config.providers.custom.api_base is None
+        assert "primary" not in config.model_presets
+
+    def test_quick_start_requires_model_id_before_setting_defaults(self, monkeypatch):
+        """Quick Start should not create a preset without an explicit model ID."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
+        monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", lambda *a, **kw: "")
+
+        assert onboard_wizard._configure_quick_start_provider(config) is False
+
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.deepseek.api_base is None
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):

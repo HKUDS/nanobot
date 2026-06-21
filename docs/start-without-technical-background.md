@@ -156,7 +156,7 @@ You will see a menu like this:
 
 ```text
 > What would you like to do?
-  [Q] Quick Start (provider + key)
+  [Q] Quick Start (provider + key + model)
   [A] Advanced Settings
   [X] Exit
 ```
@@ -169,15 +169,17 @@ Move through the wizard like this:
 | The provider menu | Choose the company or service that issued your API key. |
 | The API key field | Paste the key, then press `Enter`. |
 | A base URL field for `Other OpenAI-compatible` | Paste the provider base URL from its docs, then press `Enter`. |
+| The Model ID field | Paste a model name from your provider, then press `Enter`. |
 | A back option in Advanced Settings | Choose it to return to the previous menu. |
 
-For the first setup, choose `[Q] Quick Start (provider + key)`. It configures the recommended local browser UI and default AI settings for you. Use `Advanced Settings` later only if you need a provider that is not in the Quick Start menu, a chat app, or a tool setup.
+For the first setup, choose `[Q] Quick Start (provider + key + model)`. It configures the recommended local browser UI and default AI settings for you. Use `Advanced Settings` later only if you need a provider that is not in the Quick Start menu, a chat app, or a tool setup.
 
-1. Choose `[Q] Quick Start (provider + key)`.
+1. Choose `[Q] Quick Start (provider + key + model)`.
 2. Choose the provider that issued your API key.
 3. Paste your API key.
 4. If you chose `Other OpenAI-compatible`, paste the provider base URL from that provider's docs.
-5. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
+5. Paste a model ID that provider can run.
+6. Review the Quick Start summary. The wizard saves and exits when Quick Start finishes.
 
 The recommended path enables the local WebUI and default AI settings. You do not need to choose a chat channel for the first run.
 

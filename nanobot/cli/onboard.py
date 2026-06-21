@@ -65,11 +65,9 @@ _QUICK_START_PROVIDER_KEYS = (
     "zhipu",
 )
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
-_QUICK_START_MODEL_FETCH_API_BASES = {
-    "openai": "https://api.openai.com/v1",
-}
 
-_QUICK_START_STEPS = ("Provider + key", "WebUI", "Review")
+_QUICK_START_MENU_CHOICE = "[Q] Quick Start (provider + key + model)"
+_QUICK_START_STEPS = ("Provider + model", "WebUI", "Review")
 
 # Low-contrast terminal palette inspired by JetBrains Darcula/Islands.
 _UI_ACCENT = "#6B9BFA"
@@ -400,7 +398,7 @@ def _show_main_menu_header() -> None:
     body = Table.grid(expand=True)
     body.add_column(ratio=1)
     body.add_row(f"{__logo__} [bold {_UI_TEXT}]nanobot[/] [{_UI_MUTED}]v{__version__}[/]")
-    body.add_row(f"[{_UI_ACCENT}]Quick Start asks for the provider and API key.[/]")
+    body.add_row(f"[{_UI_ACCENT}]Quick Start asks for the provider, API key, and model.[/]")
     body.add_row(
         f"[{_UI_MUTED}]Use Advanced later for other providers or chat apps.[/]"
     )
@@ -1434,39 +1432,6 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
     return choices
 
 
-def _models_url(api_base: str) -> str:
-    """Return the OpenAI-compatible models endpoint for a base URL."""
-    return f"{api_base.rstrip('/')}/models"
-
-
-def _fetch_first_quick_start_model(api_base: str, api_key: str) -> str | None:
-    """Fetch the first model ID from a user-approved OpenAI-compatible base URL."""
-    import httpx
-
-    try:
-        response = httpx.get(
-            _models_url(api_base),
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=8.0,
-            follow_redirects=True,
-        )
-    except httpx.HTTPError:
-        return None
-    if response.status_code != 200:
-        return None
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, list):
-        return None
-    for item in data:
-        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip():
-            return item["id"].strip()
-    return None
-
-
 def _configure_quick_start_provider(config: Config) -> bool:
     """Configure the beginner path from provider + API key."""
     _show_quick_start_progress(1)
@@ -1508,22 +1473,15 @@ def _configure_quick_start_provider(config: Config) -> bool:
         console.print(f"[red]Unknown provider: {provider_name}[/red]")
         return False
 
-    provider_config.api_key = api_key
-    if api_base and not provider_config.api_base:
-        provider_config.api_base = api_base
-
-    model = None
-    model_api_base = provider_config.api_base or _QUICK_START_MODEL_FETCH_API_BASES.get(
-        provider_name
-    )
-    if model_api_base:
-        model = _fetch_first_quick_start_model(model_api_base, api_key)
-    if not model:
-        model = _input_model_with_autocomplete("Model ID", "", provider_name)
+    model = _input_model_with_autocomplete("Model ID", "", provider_name)
     model = (model or "").strip()
     if not model:
         console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
         return False
+
+    provider_config.api_key = api_key
+    if api_base and not provider_config.api_base:
+        provider_config.api_base = api_base
 
     _set_primary_quick_start_preset(
         config,
@@ -1582,7 +1540,7 @@ def _configure_quick_start(config: Config) -> bool:
     console.clear()
     _show_section_header(
         "Quick Start",
-        "Choose the API provider, paste the key, then use the local WebUI.",
+        "Choose the API provider, paste the key, enter the model, then use the local WebUI.",
     )
     if not _configure_quick_start_provider(config):
         _pause()
@@ -1629,7 +1587,7 @@ def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:
 def _get_main_menu_choices(has_unsaved_changes: bool) -> list[str]:
     """Return the top-level choices, keeping save actions hidden until needed."""
     choices = [
-        "[Q] Quick Start (provider + key)",
+        _QUICK_START_MENU_CHOICE,
         "[A] Advanced Settings",
     ]
     if has_unsaved_changes:
@@ -1734,7 +1692,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
                 return OnboardResult(config=original_config, should_save=False)
             continue
 
-        if answer == "[Q] Quick Start (provider + key)":
+        if answer == _QUICK_START_MENU_CHOICE:
             if _configure_quick_start(config):
                 return OnboardResult(config=config, should_save=True)
             continue
