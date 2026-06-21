@@ -65,14 +65,15 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
-const COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
+const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
+const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -87,6 +88,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "voice",
   "browser",
   "apps",
+  "automations",
   "skills",
   "runtime",
   "advanced",
@@ -101,7 +103,7 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "skills") return section;
+  if (section === "apps" || section === "automations" || section === "skills") return section;
   return "settings";
 }
 
@@ -129,6 +131,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/apps") {
     return { view: "apps", activeKey, settingsSection: "apps" };
+  }
+  if (path === "/automations") {
+    return { view: "automations", activeKey, settingsSection: "automations" };
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
@@ -255,10 +260,12 @@ function readSidebarOpen(): boolean {
   }
 }
 
-function readCompletedRunChatIds(): Set<string> {
+function readSessionUpdateChatIds(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.localStorage.getItem(COMPLETED_RUNS_STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(SESSION_UPDATES_STORAGE_KEY)
+      ?? window.localStorage.getItem(LEGACY_COMPLETED_RUNS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return new Set();
     return new Set(parsed.filter((item): item is string => typeof item === "string"));
@@ -267,10 +274,10 @@ function readCompletedRunChatIds(): Set<string> {
   }
 }
 
-function writeCompletedRunChatIds(chatIds: Set<string>): void {
+function writeSessionUpdateChatIds(chatIds: Set<string>): void {
   try {
     window.localStorage.setItem(
-      COMPLETED_RUNS_STORAGE_KEY,
+      SESSION_UPDATES_STORAGE_KEY,
       JSON.stringify(Array.from(chatIds)),
     );
   } catch {
@@ -570,7 +577,7 @@ function Shell({
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
-  const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(readCompletedRunChatIds);
+  const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const skills = useSkills(token);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
@@ -638,20 +645,20 @@ function Shell({
   }, [hostSidebarOpen]);
 
   useEffect(() => {
-    writeCompletedRunChatIds(completedChatIds);
-  }, [completedChatIds]);
+    writeSessionUpdateChatIds(updatedChatIds);
+  }, [updatedChatIds]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
-  const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
+  const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
     if (!activeChatId) return;
-    setCompletedChatIds((current) => {
+    setUpdatedChatIds((current) => {
       if (!current.has(activeChatId)) return current;
       const next = new Set(current);
       next.delete(activeChatId);
@@ -691,7 +698,7 @@ function Shell({
   useEffect(() => {
     if (loading) return;
     const knownChatIds = new Set(sessions.map((session) => session.chatId));
-    setCompletedChatIds((current) => {
+    setUpdatedChatIds((current) => {
       const next = new Set(
         Array.from(current).filter((chatId) => knownChatIds.has(chatId)),
       );
@@ -719,12 +726,25 @@ function Shell({
   }, [activeKey, loading, navigate, sessions]);
 
   useEffect(() => {
-    return client.onSessionUpdate((_chatId, _scope, workspaceScope) => {
+    return client.onSessionUpdate((chatId, scope, workspaceScope) => {
+      if (scope === "thread") {
+        setUpdatedChatIds((current) => {
+          const next = new Set(current);
+          if (activeChatIdRef.current === chatId) {
+            next.delete(chatId);
+          } else {
+            next.add(chatId);
+          }
+          return next.size === current.size && next.has(chatId) === current.has(chatId)
+            ? current
+            : next;
+        });
+      }
       if (!workspaceScope) return;
       const next = normalizeWorkspaceScope(workspaceScope);
       setWorkspaceOverrides((current) => ({
         ...current,
-        [_chatId]: next,
+        [chatId]: next,
       }));
       setDraftWorkspaceScope(next);
       setWorkspaceError(null);
@@ -761,7 +781,7 @@ function Shell({
       runningChatIdsRef.current = next;
       return next;
     });
-    setCompletedChatIds((current) => {
+    setUpdatedChatIds((current) => {
       let changed = false;
       const next = new Set(current);
       for (const chatId of activeRunIds) {
@@ -958,7 +978,7 @@ function Shell({
       const selected = sessions.find((session) => session.key === key);
       const selectedChatId = selected?.chatId;
       if (selectedChatId) {
-        setCompletedChatIds((current) => {
+        setUpdatedChatIds((current) => {
           if (!current.has(selectedChatId)) return current;
           const next = new Set(current);
           next.delete(selectedChatId);
@@ -1166,6 +1186,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenAutomations = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "automations", activeKey, settingsSection: "automations" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onOpenSkills = useCallback(() => {
     setSessionSearchOpen(false);
     navigate({ view: "skills", activeKey, settingsSection: "skills" });
@@ -1223,7 +1249,7 @@ function Shell({
         nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
         setRunningChatIds(nextRunning);
-        setCompletedChatIds((current) => {
+        setUpdatedChatIds((current) => {
           if (!current.has(chatId)) return current;
           const next = new Set(current);
           next.delete(chatId);
@@ -1237,7 +1263,7 @@ function Shell({
       nextRunning.delete(chatId);
       runningChatIdsRef.current = nextRunning;
       setRunningChatIds(nextRunning);
-      setCompletedChatIds((current) => {
+      setUpdatedChatIds((current) => {
         const next = new Set(current);
         if (activeChatIdRef.current === chatId) {
           next.delete(chatId);
@@ -1341,6 +1367,12 @@ function Shell({
       });
       return;
     }
+    if (view === "automations") {
+      document.title = t("app.documentTitle.chat", {
+        title: t("settings.nav.automations", { defaultValue: "Automations" }),
+      });
+      return;
+    }
     if (view === "skills") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.skills", { defaultValue: "Skills" }),
@@ -1367,9 +1399,10 @@ function Shell({
     onNewChatInProject,
     onOpenSettings,
     onOpenApps,
+    onOpenAutomations,
     onOpenSkills,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "skills" ? view : null,
+    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -1377,7 +1410,7 @@ function Shell({
     projectNameOverrides: sidebarState.project_name_overrides,
     collapsedGroups: sidebarState.collapsed_groups,
     runningChatIds: runningChatIdList,
-    completedChatIds: completedChatIdList,
+    updatedChatIds: updatedChatIdList,
     viewState: sidebarState.view,
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarState.archived_keys.length,

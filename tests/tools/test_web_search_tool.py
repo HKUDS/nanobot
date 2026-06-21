@@ -131,6 +131,76 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
+def test_keenable_without_api_key_is_treated_as_duckduckgo(monkeypatch):
+    # The REST API requires a key; without one we fall back to DuckDuckGo.
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+@pytest.mark.asyncio
+async def test_keenable_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "keenable" in url
+        assert kw["headers"]["X-API-Key"] == "keen-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="keen-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Keen" in result
+    assert "https://keenable.ai" in result
+    assert "longer excerpt" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-Key"] == "env-keen-key"
+        return _response(json={
+            "results": [{"title": "Env", "url": "https://keenable.ai/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("KEENABLE_API_KEY", "env-keen-key")
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="bad-keen-key")
+    result = await tool.execute(query="keenable")
+    assert "Error: Keenable search failed (401)" in result
+
+
 @pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):

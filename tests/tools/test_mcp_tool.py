@@ -646,6 +646,48 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    captured: dict[str, object] = {}
+
+    async def _reachable(_url: str) -> bool:
+        return True
+
+    def _validate(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    @asynccontextmanager
+    async def _capturing_streamable_http_client(_url: str, http_client=None):
+        captured["timeout"] = http_client.timeout
+        yield object(), object(), object()
+
+    monkeypatch.setattr(mcp_mod, "validate_url_target", _validate)
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", _reachable)
+    monkeypatch.setattr(
+        sys.modules["mcp.client.streamable_http"],
+        "streamable_http_client",
+        _capturing_streamable_http_client,
+    )
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(url="https://mcp.example.com/mcp")},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    timeout = captured["timeout"]
+    assert timeout.connect == 10.0
+    assert timeout.read == 30.0
+    assert timeout.write == 30.0
+    assert timeout.pool == 30.0
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
     fake_mcp_runtime: dict[str, object | None],
     monkeypatch: pytest.MonkeyPatch,

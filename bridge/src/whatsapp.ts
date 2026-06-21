@@ -181,6 +181,14 @@ export class WhatsAppClient {
         const msgTimestamp = msg.messageTimestamp as number;
         if (msgTimestamp && msgTimestamp < startupTimestamp) continue;
 
+        // Send read receipt (blue check) immediately
+        try {
+          await this.sock!.readMessages([msg.key]);
+        } catch (e) {
+          // Non-fatal: log but don't block message processing
+          console.error('Failed to send read receipt:', (e as Error).message);
+        }
+
         const unwrapped = baileysExtractMessageContent(msg.message);
         if (!unwrapped) continue;
 

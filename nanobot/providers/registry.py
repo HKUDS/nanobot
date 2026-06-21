@@ -85,6 +85,29 @@ class ProviderSpec:
     # whose API returns the actual answer in "reasoning" instead of "content".
     reasoning_as_content: bool = False
 
+    # Map user-supplied reasoning_effort (OpenAI vocab: minimal/low/medium/high)
+    # to the value this provider accepts on the wire. Set when the provider's
+    # accepted set differs from OpenAI's. An empty mapped value omits the kwarg.
+    # Mistral: only "high"/"none" — low/minimal map to "none", medium maps to "high".
+    reasoning_effort_remap: tuple[tuple[str, str], ...] = ()
+
+    # Models whose API rejects the reasoning_effort kwarg because reasoning is
+    # implicit (Magistral always reasons; sending the kwarg returns HTTP 400).
+    # Substring match against the wire model name (lowercased).
+    implicit_reasoning_models: tuple[str, ...] = ()
+
+    # When the model returns content as a list of {"type":"thinking",...} +
+    # {"type":"text",...} blocks, extract the thinking text into
+    # reasoning_content. Mistral's Magistral / reasoning-enabled responses use
+    # this shape.
+    extract_thinking_blocks: bool = False
+
+    # Strip ``reasoning_content`` from assistant history messages before
+    # sending. Mistral validates its request schema strictly and 400s on
+    # any extra fields; other providers (DeepSeek) require this key on the
+    # wire to keep thinking-mode history intact.
+    strip_history_reasoning_content: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -352,7 +375,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         thinking_style="enable_thinking",
     ),
-    # Moonshot (月之暗面): Kimi K2.5 / K2.6 enforce temperature >= 1.0.
+    # Moonshot (月之暗面): Kimi K2.5+ enforce temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -363,6 +386,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
             ("kimi-k2.6", {"temperature": 1.0}),
+            ("kimi-k2.7", {"temperature": 1.0}),
+            ("kimi-k2.7-code", {"temperature": 1.0}),
+            ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
     ),
     # MiniMax: OpenAI-compatible API
@@ -384,14 +410,30 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="anthropic",
         default_api_base="https://api.minimax.io/anthropic",
     ),
-    # Mistral AI: OpenAI-compatible API
+    # Mistral AI: OpenAI-compatible API.
+    # Reasoning quirks:
+    #   * mistral-medium-3-5 / mistral-vibe-cli-* accept reasoning_effort but
+    #     only "high" or "none" — low/medium/minimal must be remapped.
+    #   * Magistral-* models reason implicitly and reject the kwarg entirely.
+    #   * Reasoning responses return content as a list of thinking + text
+    #     blocks; thinking text gets extracted into reasoning_content.
     ProviderSpec(
         name="mistral",
-        keywords=("mistral",),
+        keywords=("mistral", "magistral", "ministral", "codestral", "devstral"),
         env_key="MISTRAL_API_KEY",
         display_name="Mistral",
         backend="openai_compat",
         default_api_base="https://api.mistral.ai/v1",
+        reasoning_effort_remap=(
+            ("minimal", "none"),
+            ("low", "none"),
+            ("medium", "high"),
+            ("high", "high"),
+            ("none", "none"),
+        ),
+        implicit_reasoning_models=("magistral",),
+        extract_thinking_blocks=True,
+        strip_history_reasoning_content=True,
     ),
     # Step Fun (阶跃星辰): OpenAI-compatible API
     ProviderSpec(

@@ -45,13 +45,23 @@ class _FsTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         extra_allowed_dirs: list[Path] | None = None,
+        extra_read_allowed_dirs: list[Path] | None = None,
+        extra_write_allowed_dirs: list[Path] | None = None,
+        extra_write_allowed_files: list[Path] | None = None,
         file_states: FileStates | None = None,
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
-        self._extra_allowed_dirs = extra_allowed_dirs
+        # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
+        # must opt in via extra_write_allowed_dirs.
+        self._extra_read_allowed_dirs = [
+            *(extra_allowed_dirs or []),
+            *(extra_read_allowed_dirs or []),
+        ]
+        self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
+        self._extra_write_allowed_files = list(extra_write_allowed_files or [])
         self._restrict_to_workspace = (
             bool(restrict_to_workspace)
             if restrict_to_workspace is not None
@@ -78,7 +88,7 @@ class _FsTool(Tool):
         return cls(
             workspace=Path(ctx.workspace),
             allowed_dir=allowed_dir,
-            extra_allowed_dirs=extra_read,
+            extra_read_allowed_dirs=extra_read,
             file_states=ctx.file_state_store,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             sandbox_restricts_workspace=sandbox_restricts,
@@ -90,7 +100,26 @@ class _FsTool(Tool):
             return self._explicit_file_states
         return current_file_states(self._fallback_file_states)
 
-    def _resolve(self, path: str) -> Path:
+    def _effective_allowed_root(self, access_allowed_root: Path | None) -> Path | None:
+        if self._allowed_dir is None or self._workspace is None:
+            return access_allowed_root
+        try:
+            allowed_dir = Path(self._allowed_dir).expanduser().resolve(strict=False)
+            workspace = Path(self._workspace).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return access_allowed_root if access_allowed_root is not None else self._allowed_dir
+        if allowed_dir == workspace:
+            return access_allowed_root
+        return allowed_dir
+
+    def _resolve_with_extra(
+        self,
+        path: str,
+        extra_allowed_dirs: list[Path] | None,
+        extra_allowed_files: list[Path] | None,
+        *,
+        include_media_dir: bool,
+    ) -> Path:
         access = current_tool_workspace(
             self._workspace,
             restrict_to_workspace=self._restrict_to_workspace,
@@ -99,9 +128,30 @@ class _FsTool(Tool):
         return resolve_workspace_path(
             path,
             access.project_path,
-            access.allowed_root,
-            self._extra_allowed_dirs,
+            self._effective_allowed_root(access.allowed_root),
+            extra_allowed_dirs,
+            extra_allowed_files,
+            include_media_dir=include_media_dir,
         )
+
+    def _resolve_read(self, path: str) -> Path:
+        return self._resolve_with_extra(
+            path,
+            self._extra_read_allowed_dirs,
+            None,
+            include_media_dir=True,
+        )
+
+    def _resolve_write(self, path: str) -> Path:
+        return self._resolve_with_extra(
+            path,
+            self._extra_write_allowed_dirs,
+            self._extra_write_allowed_files,
+            include_media_dir=False,
+        )
+
+    def _resolve(self, path: str) -> Path:
+        return self._resolve_read(path)
 
     def _display_workspace(self) -> Path | None:
         return current_tool_workspace(self._workspace).project_path
@@ -224,7 +274,7 @@ class ReadFileTool(_FsTool):
             if _is_blocked_device(path):
                 return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
 
-            fp = self._resolve(path)
+            fp = self._resolve_read(path)
             if _is_blocked_device(fp):
                 return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
             if not fp.exists():
@@ -436,7 +486,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            fp = self._resolve(path)
+            fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
             self._file_states.record_write(fp)
@@ -786,7 +836,7 @@ class EditFileTool(_FsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return "Error: expected_replacements must be >= 1."
 
-            fp = self._resolve(path)
+            fp = self._resolve_write(path)
 
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():

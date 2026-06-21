@@ -48,6 +48,19 @@ def consolidator(store, mock_provider):
     )
 
 
+def _tool_round(call_id: str) -> list[dict]:
+    return [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
+    ]
+
+
 class TestConsolidatorSummarize:
     async def test_summarize_appends_to_history(self, consolidator, mock_provider, store):
         """Consolidator should call LLM to summarize, then append to HISTORY.md."""
@@ -219,21 +232,17 @@ class TestConsolidatorTokenBudget:
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
 
-    async def test_replay_window_overflow_matches_history_tool_boundary(
+    async def test_replay_window_overflow_extends_to_long_recent_user_turn(
         self,
         consolidator,
     ):
-        """Archive the exact prefix hidden by get_history's legal-start trimming."""
+        """Replay-window consolidation must not cut into the latest user turn."""
         session = Session(key="test:replay-tool-boundary")
-        session.add_message("user", "run the tool")
-        session.add_message(
-            "assistant",
-            "",
-            tool_calls=[
-                {"id": "call-1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
-            ],
-        )
-        session.add_message("tool", "tool result", tool_call_id="call-1", name="x")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "record this")
+        for i in range(4):
+            session.messages.extend(_tool_round(f"call-{i}"))
         session.add_message("assistant", "final answer")
 
         consolidator.sessions._session_cache[session.key] = session
@@ -242,13 +251,49 @@ class TestConsolidatorTokenBudget:
 
         await consolidator.maybe_consolidate_by_tokens(
             session,
-            replay_max_messages=2,
+            replay_max_messages=4,
         )
 
         archived_chunk = consolidator.archive.await_args.args[0]
-        assert [m["role"] for m in archived_chunk] == ["user", "assistant", "tool"]
-        assert session.last_consolidated == 3
-        assert session.get_history(max_messages=2) == [{"role": "assistant", "content": "final answer"}]
+        assert [m["content"] for m in archived_chunk] == ["old", "old answer"]
+        assert session.last_consolidated == 2
+
+        history = session.get_history(max_messages=4, extend_to_user=True)
+        assert len(history) > 4
+        assert history[0]["content"] == "record this"
+        assert history[-1]["content"] == "final answer"
+
+    async def test_replay_window_overflow_uses_newer_user_inside_window(
+        self,
+        consolidator,
+    ):
+        """Do not extend to an older long turn when the hard window has a newer user."""
+        session = Session(key="test:replay-newer-user")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "long older turn")
+        for i in range(8):
+            session.messages.extend(_tool_round(f"older-{i}"))
+        session.add_message("assistant", "older final")
+        session.add_message("user", "new question")
+        session.add_message("assistant", "new answer")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="older turn summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=6,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[2]["content"] == "long older turn"
+        assert archived_chunk[-1]["content"] == "older final"
+        assert session.last_consolidated == len(session.messages) - 2
+
+        history = session.get_history(max_messages=6, extend_to_user=True)
+        assert [m["content"] for m in history] == ["new question", "new answer"]
 
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
@@ -561,8 +606,8 @@ class TestCompactIdleSession:
         real_consolidator,
         mock_provider,
     ):
-        """Assistant-only tails retain a non-contiguous slice, so archive the
-        actual dropped messages rather than a computed prefix."""
+        """Assistant-only tails extend back to the latest user turn, so archive
+        the actual dropped messages rather than a computed prefix."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -585,12 +630,16 @@ class TestCompactIdleSession:
             "assistant-02",
             "assistant-03",
             "assistant-04",
+            "assistant-05",
+            "assistant-06",
+            "assistant-07",
+            "assistant-08",
+            "assistant-09",
         ]
 
         # #4264: idle compaction now summarizes the full unconsolidated tail, so
-        # the dropped head (user-00), the non-contiguous dropped tail
-        # (assistant-09), and the retained suffix (user-14) are all summarized.
-        # Retention above still proves the non-contiguous suffix is handled.
+        # the dropped head (user-00) and retained suffix (user-14 through
+        # assistant-09) are all summarized.
         archived_call = mock_provider.chat_with_retry.call_args
         user_content = archived_call.kwargs["messages"][1]["content"]
         assert "user-00" in user_content
@@ -821,4 +870,4 @@ class TestArchiveTruncation:
         enc = tiktoken.get_encoding("cl100k_base")
         sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         token_count = len(enc.encode(sent_content))
-        assert token_count <= 9_900 + 10  # small margin for truncation suffix
+        assert token_count <= 9_900

@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +40,7 @@ def _mk_loop() -> AgentLoop:
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     WebuiTurnCoordinator(
@@ -951,6 +953,68 @@ async def test_process_message_uses_explicit_session_metadata_for_goal_context(
     assert kwargs["chat_id"] == "chat-with-goal"
     assert kwargs["session_metadata"] is system_session.metadata
     assert GOAL_STATE_KEY not in kwargs["session_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_goal_continue_message_reads_latest_metadata(
+    tmp_path: Path,
+) -> None:
+    from nanobot.agent.runner import AgentRunResult
+
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:late-goal")
+    seen: dict[str, str | None] = {}
+
+    async def fake_run(spec):
+        assert callable(spec.goal_continue_message)
+        session.metadata[GOAL_STATE_KEY] = {
+            "status": "active",
+            "objective": "Goal created during this runner call.",
+        }
+        seen["goal_continue"] = spec.goal_continue_message()
+        return AgentRunResult(
+            final_content="ok",
+            messages=[{"role": "assistant", "content": "ok"}],
+        )
+
+    loop.runner.run = fake_run  # type: ignore[method-assign]
+
+    await loop._run_agent_loop(
+        [],
+        session=session,
+        channel="websocket",
+        chat_id="late-goal",
+        session_key=session.key,
+    )
+
+    assert "Goal created during this runner call." in (seen["goal_continue"] or "")
+
+
+@pytest.mark.asyncio
+async def test_process_direct_skip_user_persist_does_not_save_retry_user(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop._connect_mcp = AsyncMock()
+    session = loop.sessions.get_or_create("api:default")
+    session.add_message("user", "hello")
+    session.add_message("assistant", "previous empty-response attempt")
+    loop.sessions.save(session)
+
+    await loop.process_direct(
+        "hello",
+        session_key=session.key,
+        channel="api",
+        chat_id="default",
+        persist_user_message=False,
+    )
+
+    session = loop.sessions.get_or_create("api:default")
+    assert [(m["role"], m["content"]) for m in session.messages] == [
+        ("user", "hello"),
+        ("assistant", "previous empty-response attempt"),
+        ("assistant", "Test title"),
+    ]
 
 
 def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:

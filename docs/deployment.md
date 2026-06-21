@@ -54,7 +54,7 @@ Restart the deployed process after editing `config.json`. Long-running processes
 > }
 > ```
 >
-> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured — see [`webui/README.md`](../webui/README.md) for details.
+> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
 
 ### Docker Compose
 

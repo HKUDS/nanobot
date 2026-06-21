@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import hashlib
 import re
 import secrets
 import string
@@ -14,6 +14,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
+    resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
 
@@ -22,6 +23,24 @@ _ALNUM = string.ascii_letters + string.digits
 
 def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
+
+
+_VALID_TOOL_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _sanitize_tool_id(tid: str) -> str:
+    """Ensure tool_use/tool_result IDs match Anthropic's required pattern.
+
+    The Anthropic API rejects tool IDs that don't match ``^[a-zA-Z0-9_-]+$``
+    with a 400 ("String should match pattern") error. IDs coming from other
+    providers or restored sessions can contain pipes, dots or other invalid
+    characters, so coerce them to the allowed charset.
+    """
+    if not tid or _VALID_TOOL_ID.match(tid):
+        return tid
+    safe_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", tid)[:48].strip("_") or "toolu"
+    digest = hashlib.sha1(tid.encode()).hexdigest()[:8]
+    return f"{safe_prefix}_{digest}"
 
 
 class AnthropicProvider(LLMProvider):
@@ -176,7 +195,7 @@ class AnthropicProvider(LLMProvider):
         content = msg.get("content")
         block: dict[str, Any] = {
             "type": "tool_result",
-            "tool_use_id": msg.get("tool_call_id", ""),
+            "tool_use_id": _sanitize_tool_id(msg.get("tool_call_id", "")),
         }
         if isinstance(content, list):
             block["content"] = AnthropicProvider._convert_user_content(content)
@@ -212,7 +231,7 @@ class AnthropicProvider(LLMProvider):
             args = func.get("arguments", "{}")
             blocks.append({
                 "type": "tool_use",
-                "id": tc.get("id") or _gen_tool_id(),
+                "id": _sanitize_tool_id(tc.get("id") or _gen_tool_id()),
                 "name": func.get("name", ""),
                 "input": tool_arguments_object_for_replay(args),
             })
@@ -613,7 +632,7 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta or on_thinking_delta or on_tool_call_delta:
@@ -682,7 +701,7 @@ class AnthropicProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

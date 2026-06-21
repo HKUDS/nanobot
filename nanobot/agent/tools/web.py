@@ -317,6 +317,9 @@ class WebSearchTool(Tool):
                 or os.environ.get("WEB_SEARCH_API_KEY", "")
             )
             return "volcengine" if api_key else "duckduckgo"
+        if provider == "keenable":
+            api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
+            return "keenable" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -371,6 +374,8 @@ class WebSearchTool(Tool):
                 n,
                 freshness=kwargs.get("freshness", "noLimit"),
             )
+        elif provider == "keenable":
+            return await self._search_keenable(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -483,6 +488,42 @@ class WebSearchTool(Tool):
             return _format_results(query, r.json().get("results", []), n)
         except Exception as e:
             return f"Error: {e}"
+
+    async def _search_keenable(self, query: str, n: int) -> str:
+        api_key = self.config.api_key or os.environ.get("KEENABLE_API_KEY", "")
+        if not api_key:
+            logger.warning("KEENABLE_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
+            "X-Keenable-Title": "nanobot",
+            "X-API-Key": api_key,
+        }
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.post(
+                    "https://api.keenable.ai/v1/search",
+                    headers=headers,
+                    json={"query": query},
+                    timeout=float(self.config.timeout),
+                )
+                r.raise_for_status()
+            items = [
+                {
+                    "title": x.get("title", ""),
+                    "url": x.get("url", ""),
+                    "content": x.get("snippet") or x.get("description", ""),
+                }
+                for x in r.json().get("results", [])
+            ]
+            return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return "Error: Keenable search rate limited. Try again later or reduce search frequency."
+            return f"Error: Keenable search failed ({e.response.status_code}): {e}"
+        except Exception as e:
+            return f"Error: Keenable search failed: {e}"
 
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()

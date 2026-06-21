@@ -90,6 +90,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -654,6 +655,40 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
     return rows
 
 
+_DEFAULT_REASONING_EFFORT_VALUES: tuple[str, ...] = ("", "low", "medium", "high")
+
+
+def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
+    """Return user-facing reasoning_effort options for this provider+model.
+
+    Mistral chat models accept only "high"/"none"; Magistral rejects the
+    kwarg entirely (reasoning is implicit). For everyone else, return the
+    full OpenAI vocab.
+    """
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+    model_lower = (model or "").lower()
+    implicit = getattr(spec, "implicit_reasoning_models", ())
+    if implicit and any(pat in model_lower for pat in implicit):
+        # Reasoning is always on; only "Default" makes sense.
+        return [""]
+
+    remap = getattr(spec, "reasoning_effort_remap", ())
+    if remap:
+        # Reverse the remap: surface the distinct wire-vocab outputs as the
+        # user's options. Mistral collapses to "high"/"none" → UI shows
+        # "Default" + "High".
+        wire_values: list[str] = []
+        for _user_val, wire_val in remap:
+            if wire_val and wire_val != "none" and wire_val not in wire_values:
+                wire_values.append(wire_val)
+        return ["", *wire_values]
+
+    return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+
 def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in transcription_provider_names():
@@ -741,6 +776,9 @@ def settings_payload(
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
             "reasoning_effort": defaults.reasoning_effort,
+            "reasoning_effort_values": _reasoning_effort_values_for(
+                defaults.provider, defaults.model
+            ),
         }
     ]
     for name, preset in config.model_presets.items():
@@ -756,6 +794,9 @@ def settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "reasoning_effort_values": _reasoning_effort_values_for(
+                    preset.provider, preset.model
+                ),
             }
         )
 

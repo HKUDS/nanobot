@@ -65,7 +65,6 @@ from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
-    SUSTAINED_GOAL_CONTINUE_PROMPT,
 )
 
 if TYPE_CHECKING:
@@ -796,15 +795,18 @@ class AgentLoop:
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
-        # Build continuation message that embeds the active goal objective so
-        # the LLM can see it even if earlier Runtime Context was truncated.
-        _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
-        _goal_continue = (
-            "You have an active sustained goal:\n\n"
-            + "\n".join(_goal_lines)
-            + "\n\nPlease continue working toward the objective using your tools, "
-            "or call complete_goal if the work is truly finished."
-        ) if _goal_lines else SUSTAINED_GOAL_CONTINUE_PROMPT
+        # Compute lazily because long_task may create goal metadata during this run.
+        def _goal_continue() -> str | None:
+            _goal_lines = goal_state_runtime_lines(session.metadata if session is not None else None)
+            if not _goal_lines:
+                return None
+            return (
+                "You have an active sustained goal:\n\n"
+                + "\n".join(_goal_lines)
+                + "\n\nPlease continue working toward the objective using your tools, "
+                "or call complete_goal if the work is truly finished."
+            )
+
         session_metadata = session.metadata if session is not None else None
         try:
             result = await self.runner.run(AgentRunSpec(
@@ -1166,13 +1168,14 @@ class AgentLoop:
             channel, chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
         )
+        current_role = "assistant" if is_subagent else "user"
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
+            "extend_to_user": is_subagent,
         }
         history = session.get_history(**_hist_kwargs)
-        current_role = "assistant" if is_subagent else "user"
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
         messages = self.context.build_messages(
@@ -1445,6 +1448,7 @@ class AgentLoop:
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
+            "extend_to_user": False,
         }
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
@@ -1808,12 +1812,16 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        persist_user_message: bool = True,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
+        metadata: dict[str, Any] = {}
+        if not persist_user_message:
+            metadata[turn_continuation.SKIP_USER_PERSIST_META] = True
         msg = InboundMessage(
             channel=channel, sender_id="user", chat_id=chat_id,
-            content=content, media=media or [],
+            content=content, media=media or [], metadata=metadata,
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())

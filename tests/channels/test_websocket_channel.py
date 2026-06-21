@@ -119,6 +119,42 @@ async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Re
     )
 
 
+@pytest.mark.asyncio
+async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -> None:
+    class Conn:
+        remote_address = None
+
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(raw)
+
+    channel = _ch(bus)
+    active_conn = Conn()
+    other_conn = Conn()
+    channel._attach(active_conn, "chat-a")
+    channel._attach(other_conn, "chat-b")
+    assert sorted(channel._subs) == ["chat-a", "chat-b"]
+    assert sum(len(conns) for conns in channel._subs.values()) == 2
+
+    await channel.send_session_updated("chat-a", scope="thread")
+
+    active_events = [json.loads(raw)["event"] for raw in active_conn.sent]
+    other_events = [json.loads(raw)["event"] for raw in other_conn.sent]
+
+    assert (active_events, other_events) == (
+        ["session_updated"],
+        ["session_updated"],
+    )
+    payload = json.loads(other_conn.sent[0])
+    assert payload == {
+        "event": "session_updated",
+        "chat_id": "chat-a",
+        "scope": "thread",
+    }
+
+
 async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
     """Receive until a specific websocket event appears."""
     for _ in range(10):
@@ -126,6 +162,10 @@ async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
         if payload.get("event") == event:
             return payload
     raise AssertionError(f"websocket event {event!r} was not received")
+
+
+def _sent_ws_payloads(mock_ws: AsyncMock) -> list[dict[str, Any]]:
+    return [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
 
 
 def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
@@ -1234,9 +1274,10 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         metadata={"_turn_end": True},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1"},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1253,9 +1294,10 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         metadata={"_turn_end": True, "latency_ms": 1500},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1273,9 +1315,10 @@ async def test_send_turn_end_includes_goal_state_when_present() -> None:
         metadata={"_turn_end": True, "goal_state": blob},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1724,6 +1767,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_providers["exa"]["credential"] == "api_key"
         assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"

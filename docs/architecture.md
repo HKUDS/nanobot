@@ -108,7 +108,8 @@ WebUI source lives in `webui/`. The production build is written to `nanobot/web/
 
 Useful docs:
 
-- [`../webui/README.md`](../webui/README.md) for WebUI use and development;
+- [`webui.md`](./webui.md) for the WebUI user guide;
+- [`../webui/README.md`](../webui/README.md) for frontend source development;
 - [`websocket.md`](./websocket.md) for protocol details.
 
 ## Tools
