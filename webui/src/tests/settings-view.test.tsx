@@ -937,6 +937,60 @@ describe("SettingsView Apps catalog", () => {
     );
   });
 
+  it("saves optional-key web search providers without an API key", async () => {
+    const payload = {
+      ...settingsPayload(),
+      web_search: {
+        ...settingsPayload().web_search,
+        provider: "duckduckgo",
+        providers: [
+          { name: "duckduckgo", label: "DuckDuckGo", credential: "none" as const },
+          { name: "keenable", label: "Keenable", credential: "optional_api_key" as const },
+        ],
+      },
+    };
+    const updatedPayload = {
+      ...payload,
+      web_search: {
+        ...payload.web_search,
+        provider: "keenable",
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      if (
+        url ===
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&fetch_provider=auto&fetch_base_url=&fetch_timeout=30"
+      ) {
+        return jsonResponse(updatedPayload);
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "browser" });
+
+    fireEvent.pointerDown(await screen.findByRole("button", { name: /DuckDuckGo/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keenable" }));
+    const saveButton = screen
+      .getAllByRole("button", { name: "Save" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    if (!saveButton) throw new Error("enabled Save button was not found");
+    fireEvent.click(saveButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/settings/web-search/update?provider=keenable&max_results=5&timeout=30&fetch_provider=auto&fetch_base_url=&fetch_timeout=30",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer tok" },
+        }),
+      ),
+    );
+  });
+
   it("uses native host safety copy on the native surface", async () => {
     const payload = {
       ...settingsPayload(),

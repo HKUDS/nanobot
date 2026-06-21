@@ -20,6 +20,7 @@ from nanobot.webui.settings_api import (
     update_network_safety_settings,
     update_provider_settings,
     update_transcription_settings,
+    update_web_search_settings,
 )
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
@@ -400,6 +401,44 @@ def test_settings_payload_includes_exec_path_flags(
 
     assert payload["advanced"]["exec_path_prepend_set"] is True
     assert payload["advanced"]["exec_path_append_set"] is True
+
+
+def test_update_web_search_settings_accepts_keenable_without_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "brave"
+    config.tools.web.search.api_key = "brave-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_web_search_settings({"provider": ["keenable"]})
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "keenable"
+    assert saved.tools.web.search.api_key == ""
+    option = next(item for item in payload["web_search"]["providers"] if item["name"] == "keenable")
+    assert option["credential"] == "optional_api_key"
+
+
+def test_update_web_search_settings_can_clear_optional_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "keenable"
+    config.tools.web.search.api_key = "keen-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    update_web_search_settings({"provider": ["keenable"], "api_key": [""]})
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "keenable"
+    assert saved.tools.web.search.api_key == ""
 
 
 def test_settings_payload_includes_effective_transcription_config(

@@ -1768,7 +1768,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_providers["exa"]["credential"] == "api_key"
         assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
-        assert search_providers["keenable"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "optional_api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"

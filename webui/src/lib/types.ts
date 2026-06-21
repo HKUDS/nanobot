@@ -398,7 +398,7 @@ export interface SettingsPayload {
     providers: Array<{
       name: string;
       label: string;
-      credential: "none" | "api_key" | "base_url";
+      credential: "none" | "api_key" | "optional_api_key" | "base_url";
     }>;
   };
   web: {
