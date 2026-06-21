@@ -1353,7 +1353,7 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     fetch_provider = _query_first_alias(query, "fetch_provider", "fetchProvider")
     if fetch_provider is not None:
         normalized_provider = fetch_provider.strip().lower()
-        if normalized_provider not in {"auto", "tavily", "jina", "readability", "local"}:
+        if normalized_provider not in {"auto", "tavily", "jina", "readability"}:
             raise WebUISettingsError("unknown web fetch provider")
         previous = web_config.fetch.provider
         set_fetch_value("provider", normalized_provider)

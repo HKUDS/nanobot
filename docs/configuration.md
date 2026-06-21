@@ -1626,7 +1626,7 @@ Create a key at [keenable.ai](https://keenable.ai). You can also set `KEENABLE_A
 > { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "provider": "readability" } } } }
 > ```
 
-nanobot by default uses automatic fetching, trying configured remote providers first and falling back to local conversion based on [readability-lxml](https://github.com/buriy/python-readability) if needed.
+nanobot by default uses automatic fetching. In `auto` mode it tries Tavily Extract only when `tools.web.fetch.apiKey` or `TAVILY_API_KEY` is configured, then tries [Jina Reader](https://jina.ai/reader/), and finally falls back to local conversion based on [readability-lxml](https://github.com/buriy/python-readability) if needed.
 
 If you want to always use the local conversion, you can force it using:
 
@@ -1648,7 +1648,7 @@ If you want to always use the local conversion, you can force it using:
 |--------|------|---------|-------------|
 | `enable` | boolean | `true` | Enable the `web_fetch` tool |
 | `provider` | string | `"auto"` | Fetch provider: `auto`, `tavily`, `jina`, or `readability` |
-| `apiKey` | string | `""` | API key for providers such as Tavily Extract |
+| `apiKey` | string | `""` | API key for providers such as Tavily Extract. This is separate from `tools.web.search.apiKey` |
 | `baseUrl` | string | `""` | Override provider base URL |
 | `timeout` | integer | `30` | Provider request timeout in seconds |
 

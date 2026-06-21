@@ -35,6 +35,20 @@ def test_web_fetch_legacy_use_jina_reader_false_maps_to_readability():
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_rejects_local_provider_alias(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(provider="local"))
+
+    async def _skip_prefetch(*args, **kwargs):
+        raise RuntimeError("skip image prefetch")
+
+    monkeypatch.setattr("nanobot.agent.tools.web._stream_with_safe_redirects", _skip_prefetch)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+    data = json.loads(result)
+    assert data["error"] == "Unknown fetch provider: local"
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_blocks_private_ip():
     tool = WebFetchTool()
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
@@ -173,8 +187,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 @pytest.mark.asyncio
 async def test_web_fetch_tavily_provider_uses_extract(monkeypatch):
     tool = WebFetchTool(
-        config=WebFetchConfig(provider="tavily"),
-        search_api_key="tavily-key",
+        config=WebFetchConfig(provider="tavily", api_key="tavily-key"),
         user_agent="nanobot-test-agent",
     )
     seen: dict[str, object] = {}
@@ -226,6 +239,12 @@ async def test_web_fetch_tavily_provider_uses_extract(monkeypatch):
     assert seen["url"] == "https://api.tavily.com/extract"
     assert seen["headers"]["Authorization"] == "Bearer tavily-key"
     assert seen["json"]["urls"] == ["https://example.com/page"]
+
+
+def test_web_fetch_tavily_key_does_not_use_search_key(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    tool = WebFetchTool(config=WebFetchConfig(provider="tavily"))
+    assert tool._tavily_api_key() == ""
 
 
 @pytest.mark.asyncio

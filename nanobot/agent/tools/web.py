@@ -881,7 +881,6 @@ class WebFetchTool(Tool):
             config=ctx.config.web.fetch,
             proxy=ctx.config.web.proxy,
             user_agent=ctx.config.web.user_agent,
-            search_api_key=ctx.config.web.search.api_key,
         )
 
     def __init__(
@@ -890,13 +889,11 @@ class WebFetchTool(Tool):
         proxy: str | None = None,
         user_agent: str | None = None,
         max_chars: int = 50000,
-        search_api_key: str = "",
     ):
         self.config = config if config is not None else WebFetchConfig()
         self.proxy = proxy
         self.user_agent = user_agent or _DEFAULT_USER_AGENT
         self.max_chars = max_chars
-        self.search_api_key = search_api_key
 
     @property
     def read_only(self) -> bool:
@@ -942,7 +939,7 @@ class WebFetchTool(Tool):
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         provider = (self.config.provider or "auto").strip().lower()
-        if provider not in {"auto", "tavily", "jina", "readability", "local"}:
+        if provider not in {"auto", "tavily", "jina", "readability"}:
             return json.dumps({"error": f"Unknown fetch provider: {provider}", "url": url}, ensure_ascii=False)
 
         result = None
@@ -962,7 +959,6 @@ class WebFetchTool(Tool):
         return (
             self.config.api_key.strip()
             or os.environ.get("TAVILY_API_KEY", "").strip()
-            or self.search_api_key.strip()
         )
 
     async def _fetch_tavily(self, url: str, extract_mode: str, max_chars: int) -> str | None:
