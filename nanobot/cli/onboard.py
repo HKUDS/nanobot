@@ -35,6 +35,17 @@ class OnboardResult:
     config: Config
     should_save: bool
 
+
+class _QuickStartProviderInfo(NamedTuple):
+    """Provider metadata used by the Quick Start flow."""
+
+    display_name: str
+    is_local: bool
+    default_api_base: str
+    backend: str
+    is_direct: bool
+
+
 # --- Field Hints for Select Fields ---
 # Maps field names to (choices, hint_text)
 # To add a new select field with hints, add an entry:
@@ -54,19 +65,10 @@ _BACK_PRESSED = object()  # Sentinel value for back navigation
 # offer existing presets as choices (e.g. AgentDefaults.model_preset).
 _MODEL_PRESET_CACHE: set[str] = set()
 
-_QUICK_START_PROVIDER_KEYS = (
-    "dashscope",
-    "deepseek",
-    "gemini",
-    "moonshot",
-    "openai",
-    "openrouter",
-    "siliconflow",
-    "zhipu",
-)
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
 
-_QUICK_START_MENU_CHOICE = "[Q] Quick Start (provider + key + model)"
+_CLEAR_CHOICE = "Clear value"
+_QUICK_START_MENU_CHOICE = "[Q] Quick Start"
 _QUICK_START_STEPS = ("Provider + model", "WebUI", "Review")
 
 # Low-contrast terminal palette inspired by JetBrains Darcula/Islands.
@@ -242,8 +244,8 @@ def _get_field_display_name(field_key: str, field_info) -> str:
         return field_info.description
     name = field_key
     suffix_map = {
-        "_s": " (seconds)",
-        "_ms": " (ms)",
+        "_s": " seconds",
+        "_ms": " ms",
         "_url": " URL",
         "_path": " Path",
         "_id": " ID",
@@ -350,7 +352,7 @@ def _validate_field_constraint(value: Any, field_info) -> str | None:
 def _get_constraint_hint(field_info) -> str:
     """Derive a human-readable constraint hint from field metadata.
 
-    Returns a string like "(0-10)" or "(>= 0)" to append to field display names.
+    Returns a string like " - 0-10" or " - >= 0" to append to field display names.
     """
     if field_info is None or not hasattr(field_info, "metadata"):
         return ""
@@ -364,11 +366,11 @@ def _get_constraint_hint(field_info) -> str:
             le_val = m.le
 
     if ge_val is not None and le_val is not None:
-        return f" ({ge_val}-{le_val})"
+        return f" - {ge_val}-{le_val}"
     if ge_val is not None:
-        return f" (>= {ge_val})"
+        return f" - >= {ge_val}"
     if le_val is not None:
-        return f" (<= {le_val})"
+        return f" - <= {le_val}"
     return ""
 
 
@@ -398,9 +400,9 @@ def _show_main_menu_header() -> None:
     body = Table.grid(expand=True)
     body.add_column(ratio=1)
     body.add_row(f"{__logo__} [bold {_UI_TEXT}]nanobot[/] [{_UI_MUTED}]v{__version__}[/]")
-    body.add_row(f"[{_UI_ACCENT}]Quick Start asks for the provider, API key, and model.[/]")
+    body.add_row(f"[{_UI_ACCENT}]Quick Start asks for the provider, credentials, and model.[/]")
     body.add_row(
-        f"[{_UI_MUTED}]Use Advanced later for other providers or chat apps.[/]"
+        f"[{_UI_MUTED}]Use Advanced later for chat apps, tools, or provider-specific details.[/]"
     )
     console.print(
         Panel(
@@ -639,12 +641,12 @@ def _handle_model_preset_field(
 ) -> None:
     """Handle the 'model_preset' field with a list of existing presets."""
     preset_names = sorted(_MODEL_PRESET_CACHE)
-    choices = ["(clear/unset)"] + preset_names
-    default_choice = str(current_value) if current_value else "(clear/unset)"
+    choices = [_CLEAR_CHOICE] + preset_names
+    default_choice = str(current_value) if current_value else _CLEAR_CHOICE
     new_value = _select_with_back(field_display, choices, default=default_choice)
     if new_value is _BACK_PRESSED:
         return
-    if new_value == "(clear/unset)":
+    if new_value == _CLEAR_CHOICE:
         setattr(working_model, field_name, None)
     elif new_value is not None:
         setattr(working_model, field_name, new_value)
@@ -679,11 +681,11 @@ def _handle_fallback_models_field(
         if items:
             for idx, item in enumerate(items, 1):
                 if isinstance(item, InlineFallbackConfig):
-                    console.print(f"  {idx}. {item.model} ({item.provider}) [inline]")
+                    console.print(f"  {idx}. {item.model} - {item.provider} inline")
                 else:
                     console.print(f"  {idx}. {item}")
         else:
-            console.print("  [dim](empty)[/dim]")
+            console.print("  [dim]empty[/dim]")
         console.print()
 
         choices = ["[+] Add preset"]
@@ -830,14 +832,14 @@ def _configure_pydantic_model(
         # Select fields with hints (e.g. reasoning_effort)
         if field_name in _SELECT_FIELD_HINTS:
             choices_list, hint = _SELECT_FIELD_HINTS[field_name]
-            select_choices = choices_list + ["(clear/unset)"]
+            select_choices = choices_list + [_CLEAR_CHOICE]
             console.print(f"[dim]  Hint: {hint}[/dim]")
             new_value = _select_with_back(
                 field_display, select_choices, default=current_value or select_choices[0]
             )
             if new_value is _BACK_PRESSED:
                 continue
-            if new_value == "(clear/unset)":
+            if new_value == _CLEAR_CHOICE:
                 setattr(working_model, field_name, None)
             elif new_value is not None:
                 setattr(working_model, field_name, new_value)
@@ -898,7 +900,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
             f"{format_token_count(context_limit)} tokens[/]"
         )
     else:
-        console.print("[dim](i) Could not auto-fill context window (model not in database)[/dim]")
+        console.print("[dim]Could not auto-fill context window - model not in database[/dim]")
 
 
 # --- Model Preset Configuration ---
@@ -914,13 +916,16 @@ def _configure_model_presets(config: Config) -> None:
     """Configure model presets (CRUD)."""
     _sync_preset_cache(config)
 
-    def get_preset_choices() -> list[str]:
+    def get_preset_choices() -> tuple[list[str], dict[str, str]]:
         choices: list[str] = []
+        choice_to_preset: dict[str, str] = {}
         for name, preset in config.model_presets.items():
-            choices.append(f"{name} ({preset.model})")
+            choice = f"{name} - {preset.model}"
+            choices.append(choice)
+            choice_to_preset[choice] = name
         choices.append("[+] Add new preset")
         choices.append("<- Back")
-        return choices
+        return choices, choice_to_preset
 
     last_preset_name: str | None = None
     while True:
@@ -930,12 +935,12 @@ def _configure_model_presets(config: Config) -> None:
                 "Model Presets",
                 "Create, edit or delete named model presets for quick switching",
             )
-            choices = get_preset_choices()
+            choices, choice_to_preset = get_preset_choices()
             default_choice = None
             if last_preset_name:
-                for c in choices:
-                    if c.startswith(last_preset_name + " ("):
-                        default_choice = c
+                for choice, name in choice_to_preset.items():
+                    if name == last_preset_name:
+                        default_choice = choice
                         break
             answer = _select_with_back(
                 "Select preset:", choices, default=default_choice
@@ -959,7 +964,9 @@ def _configure_model_presets(config: Config) -> None:
                     _pause()
                     continue
                 if name == "default":
-                    console.print("[yellow]! 'default' is reserved (auto-generated from Agent Settings)[/yellow]")
+                    console.print(
+                        "[yellow]! 'default' is reserved; it is generated from Agent Settings[/yellow]"
+                    )
                     _pause()
                     continue
                 new_preset = ModelPresetConfig(model="")
@@ -971,7 +978,9 @@ def _configure_model_presets(config: Config) -> None:
                 continue
 
             # Editing / deleting an existing preset
-            preset_name = answer.split(" (", 1)[0]
+            preset_name = choice_to_preset.get(answer)
+            if preset_name is None:
+                continue
             preset = config.model_presets.get(preset_name)
             if preset is None:
                 continue
@@ -1371,7 +1380,7 @@ def _show_summary(config: Config) -> None:
     # Model Presets
     preset_rows = []
     for name, preset in config.model_presets.items():
-        preset_rows.append((name, f"{preset.model} (ctx={preset.context_window_tokens})"))
+        preset_rows.append((name, f"{preset.model} - ctx {preset.context_window_tokens}"))
     _print_summary_panel(preset_rows, "Model Presets")
 
     # Settings sections
@@ -1420,52 +1429,90 @@ def _show_quick_start_progress(active_step: int) -> None:
     console.print()
 
 
+@lru_cache(maxsize=1)
+def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
+    """Return chat-capable providers supported by Quick Start."""
+    from nanobot.providers.registry import PROVIDERS
+
+    result: dict[str, _QuickStartProviderInfo] = {}
+    for spec in PROVIDERS:
+        if spec.name == "custom" or spec.is_oauth or spec.is_transcription_only:
+            continue
+        result[spec.name] = _QuickStartProviderInfo(
+            display_name=spec.display_name or spec.name,
+            is_local=spec.is_local,
+            default_api_base=spec.default_api_base,
+            backend=spec.backend,
+            is_direct=spec.is_direct,
+        )
+    return result
+
+
 def _get_quick_start_provider_choices() -> dict[str, str]:
     """Return Quick Start provider display choices."""
-    names = _get_provider_names()
     choices = {
-        names.get(provider_name, provider_name): provider_name
-        for provider_name in _QUICK_START_PROVIDER_KEYS
-        if provider_name in names
+        info.display_name: provider_name
+        for provider_name, info in _get_quick_start_provider_info().items()
     }
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
 
 
+def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
+    """Return whether Quick Start should ask for an API key."""
+    return provider_name == "custom" or not (info and info.is_local)
+
+
+def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
+    """Return whether Quick Start must ask for a provider base URL."""
+    if provider_name == "custom":
+        return True
+    if info is None or info.default_api_base:
+        return False
+    return info.backend == "azure_openai" or (
+        info.backend == "openai_compat" and (info.is_direct or info.is_local)
+    )
+
+
 def _configure_quick_start_provider(config: Config) -> bool:
-    """Configure the beginner path from provider + API key."""
+    """Configure the beginner path from provider credentials and model."""
     _show_quick_start_progress(1)
 
     provider_choices = _get_quick_start_provider_choices()
     answer = _select_with_back(
-        "Which provider owns this API key?",
+        "Which provider do you want to use?",
         list(provider_choices) + ["<- Back"],
     )
     if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
         return False
     assert isinstance(answer, str)
     provider_name = provider_choices[answer]
+    provider_info = _get_quick_start_provider_info().get(provider_name)
 
-    api_key = _input_text(f"{answer} API key", "", "str")
-    if api_key is None:
-        return False
-    api_key = api_key.strip()
-    if not api_key:
-        console.print("[yellow]! API key is required for Quick Start[/yellow]")
-        return False
+    api_key: str | None = None
+    if _quick_start_requires_api_key(provider_name, provider_info):
+        api_key = _input_text(f"{answer} API key", "", "str")
+        if api_key is None:
+            return False
+        api_key = api_key.strip()
+        if not api_key:
+            console.print("[yellow]! API key is required for Quick Start[/yellow]")
+            return False
 
-    api_base = _get_provider_info().get(provider_name, ("", False, False, ""))[3]
-    if provider_name == "custom":
+    api_base = provider_info.default_api_base if provider_info else ""
+    base_was_prompted = False
+    if _quick_start_requires_base_url(provider_name, provider_info):
         base_answer = _input_text(
             "Provider base URL",
-            "",
+            api_base,
             "str",
         )
         if base_answer is None:
             return False
+        base_was_prompted = True
         api_base = base_answer.strip().rstrip("/")
         if not api_base:
-            console.print("[yellow]! Provider base URL is required for custom providers[/yellow]")
+            console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
             return False
 
     provider_config = getattr(config.providers, provider_name, None)
@@ -1479,9 +1526,13 @@ def _configure_quick_start_provider(config: Config) -> bool:
         console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
         return False
 
-    provider_config.api_key = api_key
-    if api_base and not provider_config.api_base:
-        provider_config.api_base = api_base
+    if api_key is not None:
+        provider_config.api_key = api_key
+    if api_base:
+        if base_was_prompted:
+            provider_config.api_base = api_base
+        elif not provider_config.api_base:
+            provider_config.api_base = api_base
 
     _set_primary_quick_start_preset(
         config,

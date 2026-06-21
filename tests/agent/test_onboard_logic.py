@@ -270,14 +270,16 @@ class TestGetFieldDisplayName:
     def test_adds_seconds_suffix(self):
         field_info = SimpleNamespace(description=None)
         name = _get_field_display_name("timeout_s", field_info)
-        # Contains "(Seconds)" with title case
-        assert "(Seconds)" in name or "(seconds)" in name
+        assert "Seconds" in name or "seconds" in name
+        assert "(" not in name
+        assert ")" not in name
 
     def test_adds_ms_suffix(self):
         field_info = SimpleNamespace(description=None)
         name = _get_field_display_name("delay_ms", field_info)
-        # Contains "(Ms)" or "(ms)"
-        assert "(Ms)" in name or "(ms)" in name
+        assert "Ms" in name or "ms" in name
+        assert "(" not in name
+        assert ")" not in name
 
 
 class TestFormatValue:
@@ -692,7 +694,7 @@ class TestGetConstraintHint:
         assert _get_constraint_hint(field_info) == ""
 
     def test_ge_le_range(self):
-        """Field with ge+le should show '(min-max)'."""
+        """Field with ge+le should show a min-max suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -702,9 +704,11 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert "10" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_ge_only(self):
-        """Field with only ge should show '(>= N)'."""
+        """Field with only ge should show a >= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -714,9 +718,11 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert ">=" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_le_only(self):
-        """Field with only le should show '(<= N)'."""
+        """Field with only le should show a <= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -726,15 +732,19 @@ class TestGetConstraintHint:
         hint = _get_constraint_hint(field_info)
         assert "100" in hint
         assert "<=" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
     def test_real_send_max_retries_hint(self):
-        """Actual ChannelsConfig.send_max_retries should show '(0-10)'."""
+        """Actual ChannelsConfig.send_max_retries should show a 0-10 suffix."""
         from nanobot.config.schema import ChannelsConfig
 
         field_info = ChannelsConfig.model_fields["send_max_retries"]
         hint = _get_constraint_hint(field_info)
         assert "0" in hint
         assert "10" in hint
+        assert "(" not in hint
+        assert ")" not in hint
 
 
 class TestInputTextWithValidation:
@@ -866,7 +876,7 @@ class TestMainMenuUpdate:
         dirty_choices = _get_main_menu_choices(True)
 
         assert clean_choices == [
-            "[Q] Quick Start (provider + key + model)",
+            "[Q] Quick Start",
             "[A] Advanced Settings",
             "[X] Exit",
         ]
@@ -880,7 +890,7 @@ class TestMainMenuUpdate:
         initial_config = Config()
 
         responses = iter([
-            "[Q] Quick Start (provider + key + model)",
+            "[Q] Quick Start",
         ])
 
         class FakePrompt:
@@ -906,8 +916,25 @@ class TestMainMenuUpdate:
         assert result.should_save is True
         assert result.config.agents.defaults.bot_name == "quickbot"
 
+    def test_quick_start_provider_choices_include_all_chat_providers(self):
+        """Quick Start should be driven by the provider registry, not a short allowlist."""
+        from nanobot.providers.registry import PROVIDERS
+
+        choices = onboard_wizard._get_quick_start_provider_choices()
+        selected_provider_names = set(choices.values())
+        expected_provider_names = {
+            spec.name
+            for spec in PROVIDERS
+            if spec.name != "custom" and not spec.is_oauth and not spec.is_transcription_only
+        }
+        expected_provider_names.add("custom")
+
+        assert selected_provider_names == expected_provider_names
+        assert "assemblyai" not in selected_provider_names
+        assert choices[onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE] == "custom"
+
     def test_quick_start_provider_choice_skips_advanced_prompts(self, monkeypatch):
-        """The beginner path should ask for provider, API key, and model."""
+        """The beginner path should ask for provider credentials and model."""
         config = Config()
 
         def fail_websocket_config(*_args, **_kwargs):
@@ -963,6 +990,30 @@ class TestMainMenuUpdate:
         assert config.model_presets["primary"].provider == "openrouter"
         assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
 
+    def test_quick_start_local_provider_skips_api_key(self, monkeypatch):
+        """Local providers should only need a model when they have a default base URL."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "Ollama")
+
+        def fail_text_input(*_args, **_kwargs):
+            raise AssertionError("Ollama Quick Start should not require an API key")
+
+        monkeypatch.setattr(onboard_wizard, "_input_text", fail_text_input)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "llama3.2",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.ollama.api_key is None
+        assert config.providers.ollama.api_base == "http://localhost:11434/v1"
+        assert config.model_presets["primary"].provider == "ollama"
+        assert config.model_presets["primary"].model == "llama3.2"
+
     def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
         """OpenAI should support key-only setup without storing a default base URL."""
         config = Config()
@@ -1007,6 +1058,27 @@ class TestMainMenuUpdate:
         assert config.providers.custom.api_base == "https://api.example.test/v1"
         assert config.model_presets["primary"].provider == "custom"
         assert config.model_presets["primary"].model == "custom-model"
+
+    def test_quick_start_provider_without_default_base_url_prompts_for_base(self, monkeypatch):
+        """Providers that require an endpoint should ask for a base URL in Quick Start."""
+        config = Config()
+        text_answers = iter(["azure-key", "https://azure.example.test/openai"])
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "Azure OpenAI")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(text_answers))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deployment-name",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert config.providers.azure_openai.api_key == "azure-key"
+        assert config.providers.azure_openai.api_base == "https://azure.example.test/openai"
+        assert config.model_presets["primary"].provider == "azure_openai"
+        assert config.model_presets["primary"].model == "deployment-name"
 
     def test_quick_start_requires_api_key_before_setting_defaults(self, monkeypatch):
         """Quick Start should not create a ready-looking config without an API key."""
@@ -1447,12 +1519,12 @@ class TestModelPresetWizard:
         from nanobot.config.schema import ModelPresetConfig
 
         config = Config()
-        config.model_presets["old"] = ModelPresetConfig(model="x")
+        config.model_presets["old - preset"] = ModelPresetConfig(model="x")
         _MODEL_PRESET_CACHE.clear()
-        _MODEL_PRESET_CACHE.update({"old", "default"})
+        _MODEL_PRESET_CACHE.update({"old - preset", "default"})
 
         responses = iter([
-            "old (x)",
+            "old - preset - x",
             "Delete",
             True,
             "<- Back",
@@ -1485,8 +1557,8 @@ class TestModelPresetWizard:
 
         _configure_model_presets(config)
 
-        assert "old" not in config.model_presets
-        assert "old" not in _MODEL_PRESET_CACHE
+        assert "old - preset" not in config.model_presets
+        assert "old - preset" not in _MODEL_PRESET_CACHE
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler(self, monkeypatch):
@@ -1505,14 +1577,18 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler_clear(self, monkeypatch):
-        """_handle_model_preset_field should clear preset when (clear/unset) chosen."""
-        from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _handle_model_preset_field
+        """_handle_model_preset_field should clear preset when Clear value is chosen."""
+        from nanobot.cli.onboard import (
+            _CLEAR_CHOICE,
+            _MODEL_PRESET_CACHE,
+            _handle_model_preset_field,
+        )
         from nanobot.config.schema import AgentDefaults
 
         _MODEL_PRESET_CACHE.clear()
         _MODEL_PRESET_CACHE.add("fast")
 
-        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "(clear/unset)")
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: _CLEAR_CHOICE)
 
         defaults = AgentDefaults(model_preset="fast")
         _handle_model_preset_field(defaults, "model_preset", "Model Preset", "fast")
