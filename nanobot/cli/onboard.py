@@ -682,6 +682,21 @@ def _handle_fallback_models_field(
             items.clear()
 
 
+def _handle_search_provider_field(
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+) -> None:
+    """Handle the web-search 'provider' field with the search-engine list."""
+    from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
+
+    choices = [opt["name"] for opt in SEARCH_PROVIDER_OPTIONS]
+    default_choice = str(current_value) if current_value in choices else choices[0]
+    new_value = _select_with_back(field_display, choices, default=default_choice)
+    if new_value is _BACK_PRESSED:
+        return
+    if new_value is not None:
+        setattr(working_model, field_name, new_value)
+
+
 _FIELD_HANDLERS: dict[str, Any] = {
     "model": _handle_model_field,
     "context_window_tokens": _handle_context_window_field,
@@ -689,6 +704,19 @@ _FIELD_HANDLERS: dict[str, Any] = {
     "provider": _handle_provider_field,
     "fallback_models": _handle_fallback_models_field,
 }
+
+# Handlers keyed by (model class name, field name); take precedence over the
+# name-only handlers above. Needed because the bare "provider" field name is
+# shared by LLM configs (LLM provider list) and WebSearchConfig (search engines).
+_TYPED_FIELD_HANDLERS: dict[tuple[str, str], Any] = {
+    ("WebSearchConfig", "provider"): _handle_search_provider_field,
+}
+
+
+def _resolve_field_handler(model: BaseModel, field_name: str) -> Any:
+    """Resolve a field handler, preferring model-type-specific handlers."""
+    typed = _TYPED_FIELD_HANDLERS.get((type(model).__name__, field_name))
+    return typed or _FIELD_HANDLERS.get(field_name)
 
 
 def _is_str_or_none(annotation: Any) -> bool:
@@ -778,7 +806,7 @@ def _configure_pydantic_model(
             continue
 
         # Registered special-field handlers
-        handler = _FIELD_HANDLERS.get(field_name)
+        handler = _resolve_field_handler(working_model, field_name)
         if handler:
             handler(working_model, field_name, field_display, current_value)
             continue
