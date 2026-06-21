@@ -129,6 +129,10 @@ class TurnContext:
 
     ephemeral: bool = False
     tools: ToolRegistry | None = None
+    # Per-run hook override (e.g. SDK callers). When None, the loop's own
+    # ``self._extra_hooks`` apply. Passed explicitly (not via shared loop state)
+    # so concurrent runs on one AgentLoop cannot clobber each other's hooks.
+    extra_hooks: list[AgentHook] | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
@@ -694,6 +698,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -719,9 +724,12 @@ class AgentLoop:
             set_tool_context=self._set_tool_context,
             on_iteration=lambda iteration: setattr(self, "_current_iteration", iteration),
         )
+        # Per-run hooks (passed explicitly) override the loop's own configured
+        # hooks; this keeps concurrent SDK runs from sharing mutable loop state.
+        effective_extra_hooks = extra_hooks if extra_hooks is not None else self._extra_hooks
         hook: AgentHook = loop_hook
-        if not ephemeral and self._extra_hooks:
-            hook = CompositeHook([loop_hook] + self._extra_hooks)
+        if not ephemeral and effective_extra_hooks:
+            hook = CompositeHook([loop_hook] + effective_extra_hooks)
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -1240,6 +1248,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
@@ -1272,6 +1281,7 @@ class AgentLoop:
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             tools=tools,
+            extra_hooks=extra_hooks,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1498,6 +1508,7 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            extra_hooks=ctx.extra_hooks,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
@@ -1813,8 +1824,14 @@ class AgentLoop:
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
         persist_user_message: bool = True,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> OutboundMessage | None:
-        """Process a message directly and return the outbound payload."""
+        """Process a message directly and return the outbound payload.
+
+        *extra_hooks*, when provided, are used for this call only (instead of the
+        loop's configured ``_extra_hooks``). Passing them per-call keeps concurrent
+        callers from clobbering each other's hooks via shared loop state.
+        """
         await self._connect_mcp()
         metadata: dict[str, Any] = {}
         if not persist_user_message:
@@ -1833,6 +1850,7 @@ class AgentLoop:
                     "on_stream": on_stream,
                     "on_stream_end": on_stream_end,
                     "ephemeral": ephemeral,
+                    "extra_hooks": extra_hooks,
                 }
                 if tools is not None:
                     kwargs["tools"] = tools

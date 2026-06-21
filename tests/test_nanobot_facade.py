@@ -64,7 +64,14 @@ async def test_run_returns_result(tmp_path):
 
     assert isinstance(result, RunResult)
     assert result.content == "Hello back!"
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="sdk:default")
+    # Hooks are passed per-call via extra_hooks (not by mutating shared loop state).
+    from nanobot.agent.hook import SDKCaptureHook
+
+    bot._loop.process_direct.assert_awaited_once()
+    call = bot._loop.process_direct.await_args
+    assert call.args == ("hi",)
+    assert call.kwargs["session_key"] == "sdk:default"
+    assert any(isinstance(h, SDKCaptureHook) for h in call.kwargs["extra_hooks"])
 
 
 @pytest.mark.asyncio
@@ -159,7 +166,9 @@ async def test_run_custom_session_key(tmp_path):
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     await bot.run("hi", session_key="user-alice")
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="user-alice")
+    bot._loop.process_direct.assert_awaited_once()
+    assert bot._loop.process_direct.await_args.args == ("hi",)
+    assert bot._loop.process_direct.await_args.kwargs["session_key"] == "user-alice"
 
 
 def test_import_from_top_level():
@@ -183,9 +192,9 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        # Whatever hooks the SDK installed are now on the loop.
-        extras = bot._loop._extra_hooks
+    async def fake_process_direct(message, *, session_key, extra_hooks):
+        # Hooks now arrive per-call via extra_hooks, not via shared loop state.
+        extras = extra_hooks
         messages = [{"role": "user", "content": message}]
         ctx1 = AgentHookContext(iteration=0, messages=messages)
         ctx1.tool_calls = [
@@ -216,8 +225,8 @@ async def test_run_populates_final_messages(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
+    async def fake_process_direct(message, *, session_key, extra_hooks):
+        extras = extra_hooks
         messages = [
             {"role": "user", "content": message},
             {"role": "assistant", "content": "hi there"},
@@ -265,8 +274,8 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
         async def after_iteration(self, context: AgentHookContext) -> None:
             seen_iterations.append(context.iteration)
 
-    async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
+    async def fake_process_direct(message, *, session_key, extra_hooks):
+        extras = extra_hooks
         assert len(extras) == 2, f"expected capture + user hook, got {len(extras)}"
         ctx = AgentHookContext(iteration=7, messages=[])
         for h in extras:
@@ -279,8 +288,9 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
-    """Previously-installed _extra_hooks must be restored regardless of capture state."""
+async def test_run_uses_loop_configured_hooks_as_base_without_mutating(tmp_path):
+    """The loop's configured _extra_hooks are used as the base for a run and are
+    never mutated by run() (so they cannot leak/clobber across calls)."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -290,15 +300,87 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
     sentinel_hook = AgentHook()
     bot._loop._extra_hooks = [sentinel_hook]
 
-    async def fake_process_direct(message, *, session_key):
+    received: list[AgentHook] = []
+
+    async def fake_process_direct(message, *, session_key, extra_hooks):
+        received.extend(extra_hooks)
         ctx = AgentHookContext(iteration=0, messages=[])
-        for h in bot._loop._extra_hooks:
+        for h in extra_hooks:
             await h.after_iteration(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="done")
 
     bot._loop.process_direct = fake_process_direct
     await bot.run("hello")
+
+    # Configured hook is carried into the run as the base (after the capture hook)...
+    assert sentinel_hook in received
+    # ...and the loop's own list is left untouched.
     assert bot._loop._extra_hooks == [sentinel_hook]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_do_not_clobber_each_others_hooks(tmp_path):
+    """Regression for the per-run hook race: two concurrent run() calls on one
+    Nanobot must each use only their own hooks and capture only their own tools.
+
+    The fix passes hooks as a ``process_direct(extra_hooks=...)`` argument instead
+    of mutating the shared ``loop._extra_hooks``; this test interleaves two runs so
+    that the old shared-state approach would have clobbered one run's hooks.
+    """
+    import asyncio
+
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.base import ToolCallRequest
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    seen: dict[str, list[int]] = {}
+
+    class TaggedHook(AgentHook):
+        def __init__(self, tag: str) -> None:
+            super().__init__()
+            self.tag = tag
+
+        async def after_iteration(self, context: AgentHookContext) -> None:
+            seen.setdefault(self.tag, []).append(context.iteration)
+
+    a_inflight = asyncio.Event()
+    a_may_finish = asyncio.Event()
+
+    async def fake_process_direct(message, *, session_key, extra_hooks):
+        ctx = AgentHookContext(
+            iteration=0, messages=[{"role": "user", "content": message}]
+        )
+        ctx.tool_calls = [ToolCallRequest(id=message, name=f"tool_{message}", arguments={})]
+        if message == "A":
+            # Hold A open while B runs to completion, so any shared hook state
+            # would be overwritten by B before A fires its hooks.
+            a_inflight.set()
+            await a_may_finish.wait()
+        for h in extra_hooks:
+            await h.after_iteration(ctx)
+        return OutboundMessage(channel="cli", chat_id="direct", content=message)
+
+    bot._loop.process_direct = fake_process_direct
+
+    async def run_b():
+        await a_inflight.wait()
+        res = await bot.run("B", session_key="s-b", hooks=[TaggedHook("B")])
+        a_may_finish.set()
+        return res
+
+    res_a, res_b = await asyncio.gather(
+        bot.run("A", session_key="s-a", hooks=[TaggedHook("A")]),
+        run_b(),
+    )
+
+    # Each run captured only its own tool, and each tagged hook fired only once:
+    # no cross-run bleed despite the interleaving.
+    assert res_a.tools_used == ["tool_A"]
+    assert res_b.tools_used == ["tool_B"]
+    assert seen == {"A": [0], "B": [0]}
 
 
 @pytest.mark.asyncio

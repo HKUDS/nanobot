@@ -84,15 +84,17 @@ class Nanobot:
             hooks: Optional lifecycle hooks for this run.
         """
         capture = SDKCaptureHook()
-        prev = self._loop._extra_hooks
-        base_hooks = list(hooks) if hooks is not None else list(prev or [])
-        self._loop._extra_hooks = [capture, *base_hooks]
-        try:
-            response = await self._loop.process_direct(
-                message, session_key=session_key,
-            )
-        finally:
-            self._loop._extra_hooks = prev
+        # Per-run hooks are passed explicitly to ``process_direct`` rather than
+        # mutating the shared ``self._loop._extra_hooks``; otherwise concurrent
+        # ``run()`` calls on one ``Nanobot`` would clobber each other's hooks and
+        # captured results. Fall back to the loop's configured hooks when the
+        # caller passes none.
+        base_hooks = list(hooks) if hooks is not None else list(self._loop._extra_hooks or [])
+        response = await self._loop.process_direct(
+            message,
+            session_key=session_key,
+            extra_hooks=[capture, *base_hooks],
+        )
 
         content = (response.content if response else None) or ""
         return RunResult(
