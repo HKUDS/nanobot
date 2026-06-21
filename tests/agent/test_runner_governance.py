@@ -184,6 +184,63 @@ async def test_backfill_missing_tool_results_inserts_error():
     assert backfilled[0]["name"] == "read_file"
 
 
+def test_dedup_tool_calls_removes_duplicate_ids():
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+                # Duplicate of "b" — would trigger "tool_use ids must be unique".
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
+        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
+        # Duplicate result for "b".
+        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb-dup"},
+    ]
+
+    cleaned = AgentRunner._dedup_tool_calls(messages)
+
+    assert cleaned == [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
+        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
+    ]
+
+
+def test_dedup_tool_calls_noop_when_unique():
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
+    ]
+
+    # No duplicates -> identical list object returned (cheap no-op path).
+    assert AgentRunner._dedup_tool_calls(messages) is messages
+
+
 def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
     from nanobot.agent.runner import AgentRunner
 

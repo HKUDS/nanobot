@@ -373,7 +373,8 @@ class AgentRunner:
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._drop_orphan_tool_results(messages)
+                messages_for_model = self._dedup_tool_calls(messages)
+                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
@@ -388,7 +389,8 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._drop_orphan_tool_results(messages)
+                    messages_for_model = self._dedup_tool_calls(messages)
+                    messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
@@ -1354,6 +1356,58 @@ class AgentRunner:
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
+
+    @staticmethod
+    def _dedup_tool_calls(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove duplicate tool_call / tool_result ids from the history.
+
+        Anthropic rejects any request where two tool_use blocks share an id
+        ("tool_use ids must be unique"). An accidental duplicate (e.g. from a
+        mis-assembled stream) otherwise poisons the session permanently, since
+        the bad message is re-sent on every turn. Keep the first occurrence of
+        each id across all assistant tool_calls, and likewise keep only the
+        first tool result per id so pairing stays 1:1.
+        """
+        seen_call_ids: set[str] = set()
+        seen_result_ids: set[str] = set()
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            replacement: dict[str, Any] | None = None
+            drop = False
+
+            if role == "assistant" and msg.get("tool_calls"):
+                kept = []
+                changed = False
+                for tc in msg.get("tool_calls") or []:
+                    tid = tc.get("id") if isinstance(tc, dict) else None
+                    if tid and tid in seen_call_ids:
+                        changed = True
+                        continue
+                    if tid:
+                        seen_call_ids.add(tid)
+                    kept.append(tc)
+                if changed:
+                    replacement = dict(msg)
+                    replacement["tool_calls"] = kept
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid:
+                    if str(tid) in seen_result_ids:
+                        drop = True
+                    else:
+                        seen_result_ids.add(str(tid))
+
+            if (replacement is not None or drop) and updated is None:
+                updated = [dict(m) for m in messages[:idx]]
+            if drop:
+                continue
+            if updated is not None:
+                updated.append(replacement if replacement is not None else dict(msg))
+
+        return messages if updated is None else updated
 
     @staticmethod
     def _drop_orphan_tool_results(
