@@ -189,6 +189,23 @@ class TestNonStringSenderId:
         assert store.revoke("telegram", 12345) is True
         assert store.is_approved("telegram", "12345") is False
 
+    def test_hand_edited_numeric_pending_does_not_corrupt_approved_set(self) -> None:
+        # A hand-edited *pending* entry may carry a numeric sender_id. Approving
+        # it must coerce to str so the approved set stays homogeneously str —
+        # otherwise the next _save()'s sorted() on a mixed int/str set raises
+        # TypeError (in fact approve_code()'s own _save() would already raise).
+        store._store_path().write_text(
+            '{"approved": {"telegram": ["111"]}, '
+            '"pending": {"ABCD-EFGH": {"channel": "telegram", "sender_id": 222, '
+            '"created_at": 1000.0, "expires_at": 9999999999.0}}}',
+            encoding="utf-8",
+        )
+        assert store.approve_code("ABCD-EFGH") == ("telegram", "222")
+        assert store.is_approved("telegram", 222) is True
+        # A subsequent write must not raise on a mixed-type set.
+        store.generate_code("telegram", 333)
+        assert store.get_approved("telegram") == ["111", "222"]
+
     def test_numeric_id_in_hand_edited_store(self) -> None:
         # Operators may edit pairing.json directly; a numeric entry must still
         # match the str() lookup that is_approved() performs.

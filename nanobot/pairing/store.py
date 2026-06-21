@@ -113,7 +113,10 @@ def approve_code(code: str) -> tuple[str, str] | None:
         if info is None:
             return None
         channel = info["channel"]
-        sender_id = info["sender_id"]
+        # Coerce to str: a hand-edited pending entry may carry a numeric
+        # sender_id, which would otherwise add an int to the (str-normalized)
+        # approved set and break _save()'s sorted() on the mixed-type set.
+        sender_id = str(info["sender_id"])
         data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
         logger.info("Approved pairing code {} for {}@{}", code, sender_id, channel)
