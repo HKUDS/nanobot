@@ -608,18 +608,25 @@ def _handle_model_preset_field(
         setattr(working_model, field_name, new_value)
 
 
-def _handle_provider_field(
-    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+def _set_field_from_choices(
+    working_model: BaseModel, field_name: str, field_display: str,
+    choices: list[str], default_choice: str
 ) -> None:
-    """Handle the 'provider' field with a list of registered providers."""
-    provider_names = sorted(_get_provider_names().keys())
-    choices = ["auto"] + provider_names
-    default_choice = str(current_value) if current_value else "auto"
+    """Prompt to pick one of ``choices`` and set the field (no-op on back/cancel)."""
     new_value = _select_with_back(field_display, choices, default=default_choice)
     if new_value is _BACK_PRESSED:
         return
     if new_value is not None:
         setattr(working_model, field_name, new_value)
+
+
+def _handle_provider_field(
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+) -> None:
+    """Handle the 'provider' field with a list of registered LLM providers."""
+    choices = ["auto"] + sorted(_get_provider_names().keys())
+    default_choice = str(current_value) if current_value else "auto"
+    _set_field_from_choices(working_model, field_name, field_display, choices, default_choice)
 
 
 def _handle_fallback_models_field(
@@ -689,12 +696,8 @@ def _handle_search_provider_field(
     from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
 
     choices = [opt["name"] for opt in SEARCH_PROVIDER_OPTIONS]
-    default_choice = str(current_value) if current_value in choices else choices[0]
-    new_value = _select_with_back(field_display, choices, default=default_choice)
-    if new_value is _BACK_PRESSED:
-        return
-    if new_value is not None:
-        setattr(working_model, field_name, new_value)
+    default_choice = current_value if current_value in choices else choices[0]
+    _set_field_from_choices(working_model, field_name, field_display, choices, default_choice)
 
 
 _FIELD_HANDLERS: dict[str, Any] = {
@@ -705,18 +708,15 @@ _FIELD_HANDLERS: dict[str, Any] = {
     "fallback_models": _handle_fallback_models_field,
 }
 
-# Handlers keyed by (model class name, field name); take precedence over the
-# name-only handlers above. Needed because the bare "provider" field name is
-# shared by LLM configs (LLM provider list) and WebSearchConfig (search engines).
-_TYPED_FIELD_HANDLERS: dict[tuple[str, str], Any] = {
-    ("WebSearchConfig", "provider"): _handle_search_provider_field,
-}
-
 
 def _resolve_field_handler(model: BaseModel, field_name: str) -> Any:
-    """Resolve a field handler, preferring model-type-specific handlers."""
-    typed = _TYPED_FIELD_HANDLERS.get((type(model).__name__, field_name))
-    return typed or _FIELD_HANDLERS.get(field_name)
+    """Resolve the handler for a field. WebSearchConfig shares the bare "provider"
+    name with LLM configs but needs the search-engine picker, not the LLM list."""
+    if field_name == "provider":
+        from nanobot.agent.tools.web import WebSearchConfig
+        if isinstance(model, WebSearchConfig):
+            return _handle_search_provider_field
+    return _FIELD_HANDLERS.get(field_name)
 
 
 def _is_str_or_none(annotation: Any) -> bool:
