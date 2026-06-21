@@ -155,7 +155,7 @@ The key (`webhook`) becomes the config section name. The value points to your `B
 ```bash
 python -m pip install -e .
 nanobot plugins list      # verify "Webhook" shows as "plugin"
-nanobot onboard --defaults # auto-adds default config for detected plugins
+nanobot onboard           # auto-adds default config for detected plugins
 ```
 
 Edit `~/.nanobot/config.json`:
@@ -507,7 +507,7 @@ async def start(self) -> None:
 
 `allowFrom` is handled automatically by `_handle_message()` — you don't need to check it yourself.
 
-Override `default_config()` so `nanobot onboard --defaults` auto-populates `config.json`:
+Override `default_config()` so `nanobot onboard` auto-populates `config.json`:
 
 ```python
 @classmethod

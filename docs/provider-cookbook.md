@@ -25,7 +25,7 @@ Match the recipe to the credential or endpoint you already have:
 
 ## How to Use a Recipe
 
-1. Install nanobot and run `nanobot onboard` once so `~/.nanobot/config.json` exists. Use `nanobot onboard --defaults` if you prefer editing JSON by hand.
+1. Install nanobot and run `nanobot onboard` once so `~/.nanobot/config.json` exists. Use `nanobot onboard --wizard` if you prefer prompts over hand-editing JSON.
 2. Put secrets in environment variables when possible.
 3. Merge the recipe snippet into `~/.nanobot/config.json`.
 4. Run `nanobot status`.

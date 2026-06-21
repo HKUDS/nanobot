@@ -8,8 +8,8 @@ echo "=== Building Docker image ==="
 docker build -t "$IMAGE_NAME" .
 
 echo ""
-echo "=== Running 'nanobot onboard --defaults' ==="
-docker run --name nanobot-test-run "$IMAGE_NAME" onboard --defaults
+echo "=== Running 'nanobot onboard' ==="
+docker run --name nanobot-test-run "$IMAGE_NAME" onboard
 
 echo ""
 echo "=== Running 'nanobot status' ==="

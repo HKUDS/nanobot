@@ -11,7 +11,7 @@ The generated `config.json` uses camelCase keys such as `apiKey` and `intervalS`
 For setup and runtime failures, follow the diagnosis order in [`troubleshooting.md`](./troubleshooting.md) before changing multiple config areas at once.
 
 > [!NOTE]
-> If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard --defaults`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
+> If your config file is older than the current schema, you can refresh it without overwriting your existing values: run `nanobot onboard`, then answer `N` when asked whether to overwrite the config. nanobot will merge in missing default fields and keep your current settings.
 
 ## Quick Jump
 

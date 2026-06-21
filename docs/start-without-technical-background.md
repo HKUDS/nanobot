@@ -139,16 +139,16 @@ Use `python3 -m nanobot --version` or `py -m nanobot --version` if that is the P
 The one-command installer starts this for you after installation. If you installed manually, run:
 
 ```bash
-nanobot onboard
+nanobot onboard --wizard
 ```
 
 If `nanobot` is not found, run:
 
 ```bash
-python -m nanobot onboard
+python -m nanobot onboard --wizard
 ```
 
-Use `python3 -m nanobot onboard` or `py -m nanobot onboard` if that is the Python command that worked in step 2.
+Use `python3 -m nanobot onboard --wizard` or `py -m nanobot onboard --wizard` if that is the Python command that worked in step 2.
 
 The wizard is a terminal menu. It is not a graphical app, but it lets you choose options instead of hand-editing every JSON field.
 
@@ -225,13 +225,13 @@ Merge them into one object:
 }
 ```
 
-Notice the comma after the `providers` block. JSON needs commas between sibling sections, but not after the last section. If this feels hard, use `nanobot onboard` whenever possible.
+Notice the comma after the `providers` block. JSON needs commas between sibling sections, but not after the last section. If this feels hard, use `nanobot onboard --wizard` whenever possible.
 
 ## 6. Manual Setup: Config Fallback
 
 Use this only if the wizard is unavailable or you prefer opening the file yourself.
 
-Run `nanobot onboard --defaults` first if `~/.nanobot/config.json` does not exist yet.
+Run `nanobot onboard` first if `~/.nanobot/config.json` does not exist yet.
 
 Use one of these commands:
 
@@ -340,7 +340,7 @@ Do not change many things at once. Check the exact error:
 |---|---|
 | `JSON parse error` | The config file has a missing comma, extra comma, or mismatched brace. Copy the example again. |
 | `401`, `unauthorized`, or `invalid API key` | The API key is wrong, expired, has extra spaces, or was pasted under the wrong provider. |
-| `model not found` | Your account cannot use the default model. Return to `nanobot onboard`, choose `Advanced Settings`, then edit `Model Presets`. |
+| `model not found` | Your account cannot use the default model. Return to `nanobot onboard --wizard`, choose `Advanced Settings`, then edit `Model Presets`. |
 | `nanobot: command not found` | The install worked in Python, but your shell cannot find the script. Use `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`, matching the Python command that worked earlier. |
 | No response after editing config | Restart the command. Long-running processes read config when they start. |
 

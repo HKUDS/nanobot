@@ -31,7 +31,7 @@ The default instance lives under `~/.nanobot/`:
 You can override both with command flags:
 
 ```bash
-nanobot onboard --defaults --config ./bot-a/config.json --workspace ./bot-a/workspace
+nanobot onboard --config ./bot-a/config.json --workspace ./bot-a/workspace
 nanobot agent --config ./bot-a/config.json --workspace ./bot-a/workspace -m "Hello"
 nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```

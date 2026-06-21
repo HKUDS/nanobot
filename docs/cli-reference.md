@@ -7,8 +7,8 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
-| Use guided setup | `nanobot onboard` | Best when you prefer prompts over hand-editing JSON |
-| Create or refresh defaults | `nanobot onboard --defaults` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` without the wizard |
+| Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
+| Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
 | Check config without calling a model | `nanobot status` | Reads the default config and summarizes the active model/provider |
 | Send one test message | `nanobot agent -m "Hello!"` | First proof that install, config, provider, model, and workspace all work |
 | Chat in the terminal | `nanobot agent` | Interactive local chat; exit with `exit`, `/exit`, `:q`, or `Ctrl+D` |
@@ -52,13 +52,9 @@ Long-running commands keep working until you stop them. Press `Ctrl+C` in that t
 
 | Command | Description |
 |---|---|
-| `nanobot onboard` | Use the interactive setup wizard |
-| `nanobot onboard --defaults` | Initialize or refresh the default config and workspace without the wizard |
-| `nanobot onboard --defaults --config <path> --workspace <path>` | Initialize or refresh a specific instance without the wizard |
-
-Without `--defaults`, `nanobot onboard` opens the wizard only when stdin and stdout are attached to a terminal. In scripts, CI, and Docker non-TTY runs, it falls back to the defaults setup.
-
-When `--defaults` refreshes an existing config in scripts, CI, or Docker non-TTY runs, it preserves existing values without prompting. In an interactive terminal, nanobot still asks before replacing an existing config with fresh defaults.
+| `nanobot onboard` | Initialize or refresh the default config and workspace |
+| `nanobot onboard --wizard` | Use the interactive setup wizard |
+| `nanobot onboard --config <path> --workspace <path>` | Initialize or refresh a specific instance |
 
 Default paths:
 

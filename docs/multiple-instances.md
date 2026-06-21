@@ -10,9 +10,9 @@ If you want each instance to have its own dedicated workspace from the start, pa
 
 ```bash
 # Create separate instance configs and workspaces
-nanobot onboard --defaults --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --defaults --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
-nanobot onboard --defaults --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
+nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
+nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
+nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
 ```
 
 **Configure each instance:**

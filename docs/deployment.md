@@ -59,9 +59,9 @@ Restart the deployed process after editing `config.json`. Long-running processes
 ### Docker Compose
 
 ```bash
-docker compose run --rm nanobot-cli onboard --defaults   # first-time setup
-vim ~/.nanobot/config.json                                # add API keys
-docker compose up -d nanobot-gateway                      # start gateway
+docker compose run --rm nanobot-cli onboard   # first-time setup
+vim ~/.nanobot/config.json                     # add API keys
+docker compose up -d nanobot-gateway           # start gateway
 ```
 
 ```bash
@@ -77,7 +77,7 @@ docker compose down                                      # stop
 docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard --defaults
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json

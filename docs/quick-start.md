@@ -32,7 +32,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -102,10 +102,10 @@ Skip this section if the one-command setup already started the wizard and Quick 
 nanobot onboard
 ```
 
-Use the old non-interactive defaults path if you prefer editing JSON by hand:
+Use the wizard if you prefer prompts instead of editing JSON by hand:
 
 ```bash
-nanobot onboard --defaults
+nanobot onboard --wizard
 ```
 
 Initialization creates:
@@ -115,7 +115,7 @@ Initialization creates:
 | `~/.nanobot/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
 | `~/.nanobot/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
 
-If you already have a config, `nanobot onboard --defaults` can refresh missing default fields without overwriting your existing values.
+If you already have a config, `nanobot onboard` can refresh missing default fields without overwriting your existing values.
 
 ## 3. Configure a Provider
 
