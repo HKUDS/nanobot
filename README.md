@@ -56,6 +56,27 @@
 
 ## 📢 News
 
+- **2026-06-19** 🔎 Firecrawl app, OpenAI image edits, safer session deletion.
+- **2026-06-18** 💬 Feishu recovery, Keenable search, Mistral polish, workspace-aware git.
+- **2026-06-17** 🧠 Default idle auto-compact, clearer `/dream`, macOS installer fixes.
+- **2026-06-16** 🎯 Fresher goal context, Kimi K2.7 thinking, cleaner API retries.
+- **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
+- **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
+- **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
+- **2026-06-12** 💬 Slack allowlisted channels can require mentions.
+- **2026-06-11** ✂️ Fenced-code message splitting.
+- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
+
+<details>
+<summary>Earlier news</summary>
+
+- **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
+- **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
+- **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.
+- **2026-06-05** 🖼️ Azure AAD, custom image providers, `/skill`, steadier pairing.
+- **2026-06-04** 🔌 MCP reconnects, `uv pip` install fallback, QQ pairing.
+- **2026-06-03** 🧠 Hidden-history recovery, quieter email progress handling.
+- **2026-06-02** 📬 Email attachments, Napcat QQ, Volcengine search, simpler Dream.
 - **2026-06-01** 🚀 Released **v0.2.1** — **The Workbench Release** turns the packaged WebUI into a daily agent workbench: clearer Thought/response timelines, live file-edit activity, project workspaces, model and context controls, steadier sustained goals, CLI Apps + MCP extensions, and broader provider/channel support. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.1) for details.
 - **2026-05-30** 🔐 Safer Matrix verification, bounded media downloads, clearer WebUI model timeline.
 - **2026-05-29** 🧩 Extension registry, context-window tuning, document extraction controls.
@@ -66,10 +87,6 @@
 - **2026-05-24** 🧰 MCP presets, richer slash actions, configurable OpenAI-compatible requests.
 - **2026-05-23** 🖼️ Zhipu image generation, longer exec windows, cleaner transcription config.
 - **2026-05-22** 🛠️ CLI Apps, more image providers, safer web redirects and edits.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-05-21** ⚡ Novita provider, faster sidebar, smoother coding tools and Weixin replies.
 - **2026-05-20** 📶 Signal channel, faster gateway startup, multilingual README links.
 - **2026-05-19** 🎨 Image provider registry, StepFun and Skywork, stronger WebUI controls.
