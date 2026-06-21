@@ -1489,10 +1489,7 @@ def _configure_quick_start_provider(config: Config) -> bool:
         console.print("[yellow]! API key is required for Quick Start[/yellow]")
         return False
 
-    provider_info = _get_provider_info()
-    _display, _is_gateway, _is_local, api_base = provider_info.get(
-        provider_name, (provider_name, False, False, "")
-    )
+    api_base = _get_provider_info().get(provider_name, ("", False, False, ""))[3]
     if provider_name == "custom":
         base_answer = _input_text(
             "Provider base URL",
@@ -1523,14 +1520,15 @@ def _configure_quick_start_provider(config: Config) -> bool:
         model = _fetch_first_quick_start_model(model_api_base, api_key)
     if not model:
         model = _input_model_with_autocomplete("Model ID", "", provider_name)
-    if not model or not model.strip():
+    model = (model or "").strip()
+    if not model:
         console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
         return False
 
     _set_primary_quick_start_preset(
         config,
         provider_name,
-        model.strip(),
+        model,
     )
     return True
 
@@ -1741,16 +1739,10 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
                 return OnboardResult(config=config, should_save=True)
             continue
 
-        _menu_dispatch = {
-            "[A] Advanced Settings": lambda: _configure_advanced_settings(config),
-        }
-
         if answer == "[S] Save and Exit":
             return OnboardResult(config=config, should_save=True)
         if answer in {"[X] Exit", "[X] Exit Without Saving"}:
             return OnboardResult(config=original_config, should_save=False)
-
-        action_fn = _menu_dispatch.get(answer)
-        if action_fn:
+        if answer == "[A] Advanced Settings":
             last_main_choice = answer
-            action_fn()
+            _configure_advanced_settings(config)
