@@ -90,7 +90,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
-    {"name": "keenable", "label": "Keenable", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -1305,15 +1305,17 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("base_url is required")
         set_search_value("base_url", base_url)
         set_search_value("api_key", "")
-    else:
-        api_key = _query_first_alias(query, "api_key", "apiKey")
-        api_key = api_key.strip() if api_key is not None else None
-        if not api_key and previous_provider == provider_name and search_config.api_key:
+    elif credential in {"api_key", "optional_api_key"}:
+        raw_api_key = _query_first_alias(query, "api_key", "apiKey")
+        api_key = raw_api_key.strip() if raw_api_key is not None else None
+        if api_key is None and previous_provider == provider_name and search_config.api_key:
             api_key = search_config.api_key
-        if not api_key:
+        if credential == "api_key" and not api_key:
             raise WebUISettingsError("api_key is required")
-        set_search_value("api_key", api_key)
+        set_search_value("api_key", api_key or "")
         set_search_value("base_url", "")
+    else:
+        raise WebUISettingsError("unknown web search credential type")
 
     max_results = _query_first_alias(query, "max_results", "maxResults")
     if max_results is not None:

@@ -456,6 +456,16 @@ function webSearchFormFromPayload(
   };
 }
 
+type WebSearchProviderOption = SettingsPayload["web_search"]["providers"][number];
+
+function webSearchProviderAcceptsApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key" || provider?.credential === "optional_api_key";
+}
+
+function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOption): boolean {
+  return provider?.credential === "api_key";
+}
+
 function imageGenerationFormFromPayload(payload: SettingsPayload): ImageGenerationSettingsUpdate {
   return {
     enabled: payload.image_generation.enabled,
@@ -1154,11 +1164,11 @@ export function SettingsView({
     const apiKey = webSearchForm.apiKey?.trim() ?? "";
     const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
     const hasExistingSecret =
-      provider.credential === "api_key" &&
+      webSearchProviderAcceptsApiKey(provider) &&
       webSearchForm.provider === settings.web_search.provider &&
       !!settings.web_search.api_key_hint;
 
-    if (provider.credential === "api_key" && !apiKey && !hasExistingSecret) {
+    if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
       setError(t("settings.byok.webSearch.apiKeyRequired"));
       return;
     }
@@ -1178,7 +1188,12 @@ export function SettingsView({
         timeout: webSearchForm.timeout,
         useJinaReader: webSearchForm.useJinaReader,
       };
-      if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
+      if (
+        webSearchProviderAcceptsApiKey(provider) &&
+        (apiKey || (provider.credential === "optional_api_key" && webSearchKeyEditing))
+      ) {
+        update.apiKey = apiKey;
+      }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
@@ -1909,6 +1924,10 @@ function OverviewSettings({
   const webSearchCredentialStatus =
     webSearchProvider?.credential === "none"
       ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
+      : webSearchProvider?.credential === "optional_api_key"
+        ? settings.web_search.api_key_hint
+          ? tx("settings.values.configured", "Configured")
+          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
       : webSearchProvider?.credential === "base_url"
         ? settings.web_search.base_url
           ? tx("settings.values.configured", "Configured")
@@ -3218,10 +3237,10 @@ function WebSettings({
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
   const hasExistingSecret =
-    selectedProvider?.credential === "api_key" &&
+    webSearchProviderAcceptsApiKey(selectedProvider) &&
     form.provider === settings.web_search.provider &&
     !!settings.web_search.api_key_hint;
-  const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
+  const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
@@ -3234,7 +3253,7 @@ function WebSettings({
     effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const missingCredential =
-    selectedProvider?.credential === "api_key"
+    webSearchProviderRequiresApiKey(selectedProvider)
       ? !apiKey && !hasExistingSecret
       : selectedProvider?.credential === "base_url"
         ? !baseUrl
@@ -3267,7 +3286,7 @@ function WebSettings({
             </SettingsRow>
           ) : null}
 
-          {selectedProvider?.credential === "api_key" ? (
+          {webSearchProviderAcceptsApiKey(selectedProvider) ? (
             <SettingsRow
               title={t("settings.byok.apiKey")}
               description={t("settings.byok.webSearch.apiKeyHelp")}
