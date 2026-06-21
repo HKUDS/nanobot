@@ -70,6 +70,8 @@ Periodic tasks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/works
 
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
 
+For debugging, run `nanobot heartbeat trigger --dry-run` to inspect the static pre-check, LLM run/skip decision, and extracted task summary without executing the tasks. Run `nanobot heartbeat trigger` to execute one heartbeat immediately from the terminal instead of waiting for the next gateway interval.
+
 You can change the interval or disable the built-in heartbeat in `~/.nanobot/config.json`:
 
 ```json

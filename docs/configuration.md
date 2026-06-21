@@ -1837,6 +1837,8 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
 
 If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and delivers useful results to the most recently active chat target. If the file has no active tasks, the heartbeat is skipped silently.
 
+Use `nanobot heartbeat trigger --dry-run` when editing `HEARTBEAT.md`: it runs only the Phase 1 static and LLM decision checks and prints the extracted task summary. Use `nanobot heartbeat trigger` to execute one heartbeat immediately from the terminal. Manual triggers and gateway timer ticks share a workspace lock, so two heartbeat runs cannot overlap.
+
 The heartbeat job is backed by the same cron service as user-created reminders. It is stored under the active workspace (`<workspace>/cron/jobs.json`) and shows up in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. Disable it through config and restart the gateway if you do not want periodic heartbeat checks.
 
 | Option | Default | Description |

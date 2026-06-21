@@ -50,10 +50,10 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.cli import heartbeat as heartbeat_runtime  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
-from nanobot.utils.evaluator import evaluate_response  # noqa: E402
 from nanobot.utils.helpers import sync_workspace_templates  # noqa: E402
 from nanobot.utils.restart import (  # noqa: E402
     consume_restart_notice_from_env,
@@ -97,38 +97,44 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 _REASONING_SENTENCE_ENDINGS = (".", "!", "?", "。", "！", "？")
 _REASONING_FLUSH_CHARS = 60
 
-_HEARTBEAT_PREAMBLE = (
-    "[Your response will be delivered directly to the user's messaging app. "
-    "Output ONLY the final user-facing message. Never reference internal "
-    "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
-    "decision process. If nothing needs reporting, respond with just "
-    "'All clear.' and nothing else.]\n\n"
-)
+_HeartbeatTriggerResult = heartbeat_runtime.HeartbeatTriggerResult
+_heartbeat_has_active_tasks = heartbeat_runtime.heartbeat_has_active_tasks
+_heartbeat_result_payload = heartbeat_runtime.heartbeat_result_payload
+_run_heartbeat_trigger = heartbeat_runtime.run_heartbeat_trigger
 
 
-def _heartbeat_has_active_tasks(content: str) -> bool:
-    """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments."""
-    in_comment = False
-    in_active_section: bool = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if in_comment:
-            if "-->" in stripped:
-                in_comment = False
-            continue
-        if not stripped or stripped.startswith("#"):
-            if stripped.startswith("##") and not stripped.startswith("###"):
-                heading = stripped.lstrip("#").strip().lower()
-                in_active_section = heading.startswith("active tasks")
-            continue
-        if stripped.startswith("<!--"):
-            if "-->" not in stripped[4:]:
-                in_comment = True
-            continue
-        if in_active_section is False:
-            continue
-        return True
-    return False
+def _print_heartbeat_trigger_result(
+    result: _HeartbeatTriggerResult,
+    *,
+    json_output: bool,
+) -> None:
+    if json_output:
+        import json
+
+        console.print(json.dumps(_heartbeat_result_payload(result), ensure_ascii=False, indent=2))
+        return
+
+    console.print(f"[cyan]Heartbeat trigger[/cyan] [{result.status}]")
+    console.print(
+        f"  [cyan]Target[/cyan]   : {result.channel}:{result.chat_id}"
+    )
+    console.print(
+        "  [cyan]Static[/cyan]   : "
+        + ("active tasks found" if result.decision.static_has_active_tasks else "no active tasks")
+    )
+    console.print(
+        "  [cyan]Decision[/cyan] : "
+        + ("run" if result.decision.should_run else "skip")
+        + f" ({result.decision.source})"
+    )
+    if result.decision.tasks:
+        console.print("  [cyan]Tasks[/cyan]    :")
+        console.print(result.decision.tasks)
+    if result.decision.reason:
+        console.print(f"  [cyan]Reason[/cyan]   : {result.decision.reason}")
+    if result.response:
+        console.print()
+        _print_agent_response(result.response, render_markdown=True, show_header=False)
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -855,11 +861,11 @@ def _run_gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        async def _silent(*_args, **_kwargs):
-            pass
-
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
+            async def _silent(*_args, **_kwargs):
+                pass
+
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
@@ -913,65 +919,14 @@ def _run_gateway(
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
         if job.name == "heartbeat":
-            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
-            try:
-                content = heartbeat_file.read_text(encoding="utf-8")
-            except OSError:
-                logger.debug("Heartbeat: HEARTBEAT.md missing")
-                return None
-            if not _heartbeat_has_active_tasks(content):
-                logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
-                return None
-
-            channel, chat_id = _pick_heartbeat_target()
-            if channel == "cli":
-                return None
-
-            prompt = (
-                _HEARTBEAT_PREAMBLE
-                + f"Review the following HEARTBEAT.md and report any active tasks:\n\n{content}"
+            result = await _run_heartbeat_trigger(
+                config,
+                agent,
+                target_picker=_pick_heartbeat_target,
+                deliver_to_channel=_deliver_to_channel,
+                message_tool=message_tool if isinstance(message_tool, MessageTool) else None,
             )
-
-            # Internal check: funnel all output through the post-run gate so the
-            # turn can't deliver directly via the message tool and skip it.
-            suppress_token = None
-            if isinstance(message_tool, MessageTool):
-                suppress_token = message_tool.set_suppress_delivery(True)
-            try:
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key="heartbeat",
-                    channel=channel,
-                    chat_id=chat_id,
-                    on_progress=_silent,
-                )
-            finally:
-                if isinstance(message_tool, MessageTool) and suppress_token is not None:
-                    message_tool.reset_suppress_delivery(suppress_token)
-            response = resp.content if resp else ""
-
-            # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
-
-            if not response:
-                return None
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            should_notify = await evaluate_response(
-                response, prompt, agent.provider, agent.model,
-                default_notify=False,
-            )
-            if should_notify:
-                logger.info("Heartbeat: completed, delivering response")
-                await _deliver_to_channel(
-                    OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
-                )
-            else:
-                logger.info("Heartbeat: silenced by post-run evaluation")
-            return response
+            return result.response or None
 
         if is_bound_cron_job(job):
             return await run_bound_cron_job(job, agent=agent, cron=cron)
@@ -1427,6 +1382,90 @@ def agent(
                 await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
+
+
+# ============================================================================
+# Heartbeat Commands
+# ============================================================================
+
+heartbeat_app = typer.Typer(help="Debug and trigger heartbeat checks", no_args_is_help=True)
+app.add_typer(heartbeat_app, name="heartbeat")
+
+
+@heartbeat_app.command("trigger")
+def heartbeat_trigger(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Run only Phase 1 and print the decision without executing tasks.",
+    ),
+    channel: str | None = typer.Option(
+        None,
+        "--channel",
+        help="Channel context for the trigger, such as telegram or websocket.",
+    ),
+    chat_id: str | None = typer.Option(
+        None,
+        "--chat-id",
+        help="Chat ID context for the trigger. Must be used with --channel.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Print machine-readable JSON output.",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Trigger the workspace heartbeat now for debugging."""
+    from nanobot.bus.queue import MessageBus
+    from nanobot.cron.service import CronService
+    from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.session.manager import SessionManager
+
+    if (channel is None) != (chat_id is None):
+        console.print("[red]Error: --channel and --chat-id must be provided together[/red]")
+        raise typer.Exit(1)
+
+    cfg = _load_runtime_config(config, workspace)
+    sync_workspace_templates(cfg.workspace_path)
+    bus = MessageBus()
+
+    if is_default_workspace(cfg.workspace_path):
+        _migrate_cron_store(cfg)
+
+    cron = CronService(cfg.workspace_path / "cron" / "jobs.json")
+    session_manager = SessionManager(cfg.workspace_path)
+
+    try:
+        agent_loop = AgentLoop.from_config(
+            cfg,
+            bus,
+            cron_service=cron,
+            session_manager=session_manager,
+            image_generation_provider_configs=image_gen_provider_configs(cfg),
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    target = (channel or "cli", chat_id or "direct")
+
+    async def _run_once() -> _HeartbeatTriggerResult:
+        try:
+            return await _run_heartbeat_trigger(
+                cfg,
+                agent_loop,
+                dry_run=dry_run,
+                target=target,
+                message_tool=getattr(agent_loop, "tools", {}).get("message"),
+                allow_cli_target=True,
+            )
+        finally:
+            await agent_loop.close_mcp()
+
+    result = asyncio.run(_run_once())
+    _print_heartbeat_trigger_result(result, json_output=json_output)
 
 
 # ============================================================================
