@@ -1126,6 +1126,14 @@ class AgentLoop:
                 await stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
                 logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+                # Force-close the streamable_http_client generator to prevent
+                # its anyio cancel scope from crashing the gateway (#4302).
+                http_gen = getattr(stack, "_mcp_http_gen", None)
+                if http_gen is not None:
+                    from contextlib import suppress
+
+                    with suppress(Exception):
+                        await http_gen.aclose()
         self._mcp_stacks.clear()
 
     def _schedule_background(self, coro) -> None:
