@@ -29,6 +29,11 @@ def _fake_resolve_public(hostname, port, family=0, type_=0):
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
 
 
+def test_web_fetch_legacy_use_jina_reader_false_maps_to_readability():
+    cfg = WebFetchConfig.model_validate({"useJinaReader": False})
+    assert cfg.provider == "readability"
+
+
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_private_ip():
     tool = WebFetchTool()
@@ -100,7 +105,7 @@ async def test_web_fetch_result_contains_untrusted_flag():
 @pytest.mark.asyncio
 async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
     tool = WebFetchTool(
-        config=WebFetchConfig(use_jina_reader=False),
+        config=WebFetchConfig(provider="readability"),
         user_agent="nanobot-test-agent",
     )
     seen_headers: list[dict] = []
@@ -166,8 +171,66 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_tavily_provider_uses_extract(monkeypatch):
+    tool = WebFetchTool(
+        config=WebFetchConfig(provider="tavily"),
+        search_api_key="tavily-key",
+        user_agent="nanobot-test-agent",
+    )
+    seen: dict[str, object] = {}
+
+    async def _skip_prefetch(*args, **kwargs):
+        raise RuntimeError("skip image prefetch")
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "results": [
+                    {
+                        "url": "https://example.com/page",
+                        "raw_content": "Extracted with Tavily",
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, **kwargs):
+            seen["url"] = url
+            seen["headers"] = headers
+            seen["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web._stream_with_safe_redirects", _skip_prefetch)
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+
+    data = json.loads(result)
+    assert data["extractor"] == "tavily"
+    assert "Extracted with Tavily" in data["text"]
+    assert seen["url"] == "https://api.tavily.com/extract"
+    assert seen["headers"]["Authorization"] == "Bearer tavily-key"
+    assert seen["json"]["urls"] == ["https://example.com/page"]
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monkeypatch):
-    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    tool = WebFetchTool(config=WebFetchConfig(provider="readability"))
 
     class FakeResponse:
         status_code = 200
@@ -208,7 +271,7 @@ async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monke
 
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_private_redirect_before_readability_request(monkeypatch):
-    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    tool = WebFetchTool(config=WebFetchConfig(provider="readability"))
     requested: list[str] = []
 
     class FakeStreamResponse:
@@ -270,7 +333,7 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
 
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
-    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    tool = WebFetchTool(config=WebFetchConfig(provider="readability"))
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == "https://example.com/image.png":
@@ -313,7 +376,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
 
 @pytest.mark.asyncio
 async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
-    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    tool = WebFetchTool(config=WebFetchConfig(provider="readability"))
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

@@ -383,8 +383,15 @@ const DEFAULT_WEB_SEARCH_FORM: WebSearchSettingsUpdate = {
   baseUrl: "",
   maxResults: 5,
   timeout: 30,
-  useJinaReader: true,
+  fetchProvider: "auto",
 };
+
+const WEB_FETCH_PROVIDERS = [
+  { name: "auto", label: "Auto" },
+  { name: "tavily", label: "Tavily Extract" },
+  { name: "jina", label: "Jina Reader" },
+  { name: "readability", label: "Local readability" },
+];
 
 const DEFAULT_IMAGE_GENERATION_FORM: ImageGenerationSettingsUpdate = {
   enabled: false,
@@ -452,7 +459,7 @@ function webSearchFormFromPayload(
     baseUrl: payload.web_search.base_url ?? "",
     maxResults: payload.web_search.max_results,
     timeout: payload.web_search.timeout,
-    useJinaReader: payload.web.fetch.use_jina_reader,
+    fetchProvider: payload.web.fetch.provider,
   };
 }
 
@@ -1170,13 +1177,13 @@ export function SettingsView({
     setWebSearchSaving(true);
     try {
       const webFetchRestartRequired =
-        (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
-        settings.web.fetch.use_jina_reader;
+        (webSearchForm.fetchProvider ?? settings.web.fetch.provider) !==
+        settings.web.fetch.provider;
       const update: WebSearchSettingsUpdate = {
         provider: webSearchForm.provider,
         maxResults: webSearchForm.maxResults,
         timeout: webSearchForm.timeout,
-        useJinaReader: webSearchForm.useJinaReader,
+        fetchProvider: webSearchForm.fetchProvider,
       };
       if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
@@ -1192,7 +1199,7 @@ export function SettingsView({
         baseUrl: payload.web_search.base_url ?? prev.baseUrl ?? "",
         maxResults: payload.web_search.max_results,
         timeout: payload.web_search.timeout,
-        useJinaReader: payload.web.fetch.use_jina_reader,
+        fetchProvider: payload.web.fetch.provider,
       }));
       setWebSearchKeyVisible(false);
       setWebSearchKeyEditing(false);
@@ -1232,7 +1239,7 @@ export function SettingsView({
       baseUrl: settings.web_search.base_url ?? "",
       maxResults: settings.web_search.max_results,
       timeout: settings.web_search.timeout,
-      useJinaReader: settings.web.fetch.use_jina_reader,
+      fetchProvider: settings.web.fetch.provider,
     });
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
@@ -1246,7 +1253,7 @@ export function SettingsView({
       baseUrl: provider === settings.web_search.provider ? settings.web_search.base_url ?? "" : "",
       maxResults: prev.maxResults ?? settings.web_search.max_results,
       timeout: prev.timeout ?? settings.web_search.timeout,
-      useJinaReader: prev.useJinaReader ?? settings.web.fetch.use_jina_reader,
+      fetchProvider: prev.fetchProvider ?? settings.web.fetch.provider,
     }));
     setWebSearchKeyVisible(false);
     setWebSearchKeyEditing(false);
@@ -3224,15 +3231,15 @@ function WebSettings({
   const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
-  const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
+  const effectiveFetchProvider = form.fetchProvider ?? settings.web.fetch.provider;
   const dirty =
     form.provider !== settings.web_search.provider ||
     apiKey.length > 0 ||
     baseUrl !== (settings.web_search.base_url ?? "") ||
     form.maxResults !== settings.web_search.max_results ||
     form.timeout !== settings.web_search.timeout ||
-    effectiveJinaReader !== settings.web.fetch.use_jina_reader;
-  const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
+    effectiveFetchProvider !== settings.web.fetch.provider;
+  const fetchProviderDirty = effectiveFetchProvider !== settings.web.fetch.provider;
   const missingCredential =
     selectedProvider?.credential === "api_key"
       ? !apiKey && !hasExistingSecret
@@ -3371,14 +3378,14 @@ function WebSettings({
             />
           </SettingsRow>
           <SettingsRow
-            title={tx("settings.rows.jinaReader", "Jina reader")}
-            description={tx("settings.help.jinaReader", "Use Jina Reader for web_fetch when available.")}
+            title={tx("settings.rows.fetchProvider", "Fetch provider")}
+            description={tx("settings.help.fetchProvider", "Provider used by web_fetch when reading page content.")}
           >
-            <ToggleButton
-              checked={effectiveJinaReader}
-              onChange={(useJinaReader) => onChangeForm((prev) => ({ ...prev, useJinaReader }))}
-              ariaLabel={tx("settings.rows.jinaReader", "Jina reader")}
-              label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            <ProviderPicker
+              providers={WEB_FETCH_PROVIDERS}
+              value={effectiveFetchProvider}
+              emptyLabel={tx("settings.placeholders.fetchProvider", "Select fetch provider")}
+              onChange={(fetchProvider) => onChangeForm((prev) => ({ ...prev, fetchProvider }))}
             />
           </SettingsRow>
           <RestartSettingsFooter
@@ -3391,7 +3398,7 @@ function WebSettings({
                 ? t("settings.byok.webSearch.missingCredential")
                 : requiresRestartPending && !dirty
                   ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
-                  : jinaReaderDirty
+                  : fetchProviderDirty
                     ? tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
                     : dirty
                       ? t("settings.byok.webSearch.saveHint")

@@ -172,7 +172,7 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       proxy: null,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
-      fetch: { use_jina_reader: true },
+      fetch: { enable: true, provider: "auto", api_key_hint: null, base_url: null, timeout: 30 },
     },
     image_generation: {
       enabled: false,

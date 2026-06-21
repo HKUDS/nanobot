@@ -12,7 +12,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import (
@@ -46,7 +46,25 @@ class WebSearchConfig(Base):
 
 class WebFetchConfig(Base):
     """Web fetch tool configuration."""
-    use_jina_reader: bool = True
+    enable: bool = True
+    provider: str = "auto"  # auto | tavily | jina | readability
+    api_key: str = ""
+    base_url: str = ""
+    timeout: int = 30
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_jina_reader(cls, data: Any) -> Any:
+        """Map legacy useJinaReader=false to provider=readability."""
+        if not isinstance(data, dict):
+            return data
+        has_provider = bool(data.get("provider"))
+        if has_provider:
+            return data
+        legacy = data.get("useJinaReader", data.get("use_jina_reader"))
+        if legacy is False:
+            return {**data, "provider": "readability"}
+        return data
 
 
 class WebToolsConfig(Base):
@@ -855,7 +873,7 @@ class WebFetchTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
-        return ctx.config.web.enable
+        return bool(ctx.config.web.enable and ctx.config.web.fetch.enable)
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -863,13 +881,22 @@ class WebFetchTool(Tool):
             config=ctx.config.web.fetch,
             proxy=ctx.config.web.proxy,
             user_agent=ctx.config.web.user_agent,
+            search_api_key=ctx.config.web.search.api_key,
         )
 
-    def __init__(self, config: WebFetchConfig | None = None, proxy: str | None = None, user_agent: str | None = None, max_chars: int = 50000):
+    def __init__(
+        self,
+        config: WebFetchConfig | None = None,
+        proxy: str | None = None,
+        user_agent: str | None = None,
+        max_chars: int = 50000,
+        search_api_key: str = "",
+    ):
         self.config = config if config is not None else WebFetchConfig()
         self.proxy = proxy
         self.user_agent = user_agent or _DEFAULT_USER_AGENT
         self.max_chars = max_chars
+        self.search_api_key = search_api_key
 
     @property
     def read_only(self) -> bool:
@@ -914,12 +941,77 @@ class WebFetchTool(Tool):
         except Exception as e:
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
+        provider = (self.config.provider or "auto").strip().lower()
+        if provider not in {"auto", "tavily", "jina", "readability", "local"}:
+            return json.dumps({"error": f"Unknown fetch provider: {provider}", "url": url}, ensure_ascii=False)
+
         result = None
-        if self.config.use_jina_reader:
+        if provider in {"auto", "tavily"}:
+            result = await self._fetch_tavily(url, extract_mode, max_chars)
+            if result is not None or provider == "tavily":
+                return result or await self._fetch_readability(url, extract_mode, max_chars)
+
+        if provider in {"auto", "jina"}:
             result = await self._fetch_jina(url, max_chars)
-        if result is None:
-            result = await self._fetch_readability(url, extract_mode, max_chars)
-        return result
+            if result is not None or provider == "jina":
+                return result or await self._fetch_readability(url, extract_mode, max_chars)
+
+        return await self._fetch_readability(url, extract_mode, max_chars)
+
+    def _tavily_api_key(self) -> str:
+        return (
+            self.config.api_key.strip()
+            or os.environ.get("TAVILY_API_KEY", "").strip()
+            or self.search_api_key.strip()
+        )
+
+    async def _fetch_tavily(self, url: str, extract_mode: str, max_chars: int) -> str | None:
+        """Try fetching via Tavily Extract API. Returns None on failure."""
+        api_key = self._tavily_api_key()
+        if not api_key:
+            logger.debug("Tavily Extract API key not configured, falling back")
+            return None
+        try:
+            base_url = (self.config.base_url or "https://api.tavily.com").rstrip("/")
+            timeout = max(int(self.config.timeout or 30), 1)
+            payload = {
+                "urls": [url],
+                "extract_depth": "advanced",
+                "format": "text" if extract_mode == "text" else "markdown",
+                "include_images": False,
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": self.user_agent,
+            }
+            async with httpx.AsyncClient(proxy=self.proxy, timeout=timeout) as client:
+                r = await client.post(f"{base_url}/extract", headers=headers, json=payload)
+                if r.status_code == 429:
+                    logger.debug("Tavily Extract rate limited, falling back")
+                    return None
+                r.raise_for_status()
+
+            data = r.json()
+            results = data.get("results", []) or []
+            if not results:
+                return None
+            item = results[0]
+            text = item.get("raw_content") or item.get("content") or ""
+            if not text:
+                return None
+            truncated = len(text) > max_chars
+            if truncated:
+                text = text[:max_chars]
+            text = f"{_UNTRUSTED_BANNER}\n\n{text}"
+            return json.dumps({
+                "url": url, "finalUrl": item.get("url", url), "status": r.status_code,
+                "extractor": "tavily", "truncated": truncated, "length": len(text),
+                "untrusted": True, "text": text,
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.debug("Tavily Extract failed for {}, falling back: {}", url, e)
+            return None
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         """Try fetching via Jina Reader API. Returns None on failure."""

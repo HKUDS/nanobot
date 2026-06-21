@@ -1621,12 +1621,12 @@ Create a key at [keenable.ai](https://keenable.ai). You can also set `KEENABLE_A
 ### Web Fetch
 
 > [!TIP]
-> If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
+> If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and force the local readability fetch provider:
 > ```json
-> { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
+> { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "provider": "readability" } } } }
 > ```
 
-nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
+nanobot by default uses automatic fetching, trying configured remote providers first and falling back to local conversion based on [readability-lxml](https://github.com/buriy/python-readability) if needed.
 
 If you want to always use the local conversion, you can force it using:
 
@@ -1635,7 +1635,7 @@ If you want to always use the local conversion, you can force it using:
   "tools": {
     "web": {
       "fetch": {
-        "useJinaReader": false
+        "provider": "readability"
       }
     }
   }
@@ -1646,7 +1646,13 @@ If you want to always use the local conversion, you can force it using:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
+| `enable` | boolean | `true` | Enable the `web_fetch` tool |
+| `provider` | string | `"auto"` | Fetch provider: `auto`, `tavily`, `jina`, or `readability` |
+| `apiKey` | string | `""` | API key for providers such as Tavily Extract |
+| `baseUrl` | string | `""` | Override provider base URL |
+| `timeout` | integer | `30` | Provider request timeout in seconds |
+
+Legacy `useJinaReader: false` is still accepted when `provider` is not set and is treated as `provider: "readability"`.
 
 ## Image Generation
 
