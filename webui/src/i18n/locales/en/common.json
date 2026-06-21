@@ -146,6 +146,10 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "fetchProvider": "Fetch provider",
+      "fetchApiKey": "Tavily Extract API key",
+      "fetchBaseUrl": "Tavily Extract base URL",
+      "fetchTimeout": "Fetch timeout",
       "imageGeneration": "Image generation",
       "imageProvider": "Image provider",
       "imageProviderStatus": "Provider status",
@@ -192,6 +196,10 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "fetchProvider": "Provider used by web_fetch when reading page content.",
+      "fetchApiKey": "Used by web_fetch for Tavily Extract. Leave blank to use TAVILY_API_KEY from the gateway environment.",
+      "fetchBaseUrl": "Optional override for Tavily-compatible extract endpoints.",
+      "fetchTimeout": "Seconds before a web_fetch provider request times out.",
       "imageGeneration": "Expose generate_image in chats when a configured image provider is available.",
       "imageProvider": "Choose the registry provider used by generate_image.",
       "imageProviderStatus": "Image generation reuses provider credentials from Providers.",
@@ -217,6 +225,15 @@
       "transcriptionProviderStatus": "API keys stay under providers, not in transcription settings.",
       "transcriptionModel": "Leave as the resolved default unless your provider needs a custom model id.",
       "transcriptionLanguage": "Optional ISO-639 hint such as en, zh, ja, or ko."
+    },
+    "placeholders": {
+      "fetchProvider": "Select fetch provider"
+    },
+    "fetchProviders": {
+      "auto": "Auto",
+      "tavily": "Tavily Extract",
+      "jina": "Jina Reader",
+      "readability": "Local readability"
     },
     "timezone": {
       "select": "Select timezone",

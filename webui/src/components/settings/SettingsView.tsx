@@ -3290,6 +3290,10 @@ function WebSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const fetchProviders = WEB_FETCH_PROVIDERS.map((provider) => ({
+    ...provider,
+    label: tx(`settings.fetchProviders.${provider.name}`, provider.label),
+  }));
   const selectedProvider =
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
@@ -3464,7 +3468,7 @@ function WebSettings({
             description={tx("settings.help.fetchProvider", "Provider used by web_fetch when reading page content.")}
           >
             <ProviderPicker
-              providers={WEB_FETCH_PROVIDERS}
+              providers={fetchProviders}
               value={effectiveFetchProvider}
               emptyLabel={tx("settings.placeholders.fetchProvider", "Select fetch provider")}
               onChange={(fetchProvider) => onChangeForm((prev) => ({ ...prev, fetchProvider }))}
