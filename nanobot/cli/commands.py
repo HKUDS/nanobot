@@ -74,6 +74,62 @@ def _sanitize_surrogates(text: str) -> str:
     return text.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
 
 
+def _signal_name(signum: int) -> str:
+    with suppress(ValueError):
+        return signal.Signals(signum).name
+    return f"signal {signum}"
+
+
+def _install_gateway_shutdown_handlers(
+    loop: asyncio.AbstractEventLoop,
+    shutdown_event: asyncio.Event,
+    tasks: list[asyncio.Task],
+    print_status: Callable[[str], None],
+) -> Callable[[], None]:
+    """Install foreground gateway signal handlers and return a restore callback."""
+    loop_signals: list[int] = []
+    previous_handlers: list[tuple[int, Any]] = []
+    shutdown_requested = False
+
+    def request_shutdown(signum: int) -> None:
+        nonlocal shutdown_requested
+        sig_name = _signal_name(signum)
+        if shutdown_requested:
+            logger.warning("Forcing gateway shutdown after repeated {}", sig_name)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            return
+        shutdown_requested = True
+        logger.info("Gateway shutdown requested by {}", sig_name)
+        print_status("\nShutting down... Press Ctrl+C again to force.")
+        shutdown_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(signum, request_shutdown, signum)
+        except (NotImplementedError, RuntimeError, ValueError):
+            try:
+                previous = signal.getsignal(signum)
+                signal.signal(signum, lambda sig, _frame: request_shutdown(sig))
+            except (RuntimeError, ValueError):
+                logger.debug("Could not install gateway handler for {}", _signal_name(signum))
+                continue
+            previous_handlers.append((signum, previous))
+        else:
+            loop_signals.append(signum)
+
+    def restore() -> None:
+        for signum in loop_signals:
+            with suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(signum)
+        for signum, handler in previous_handlers:
+            with suppress(RuntimeError, ValueError):
+                signal.signal(signum, handler)
+
+    return restore
+
+
 class SafeFileHistory(FileHistory):
     """FileHistory subclass that sanitizes surrogate characters on write.
 
@@ -1106,6 +1162,16 @@ def _run_gateway(
 
     async def run():
         tasks: list[asyncio.Task] = []
+        shutdown_task: asyncio.Task | None = None
+        runtime_tasks: asyncio.Future | None = None
+        runtime_tasks_drained = False
+        shutdown_event = asyncio.Event()
+        restore_shutdown_handlers = _install_gateway_shutdown_handlers(
+            asyncio.get_running_loop(),
+            shutdown_event,
+            tasks,
+            console.print,
+        )
         try:
             await cron.start()
             tasks = [
@@ -1122,7 +1188,20 @@ def _run_gateway(
                     _open_browser_when_ready(),
                     name="nanobot-open-browser",
                 ))
-            await asyncio.gather(*tasks)
+            runtime_tasks = asyncio.gather(*tasks)
+            shutdown_task = asyncio.create_task(
+                shutdown_event.wait(),
+                name="nanobot-gateway-shutdown",
+            )
+            done, _pending = await asyncio.wait(
+                {runtime_tasks, shutdown_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if runtime_tasks in done:
+                runtime_tasks_drained = True
+                await runtime_tasks
+            elif runtime_tasks is not None:
+                runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -1131,20 +1210,30 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            cron.stop()
-            agent.stop()
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            await channels.stop_all()
-            # Flush all cached sessions to durable storage before exit.
-            # This prevents data loss on filesystems with write-back
-            # caching (rclone VFS, NFS, FUSE mounts, etc.).
-            flushed = agent.sessions.flush_all()
-            if flushed:
-                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            try:
+                if shutdown_task and not shutdown_task.done():
+                    shutdown_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await shutdown_task
+                cron.stop()
+                agent.stop()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                if runtime_tasks is not None and not runtime_tasks_drained:
+                    with suppress(asyncio.CancelledError, Exception):
+                        await runtime_tasks
+                await channels.stop_all()
+                # Flush all cached sessions to durable storage before exit.
+                # This prevents data loss on filesystems with write-back
+                # caching (rclone VFS, NFS, FUSE mounts, etc.).
+                flushed = agent.sessions.flush_all()
+                if flushed:
+                    logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            finally:
+                restore_shutdown_handlers()
 
     asyncio.run(run())
 
