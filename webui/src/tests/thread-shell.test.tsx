@@ -931,6 +931,75 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.getByText("live assistant reply")).toBeInTheDocument());
   });
 
+  it("keeps live fork replies when a canonical refresh is missing an earlier assistant answer", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-fork/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "first fork question" }]
+                : [
+                    { role: "user", content: "first fork question" },
+                    { role: "user", content: "second fork question" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-fork")}
+          title="Chat chat-fork"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("first fork question")).toBeInTheDocument());
+    await act(async () => {
+      client._emitChat("chat-fork", {
+        event: "message",
+        chat_id: "chat-fork",
+        text: "first fork answer",
+      });
+    });
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "second fork question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expectSendMessageWithTurn(client, "chat-fork", "second fork question"),
+    );
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+
+    await act(async () => {
+      client._emitSessionUpdate("chat-fork");
+    });
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    expect(screen.getByText("first fork question")).toBeInTheDocument();
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+  });
+
   it("does not refetch thread history on turn_end", async () => {
     const client = makeClient();
     let historyCalls = 0;

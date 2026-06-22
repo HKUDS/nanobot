@@ -44,7 +44,9 @@ function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
 }
 
-function sameMessageShape(a: UIMessage, b: UIMessage): boolean {
+type MessageShape = Pick<UIMessage, "role" | "kind" | "content">;
+
+function sameMessageShape(a: MessageShape, b: MessageShape): boolean {
   return (
     a.role === b.role
     && (a.kind ?? "") === (b.kind ?? "")
@@ -52,9 +54,51 @@ function sameMessageShape(a: UIMessage, b: UIMessage): boolean {
   );
 }
 
+function durableMessageShape(message: UIMessage): MessageShape | null {
+  if (message.kind === "trace") return null;
+  if (message.role !== "user" && message.role !== "assistant") return null;
+  if (message.role === "assistant" && !message.content.trim() && !message.media?.length) {
+    return null;
+  }
+  return {
+    role: message.role,
+    kind: message.kind,
+    content: message.content,
+  };
+}
+
+function preservesDurableMessages(current: UIMessage[], snapshot: UIMessage[]): boolean {
+  // Canonical history refreshes can race with live websocket messages after fork/send.
+  // Never accept a refreshed snapshot that drops a user/assistant message already shown.
+  const expected = current
+    .map(durableMessageShape)
+    .filter((message): message is MessageShape => message !== null);
+  if (expected.length === 0) return true;
+  const candidates = snapshot
+    .map(durableMessageShape)
+    .filter((message): message is MessageShape => message !== null);
+
+  let cursor = 0;
+  for (const message of expected) {
+    let found = false;
+    while (cursor < candidates.length) {
+      const candidate = candidates[cursor];
+      cursor += 1;
+      if (sameMessageShape(message, candidate)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
 function isStaleThreadSnapshot(current: UIMessage[], snapshot: UIMessage[]): boolean {
-  if (current.length === 0 || snapshot.length >= current.length) return false;
+  if (current.length === 0) return false;
   if (snapshot.length === 0) return true;
+  if (!preservesDurableMessages(current, snapshot)) return true;
+  if (snapshot.length >= current.length) return false;
   return snapshot.every((message, index) => sameMessageShape(current[index], message));
 }
 
