@@ -1700,14 +1700,17 @@ def _configure_quick_start(config: Config) -> bool:
         "Quick Start",
         "Choose provider endpoint, add credentials and model, then enable the local WebUI channel.",
     )
-    if not _configure_quick_start_provider(config):
+    draft = config.model_copy(deep=True)
+    if not _configure_quick_start_provider(draft):
         _pause()
         return False
-    if not _enable_quick_start_websocket_defaults(config):
+    if not _enable_quick_start_websocket_defaults(draft):
         _pause()
         return False
-    _show_quick_start_summary(config)
+    _show_quick_start_summary(draft)
     _pause("Press Enter to save and exit...")
+    for field_name in type(config).model_fields:
+        setattr(config, field_name, getattr(draft, field_name))
     return True
 
 

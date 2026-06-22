@@ -225,7 +225,9 @@ Merge them into one object:
   },
   "channels": {
     "websocket": {
-      "enabled": true
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
     }
   }
 }
@@ -286,13 +288,15 @@ If this is a brand-new install and you have not configured anything else yet, re
   },
   "channels": {
     "websocket": {
-      "enabled": true
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
     }
   }
 }
 ```
 
-Replace `your-api-key`, `https://api.example.com/v1`, and `model-id-from-your-provider` with values from your provider.
+Replace `your-api-key`, `https://api.example.com/v1`, `model-id-from-your-provider`, and `your-webui-password` with your own values.
 
 For copyable provider-specific examples, use [`provider-cookbook.md`](./provider-cookbook.md).
 
@@ -316,7 +320,7 @@ Start the local browser UI:
 nanobot gateway
 ```
 
-Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. If Quick Start enabled the WebSocket channel, enter the WebUI password you set in the wizard.
+Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard or the `tokenIssueSecret` value from your manual config.
 
 Send this first message in the browser:
 

@@ -983,6 +983,41 @@ class TestMainMenuUpdate:
         assert websocket["websocketRequiresToken"] is True
         assert websocket["tokenIssueSecret"] == "webui-secret"
 
+    def test_quick_start_websocket_decline_rolls_back_provider_defaults(self, monkeypatch):
+        """A failed WebSocket step should not leave saveable Quick Start defaults behind."""
+        config = Config()
+        original = config.model_dump(by_alias=True)
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
+        monkeypatch.setattr(onboard_wizard.console, "print", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "DeepSeek")
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-ds-test")
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "deepseek-v4-flash",
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "questionary",
+            SimpleNamespace(confirm=lambda *a, **kw: FakePrompt(False)),
+        )
+        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": None)
+
+        assert onboard_wizard._configure_quick_start(config) is False
+
+        assert config.model_dump(by_alias=True) == original
+        assert getattr(config.channels, "websocket", None) is None
+
     def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
         """Known providers should ask users for the model instead of fetching one."""
         config = Config()

@@ -280,7 +280,7 @@ Tell me exactly what changed and whether I need to run /restart.
 
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
-## 6. Choose Your Next Step
+## 7. Choose Your Next Step
 
 | Want to... | Go to |
 |---|---|

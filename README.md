@@ -383,7 +383,15 @@ The WebUI ships **inside the published wheel** — no extra build step. It is th
 Merge this block into your existing config:
 
 ```json
-{ "channels": { "websocket": { "enabled": true } } }
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
+    }
+  }
+}
 ```
 
 **2. Start the gateway**
