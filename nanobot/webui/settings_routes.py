@@ -18,6 +18,7 @@ from websockets.http11 import Response
 from nanobot.agent.tools.mcp import request_mcp_reload
 from nanobot.bus.queue import MessageBus
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import query_first as _query_first
 from nanobot.webui.mcp_presets_api import mcp_presets_settings_action
 from nanobot.webui.settings_api import (
     WebUISettingsError,
@@ -107,7 +108,7 @@ class WebUISettingsRouter:
         if path == "/api/settings/network-safety/update":
             return self._handle_settings_network_safety_update(request)
         if path == "/api/settings/cli-apps":
-            return self._handle_settings_cli_apps(request)
+            return await self._handle_settings_cli_apps(request)
         if path == "/api/settings/cli-apps/install":
             return await self._handle_settings_cli_apps_action(request, "install")
         if path == "/api/settings/cli-apps/update":
@@ -299,11 +300,16 @@ class WebUISettingsRouter:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
 
-    def _handle_settings_cli_apps(self, request: WsRequest) -> Response:
+    async def _handle_settings_cli_apps(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
+        installed_only = (_query_first(self._query(request), "installed_only") or "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         try:
-            payload = cli_apps_payload()
+            payload = await cli_apps_payload(installed_only=installed_only)
         except Exception:
             self.logger.exception("failed to load CLI Apps payload")
             return self._error_response(500, "failed to load CLI Apps")

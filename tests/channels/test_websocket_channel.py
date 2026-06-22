@@ -119,6 +119,42 @@ async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Re
     )
 
 
+@pytest.mark.asyncio
+async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -> None:
+    class Conn:
+        remote_address = None
+
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(raw)
+
+    channel = _ch(bus)
+    active_conn = Conn()
+    other_conn = Conn()
+    channel._attach(active_conn, "chat-a")
+    channel._attach(other_conn, "chat-b")
+    assert sorted(channel._subs) == ["chat-a", "chat-b"]
+    assert sum(len(conns) for conns in channel._subs.values()) == 2
+
+    await channel.send_session_updated("chat-a", scope="thread")
+
+    active_events = [json.loads(raw)["event"] for raw in active_conn.sent]
+    other_events = [json.loads(raw)["event"] for raw in other_conn.sent]
+
+    assert (active_events, other_events) == (
+        ["session_updated"],
+        ["session_updated"],
+    )
+    payload = json.loads(other_conn.sent[0])
+    assert payload == {
+        "event": "session_updated",
+        "chat_id": "chat-a",
+        "scope": "thread",
+    }
+
+
 async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
     """Receive until a specific websocket event appears."""
     for _ in range(10):
@@ -126,6 +162,10 @@ async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
         if payload.get("event") == event:
             return payload
     raise AssertionError(f"websocket event {event!r} was not received")
+
+
+def _sent_ws_payloads(mock_ws: AsyncMock) -> list[dict[str, Any]]:
+    return [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
 
 
 def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
@@ -1234,9 +1274,10 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         metadata={"_turn_end": True},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1"},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1253,9 +1294,10 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         metadata={"_turn_end": True, "latency_ms": 1500},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1273,9 +1315,10 @@ async def test_send_turn_end_includes_goal_state_when_present() -> None:
         metadata={"_turn_end": True, "goal_state": blob},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1724,6 +1767,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert search_providers["exa"]["credential"] == "api_key"
         assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "optional_api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"
@@ -2654,7 +2698,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     try:
         wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
-        resp = channel.gateway.http._handle_sessions_list(req)
+        resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
         wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
 
@@ -2866,3 +2910,49 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
         "legacy question",
         "legacy answer",
     ]
+
+
+def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.cron.session_turns import CRON_HISTORY_META
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    key = "websocket:c-cron"
+    session = sessions.get_or_create(key)
+    session.add_message(
+        "user",
+        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
+        **{CRON_HISTORY_META: True},
+    )
+    session.add_message("assistant", "提醒已经到期。")
+    sessions.save(session)
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "c-cron", "text": "提醒已经到期。"},
+    )
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
+    )
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["role"] for message in body["messages"]] == ["assistant"]
+    assert [message["content"] for message in body["messages"]] == ["提醒已经到期。"]

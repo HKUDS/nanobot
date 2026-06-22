@@ -1,4 +1,6 @@
 import type {
+  AutomationsPayload,
+  AutomationUpdatePayload,
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
@@ -9,6 +11,7 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
+  SessionDeleteResult,
   SessionAutomationsPayload,
   SettingsPayload,
   SettingsUpdate,
@@ -84,6 +87,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   });
   if (!Object.keys(payload).length) return undefined;
   return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
+}
+
+function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
+  return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
 }
 
 function splitKey(key: string): { channel: string; chatId: string } {
@@ -183,6 +190,52 @@ export async function fetchSessionAutomations(
   );
 }
 
+export async function fetchAutomations(
+  token: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function runAutomationAction(
+  token: string,
+  action: "enable" | "disable" | "delete" | "run",
+  id: string,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/${action}?${query}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function updateAutomation(
+  token: string,
+  id: string,
+  values: AutomationUpdatePayload,
+  base: string = "",
+): Promise<AutomationsPayload> {
+  const query = new URLSearchParams();
+  query.set("id", id);
+  return request<AutomationsPayload>(
+    `${base}/api/webui/automations/update?${query}`,
+    token,
+    {
+      headers: automationValuesHeader(values),
+    },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function fetchSkills(
   token: string,
   base: string = "",
@@ -211,13 +264,18 @@ export async function fetchSkillDetail(
 export async function deleteSession(
   token: string,
   key: string,
+  optionsOrBase?: { deleteAutomations?: boolean } | string,
   base: string = "",
-): Promise<boolean> {
-  const body = await request<{ deleted: boolean }>(
-    `${base}/api/sessions/${encodeURIComponent(key)}/delete`,
+): Promise<SessionDeleteResult> {
+  const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+  const resolvedBase = typeof optionsOrBase === "string" ? optionsOrBase : base;
+  const query = new URLSearchParams();
+  if (options?.deleteAutomations) query.set("delete_automations", "true");
+  const suffix = query.toString() ? `?${query}` : "";
+  return request<SessionDeleteResult>(
+    `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
     token,
   );
-  return body.deleted;
 }
 
 export async function fetchSettings(
@@ -282,6 +340,18 @@ export async function fetchCliApps(
 ): Promise<CliAppsPayload> {
   return request<CliAppsPayload>(
     `${base}/api/settings/cli-apps`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchInstalledCliApps(
+  token: string,
+  base: string = "",
+): Promise<CliAppsPayload> {
+  return request<CliAppsPayload>(
+    `${base}/api/settings/cli-apps?installed_only=1`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,

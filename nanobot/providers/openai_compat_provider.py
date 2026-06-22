@@ -18,12 +18,14 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from loguru import logger
+from pydantic.alias_generators import to_snake
 
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
     parse_tool_arguments,
+    resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
 from nanobot.providers.openai_responses import (
@@ -59,7 +61,14 @@ _DEFAULT_OPENROUTER_HEADERS = {
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
+    "kimi-k2.7",
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
     "k2.6-code-preview",
+})
+_KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
+    "kimi-k2.7-code",
+    "kimi-k2.7-code-highspeed",
 })
 # Thinking-capable MiMo models per Xiaomi docs (see
 # tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
@@ -91,6 +100,10 @@ _MODEL_THINKING_STYLES: dict[str, str] = {
 
 def _model_slug(model_name: str) -> str:
     return model_name.lower().rsplit("/", 1)[-1]
+
+
+def _provider_prefix_key(name: str) -> str:
+    return to_snake(name.replace("-", "_")).lower()
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
@@ -393,10 +406,20 @@ class OpenAICompatProvider(LLMProvider):
             # opening a fresh connection for each request, which is cheap on a
             # LAN. Cloud providers benefit from keepalive, so we leave the
             # default pool settings for them.
+            #
+            # Also disable proxy for local endpoints: when the host has
+            # HTTP_PROXY / HTTPS_PROXY / ALL_PROXY set, httpx would try to
+            # route local traffic through the proxy, which typically cannot
+            # reach localhost or LAN addresses.
+            _local_limits = httpx.Limits(keepalive_expiry=0)
             http_client = httpx.AsyncClient(
-                limits=httpx.Limits(keepalive_expiry=0),
+                limits=_local_limits,
                 timeout=timeout_s,
+                transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
             )
+        # else: http_client stays None → SDK creates DefaultAsyncHttpxClient
+        # which already reads proxy env vars via trust_env=True, has proper
+        # connection limits, and follows redirects.
         self._client = AsyncOpenAI(
             api_key=self._api_key_for_client,
             base_url=self._effective_base,
@@ -512,6 +535,13 @@ class OpenAICompatProvider(LLMProvider):
         pending_tool_ids: dict[str, deque[str]] = {}
         force_string_content = bool(self._spec and self._spec.name == "deepseek")
         normalize_tool_ids = self._should_normalize_tool_call_ids()
+        strip_reasoning = bool(
+            self._spec
+            and getattr(self._spec, "strip_history_reasoning_content", False)
+        )
+        if strip_reasoning:
+            for msg in sanitized:
+                msg.pop("reasoning_content", None)
 
         def map_id(value: Any) -> Any:
             if not isinstance(value, str):
@@ -592,6 +622,22 @@ class OpenAICompatProvider(LLMProvider):
     # Build kwargs
     # ------------------------------------------------------------------
 
+    def _request_model_name(self, model_name: str) -> str:
+        spec = self._spec
+        if not spec or "/" not in model_name:
+            return model_name
+        if spec.strip_model_prefix:
+            return model_name.split("/")[-1]
+
+        route_prefixes = getattr(spec, "strip_model_prefixes", ())
+        if not isinstance(route_prefixes, tuple) or not route_prefixes:
+            return model_name
+        model_prefix, routed_model = model_name.split("/", 1)
+        model_prefix_key = _provider_prefix_key(model_prefix)
+        if any(_provider_prefix_key(prefix) == model_prefix_key for prefix in route_prefixes):
+            return routed_model
+        return model_name
+
     @staticmethod
     def _supports_temperature(
         model_name: str,
@@ -625,8 +671,7 @@ class OpenAICompatProvider(LLMProvider):
             if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
                 messages, tools = self._apply_cache_control(messages, tools)
 
-        if spec and spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -666,19 +711,53 @@ class OpenAICompatProvider(LLMProvider):
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
 
-        if wire_effort and semantic_effort != "none":
+        # Magistral and other providers where reasoning is implicit reject the
+        # reasoning_effort kwarg entirely. Strip it before the remap so we don't
+        # accidentally send "none"/"high" to a model that always reasons.
+        strip_effort = False
+        if spec and getattr(spec, "implicit_reasoning_models", ()):
+            model_lower = model_name.lower()
+            strip_effort = any(
+                pat in model_lower for pat in spec.implicit_reasoning_models
+            )
+
+        # Some providers accept a constrained reasoning_effort vocabulary
+        # (Mistral: only "high"/"none"). Remap from OpenAI vocab to the
+        # provider's accepted set; an empty mapped value means "omit".
+        if (
+            not strip_effort
+            and spec
+            and getattr(spec, "reasoning_effort_remap", ())
+            and isinstance(semantic_effort, str)
+        ):
+            remap = dict(spec.reasoning_effort_remap)
+            mapped = remap.get(semantic_effort)
+            if mapped is not None:
+                wire_effort = mapped or None
+                semantic_effort = mapped or "none"
+
+        if strip_effort:
+            wire_effort = None
+        elif wire_effort and semantic_effort != "none":
             kwargs["reasoning_effort"] = wire_effort
 
         # Only send thinking controls when reasoning_effort is explicit so
         # omitting the config preserves each provider's default.
         if reasoning_effort is not None:
+            slug = _model_slug(model_name)
             thinking_enabled = semantic_effort not in ("none", "minimal")
             for thinking_style in _thinking_styles_for(spec, model_name):
+                if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
+                    continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
-            if gateway_style and _model_thinking_style(model_name):
+            if (
+                gateway_style
+                and _model_thinking_style(model_name)
+                and (thinking_enabled or slug not in _KIMI_ALWAYS_THINKING_MODELS)
+            ):
                 extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
@@ -688,7 +767,7 @@ class OpenAICompatProvider(LLMProvider):
             # user's intent via the provider-native shape, so drop the
             # redundant wire-level kwarg.  Only kimi models need this —
             # Xiaomi's API accepts both params.
-            if _model_slug(model_name) in _KIMI_THINKING_MODELS:
+            if slug in _KIMI_THINKING_MODELS:
                 kwargs.pop("reasoning_effort", None)
 
         if tools:
@@ -830,8 +909,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
-        if self._spec and self._spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         instructions, input_items = convert_messages(sanitized_messages)
 
@@ -887,6 +965,10 @@ class OpenAICompatProvider(LLMProvider):
             for item in value:
                 item_map = cls._maybe_mapping(item)
                 if item_map:
+                    # Skip Mistral-style {"type":"thinking","thinking":[...]}
+                    # blocks: their text belongs in reasoning_content.
+                    if item_map.get("type") == "thinking":
+                        continue
                     text = item_map.get("text")
                     if isinstance(text, str):
                         parts.append(text)
@@ -899,6 +981,31 @@ class OpenAICompatProvider(LLMProvider):
                     parts.append(item)
             return "".join(parts) or None
         return str(value)
+
+    @classmethod
+    def _extract_thinking_content(cls, value: Any) -> str | None:
+        """Extract reasoning text from Mistral-style thinking blocks.
+
+        Mistral returns content as a list mixing
+        ``{"type":"thinking","thinking":[{"type":"text","text":...}]}`` and
+        ``{"type":"text","text":...}``. The thinking text belongs in
+        ``reasoning_content`` so the agent can surface it as a reasoning
+        trace rather than as the assistant's reply.
+        """
+        if not isinstance(value, list):
+            return None
+        parts: list[str] = []
+        for item in value:
+            item_map = cls._maybe_mapping(item)
+            if not item_map:
+                continue
+            if item_map.get("type") != "thinking":
+                continue
+            inner = item_map.get("thinking")
+            text = cls._extract_text_content(inner)
+            if text:
+                parts.append(text)
+        return "".join(parts) or None
 
     @classmethod
     def _extract_usage(cls, response: Any) -> dict[str, int]:
@@ -987,7 +1094,11 @@ class OpenAICompatProvider(LLMProvider):
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
-                return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
+                return LLMResponse(
+                    content="Error: API returned empty choices.",
+                    finish_reason="error",
+                    error_kind="empty",
+                )
 
             choice0 = self._maybe_mapping(choices[0]) or {}
             msg0 = self._maybe_mapping(choice0.get("message")) or {}
@@ -1001,6 +1112,12 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_content = msg0.get("reasoning_content")
             if reasoning_content is None and msg0.get("reasoning"):
                 reasoning_content = self._extract_text_content(msg0.get("reasoning"))
+            # Mistral reasoning models return thinking text inside the content
+            # array; lift it into reasoning_content so the runner records it
+            # under the reasoning trace.
+            spec = getattr(self, "_spec", None)
+            if reasoning_content is None and getattr(spec, "extract_thinking_blocks", False):
+                reasoning_content = self._extract_thinking_content(msg0.get("content"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
@@ -1038,7 +1155,11 @@ class OpenAICompatProvider(LLMProvider):
             )
 
         if not response.choices:
-            return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
+            return LLMResponse(
+                content="Error: API returned empty choices.",
+                finish_reason="error",
+                error_kind="empty",
+            )
 
         choice = response.choices[0]
         msg = choice.message
@@ -1151,12 +1272,17 @@ class OpenAICompatProvider(LLMProvider):
                 if choice.get("finish_reason"):
                     finish_reason = str(choice["finish_reason"])
                 delta = cls._maybe_mapping(choice.get("delta")) or {}
-                text = cls._extract_text_content(delta.get("content"))
+                raw_delta_content = delta.get("content")
+                text = cls._extract_text_content(raw_delta_content)
                 if text:
                     content_parts.append(text)
                 text = cls._extract_text_content(delta.get("reasoning_content"))
                 if not text:
                     text = cls._extract_text_content(delta.get("reasoning"))
+                if not text:
+                    # Mistral streams thinking inside the content array as
+                    # {"type":"thinking", thinking:[{"type":"text", ...}]}.
+                    text = cls._extract_thinking_content(raw_delta_content)
                 if text:
                     reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
@@ -1173,13 +1299,20 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason = choice.finish_reason
             delta = choice.delta
             if delta and delta.content:
-                content_parts.append(delta.content)
+                text = cls._extract_text_content(delta.content)
+                if text:
+                    content_parts.append(text)
+                thinking_text = cls._extract_thinking_content(delta.content)
+                if thinking_text:
+                    reasoning_parts.append(thinking_text)
             if delta:
                 reasoning = getattr(delta, "reasoning_content", None)
                 if not reasoning:
                     reasoning = getattr(delta, "reasoning", None)
                 if reasoning:
-                    reasoning_parts.append(reasoning)
+                    text = cls._extract_text_content(reasoning)
+                    if text:
+                        reasoning_parts.append(text)
             for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
             if delta:
@@ -1353,7 +1486,7 @@ class OpenAICompatProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         await self._ensure_client()
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1432,8 +1565,13 @@ class OpenAICompatProvider(LLMProvider):
                 chunks.append(chunk)
                 if chunk.choices:
                     delta_obj = chunk.choices[0].delta
+                    raw_delta_content = getattr(delta_obj, "content", None)
                     if on_content_delta:
-                        text = getattr(delta_obj, "content", None)
+                        # Mistral streams content as a list of {"type":"thinking",
+                        # ...} + {"type":"text",...} blocks. Extract just the
+                        # text portion before invoking the callback so callers
+                        # never see non-string content.
+                        text = self._extract_text_content(raw_delta_content)
                         if text:
                             await on_content_delta(text)
                     if on_thinking_delta:
@@ -1441,6 +1579,10 @@ class OpenAICompatProvider(LLMProvider):
                             delta_obj, "reasoning", None,
                         )
                         r_text = self._extract_text_content(reasoning)
+                        if not r_text:
+                            # Mistral keeps the thinking trace inside the
+                            # content array rather than a separate field.
+                            r_text = self._extract_thinking_content(raw_delta_content)
                         if r_text:
                             await on_thinking_delta(r_text)
                     if on_tool_call_delta:
@@ -1470,7 +1612,7 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

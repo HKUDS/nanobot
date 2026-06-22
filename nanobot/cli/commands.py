@@ -5,10 +5,8 @@ import os
 import select
 import signal
 import sys
-import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +50,7 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
@@ -86,32 +85,6 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         super().store_string(_sanitize_surrogates(string))
 
-
-_WEBUI_TURN_META_KEY = "webui_turn_id"
-_WEBUI_MESSAGE_SOURCE_META_KEY = "_webui_message_source"
-_PROACTIVE_WEBUI_METADATA: ContextVar[dict[str, Any] | None] = ContextVar(
-    "proactive_webui_metadata",
-    default=None,
-)
-
-
-def _proactive_delivery_metadata(
-    channel: str,
-    metadata: dict[str, Any] | None,
-    *,
-    turn_seed: str,
-    source_label: str | None = None,
-) -> dict[str, Any]:
-    """Return channel metadata for a fresh proactive delivery turn."""
-    out = dict(metadata or {})
-    out.pop(_WEBUI_TURN_META_KEY, None)
-    if channel == "websocket":
-        out[_WEBUI_TURN_META_KEY] = f"{turn_seed}:{uuid.uuid4().hex}"
-        source: dict[str, str] = {"kind": "cron"}
-        if source_label:
-            source["label"] = source_label
-        out[_WEBUI_MESSAGE_SOURCE_META_KEY] = source
-    return out
 
 app = typer.Typer(
     name="nanobot",
@@ -742,223 +715,6 @@ def serve(
 # ============================================================================
 
 
-@app.command()
-def gateway(
-    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Start the nanobot gateway."""
-    if verbose:
-        logger.remove(_log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
-    cfg = _load_runtime_config(config, workspace)
-    _run_gateway(cfg, port=port)
-
-
-DESKTOP_BOOTSTRAP_PROVIDER = "openai_codex"
-DESKTOP_BOOTSTRAP_MODEL = "openai-codex/gpt-5.1-codex"
-
-
-def _desktop_provider_error_is_recoverable(error: ValueError) -> bool:
-    message = str(error)
-    return "No API key configured" in message or "requires api_key and api_base" in message
-
-
-def _desktop_provider_needs_bootstrap(config: Config) -> bool:
-    from nanobot.providers.factory import make_provider
-
-    try:
-        make_provider(config)
-        return False
-    except ValueError as e:
-        if not _desktop_provider_error_is_recoverable(e):
-            raise
-        return True
-
-
-def _reset_desktop_config_to_unconfigured(config: Config) -> bool:
-    defaults = config.agents.defaults
-    changed = False
-    if defaults.model_preset is not None:
-        defaults.model_preset = None
-        changed = True
-    if defaults.provider:
-        defaults.provider = ""
-        changed = True
-    if defaults.model:
-        defaults.model = ""
-        changed = True
-    return changed
-
-
-def _is_persisted_desktop_bootstrap(config: Config) -> bool:
-    defaults = config.agents.defaults
-    return (
-        defaults.model_preset is None
-        and defaults.provider == DESKTOP_BOOTSTRAP_PROVIDER
-        and defaults.model == DESKTOP_BOOTSTRAP_MODEL
-        and not config.model_presets
-    )
-
-
-def _apply_desktop_runtime_bootstrap(config: Config) -> None:
-    defaults = config.agents.defaults
-    config.agents.defaults.model_preset = None
-    defaults.provider = DESKTOP_BOOTSTRAP_PROVIDER
-    defaults.model = DESKTOP_BOOTSTRAP_MODEL
-
-
-def _load_or_create_desktop_config(config: str | None, workspace: str | None) -> Config:
-    """Load the desktop-owned config, creating it on first launch."""
-    from nanobot.config.loader import (
-        get_config_path,
-        load_config,
-        resolve_config_env_vars,
-        save_config,
-        set_config_path,
-    )
-    from nanobot.config.schema import Config as NanobotConfig
-
-    config_path = Path(config).expanduser().resolve() if config else get_config_path()
-    set_config_path(config_path)
-    changed = False
-    if config_path.exists():
-        try:
-            loaded = resolve_config_env_vars(load_config(config_path))
-        except ValueError as e:
-            console.print(f"[red]Error: {e}[/red]")
-            raise typer.Exit(1)
-    else:
-        loaded = NanobotConfig()
-        changed = True
-
-    if workspace:
-        workspace_path = Path(workspace).expanduser()
-        loaded.agents.defaults.workspace = str(workspace_path)
-        changed = True
-
-    if _is_persisted_desktop_bootstrap(loaded):
-        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
-    elif _desktop_provider_needs_bootstrap(loaded):
-        changed = _reset_desktop_config_to_unconfigured(loaded) or changed
-
-    if changed:
-        save_config(loaded, config_path)
-
-    runtime_config = loaded.model_copy(deep=True)
-    if _desktop_provider_needs_bootstrap(runtime_config):
-        _apply_desktop_runtime_bootstrap(runtime_config)
-    return runtime_config
-
-
-def _configure_desktop_gateway(
-    config: Config,
-    *,
-    webui_port: int,
-    webui_socket: str | None,
-    token_issue_secret: str,
-) -> None:
-    """Force a local WebSocket-only gateway for the desktop app process."""
-    config.gateway.host = "127.0.0.1"
-    config.gateway.port = webui_port
-    config.gateway.heartbeat.enabled = False
-
-    extras = dict(getattr(config.channels, "__pydantic_extra__", None) or {})
-    for name, section in list(extras.items()):
-        if name == "websocket":
-            continue
-        if isinstance(section, dict):
-            extras[name] = {**section, "enabled": False}
-        else:
-            with suppress(Exception):
-                setattr(section, "enabled", False)
-            extras[name] = section
-
-    websocket_cfg = extras.get("websocket")
-    if not isinstance(websocket_cfg, dict):
-        websocket_cfg = {}
-    websocket_cfg.update(
-        {
-            "enabled": True,
-            "host": "127.0.0.1",
-            "port": webui_port,
-            "unix_socket_path": webui_socket or "",
-            "path": "/",
-            "token_issue_secret": token_issue_secret,
-            "websocket_requires_token": True,
-            "allow_from": ["*"],
-            "streaming": True,
-        }
-    )
-    extras["websocket"] = websocket_cfg
-    config.channels.__pydantic_extra__ = extras
-
-
-@app.command("desktop-gateway", hidden=True)
-def desktop_gateway(
-    webui_port: int = typer.Option(0, "--webui-port", min=0, max=65535),
-    webui_socket: str | None = typer.Option(None, "--webui-socket", help="Unix socket path for desktop IPC"),
-    token_issue_secret: str = typer.Option(..., "--token-issue-secret"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Desktop workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Desktop config file"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-):
-    """Start the private local gateway used by nanobot Desktop."""
-    if not token_issue_secret.strip():
-        console.print("[red]Error: --token-issue-secret is required[/red]")
-        raise typer.Exit(1)
-    if webui_port <= 0 and not (webui_socket or "").strip():
-        console.print("[red]Error: --webui-port or --webui-socket is required[/red]")
-        raise typer.Exit(1)
-    if verbose:
-        logger.remove(_log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
-    cfg = _load_or_create_desktop_config(config, workspace)
-    _configure_desktop_gateway(
-        cfg,
-        webui_port=webui_port,
-        webui_socket=webui_socket,
-        token_issue_secret=token_issue_secret,
-    )
-    _run_gateway(
-        cfg,
-        port=webui_port,
-        webui_static_dist=False,
-        webui_runtime_surface="native",
-        webui_runtime_capabilities={
-            "can_restart_engine": True,
-            "can_pick_folder": True,
-            "can_open_logs": True,
-            "can_export_diagnostics": True,
-        },
-        health_server_enabled=False,
-    )
-
-
 def _run_gateway(
     config: Config,
     *,
@@ -970,12 +726,13 @@ def _run_gateway(
     health_server_enabled: bool = True,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.tools.cron import CronTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.cron.service import CronService
+    from nanobot.cron.bound_runner import run_bound_cron_job
+    from nanobot.cron.service import CronJobSkippedError, CronService
+    from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.providers.image_generation import image_gen_provider_configs
@@ -1024,14 +781,14 @@ def _run_gateway(
         schedule_background=lambda coro: agent._schedule_background(coro),
     ).subscribe(runtime_events)
 
-    from nanobot.agent.loop import UNIFIED_SESSION_KEY
     from nanobot.bus.events import OutboundMessage
+    from nanobot.session.keys import session_key_for_channel
 
     def _channel_session_key(channel: str, chat_id: str) -> str:
-        return (
-            UNIFIED_SESSION_KEY
-            if config.agents.defaults.unified_session
-            else f"{channel}:{chat_id}"
+        return session_key_for_channel(
+            channel,
+            chat_id,
+            unified_session=config.agents.defaults.unified_session,
         )
 
     async def _deliver_to_channel(
@@ -1040,9 +797,6 @@ def _run_gateway(
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
         record = record or bool(metadata.pop("_record_channel_delivery", False))
-        proactive_webui_metadata = _PROACTIVE_WEBUI_METADATA.get()
-        if record and msg.channel == "websocket" and proactive_webui_metadata:
-            metadata = {**metadata, **proactive_webui_metadata}
         if metadata != (msg.metadata or {}):
             msg = OutboundMessage(
                 channel=msg.channel,
@@ -1194,73 +948,17 @@ def _run_gateway(
                 logger.info("Heartbeat: silenced by post-run evaluation")
             return response
 
-        reminder_note = (
-            "The scheduled time has arrived. Deliver this reminder to the user now, "
-            "as a brief and natural message in their language. Speak directly to them — "
-            "do not narrate progress, summarize, include user IDs, or add status reports "
-            "like 'Done' or 'Reminded'.\n\n"
-            f"Reminder: {job.payload.message}"
+        if is_bound_cron_job(job):
+            return await run_bound_cron_job(job, agent=agent, cron=cron)
+
+        reason = "unbound agent cron job must be recreated from a chat session"
+        logger.warning(
+            "Cron: skipped unbound agent job '{}' ({}): {}",
+            job.name,
+            job.id,
+            reason,
         )
-
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-
-        message_record_token = None
-        if isinstance(message_tool, MessageTool):
-            message_record_token = message_tool.set_record_channel_delivery(True)
-
-        proactive_webui_metadata = _proactive_delivery_metadata(
-            "websocket",
-            None,
-            turn_seed=f"cron:{job.id}",
-            source_label=job.name,
-        )
-        proactive_token = _PROACTIVE_WEBUI_METADATA.set(proactive_webui_metadata)
-
-        try:
-            resp = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-                on_progress=_silent,
-            )
-        finally:
-            _PROACTIVE_WEBUI_METADATA.reset(proactive_token)
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-            if isinstance(message_tool, MessageTool) and message_record_token is not None:
-                message_tool.reset_record_channel_delivery(message_record_token)
-
-        response = resp.content if resp else ""
-
-        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, reminder_note, agent.provider, agent.model,
-            )
-            if should_notify:
-                proactive_metadata = _proactive_delivery_metadata(
-                    job.payload.channel or "cli",
-                    job.payload.channel_meta,
-                    turn_seed=f"cron:{job.id}",
-                    source_label=job.name,
-                )
-                await _deliver_to_channel(
-                    OutboundMessage(
-                        channel=job.payload.channel or "cli",
-                        chat_id=job.payload.to,
-                        content=response,
-                        metadata=proactive_metadata,
-                    ),
-                    record=True,
-                    session_key=job.payload.session_key,
-                )
-        return response
+        raise CronJobSkippedError(reason)
 
     cron.on_job = on_cron_job
 
@@ -1279,6 +977,7 @@ def _run_gateway(
         session_manager=session_manager,
         cron_service=cron,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
@@ -1439,6 +1138,17 @@ def _run_gateway(
     asyncio.run(run())
 
 
+app.add_typer(
+    create_gateway_app(
+        console=console,
+        log_handler_id=_log_handler_id,
+        load_runtime_config=_load_runtime_config,
+        run_gateway=_run_gateway,
+    ),
+    name="gateway",
+)
+
+
 # ============================================================================
 # Agent Commands
 # ============================================================================
@@ -1558,7 +1268,8 @@ def agent(
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
         _model, _preset_tag = _model_display(config)
-        console.print(f"{__logo__} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        _icon = config.agents.defaults.bot_icon or __logo__
+        console.print(f"{_icon} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)

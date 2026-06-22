@@ -124,6 +124,7 @@ class SubagentManager:
         return ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
+            file=self.tools_config.file,
             restrict_to_workspace=self.restrict_to_workspace,
         )
 

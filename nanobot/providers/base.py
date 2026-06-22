@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -14,7 +15,33 @@ from typing import Any
 import json_repair
 from loguru import logger
 
-from nanobot.utils.helpers import image_placeholder_text
+STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
+DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
+MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
+
+
+def resolve_stream_idle_timeout_s(
+    *,
+    env_value: str | None = None,
+    default: float = DEFAULT_STREAM_IDLE_TIMEOUT_S,
+    maximum: float = MAX_STREAM_IDLE_TIMEOUT_S,
+) -> float:
+    """Return a safe streaming idle timeout from env/config text."""
+    raw = os.environ.get(STREAM_IDLE_TIMEOUT_ENV) if env_value is None else env_value
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid {}={!r}; using {}", STREAM_IDLE_TIMEOUT_ENV, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive {}={!r}; using {}", STREAM_IDLE_TIMEOUT_ENV, raw, default)
+        return default
+    if value > maximum:
+        logger.warning("Clamping {}={!r} to {}", STREAM_IDLE_TIMEOUT_ENV, raw, maximum)
+        return maximum
+    return value
 
 
 @dataclass
@@ -535,8 +562,10 @@ class LLMProvider(ABC):
                 new_content = []
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
                         new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
@@ -560,8 +589,10 @@ class LLMProvider(ABC):
             if isinstance(content, list):
                 for i, b in enumerate(content):
                     if isinstance(b, dict) and b.get("type") == "image_url":
-                        path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        placeholder = (
+                            "[Image not delivered to model — "
+                            "do not describe or reference it]"
+                        )
                         content[i] = {"type": "text", "text": placeholder}
                         found = True
         return found

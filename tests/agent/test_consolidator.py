@@ -48,6 +48,19 @@ def consolidator(store, mock_provider):
     )
 
 
+def _tool_round(call_id: str) -> list[dict]:
+    return [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": call_id, "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
+    ]
+
+
 class TestConsolidatorSummarize:
     async def test_summarize_appends_to_history(self, consolidator, mock_provider, store):
         """Consolidator should call LLM to summarize, then append to HISTORY.md."""
@@ -219,21 +232,17 @@ class TestConsolidatorTokenBudget:
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
 
-    async def test_replay_window_overflow_matches_history_tool_boundary(
+    async def test_replay_window_overflow_extends_to_long_recent_user_turn(
         self,
         consolidator,
     ):
-        """Archive the exact prefix hidden by get_history's legal-start trimming."""
+        """Replay-window consolidation must not cut into the latest user turn."""
         session = Session(key="test:replay-tool-boundary")
-        session.add_message("user", "run the tool")
-        session.add_message(
-            "assistant",
-            "",
-            tool_calls=[
-                {"id": "call-1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
-            ],
-        )
-        session.add_message("tool", "tool result", tool_call_id="call-1", name="x")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "record this")
+        for i in range(4):
+            session.messages.extend(_tool_round(f"call-{i}"))
         session.add_message("assistant", "final answer")
 
         consolidator.sessions._session_cache[session.key] = session
@@ -242,13 +251,49 @@ class TestConsolidatorTokenBudget:
 
         await consolidator.maybe_consolidate_by_tokens(
             session,
-            replay_max_messages=2,
+            replay_max_messages=4,
         )
 
         archived_chunk = consolidator.archive.await_args.args[0]
-        assert [m["role"] for m in archived_chunk] == ["user", "assistant", "tool"]
-        assert session.last_consolidated == 3
-        assert session.get_history(max_messages=2) == [{"role": "assistant", "content": "final answer"}]
+        assert [m["content"] for m in archived_chunk] == ["old", "old answer"]
+        assert session.last_consolidated == 2
+
+        history = session.get_history(max_messages=4, extend_to_user=True)
+        assert len(history) > 4
+        assert history[0]["content"] == "record this"
+        assert history[-1]["content"] == "final answer"
+
+    async def test_replay_window_overflow_uses_newer_user_inside_window(
+        self,
+        consolidator,
+    ):
+        """Do not extend to an older long turn when the hard window has a newer user."""
+        session = Session(key="test:replay-newer-user")
+        session.add_message("user", "old")
+        session.add_message("assistant", "old answer")
+        session.add_message("user", "long older turn")
+        for i in range(8):
+            session.messages.extend(_tool_round(f"older-{i}"))
+        session.add_message("assistant", "older final")
+        session.add_message("user", "new question")
+        session.add_message("assistant", "new answer")
+
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="older turn summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=6,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[2]["content"] == "long older turn"
+        assert archived_chunk[-1]["content"] == "older final"
+        assert session.last_consolidated == len(session.messages) - 2
+
+        history = session.get_history(max_messages=6, extend_to_user=True)
+        assert [m["content"] for m in history] == ["new question", "new answer"]
 
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
@@ -402,6 +447,56 @@ class TestCompactIdleSession:
         assert "last_active" in meta
 
     @pytest.mark.asyncio
+    async def test_summarizes_retained_suffix_not_just_dropped_prefix(
+        self, real_consolidator, mock_provider
+    ):
+        """idleCompact must summarize over the full unconsolidated tail, including
+        the recent suffix it retains. Otherwise a late user correction / final
+        result that lands in the kept suffix is excluded from the persisted
+        summary, leaving a stale wrong conclusion in history. Regression for #4264."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:correction")
+        for i in range(18):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        # Final correction exchange lands inside the retained max_suffix window.
+        session.add_message("user", "no, that's wrong, use approach B")
+        session.add_message("assistant", "CORRECTED_FINAL_RESULT_alpha")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session("cli:correction", max_suffix=8)
+
+        summarized = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "CORRECTED_FINAL_RESULT_alpha" in summarized
+
+    @pytest.mark.asyncio
+    async def test_raw_dumps_only_dropped_messages_on_llm_failure(
+        self, real_consolidator, mock_provider, store
+    ):
+        """Summarizing over the full tail must not widen what gets raw-dumped on
+        LLM failure: the breadcrumb should contain only the removed prefix, not
+        the retained suffix that stays live in the session. Regression for #4264."""
+        mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:rawdrop")
+        for i in range(18):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        session.add_message("user", "final user follow-up")
+        session.add_message("assistant", "RETAINED_SUFFIX_marker")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session("cli:rawdrop", max_suffix=8)
+
+        raw = "\n".join(e["content"] for e in store.read_unprocessed_history(since_cursor=0))
+        assert "[RAW]" in raw
+        assert "user msg 0" in raw  # removed prefix is the breadcrumb
+        assert "RETAINED_SUFFIX_marker" not in raw  # retained suffix not dumped
+
+    @pytest.mark.asyncio
     async def test_idle_compact_writes_session_key_to_history(
         self,
         real_consolidator,
@@ -511,8 +606,8 @@ class TestCompactIdleSession:
         real_consolidator,
         mock_provider,
     ):
-        """Assistant-only tails retain a non-contiguous slice, so archive the
-        actual dropped messages rather than a computed prefix."""
+        """Assistant-only tails extend back to the latest user turn, so archive
+        the actual dropped messages rather than a computed prefix."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -535,13 +630,21 @@ class TestCompactIdleSession:
             "assistant-02",
             "assistant-03",
             "assistant-04",
+            "assistant-05",
+            "assistant-06",
+            "assistant-07",
+            "assistant-08",
+            "assistant-09",
         ]
 
+        # #4264: idle compaction now summarizes the full unconsolidated tail, so
+        # the dropped head (user-00) and retained suffix (user-14 through
+        # assistant-09) are all summarized.
         archived_call = mock_provider.chat_with_retry.call_args
         user_content = archived_call.kwargs["messages"][1]["content"]
-        assert "user-14" not in user_content
-        assert "assistant-00" not in user_content
+        assert "user-00" in user_content
         assert "assistant-09" in user_content
+        assert "user-14" in user_content
 
     @pytest.mark.asyncio
     async def test_acquires_consolidation_lock(self, real_consolidator, mock_provider):
@@ -767,4 +870,4 @@ class TestArchiveTruncation:
         enc = tiktoken.get_encoding("cl100k_base")
         sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
         token_count = len(enc.encode(sent_content))
-        assert token_count <= 9_900 + 10  # small margin for truncation suffix
+        assert token_count <= 9_900

@@ -25,7 +25,7 @@ Match the recipe to the credential or endpoint you already have:
 
 ## How to Use a Recipe
 
-1. Install nanobot and run `nanobot onboard` or `nanobot onboard --wizard` once so `~/.nanobot/config.json` exists.
+1. Install nanobot and run `nanobot onboard` once so `~/.nanobot/config.json` exists. Use `nanobot onboard --wizard` if you prefer prompts over hand-editing JSON.
 2. Put secrets in environment variables when possible.
 3. Merge the recipe snippet into `~/.nanobot/config.json`.
 4. Run `nanobot status`.
@@ -168,6 +168,36 @@ ANTHROPIC_API_KEY="sk-ant-..." nanobot agent -m "Hello!"
 
 If you copied a model name such as `anthropic/claude-sonnet-4.5`, that is a gateway-style model path and belongs under `provider: "openrouter"`, not `provider: "anthropic"`.
 
+If you use an Anthropic-compatible proxy, keep the preset provider as `anthropic` and set `providers.anthropic.apiBase`:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "apiBase": "https://anthropic-proxy.example.com"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "label": "Anthropic proxy",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "maxTokens": 4096,
+      "contextWindowTokens": 200000,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Do not configure Anthropic-compatible endpoints as arbitrary custom provider names; named custom providers use the OpenAI-compatible request format.
+
 ## Recipe: Custom OpenAI-Compatible Provider
 
 This recipe applies to an OpenAI-compatible service that is not a named nanobot provider.
@@ -206,6 +236,47 @@ nanobot agent -m "Hello!"
 ```
 
 `apiBase` is the HTTP base URL, not the model name. Include the version path when the service expects it, such as `/v1`. If the service requires a non-empty key but does not validate it, use a placeholder such as `"apiKey": "EMPTY"`.
+
+For multiple custom endpoints, do not overload the single `custom` block. Name each endpoint under `providers` and reference that same name from the preset:
+
+```json
+{
+  "providers": {
+    "workProxy": {
+      "apiKey": "${WORK_PROXY_API_KEY}",
+      "apiBase": "https://proxy.example.com/v1"
+    },
+    "lab-local": {
+      "apiBase": "http://127.0.0.1:8000/v1"
+    }
+  },
+  "modelPresets": {
+    "work": {
+      "label": "Work proxy",
+      "provider": "workProxy",
+      "model": "gpt-4o-mini",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    },
+    "lab": {
+      "label": "Lab local",
+      "provider": "lab-local",
+      "model": "served-model-name",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "work"
+    }
+  }
+}
+```
+
+These custom names behave like direct OpenAI-compatible providers: `apiBase` is required, `apiKey` is optional when the endpoint allows anonymous or placeholder credentials, and `apiType` should be left unset. They do not support Anthropic-compatible endpoints; use the `anthropic` provider with `apiBase` for that case.
 
 ## Recipe: Ollama Local Model
 

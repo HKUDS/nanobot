@@ -292,6 +292,30 @@ async def test_voice_message_transcription_uses_media_path():
 
 
 @pytest.mark.asyncio
+async def test_forwarded_voice_message_preserves_metadata_after_transcription():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._handle_message = AsyncMock()
+    ch.transcribe_audio = AsyncMock(return_value="Forwarded audio text")
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "v-forwarded",
+            "sender": "12345@s.whatsapp.net",
+            "pn": "",
+            "content": "[Voice Message]",
+            "timestamp": 1,
+            "media": ["/tmp/voice.ogg"],
+            "isForwarded": True,
+        })
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"] == "Forwarded audio text"
+    assert kwargs["metadata"]["is_forwarded"] is True
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_voice_message_does_not_transcribe() -> None:
     ch = WhatsAppChannel({"enabled": True, "allowFrom": ["allowed"]}, MagicMock())
     ch._handle_message = AsyncMock()
@@ -425,3 +449,59 @@ async def test_start_sends_auth_message_with_generated_token(monkeypatch, tmp_pa
     assert sent_messages == [
         json.dumps({"type": "auth", "token": token_path.read_text(encoding="utf-8")})
     ]
+
+
+# ---------------------------------------------------------------------------
+# LID -> phone mapping seeding (startup): static config + bridge reverse files.
+# ---------------------------------------------------------------------------
+
+
+def test_lid_mappings_from_config():
+    ch = WhatsAppChannel(
+        {"enabled": True, "lidMappings": {"123456789012345": "15551234567"}},
+        MagicMock(),
+    )
+    assert ch._lid_to_phone["123456789012345"] == "15551234567"
+
+
+def test_lid_mappings_from_bridge_reverse_files(tmp_path, monkeypatch):
+    auth_dir = tmp_path / "whatsapp-auth"
+    auth_dir.mkdir()
+    (auth_dir / "lid-mapping-999888777666555_reverse.json").write_text(
+        json.dumps("15559998888"), encoding="utf-8"
+    )
+    # malformed / empty files must be ignored, not crash startup
+    (auth_dir / "lid-mapping-broken_reverse.json").write_text("{not json", encoding="utf-8")
+    (auth_dir / "lid-mapping-empty_reverse.json").write_text(json.dumps(""), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_runtime_subdir", lambda name: auth_dir
+    )
+
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    assert ch._lid_to_phone == {"999888777666555": "15559998888"}
+
+
+def test_lid_mappings_config_takes_precedence_over_files(tmp_path, monkeypatch):
+    auth_dir = tmp_path / "whatsapp-auth"
+    auth_dir.mkdir()
+    (auth_dir / "lid-mapping-555_reverse.json").write_text(
+        json.dumps("from-file"), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_runtime_subdir", lambda name: auth_dir
+    )
+
+    ch = WhatsAppChannel(
+        {"enabled": True, "lidMappings": {"555": "from-config"}}, MagicMock()
+    )
+    assert ch._lid_to_phone["555"] == "from-config"
+
+
+def test_lid_mappings_empty_when_no_auth_dir(tmp_path, monkeypatch):
+    missing = tmp_path / "does-not-exist"
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_runtime_subdir", lambda name: missing
+    )
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    assert ch._lid_to_phone == {}

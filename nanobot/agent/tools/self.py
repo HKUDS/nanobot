@@ -10,7 +10,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.runtime_state import RuntimeState
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentStatus
@@ -148,6 +148,7 @@ class MyTool(Tool, ContextAware):
             "\n"
             "When to use:\n"
             "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
             "- About to start a large task → check context_window_tokens and max_iterations first."
@@ -175,9 +176,9 @@ class MyTool(Tool, ContextAware):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "For check without key, shows all config values.",
+                    "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
-                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model)."},
+                "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
             },
             "required": ["action"],
         }
@@ -399,9 +400,23 @@ class MyTool(Tool, ContextAware):
                 setattr(parent, leaf, value)
             self._audit("modify", f"{key} = {value!r}")
             return f"Set {key} = {value!r}"
+        if key == "model_preset":
+            return self._modify_model_preset(value)
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_model_preset(self, value: Any) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return "Error: 'model_preset' must be a non-empty string"
+        name = value.strip()
+        result = self._modify_free("model_preset", name)
+        if result.startswith("Error:"):
+            return result if result.endswith((".", "!", "?")) else f"{result}."
+        return (
+            f"{result}; model is now {self._runtime_state.model!r}; "
+            f"context_window_tokens is now {self._runtime_state.context_window_tokens!r}"
+        )
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]
@@ -444,8 +459,9 @@ class MyTool(Tool, ContextAware):
             try:
                 setattr(self._runtime_state, key, value)
             except (ValueError, KeyError) as e:
-                self._audit("modify", f"REJECTED {key}: {e}")
-                return f"Error: {e}"
+                message = str(e.args[0] if isinstance(e, KeyError) and e.args else e).strip('"')
+                self._audit("modify", f"REJECTED {key}: {message}")
+                return f"Error: {message}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):

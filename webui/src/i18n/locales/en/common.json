@@ -55,6 +55,7 @@
       "ariaLabel": "Change language"
     },
     "apps": "Apps",
+    "automations": "Automations",
     "skills": {
       "title": "Skills"
     }
@@ -80,12 +81,14 @@
       "runtime": "System",
       "advanced": "Security",
       "apps": "Apps",
+      "automations": "Automations",
       "skills": "Skills"
     },
     "sections": {
       "interface": "Interface",
       "ai": "AI",
       "system": "System",
+      "about": "About",
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
@@ -250,6 +253,13 @@
       "unsupported": "Unsupported",
       "unavailable": "Unavailable",
       "noDescription": "No description available."
+    },
+    "about": {
+      "version": "Version",
+      "checking": "Checking...",
+      "checkForUpdates": "Check for updates",
+      "upToDate": "You're up to date",
+      "updateAvailable": "Update available v{{version}}"
     },
     "mcp": {
       "allCategories": "All categories",
@@ -461,6 +471,127 @@
       "loading": "Loading Apps...",
       "empty": "No apps match this filter."
     },
+    "automations": {
+      "filters": {
+        "all": "All",
+        "active": "Active",
+        "paused": "Paused",
+        "failed": "Needs attention",
+        "system": "System"
+      },
+      "sort": {
+        "next": "Next run",
+        "last": "Last run",
+        "updated": "Updated",
+        "name": "Name"
+      },
+      "search": "Search task, message, linked chat, or schedule",
+      "queue": "Queue",
+      "loading": "Loading automations...",
+      "noMatches": "No automations match this view.",
+      "empty": "No automations yet.",
+      "emptyHint": "Create one from where it should run so nanobot keeps the right context.",
+      "oneShot": "One-time",
+      "systemTask": "System-managed automation",
+      "labels": {
+        "schedule": "Schedule",
+        "next": "Next",
+        "origin": "Linked chat",
+        "created": "Created",
+        "updated": "Updated"
+      },
+      "runNow": "Run now",
+      "pause": "Pause",
+      "resume": "Resume",
+      "edit": "Edit",
+      "delete": "Delete",
+      "protected": "Protected",
+      "editTitle": "Edit automation",
+      "save": "Save",
+      "deleteTitle": "Delete automation",
+      "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+      "cancel": "Cancel",
+      "status": {
+        "system": "System",
+        "running": "Running now",
+        "paused": "Paused",
+        "failed": "Failed",
+        "completed": "Completed",
+        "noSchedule": "No schedule",
+        "active": "Active"
+      },
+      "origin": {
+        "system": "System",
+        "unknown": "No linked chat"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "At {{time}}",
+        "every": "Every {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Daily at {{time}}",
+        "weekdaysAt": "Weekdays at {{time}}",
+        "hourlyAt": "Hourly at :{{minute}}",
+        "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
+        "custom": "Custom schedule"
+      },
+      "next": {
+        "paused": "Paused",
+        "pending": "Running now",
+        "none": "No next run"
+      },
+      "message": {
+        "showMore": "Show full message",
+        "showLess": "Show less"
+      },
+      "fields": {
+        "name": "Name",
+        "message": "Message",
+        "scheduleType": "Schedule type",
+        "every": "Every",
+        "unit": "Unit",
+        "cronExpression": "Cron expression",
+        "timezone": "Timezone",
+        "runAt": "Run at"
+      },
+      "scheduleTypes": {
+        "every": "Interval",
+        "cron": "Cron",
+        "at": "Once"
+      },
+      "everyUnits": {
+        "second": "Seconds",
+        "minute": "Minutes",
+        "hour": "Hours",
+        "day": "Days"
+      },
+      "validation": {
+        "nameRequired": "Name is required.",
+        "messageRequired": "Message is required.",
+        "intervalRequired": "Interval must be a positive number.",
+        "cronRequired": "Cron expression is required.",
+        "timeRequired": "Run time is required.",
+        "futureRequired": "Run time must be in the future."
+      }
+    },
     "oauth": {
       "authentication": "OAuth authentication",
       "signIn": "Sign in",
@@ -519,7 +650,8 @@
     "newInProject": "Start a new chat in {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -551,7 +683,22 @@
     "title": "Delete this chat?",
     "description": "This action cannot be undone.",
     "cancel": "Cancel",
-    "confirm": "Delete"
+    "confirm": "Delete",
+    "automationsDescription": "This chat has scheduled automations. Deleting it will also delete them.",
+    "moreAutomations": "+ {{count}} more",
+    "confirmWithAutomations": "Delete",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Every {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Custom schedule"
+    },
+    "next": {
+      "label": "Next: {{time}}",
+      "disabled": "Paused",
+      "none": "No next run"
+    }
   },
   "connection": {
     "idle": "Idle",
@@ -648,6 +795,7 @@
       },
       "next": {
         "label": "{{time}}",
+        "pending": "Runs shortly",
         "disabled": "Paused",
         "none": "No next run"
       }
@@ -839,6 +987,9 @@
     "activityThinkingFor": "Thinking for {{duration}}",
     "activityThought": "Thought",
     "activityThoughtFor": "Thought for {{duration}}",
+    "activityWorkingFor": "Working for {{duration}}",
+    "activityWorked": "Worked",
+    "activityWorkedFor": "Worked for {{duration}}",
     "cliActivityRunningOne": "Using @{{name}}",
     "cliActivityRanOne": "Used @{{name}}",
     "cliActivityFailedOne": "Failed @{{name}}",

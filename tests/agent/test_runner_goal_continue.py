@@ -210,3 +210,37 @@ async def test_runner_uses_custom_goal_continue_message():
 
     user_msgs = [m for m in result.messages if m.get("role") == "user"]
     assert any(custom_msg in str(m.get("content", "")) for m in user_msgs)
+
+
+@pytest.mark.asyncio
+async def test_runner_resolves_goal_continue_message_lazily():
+    """The continuation text can depend on goal metadata created during the run."""
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage={},
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    calls = {"n": 0}
+
+    def dynamic_msg() -> str:
+        calls["n"] += 1
+        return "Goal (active):\nWrite the article draft."
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        goal_active_predicate=lambda: True,
+        goal_continue_message=dynamic_msg,
+        finalize_on_max_iterations=False,
+    ))
+
+    user_msgs = [m for m in result.messages if m.get("role") == "user"]
+    assert calls["n"] == 1
+    assert any("Write the article draft." in str(m.get("content", "")) for m in user_msgs)

@@ -54,7 +54,7 @@ Restart the deployed process after editing `config.json`. Long-running processes
 > }
 > ```
 >
-> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured — see [`webui/README.md`](../webui/README.md) for details.
+> When the WebSocket `host` is `0.0.0.0`, the channel refuses to start unless `token` or `tokenIssueSecret` is also configured. See [`webui.md#lan-access`](./webui.md#lan-access) for details.
 
 ### Docker Compose
 
@@ -106,48 +106,41 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 
 Run the gateway as a systemd user service so it starts automatically and restarts on failure.
 
-**1. Find the nanobot binary path:**
+Preview the generated unit first:
 
 ```bash
-which nanobot   # e.g. /home/user/.local/bin/nanobot
+nanobot gateway install-service --manager systemd --dry-run
 ```
 
-**2. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service` (replace `ExecStart` path if needed):
-
-```ini
-[Unit]
-Description=Nanobot Gateway
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/nanobot gateway
-Restart=always
-RestartSec=10
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=%h
-
-[Install]
-WantedBy=default.target
-```
-
-**3. Enable and start:**
+Install, enable, and start it:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now nanobot-gateway
+nanobot gateway install-service --manager systemd
 ```
 
-**Common operations:**
+For a custom instance, pass the same config/workspace selector you use to run the gateway:
+
+```bash
+nanobot gateway install-service \
+  --manager systemd \
+  --name nanobot-telegram \
+  --config ~/.nanobot-telegram/config.json \
+  --workspace ~/.nanobot-telegram/workspace
+```
+
+Common operations:
 
 ```bash
 systemctl --user status nanobot-gateway        # check status
 systemctl --user restart nanobot-gateway       # restart after config changes
 journalctl --user -u nanobot-gateway -f        # follow logs
+nanobot gateway uninstall-service --manager systemd
 ```
 
-If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.
+The installer writes `~/.config/systemd/user/nanobot-gateway.service`, runs
+`systemctl --user daemon-reload`, enables the unit, and restarts it. It uses the
+current Python executable with `python -m nanobot gateway --foreground`, so the
+service runs in the same environment you used to install nanobot.
 
 > **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
 >
@@ -159,70 +152,38 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 
 Use a LaunchAgent when you want `nanobot gateway` to stay online after you log in, without keeping a terminal open.
 
-**1. Get the absolute `nanobot` path:**
+Preview the generated plist first:
 
 ```bash
-which nanobot   # e.g. /Users/youruser/.local/bin/nanobot
+nanobot gateway install-service --manager launchd --dry-run
 ```
 
-Use that exact path in the plist. It keeps the Python environment from your install method.
-
-**2. Create `~/Library/LaunchAgents/ai.nanobot.gateway.plist`:**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>ai.nanobot.gateway</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/youruser/.local/bin/nanobot</string>
-    <string>gateway</string>
-    <string>--workspace</string>
-    <string>/Users/youruser/.nanobot/workspace</string>
-  </array>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/youruser/.nanobot/workspace</string>
-
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-
-  <key>StandardOutPath</key>
-  <string>/Users/youruser/.nanobot/logs/gateway.log</string>
-
-  <key>StandardErrorPath</key>
-  <string>/Users/youruser/.nanobot/logs/gateway.error.log</string>
-</dict>
-</plist>
-```
-
-**3. Load and start it:**
+Install, load, enable, and start it:
 
 ```bash
-mkdir -p ~/Library/LaunchAgents ~/.nanobot/logs
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
-launchctl enable gui/$(id -u)/ai.nanobot.gateway
-launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
+nanobot gateway install-service --manager launchd
 ```
 
-**Common operations:**
+For a custom instance:
+
+```bash
+nanobot gateway install-service \
+  --manager launchd \
+  --name nanobot-telegram \
+  --config ~/.nanobot-telegram/config.json \
+  --workspace ~/.nanobot-telegram/workspace
+```
+
+Common operations:
 
 ```bash
 launchctl list | grep ai.nanobot.gateway
-launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway   # restart
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
+launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
+nanobot gateway uninstall-service --manager launchd
 ```
 
-After editing the plist, run `launchctl bootout ...` and `launchctl bootstrap ...` again.
+The installer writes `~/Library/LaunchAgents/ai.nanobot.gateway.plist`, uses the
+current Python executable with `python -m nanobot gateway --foreground`, and
+writes LaunchAgent logs under `~/.nanobot/logs/`.
 
 > **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.

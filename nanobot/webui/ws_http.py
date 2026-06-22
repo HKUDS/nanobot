@@ -9,18 +9,23 @@ Also houses shared HTTP utility functions used by both this module and
 
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 import re
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 
 from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.command.builtin import builtin_command_palette
+from nanobot.cron.session_turns import is_bound_cron_job
+from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
@@ -61,7 +66,12 @@ from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
 from nanobot.webui.media_gateway import WebUIMediaGateway
-from nanobot.webui.session_automations import session_automations_payload
+from nanobot.webui.session_automations import (
+    all_automations_payload,
+    serialize_automation_jobs,
+    session_automation_jobs,
+    session_automations_payload,
+)
 from nanobot.webui.session_list_index import list_webui_sessions
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
@@ -72,6 +82,9 @@ from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
+_SLOW_WEBUI_HTTP_LOG_MS = 1_000
+_AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
@@ -79,8 +92,6 @@ if TYPE_CHECKING:
 
 
 def _decode_api_key(raw_key: str) -> str | None:
-    from urllib.parse import unquote
-
     key = unquote(raw_key)
     _api_key_re = re.compile(r"^[A-Za-z0-9_:.-]{1,128}$")
     if _api_key_re.match(key) is None:
@@ -142,6 +153,7 @@ class GatewayHTTPHandler:
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
+        cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -155,6 +167,7 @@ class GatewayHTTPHandler:
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
         self.cron_service = cron_service
+        self.cron_pending_job_ids = cron_pending_job_ids
         self._log = log
         self._runtime_surface = runtime_surface
 
@@ -186,7 +199,21 @@ class GatewayHTTPHandler:
     async def dispatch(self, connection: Any, request: WsRequest) -> Any | None:
         """Route an HTTP request. Returns Response or None."""
         got, _ = _parse_request_path(request.path)
+        started = time.perf_counter()
+        response: Any | None = None
 
+        try:
+            response = await self._dispatch_resolved(connection, request, got)
+            return response
+        finally:
+            self._log_slow_http(got, response, started)
+
+    async def _dispatch_resolved(
+        self,
+        connection: Any,
+        request: WsRequest,
+        got: str,
+    ) -> Any | None:
         # Token issue endpoint
         if self.config.token_issue_path:
             issue_expected = _normalize_config_path(self.config.token_issue_path)
@@ -203,7 +230,7 @@ class GatewayHTTPHandler:
             return response
 
         # Session routes
-        response = self._dispatch_session_routes(request, got)
+        response = await self._dispatch_session_routes(request, got)
         if response is not None:
             return response
 
@@ -212,8 +239,13 @@ class GatewayHTTPHandler:
         if response is not None:
             return response
 
+        # Automation routes
+        response = await self._dispatch_automation_routes(request, got)
+        if response is not None:
+            return response
+
         # Misc routes
-        response = self._dispatch_misc_routes(connection, request, got)
+        response = await self._dispatch_misc_routes(connection, request, got)
         if response is not None:
             return response
 
@@ -228,6 +260,20 @@ class GatewayHTTPHandler:
                 return response
 
         return connection.respond(404, "Not Found")
+
+    def _log_slow_http(self, path: str, response: Any | None, started: float) -> None:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        if elapsed_ms < _SLOW_WEBUI_HTTP_LOG_MS:
+            return
+        if not (path.startswith("/api/") or path == "/webui/bootstrap"):
+            return
+        status = getattr(response, "status_code", None)
+        self._log.warning(
+            "slow webui http route path={} status={} duration_ms={}",
+            path,
+            status if status is not None else "none",
+            elapsed_ms,
+        )
 
     # -- Token issue --------------------------------------------------------
 
@@ -296,7 +342,7 @@ class GatewayHTTPHandler:
 
     # -- Session routes -----------------------------------------------------
 
-    def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
+    async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -319,11 +365,16 @@ class GatewayHTTPHandler:
 
         return None
 
-    def _handle_sessions_list(self, request: WsRequest) -> Response:
+    async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
+        payload = await asyncio.to_thread(self._sessions_list_payload)
+        return _http_json_response(payload)
+
+    def _sessions_list_payload(self) -> dict[str, Any]:
+        assert self.session_manager is not None
         sessions = list_webui_sessions(self.session_manager)
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
@@ -340,7 +391,7 @@ class GatewayHTTPHandler:
             scope = self.workspaces.scope_for_session_key(key)
             row["workspace_scope"] = scope.payload()
             cleaned.append(row)
-        return _http_json_response({"sessions": cleaned})
+        return {"sessions": cleaned}
 
     def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
@@ -432,8 +483,15 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        pending_job_ids: set[str] = set()
+        if self.cron_pending_job_ids is not None:
+            pending_job_ids = self.cron_pending_job_ids(decoded_key)
         return _http_json_response(
-            session_automations_payload(self.cron_service, decoded_key)
+            session_automations_payload(
+                self.cron_service,
+                decoded_key,
+                pending_job_ids=pending_job_ids,
+            )
         )
 
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
@@ -446,9 +504,129 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        query = _parse_query(request.path)
+        delete_automations = (_query_first(query, "delete_automations") or "").lower()
+        automation_jobs = session_automation_jobs(self.cron_service, decoded_key)
+        if automation_jobs and delete_automations not in {"1", "true", "yes"}:
+            return _http_json_response(
+                {
+                    "deleted": False,
+                    "blocked_by_automations": True,
+                    "automations": serialize_automation_jobs(automation_jobs),
+                }
+            )
+        if automation_jobs and self.cron_service is not None:
+            for job in automation_jobs:
+                self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    # -- Automation routes --------------------------------------------------
+
+    async def _dispatch_automation_routes(
+        self,
+        request: WsRequest,
+        got: str,
+    ) -> Response | None:
+        if got == "/api/webui/automations":
+            return self._handle_webui_automations(request)
+        m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", got)
+        if m:
+            return await self._handle_webui_automation_action(request, m.group(1))
+        return None
+
+    def _pending_cron_job_ids_for_all(self) -> set[str]:
+        if self.cron_service is None or self.cron_pending_job_ids is None:
+            return set()
+        pending: set[str] = set()
+        for job in self.cron_service.list_jobs(include_disabled=True):
+            session_key = job.payload.session_key
+            if not session_key and job.payload.origin_channel and job.payload.origin_chat_id:
+                session_key = f"{job.payload.origin_channel}:{job.payload.origin_chat_id}"
+            if session_key:
+                pending.update(self.cron_pending_job_ids(session_key))
+        return pending
+
+    def _handle_webui_automations(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(
+            all_automations_payload(
+                self.cron_service,
+                session_manager=self.session_manager,
+                pending_job_ids=self._pending_cron_job_ids_for_all(),
+            )
+        )
+
+    async def _handle_webui_automation_action(
+        self,
+        request: WsRequest,
+        action: str,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.cron_service is None:
+            return _http_error(503, "cron service unavailable")
+
+        query = _parse_query(request.path)
+        job_id = (_query_first(query, "id") or _query_first(query, "job_id") or "").strip()
+        if not job_id:
+            return _http_error(400, "missing automation id")
+        job = self.cron_service.get_job(job_id)
+        if job is None:
+            return _http_error(404, "automation not found")
+        if job.payload.kind == "system_event":
+            return _http_error(403, "system automation is protected")
+        if action in {"enable", "run"} and not is_bound_cron_job(job):
+            return _http_error(409, "automation has no linked chat")
+
+        if action == "enable":
+            if self.cron_service.enable_job(job_id, enabled=True) is None:
+                return _http_error(404, "automation not found")
+        elif action == "disable":
+            if self.cron_service.enable_job(job_id, enabled=False) is None:
+                return _http_error(404, "automation not found")
+        elif action == "delete":
+            result = self.cron_service.remove_job(job_id)
+            if result == "not_found":
+                return _http_error(404, "automation not found")
+            if result == "protected":
+                return _http_error(403, "system automation is protected")
+        elif action == "run":
+            if not job.enabled:
+                return _http_error(409, "automation is disabled")
+            task = asyncio.create_task(self.cron_service.run_job(job_id, force=False))
+            task.add_done_callback(self._log_automation_run_result)
+        elif action == "update":
+            values = _automation_values_from_request(request)
+            if values is None:
+                return _http_error(400, "invalid automation update payload")
+            parsed = _parse_automation_update(values, current_job=job)
+            if isinstance(parsed, str):
+                return _http_error(400, parsed)
+            try:
+                result = self.cron_service.update_job(job_id, **parsed)
+            except ValueError as exc:
+                return _http_error(400, str(exc))
+            if result == "not_found":
+                return _http_error(404, "automation not found")
+            if result == "protected":
+                return _http_error(403, "system automation is protected")
+        else:
+            return _http_error(404, "unknown automation action")
+
+        return self._handle_webui_automations(request)
+
+    @staticmethod
+    def _log_automation_run_result(task: asyncio.Task[bool]) -> None:
+        try:
+            ran = task.result()
+        except Exception:
+            logger.exception("WebUI automation run-now task failed")
+            return
+        if not ran:
+            logger.warning("WebUI automation run-now task did not execute")
 
     # -- Media routes -------------------------------------------------------
 
@@ -469,11 +647,11 @@ class GatewayHTTPHandler:
 
     # -- Misc routes --------------------------------------------------------
 
-    def _dispatch_misc_routes(
+    async def _dispatch_misc_routes(
         self, connection: Any, request: WsRequest, got: str
     ) -> Response | None:
         if got == "/api/sessions":
-            return self._handle_sessions_list(request)
+            return await self._handle_sessions_list(request)
         if got == "/api/commands":
             return self._handle_commands(request)
         if got == "/api/workspaces":
@@ -597,6 +775,133 @@ class GatewayHTTPHandler:
             content_type=ctype,
             extra_headers=[("Cache-Control", cache)],
         )
+
+
+def _automation_values_from_request(request: WsRequest) -> dict[str, Any] | None:
+    raw = _case_insensitive_header(request.headers, _AUTOMATION_VALUES_HEADER)
+    if not raw:
+        return {}
+    try:
+        values = json.loads(raw)
+    except Exception:
+        try:
+            values = json.loads(unquote(raw))
+        except Exception:
+            return None
+    return values if isinstance(values, dict) else None
+
+
+def _parse_automation_update(
+    values: dict[str, Any],
+    *,
+    current_job: CronJob | None = None,
+) -> dict[str, Any] | str:
+    update: dict[str, Any] = {}
+    if "name" in values:
+        raw_name = values.get("name")
+        if not isinstance(raw_name, str):
+            return "name must be a string"
+        name = raw_name.strip()
+        if not name:
+            return "name cannot be empty"
+        update["name"] = name
+    if "message" in values:
+        raw_message = values.get("message")
+        if not isinstance(raw_message, str):
+            return "message must be a string"
+        message = raw_message.strip()
+        if not message:
+            return "message cannot be empty"
+        update["message"] = message
+    if "schedule" in values:
+        raw_schedule = values.get("schedule")
+        if not isinstance(raw_schedule, dict):
+            return "schedule must be an object"
+        parsed_schedule = _parse_automation_schedule(raw_schedule)
+        if isinstance(parsed_schedule, str):
+            return parsed_schedule
+        if current_job is not None and _schedule_matches_job(parsed_schedule, current_job):
+            return update
+        schedule_error = _validate_automation_schedule(parsed_schedule)
+        if schedule_error:
+            return schedule_error
+        update["schedule"] = parsed_schedule
+        update["delete_after_run"] = parsed_schedule.kind == "at"
+    return update
+
+
+def _parse_automation_schedule(values: dict[str, Any]) -> CronSchedule | str:
+    raw_kind = values.get("kind")
+    if not isinstance(raw_kind, str):
+        return "schedule kind must be a string"
+    kind = raw_kind.strip()
+    if kind == "every":
+        every_ms = _positive_int(values.get("every_ms"))
+        if every_ms is None:
+            return "every schedule requires positive every_ms"
+        return CronSchedule(kind="every", every_ms=every_ms)
+    if kind == "cron":
+        raw_expr = values.get("expr")
+        if not isinstance(raw_expr, str):
+            return "cron schedule requires expr"
+        expr = raw_expr.strip()
+        if not expr:
+            return "cron schedule requires expr"
+        raw_tz = values.get("tz")
+        if raw_tz is not None and not isinstance(raw_tz, str):
+            return "cron schedule timezone must be a string"
+        tz = raw_tz.strip() if isinstance(raw_tz, str) else ""
+        return CronSchedule(kind="cron", expr=expr, tz=tz or None)
+    if kind == "at":
+        at_ms = _positive_int(values.get("at_ms"))
+        if at_ms is None:
+            return "one-time schedule requires positive at_ms"
+        return CronSchedule(kind="at", at_ms=at_ms)
+    return "unknown schedule kind"
+
+
+def _schedule_matches_job(schedule: CronSchedule, job: CronJob) -> bool:
+    current = job.schedule
+    if schedule.kind != current.kind:
+        return False
+    if schedule.kind == "at":
+        return schedule.at_ms == current.at_ms
+    if schedule.kind == "every":
+        return schedule.every_ms == current.every_ms
+    if schedule.kind == "cron":
+        return (schedule.expr or "") == (current.expr or "") and (
+            schedule.tz or None
+        ) == (current.tz or None)
+    return False
+
+
+def _validate_automation_schedule(schedule: CronSchedule) -> str | None:
+    if schedule.kind == "at":
+        if not schedule.at_ms or schedule.at_ms <= int(time.time() * 1000):
+            return "one-time schedule must be in the future"
+        return None
+    if schedule.kind != "cron":
+        return None
+
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from croniter import croniter
+
+        tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
+        base = datetime.now(tz=tz)
+        croniter(schedule.expr, base).get_next(datetime)
+    except Exception:
+        return "cron schedule is invalid"
+    return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
+
 
 def _is_websocket_channel_session_key(key: str) -> bool:
     return key.startswith("websocket:")
