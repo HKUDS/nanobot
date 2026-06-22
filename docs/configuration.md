@@ -1706,7 +1706,7 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 }
 ```
 
-Use `enabledTools` to register only a subset of tools from an MCP server:
+Use `enabledTools` to register only a subset of model-callable capabilities from an MCP server:
 
 ```json
 {
@@ -1722,10 +1722,10 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 }
 ```
 
-`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
+`enabledTools` accepts either the raw MCP capability name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`, `mcp_docs_resource_index`, or `mcp_docs_prompt_research`).
 
-- Omit `enabledTools`, or set it to `["*"]`, to register all tools.
-- Set `enabledTools` to `[]` to register no tools from that server.
+- Omit `enabledTools`, or set it to `["*"]`, to register all tools, resources, and prompts.
+- Set `enabledTools` to `[]` to register no capabilities from that server.
 - Set `enabledTools` to a non-empty list of names to register only that subset.
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
