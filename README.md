@@ -362,6 +362,7 @@ nanobot gateway
 ```
 
 Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
+Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
 
 For manual or terminal-only setup, test one CLI message:
 
@@ -416,6 +417,8 @@ Merge this block into your existing config:
 ```bash
 nanobot gateway
 ```
+
+Use `nanobot gateway --background` for a local background process you can manage later with `nanobot gateway status`, `logs`, `restart`, and `stop`.
 
 **3. Open the WebUI**
 
