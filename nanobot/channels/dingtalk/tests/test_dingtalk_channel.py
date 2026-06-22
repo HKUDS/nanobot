@@ -1,4 +1,5 @@
 import asyncio
+import json
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
@@ -250,6 +251,56 @@ async def test_group_send_uses_group_messages_api() -> None:
     assert call["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
     assert call["json"]["openConversationId"] == "conv123"
     assert call["json"]["msgKey"] == "sampleMarkdown"
+
+
+@pytest.mark.asyncio
+async def test_group_send_prepends_sender_mention(monkeypatch) -> None:
+    """Group replies are prefixed with a markdown header naming the sender."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="group:conv123",
+            content="hello",
+            metadata={"sender_name": "Alice"},
+        )
+    )
+
+    sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
+    assert sent_text == "# @Alice\n\nhello"
+
+
+@pytest.mark.asyncio
+async def test_private_send_does_not_prepend_mention(monkeypatch) -> None:
+    """Private replies are sent verbatim, without the sender header."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _FakeHttp()
+
+    async def _fake_token() -> str:
+        return "token"
+
+    monkeypatch.setattr(channel, "_get_access_token", _fake_token)
+
+    await channel.send(
+        OutboundMessage(
+            channel="dingtalk",
+            chat_id="user1",  # private chat: no "group:" prefix
+            content="hello",
+            metadata={"sender_name": "Alice"},
+        )
+    )
+
+    sent_text = json.loads(channel._http.calls[0]["json"]["msgParam"])["text"]
+    assert sent_text == "hello"
 
 
 @pytest.mark.asyncio

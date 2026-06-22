@@ -713,8 +713,15 @@ class DingTalkChannel(BaseChannel):
         if not token:
             raise RuntimeError("DingTalk access token unavailable")
 
-        if msg.content and msg.content.strip():
-            if not await self._send_markdown_text(token, msg.chat_id, msg.content.strip()):
+        content = msg.content.strip() if msg.content else ""
+        if content:
+            # In group chats, prefix the reply with a markdown header naming the
+            # sender so the addressed user can spot the reply. Visual only —
+            # DingTalk's markdown robot messages do not push real @ notifications.
+            sender_name = msg.metadata.get("sender_name") if msg.metadata else None
+            if msg.chat_id.startswith("group:") and sender_name:
+                content = f"# @{sender_name}\n\n{content}"
+            if not await self._send_markdown_text(token, msg.chat_id, content):
                 raise RuntimeError("DingTalk text message was not delivered")
 
         for media_ref in msg.media or []:
