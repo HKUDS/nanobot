@@ -175,6 +175,7 @@ class DingTalkConfig(Base):
     allow_remote_media_redirects: bool = False
     remote_media_redirect_allowed_hosts: list[str] = Field(default_factory=list)
     group_user_isolation: bool = False  # If True, each user in group chat gets their own session
+    disable_private_chat: bool = False  # If True, reject 1:1 DMs with a notice; group chats only
 
 
 class DingTalkChannel(BaseChannel):
@@ -750,6 +751,21 @@ class DingTalkChannel(BaseChannel):
             session_key = None
             if is_group and self.config.group_user_isolation:
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
+
+            if not is_group and self.config.disable_private_chat:
+                # Private chat is disabled: reply with a notice and drop the
+                # message before any permission/pairing logic runs, so even
+                # allowlisted users are redirected to group chat.
+                self.logger.info("private chat disabled; rejecting DM from {}", sender_name)
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),
+                        content="该机器人未开启私聊，请在群聊中与我对话。",
+                    )
+                )
+                return
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
