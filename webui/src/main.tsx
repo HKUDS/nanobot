@@ -20,6 +20,15 @@ if (typeof globalThis.crypto !== "undefined" && !("randomUUID" in globalThis.cry
   });
 }
 
+// Register service worker for PWA support
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {
+      // Service worker registration is best-effort; silence in private browsing
+    });
+  });
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("root element missing");
 
