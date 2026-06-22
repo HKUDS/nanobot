@@ -1035,11 +1035,79 @@ describe("ThreadShell", () => {
     expect(historyCalls).toBe(1);
   });
 
+  it("does not scroll again when canonical history refreshes after a session update", async () => {
+    const client = makeClient();
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollTo;
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "canonical answer" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+      await act(async () => {
+        for (let i = 0; i < 8; i += 1) {
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        }
+      });
+      scrollTo.mockClear();
+
+      await act(async () => {
+        client._emitSessionUpdate("chat-a");
+      });
+
+      await waitFor(() => expect(historyCalls).toBe(2));
+      await waitFor(() => expect(screen.getByText("canonical answer")).toBeInTheDocument());
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
   it("scrolls to the bottom after loading a session from the blank new-chat page", async () => {
     const client = makeClient();
     const scrollIntoView = vi.fn();
+    const scrollTo = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    HTMLElement.prototype.scrollTo = scrollTo;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1092,13 +1160,14 @@ describe("ThreadShell", () => {
 
       await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
       await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
+        expect(scrollTo).toHaveBeenCalledWith({
+          top: 0,
           behavior: "auto",
         }),
       );
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      HTMLElement.prototype.scrollTo = originalScrollTo;
     }
   });
 

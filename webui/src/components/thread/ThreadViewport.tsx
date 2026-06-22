@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import {
   findPromptElement,
   jumpToPrompt,
+  promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
@@ -33,6 +34,7 @@ interface ThreadViewportProps {
   composer: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
+  scrollToLatestUserPromptSignal?: number;
   conversationKey?: string | null;
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
@@ -103,6 +105,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   composer,
   emptyState,
   scrollToBottomSignal = 0,
+  scrollToLatestUserPromptSignal = 0,
   conversationKey = null,
   showScrollToBottomButton = true,
   cliApps = [],
@@ -124,6 +127,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const pendingConversationScrollRef = useRef(true);
   const pendingPromptJumpRef = useRef<string | null>(null);
   const scrollFrameIdsRef = useRef<number[]>([]);
+  const handledLatestPromptSignalRef = useRef(0);
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
   /** User scrolled away from the bottom; do not auto-yank until they return or we reset (new chat / send). */
@@ -184,6 +188,28 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     userReadingHistoryRef.current = false;
     setAtBottom(true);
+  }, []);
+
+  const scrollToPromptTopNow = useCallback((promptId: string) => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const target = findPromptElement(el, promptId);
+    if (!target) return false;
+    const top = Math.max(0, promptTop(el, target) - 16);
+    try {
+      el.scrollTo?.({ top, behavior: "auto" });
+      el.scrollTop = top;
+    } catch {
+      try {
+        el.scrollTop = top;
+      } catch {
+        // Test DOMs can expose read-only scrollTop; browsers keep this writable.
+      }
+    }
+    const near = el.scrollHeight - top - el.clientHeight < NEAR_BOTTOM_PX;
+    userReadingHistoryRef.current = !near;
+    setAtBottom(near);
+    return true;
   }, []);
 
   const scrollToBottom = useCallback(
@@ -297,13 +323,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
   }, [hasMessages, scrollToBottom]);
 
-  useEffect(() => {
-    if (!atBottom) return;
-    // Instant jump: CSS scroll-smooth + behavior "auto" still animates in some
-    // browsers; session switches and history hydration should never slide from top.
-    scrollToBottom(false);
-  }, [messages, atBottom, scrollToBottom]);
-
   useLayoutEffect(() => {
     if (keyboardInsetBottom > 0) {
       userReadingHistoryRef.current = false;
@@ -334,6 +353,20 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     userReadingHistoryRef.current = false;
     scrollToBottom(false, 8);
   }, [scrollToBottomSignal, scrollToBottom]);
+
+  useLayoutEffect(() => {
+    if (scrollToLatestUserPromptSignal <= handledLatestPromptSignalRef.current) return;
+    const latest = messages[messages.length - 1];
+    if (!latest || latest.role !== "user") return;
+    handledLatestPromptSignalRef.current = scrollToLatestUserPromptSignal;
+    cancelScheduledBottomScroll();
+    scrollToPromptTopNow(latest.id);
+  }, [
+    cancelScheduledBottomScroll,
+    messages,
+    scrollToLatestUserPromptSignal,
+    scrollToPromptTopNow,
+  ]);
 
   useLayoutEffect(() => {
     if (lastConversationKeyRef.current === conversationKey) return;
@@ -391,17 +424,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   useEffect(() => cancelScheduledBottomScroll, [cancelScheduledBottomScroll]);
 
   useEffect(() => {
-    const target = contentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (userReadingHistoryRef.current) return;
-      scrollToBottom(false, 4);
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMessages, scrollToBottom]);
-
-  useEffect(() => {
     const target = composerDockRef.current;
     if (!target || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => measureComposerDock());
@@ -444,7 +466,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
             <div
               data-testid="thread-message-region"
-              className="flex min-h-0 flex-1 flex-col justify-end px-3 pb-4 pt-4 sm:px-4"
+              className="flex min-h-0 flex-1 flex-col justify-start px-3 pb-4 pt-4 sm:px-4"
             >
               <div className="mx-auto w-full max-w-[49.5rem]">
                 <ThreadMessages
@@ -463,7 +485,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             <div
               ref={composerDockRef}
               data-testid="thread-composer-dock"
-              className="sticky bottom-0 z-10 mt-auto bg-background"
+              className="sticky bottom-0 z-10 bg-background"
             >
               <div className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
                 {composer}

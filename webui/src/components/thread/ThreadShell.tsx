@@ -284,6 +284,7 @@ export function ThreadShell({
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [scrollToLatestUserPromptSignal, setScrollToLatestUserPromptSignal] = useState(0);
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
@@ -300,6 +301,7 @@ export function ThreadShell({
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const bottomScrolledChatIdRef = useRef<string | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -454,9 +456,14 @@ export function ThreadShell({
   }, [chatId, client, refreshHistory]);
 
   useEffect(() => {
-    if (!chatId || loading) return;
+    if (!chatId) {
+      bottomScrolledChatIdRef.current = null;
+      return;
+    }
+    if (loading || bottomScrolledChatIdRef.current === chatId) return;
+    bottomScrolledChatIdRef.current = chatId;
     setScrollToBottomSignal((value) => value + 1);
-  }, [chatId, loading, historical]);
+  }, [chatId, loading]);
 
   useEffect(() => {
     if (chatId) return;
@@ -505,7 +512,7 @@ export function ThreadShell({
     const pending = pendingFirstRef.current;
     if (!pending) return;
     pendingFirstRef.current = null;
-    setScrollToBottomSignal((value) => value + 1);
+    setScrollToLatestUserPromptSignal((value) => value + 1);
     send(pending.content, pending.images, pending.options);
     setBooting(false);
   }, [chatId, send]);
@@ -541,7 +548,7 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendImage[], options?: SendOptions) => {
-      setScrollToBottomSignal((value) => value + 1);
+      setScrollToLatestUserPromptSignal((value) => value + 1);
       send(content, images, withWorkspaceScope(options));
     },
     [send, withWorkspaceScope],
@@ -764,6 +771,7 @@ export function ThreadShell({
           emptyState={emptyState}
           composer={composer}
           scrollToBottomSignal={scrollToBottomSignal}
+          scrollToLatestUserPromptSignal={scrollToLatestUserPromptSignal}
           conversationKey={historyKey}
           showScrollToBottomButton={!!session}
           cliApps={cliApps}
