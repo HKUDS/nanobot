@@ -56,6 +56,7 @@
 
 ## 📢 News
 
+- **2026-06-22** 🚀 Released **v0.2.2** — **The SDK & WebUI Durability Release** makes the Python SDK a first-class runtime, adds segmented WebUI transcripts, automation management, richer search/STT providers, token usage visibility, and stronger session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
 - **2026-06-19** 🔎 Firecrawl app, OpenAI image edits, safer session deletion.
 - **2026-06-18** 💬 Feishu recovery, Keenable search, Mistral polish, workspace-aware git.
 - **2026-06-17** 🧠 Default idle auto-compact, clearer `/dream`, macOS installer fixes.
@@ -65,11 +66,11 @@
 - **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
 - **2026-06-12** 💬 Slack allowlisted channels can require mentions.
 - **2026-06-11** ✂️ Fenced-code message splitting.
-- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
 
 <details>
 <summary>Earlier news</summary>
 
+- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
 - **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
 - **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
 - **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.

@@ -10,9 +10,9 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
+from nanobot.security.workspace_access import current_tool_workspace
 
 
 @tool_parameters(
