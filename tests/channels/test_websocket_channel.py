@@ -96,6 +96,27 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
     )
 
 
+@pytest.mark.asyncio
+async def test_stop_treats_cancelled_server_task_as_shutdown() -> None:
+    channel = _ch(MessageBus())
+    channel._running = True
+    channel._stop_event = asyncio.Event()
+
+    async def _server_task() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_server_task())
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    channel._server_task = task
+
+    await channel.stop()
+
+    assert channel._server_task is None
+    assert task.cancelled()
+
+
 @pytest.fixture()
 def bus() -> MagicMock:
     b = MagicMock()
