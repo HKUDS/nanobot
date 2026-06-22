@@ -136,6 +136,43 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_run_closes_mcp_from_connection_owner_task(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    loop = _make_loop(tmp_path, mcp_servers={"playwright": object()})
+    connected = asyncio.Event()
+    owner_tasks: list[asyncio.Task | None] = []
+    closed_tasks: list[asyncio.Task | None] = []
+
+    class _OwnerCheckedStack:
+        def __init__(self) -> None:
+            self.owner = asyncio.current_task()
+            owner_tasks.append(self.owner)
+
+        async def aclose(self) -> None:
+            closed_tasks.append(asyncio.current_task())
+            assert asyncio.current_task() is self.owner
+
+    async def _fake_connect(servers, _registry):
+        stacks = {name: _OwnerCheckedStack() for name in servers}
+        connected.set()
+        return stacks
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+
+    task = asyncio.create_task(loop.run())
+    await asyncio.wait_for(connected.wait(), timeout=1)
+    loop.stop()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert owner_tasks
+    assert closed_tasks == owner_tasks
+    assert loop._mcp_stacks == {}
+
+
+@pytest.mark.asyncio
 async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
