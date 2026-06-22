@@ -520,24 +520,18 @@ class TestRunOnboardExitBehavior:
             ]
         )
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "Agent Settings":
                 config.agents.defaults.model = "test/provider-model"
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -868,6 +862,22 @@ class TestApiServerRegistration:
 class TestMainMenuUpdate:
     """Tests for main menu including new Channel Common and API Server items."""
 
+    def test_choice_viewport_keeps_long_menus_within_terminal_height(self):
+        """Long provider menus should render as a bounded scrolling slice."""
+        assert onboard_wizard._choice_viewport(selected_index=0, total=20, visible_count=5) == (0, 5)
+        assert onboard_wizard._choice_viewport(selected_index=10, total=20, visible_count=5) == (
+            8,
+            13,
+        )
+        assert onboard_wizard._choice_viewport(selected_index=19, total=20, visible_count=5) == (
+            15,
+            20,
+        )
+
+    def test_choice_viewport_handles_tiny_terminals(self):
+        """A one-row menu is still usable instead of failing as window-too-small."""
+        assert onboard_wizard._choice_viewport(selected_index=3, total=5, visible_count=0) == (3, 4)
+
     def test_main_menu_hides_save_actions_until_needed(self):
         """The first screen should not show save or summary actions before edits."""
         from nanobot.cli.onboard import _get_main_menu_choices
@@ -893,28 +903,61 @@ class TestMainMenuUpdate:
             "[Q] Quick Start",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            return next(responses)
 
         def fake_quick_start(config):
             config.agents.defaults.bot_name = "quickbot"
             return True
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_quick_start", fake_quick_start)
 
         result = run_onboard(initial_config=initial_config)
 
         assert result.should_save is True
         assert result.config.agents.defaults.bot_name == "quickbot"
+
+    def test_main_menu_default_resets_after_returning_from_advanced(self, monkeypatch):
+        """Returning from Advanced should not leave its item visually selected."""
+        initial_config = Config()
+        responses = iter([
+            "[A] Advanced Settings",
+            "<- Back",
+            "[X] Exit",
+        ])
+        main_defaults: list[str | None] = []
+
+        def fake_select_with_back(prompt, _choices, default=None):
+            if prompt == "What would you like to do?":
+                main_defaults.append(default)
+            return next(responses)
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is False
+        assert main_defaults == [None, None]
+
+    def test_ask_prompt_shortens_escape_timeout(self):
+        """Questionary text prompts should not wait the default timeout on Escape."""
+
+        class FakePrompt:
+            def __init__(self):
+                self.application = SimpleNamespace(ttimeoutlen=0.5, timeoutlen=1.0)
+
+            def ask(self):
+                return "ok"
+
+        prompt = FakePrompt()
+
+        assert onboard_wizard._ask_prompt(prompt) == "ok"
+        assert prompt.application.ttimeoutlen == onboard_wizard._PROMPT_ESCAPE_TIMEOUT_SECONDS
+        assert prompt.application.timeoutlen == onboard_wizard._PROMPT_ESCAPE_TIMEOUT_SECONDS
 
     def test_quick_start_provider_choices_include_all_chat_providers(self):
         """Quick Start should be driven by the provider registry, not a short allowlist."""
@@ -982,6 +1025,45 @@ class TestMainMenuUpdate:
         assert websocket["enabled"] is True
         assert websocket["websocketRequiresToken"] is True
         assert websocket["tokenIssueSecret"] == "webui-secret"
+
+    def test_quick_start_provider_menu_escape_returns_back(self, monkeypatch):
+        """Esc from the first Quick Start menu should return to the main menu."""
+        config = Config()
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_select_with_back",
+            lambda *a, **kw: onboard_wizard._BACK_PRESSED,
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is onboard_wizard._BACK_PRESSED
+        assert "primary" not in config.model_presets
+
+    def test_quick_start_provider_back_skips_pause(self, monkeypatch):
+        """Returning from Quick Start should not require an extra Enter key press."""
+        config = Config()
+        pause_messages: list[str] = []
+
+        def fail_websocket_defaults(*_args, **_kwargs):
+            raise AssertionError("Back navigation should not continue Quick Start")
+
+        monkeypatch.setattr(onboard_wizard.console, "clear", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_configure_quick_start_provider",
+            lambda *_args: onboard_wizard._BACK_PRESSED,
+        )
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_enable_quick_start_websocket_defaults",
+            fail_websocket_defaults,
+        )
+        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": pause_messages.append(message))
+
+        assert onboard_wizard._configure_quick_start(config) is False
+        assert pause_messages == []
 
     def test_quick_start_websocket_decline_rolls_back_provider_defaults(self, monkeypatch):
         """A failed WebSocket step should not leave saveable Quick Start defaults behind."""
@@ -1084,6 +1166,34 @@ class TestMainMenuUpdate:
         assert config.providers.openai.api_base is None
         assert config.model_presets["primary"].provider == "openai"
         assert config.model_presets["primary"].model == "gpt-4o-mini"
+
+    def test_quick_start_api_key_escape_returns_to_provider_choice(self, monkeypatch):
+        """Esc from an API-key prompt should go back to provider selection."""
+        config = Config()
+        provider_answers = iter(["DeepSeek", "OpenAI"])
+        api_key_answers = iter([onboard_wizard._BACK_PRESSED, "sk-openai-test"])
+        selected_providers: list[str] = []
+
+        def fake_select(*_args, **_kwargs):
+            selected = next(provider_answers)
+            selected_providers.append(selected)
+            return selected
+
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: next(api_key_answers))
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_input_model_with_autocomplete",
+            lambda *a, **kw: "gpt-4o-mini",
+        )
+
+        assert onboard_wizard._configure_quick_start_provider(config) is True
+
+        assert selected_providers == ["DeepSeek", "OpenAI"]
+        assert config.providers.deepseek.api_key is None
+        assert config.providers.openai.api_key == "sk-openai-test"
+        assert config.model_presets["primary"].provider == "openai"
 
     def test_quick_start_zhipu_coding_plan_uses_coding_base_url(self, monkeypatch):
         """Zhipu Coding Plan should not use the standard Zhipu base URL."""
@@ -1441,24 +1551,18 @@ class TestMainMenuUpdate:
             "[S] Save and Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "Channel Common":
                 config.channels.send_tool_hints = True
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -1477,24 +1581,18 @@ class TestMainMenuUpdate:
             "[S] Save and Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_configure_general_settings(config, section):
             if section == "API Server":
                 config.api.port = 9999
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
 
         result = run_onboard(initial_config=initial_config)
@@ -1514,23 +1612,17 @@ class TestMainMenuUpdate:
             "[X] Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         def fake_pause():
             pause_called["n"] += 1
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         # _pause is called inside _show_summary, so we patch it there
         monkeypatch.setattr(onboard_wizard, "_pause", fake_pause)
         # Suppress summary output but still call _pause
@@ -1568,6 +1660,19 @@ class TestInputTextEmptyString:
 
         result = _input_text("Name", "old", "str")
         assert result is None
+
+    def test_escape_returns_back_pressed(self, monkeypatch):
+        """_input_text should preserve the local back sentinel."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(
+                text=lambda *a, **kw: SimpleNamespace(ask=lambda: onboard_wizard._BACK_PRESSED)
+            ),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result is onboard_wizard._BACK_PRESSED
 
 
 class TestIsStrOrNone:
@@ -1697,12 +1802,7 @@ class TestModelPresetWizard:
                 self.response = response
 
             def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
                 return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
 
         def fake_text(*_args, **_kwargs):
             return FakePrompt(next(responses))
@@ -1714,9 +1814,7 @@ class TestModelPresetWizard:
             return next(responses)
 
         monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
-        monkeypatch.setattr(
-            onboard_wizard, "questionary", SimpleNamespace(select=fake_select, text=fake_text)
-        )
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(text=fake_text))
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fake_configure)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None))
@@ -1829,17 +1927,11 @@ class TestModelPresetWizard:
             "[S] Save and Exit",
         ])
 
-        class FakePrompt:
-            def __init__(self, response):
-                self.response = response
-
-            def ask(self):
-                if isinstance(self.response, BaseException):
-                    raise self.response
-                return self.response
-
-        def fake_select(*_args, **_kwargs):
-            return FakePrompt(next(responses))
+        def fake_select_with_back(*_args, **_kwargs):
+            response = next(responses)
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         preset_mutated = {"n": 0}
 
@@ -1847,7 +1939,7 @@ class TestModelPresetWizard:
             preset_mutated["n"] += 1
             config.model_presets["test"] = ModelPresetConfig(model="gpt-test")
 
-        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
         monkeypatch.setattr(onboard_wizard, "_configure_model_presets", fake_configure_model_presets)
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *a, **kw: None)

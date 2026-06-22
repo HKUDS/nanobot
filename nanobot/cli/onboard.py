@@ -109,6 +109,7 @@ _UI_BORDER = "#4E5254"
 _UI_TEXT = "#A9B7C6"
 _UI_MUTED = "#80868B"
 _UI_SUCCESS = "#6AAB73"
+_PROMPT_ESCAPE_TIMEOUT_SECONDS = 0.05
 _CHANNEL_LOGIN_CHOICE = "Login with QR/link"
 _CHANNEL_ADVANCED_CHOICE = "Edit advanced settings"
 
@@ -138,6 +139,8 @@ def _select_with_back(
         The selected choice string if user confirmed
         None if user cancelled (Ctrl+C)
     """
+    import shutil
+
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
@@ -158,11 +161,15 @@ def _select_with_back(
 
     # State holder for the result
     state: dict[str, str | None | object] = {"result": None}
+    terminal_lines = shutil.get_terminal_size((80, 24)).lines
+    visible_count = min(len(choices), max(1, terminal_lines - 3))
 
     # Build menu items (uses closure over selected_index)
     def get_menu_text():
         items = []
-        for i, choice in enumerate(choices):
+        start, end = _choice_viewport(selected_index, len(choices), visible_count)
+        for i in range(start, end):
+            choice = choices[i]
             if i == selected_index:
                 items.append(("class:selected", f"> {choice}\n"))
             else:
@@ -170,11 +177,15 @@ def _select_with_back(
         return items
 
     # Create layout
-    menu_control = FormattedTextControl(get_menu_text)
-    menu_window = Window(content=menu_control, height=len(choices))
+    menu_control = FormattedTextControl(get_menu_text, show_cursor=False)
+    menu_window = Window(content=menu_control, height=visible_count, always_hide_cursor=True)
 
-    prompt_control = FormattedTextControl(lambda: [("class:question", f"> {prompt}")])
-    prompt_window = Window(content=prompt_control, height=1)
+    def get_prompt_text():
+        suffix = f" ({selected_index + 1}/{len(choices)})" if len(choices) > visible_count else ""
+        return [("class:question", f"{prompt}{suffix}")]
+
+    prompt_control = FormattedTextControl(get_prompt_text, show_cursor=False)
+    prompt_window = Window(content=prompt_control, height=1, always_hide_cursor=True)
 
     layout = Layout(HSplit([prompt_window, menu_window]))
 
@@ -220,6 +231,8 @@ def _select_with_back(
     })
 
     app = Application(layout=layout, key_bindings=bindings, style=style)
+    app.ttimeoutlen = 0.05
+    app.timeoutlen = 0.05
     try:
         app.run()
     except Exception:
@@ -227,6 +240,18 @@ def _select_with_back(
         return None
 
     return state["result"]
+
+
+def _choice_viewport(selected_index: int, total: int, visible_count: int) -> tuple[int, int]:
+    """Return the visible slice for a long terminal menu."""
+    if total <= 0:
+        return 0, 0
+    visible_count = max(1, min(visible_count, total))
+    selected_index = max(0, min(selected_index, total - 1))
+    half = visible_count // 2
+    start = selected_index - half
+    start = max(0, min(start, total - visible_count))
+    return start, start + visible_count
 
 # --- Type Introspection ---
 
@@ -474,14 +499,44 @@ def _input_bool(display_name: str, current: bool | None) -> bool | None:
     ).ask()
 
 
+def _input_back_key_bindings():
+    """Return key bindings that make Escape behave like a local back action."""
+    from prompt_toolkit.key_binding import KeyBindings
+
+    bindings = KeyBindings()
+
+    @bindings.add("escape")
+    def _escape(event):
+        event.app.exit(result=_BACK_PRESSED)
+
+    return bindings
+
+
+def _ask_prompt(prompt):
+    """Ask a questionary prompt with responsive Escape handling."""
+    app = getattr(prompt, "application", None)
+    if app is not None:
+        if hasattr(app, "ttimeoutlen"):
+            app.ttimeoutlen = _PROMPT_ESCAPE_TIMEOUT_SECONDS
+        if hasattr(app, "timeoutlen"):
+            app.timeoutlen = _PROMPT_ESCAPE_TIMEOUT_SECONDS
+    return prompt.ask()
+
+
 def _input_text(display_name: str, current: Any, field_type: str, field_info=None) -> Any:
     """Get text input and parse based on field type."""
     default = _format_value_for_input(current, field_type)
 
-    value = _get_questionary().text(f"{display_name}:", default=default).ask()
+    value = _ask_prompt(
+        _get_questionary().text(
+            f"{display_name}:",
+            default=default,
+            key_bindings=_input_back_key_bindings(),
+        )
+    )
 
-    if value is None:
-        return None
+    if value is _BACK_PRESSED or value is None:
+        return None if value is None else _BACK_PRESSED
 
     if field_type == "int":
         try:
@@ -519,14 +574,14 @@ def _input_text(display_name: str, current: Any, field_type: str, field_info=Non
     return value
 
 
-def _input_secret(display_name: str) -> str | None:
+def _input_secret(display_name: str) -> str | None | object:
     """Get a secret value without echoing it when questionary supports password input."""
     prompt_factory = getattr(_get_questionary(), "password", None)
     if prompt_factory is None:
         prompt_factory = _get_questionary().text
-    value = prompt_factory(f"{display_name}:").ask()
-    if value is None:
-        return None
+    value = _ask_prompt(prompt_factory(f"{display_name}:", key_bindings=_input_back_key_bindings()))
+    if value is _BACK_PRESSED or value is None:
+        return None if value is None else _BACK_PRESSED
     return str(value).strip()
 
 
@@ -560,7 +615,7 @@ def _get_current_provider(model: BaseModel) -> str:
 
 def _input_model_with_autocomplete(
     display_name: str, current: Any, provider: str
-) -> str | None:
+) -> str | None | object:
     """Get model input with autocomplete suggestions.
 
     """
@@ -587,20 +642,25 @@ def _input_model_with_autocomplete(
                     display=model,
                 )
 
-    value = _get_questionary().autocomplete(
-        f"{display_name}:",
-        choices=[""],  # Placeholder, actual completions from completer
-        completer=DynamicModelCompleter(provider),
-        default=default,
-        qmark=">",
-    ).ask()
+    value = _ask_prompt(
+        _get_questionary().autocomplete(
+            f"{display_name}:",
+            choices=[""],  # Placeholder, actual completions from completer
+            completer=DynamicModelCompleter(provider),
+            default=default,
+            key_bindings=_input_back_key_bindings(),
+            qmark=">",
+        )
+    )
 
-    return value if value is not None else None
+    if value is _BACK_PRESSED or value is None:
+        return None if value is None else _BACK_PRESSED
+    return value
 
 
 def _input_context_window_with_recommendation(
     display_name: str, current: Any, model_obj: BaseModel
-) -> int | None:
+) -> int | None | object:
     """Get context window input with option to fetch recommended value."""
     current_val = current if current else ""
 
@@ -645,8 +705,11 @@ def _input_context_window_with_recommendation(
     value = _get_questionary().text(
         f"{display_name}:",
         default=str(current_val) if current_val else "",
+        key_bindings=_input_back_key_bindings(),
     ).ask()
 
+    if value is _BACK_PRESSED:
+        return _BACK_PRESSED
     if value is None or value == "":
         return None
 
@@ -663,6 +726,8 @@ def _handle_model_field(
     """Handle the 'model' field with autocomplete and context-window auto-fill."""
     provider = _get_current_provider(working_model)
     new_value = _input_model_with_autocomplete(field_display, current_value, provider)
+    if new_value is _BACK_PRESSED:
+        return
     if new_value is not None and new_value != current_value:
         setattr(working_model, field_name, new_value)
         _try_auto_fill_context_window(working_model, new_value)
@@ -675,6 +740,8 @@ def _handle_context_window_field(
     new_value = _input_context_window_with_recommendation(
         field_display, current_value, working_model
     )
+    if new_value is _BACK_PRESSED:
+        return
     if new_value is not None:
         setattr(working_model, field_name, new_value)
 
@@ -902,6 +969,8 @@ def _configure_pydantic_model(
             new_value = _input_bool(field_display, current_value)
         else:
             new_value = _input_with_existing(field_display, current_value, ftype.type_name, field_info=field_info)
+        if new_value is _BACK_PRESSED:
+            continue
         if new_value is not None:
             # Normalize empty string to None for optional string fields so that
             # clearing an api_key / api_base actually removes the value.
@@ -1523,7 +1592,7 @@ def _select_quick_start_api_base(
     provider_name: str,
     provider_display: str,
     info: _QuickStartProviderInfo | None,
-) -> tuple[str, bool] | None:
+) -> tuple[str, bool] | None | object:
     """Return the api_base and whether the user explicitly selected or entered it."""
     endpoint_choices = _QUICK_START_ENDPOINT_CHOICES.get(provider_name)
     if endpoint_choices:
@@ -1533,7 +1602,9 @@ def _select_quick_start_api_base(
             list(choices) + ["<- Back"],
             default=endpoint_choices[0].label,
         )
-        if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
+        if answer is _BACK_PRESSED or answer == "<- Back":
+            return _BACK_PRESSED
+        if answer is None:
             return None
         assert isinstance(answer, str)
         return choices[answer], True
@@ -1547,6 +1618,8 @@ def _select_quick_start_api_base(
         api_base,
         "str",
     )
+    if base_answer is _BACK_PRESSED:
+        return _BACK_PRESSED
     if base_answer is None:
         return None
     api_base = base_answer.strip().rstrip("/")
@@ -1556,73 +1629,82 @@ def _select_quick_start_api_base(
     return api_base, True
 
 
-def _configure_quick_start_provider(config: Config) -> bool:
+def _configure_quick_start_provider(config: Config) -> bool | object:
     """Configure the beginner path from provider credentials and model."""
-    _show_quick_start_progress(1)
+    while True:
+        _show_quick_start_progress(1)
 
-    provider_choices = _get_quick_start_provider_choices()
-    answer = _select_with_back(
-        "Which provider do you want to use?",
-        list(provider_choices) + ["<- Back"],
-    )
-    if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
-        return False
-    assert isinstance(answer, str)
-    provider_name = provider_choices[answer]
-    provider_info = _get_quick_start_provider_info().get(provider_name)
+        provider_choices = _get_quick_start_provider_choices()
+        answer = _select_with_back(
+            "Which provider do you want to use?",
+            list(provider_choices) + ["<- Back"],
+        )
+        if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
+            return _BACK_PRESSED
+        assert isinstance(answer, str)
+        provider_name = provider_choices[answer]
+        provider_info = _get_quick_start_provider_info().get(provider_name)
 
-    api_base = provider_info.default_api_base if provider_info else ""
-    base_was_prompted = False
-    if provider_name in _QUICK_START_ENDPOINT_CHOICES:
-        api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
-        if api_base_result is None:
+        api_base = provider_info.default_api_base if provider_info else ""
+        base_was_prompted = False
+        if provider_name in _QUICK_START_ENDPOINT_CHOICES:
+            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+            if api_base_result is _BACK_PRESSED:
+                continue
+            if api_base_result is None:
+                return False
+            api_base, base_was_prompted = api_base_result
+
+        api_key: str | None = None
+        if _quick_start_requires_api_key(provider_name, provider_info):
+            api_key = _input_text(f"{answer} API key", "", "str")
+            if api_key is _BACK_PRESSED:
+                continue
+            if api_key is None:
+                return False
+            api_key = api_key.strip()
+            if not api_key:
+                console.print("[yellow]! API key is required for Quick Start[/yellow]")
+                return False
+
+        if (
+            provider_name not in _QUICK_START_ENDPOINT_CHOICES
+            and _quick_start_requires_base_url(provider_name, provider_info)
+        ):
+            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+            if api_base_result is _BACK_PRESSED:
+                continue
+            if api_base_result is None:
+                return False
+            api_base, base_was_prompted = api_base_result
+
+        provider_config = getattr(config.providers, provider_name, None)
+        if provider_config is None:
+            console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
-        api_base, base_was_prompted = api_base_result
 
-    api_key: str | None = None
-    if _quick_start_requires_api_key(provider_name, provider_info):
-        api_key = _input_text(f"{answer} API key", "", "str")
-        if api_key is None:
-            return False
-        api_key = api_key.strip()
-        if not api_key:
-            console.print("[yellow]! API key is required for Quick Start[/yellow]")
+        model = _input_model_with_autocomplete("Model ID", "", provider_name)
+        if model is _BACK_PRESSED:
+            continue
+        model = (model or "").strip()
+        if not model:
+            console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
             return False
 
-    if (
-        provider_name not in _QUICK_START_ENDPOINT_CHOICES
-        and _quick_start_requires_base_url(provider_name, provider_info)
-    ):
-        api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
-        if api_base_result is None:
-            return False
-        api_base, base_was_prompted = api_base_result
+        if api_key is not None:
+            provider_config.api_key = api_key
+        if api_base:
+            if base_was_prompted:
+                provider_config.api_base = api_base
+            elif not provider_config.api_base:
+                provider_config.api_base = api_base
 
-    provider_config = getattr(config.providers, provider_name, None)
-    if provider_config is None:
-        console.print(f"[red]Unknown provider: {provider_name}[/red]")
-        return False
-
-    model = _input_model_with_autocomplete("Model ID", "", provider_name)
-    model = (model or "").strip()
-    if not model:
-        console.print("[yellow]! Model ID is required for Quick Start[/yellow]")
-        return False
-
-    if api_key is not None:
-        provider_config.api_key = api_key
-    if api_base:
-        if base_was_prompted:
-            provider_config.api_base = api_base
-        elif not provider_config.api_base:
-            provider_config.api_base = api_base
-
-    _set_primary_quick_start_preset(
-        config,
-        provider_name,
-        model,
-    )
-    return True
+        _set_primary_quick_start_preset(
+            config,
+            provider_name,
+            model,
+        )
+        return True
 
 
 def _enable_quick_start_websocket_defaults(config: Config) -> bool:
@@ -1635,17 +1717,23 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
         f"[{_UI_MUTED}]This lets the browser UI at http://127.0.0.1:8765 connect to nanobot.[/]"
     )
     console.print()
-    answer = _get_questionary().confirm(
-        "Enable WebSocket channel now?",
-        default=True,
-    ).ask()
-    if not answer:
-        console.print("[yellow]! Quick Start needs the WebSocket channel for the local WebUI[/yellow]")
-        return False
-    webui_secret = _input_secret("Set a WebUI password")
-    if not webui_secret:
-        console.print("[yellow]! WebUI password is required when enabling WebSocket[/yellow]")
-        return False
+    while True:
+        answer = _get_questionary().confirm(
+            "Enable WebSocket channel now?",
+            default=True,
+        ).ask()
+        if not answer:
+            console.print(
+                "[yellow]! Quick Start needs the WebSocket channel for the local WebUI[/yellow]"
+            )
+            return False
+        webui_secret = _input_secret("Set a WebUI password")
+        if webui_secret is _BACK_PRESSED:
+            continue
+        if not webui_secret:
+            console.print("[yellow]! WebUI password is required when enabling WebSocket[/yellow]")
+            return False
+        break
 
     config_cls = _get_channel_config_class("websocket")
     if config_cls is None:
@@ -1701,7 +1789,10 @@ def _configure_quick_start(config: Config) -> bool:
         "Choose provider endpoint, add credentials and model, then enable the local WebUI channel.",
     )
     draft = config.model_copy(deep=True)
-    if not _configure_quick_start_provider(draft):
+    provider_result = _configure_quick_start_provider(draft)
+    if provider_result is _BACK_PRESSED:
+        return False
+    if not provider_result:
         _pause()
         return False
     if not _enable_quick_start_websocket_defaults(draft):
@@ -1761,6 +1852,18 @@ def _get_main_menu_choices(has_unsaved_changes: bool) -> list[str]:
 def _configure_advanced_settings(config: Config) -> None:
     """Show lower-frequency setup options behind one advanced menu."""
     last_choice: str | None = None
+    choices = [
+        "[P] LLM Provider",
+        "[M] Model Presets",
+        "[C] Chat Channel",
+        "[H] Channel Common",
+        "[A] Agent Settings",
+        "[I] API Server",
+        "[G] Gateway",
+        "[T] Tools",
+        "[V] View Configuration Summary",
+        "<- Back",
+    ]
     while True:
         try:
             console.clear()
@@ -1768,27 +1871,15 @@ def _configure_advanced_settings(config: Config) -> None:
                 "Advanced Settings",
                 "Use these when the default API-key setup is not enough.",
             )
-            answer = _get_questionary().select(
+            answer = _select_with_back(
                 "What would you like to configure?",
-                choices=[
-                    "[P] LLM Provider",
-                    "[M] Model Presets",
-                    "[C] Chat Channel",
-                    "[H] Channel Common",
-                    "[A] Agent Settings",
-                    "[I] API Server",
-                    "[G] Gateway",
-                    "[T] Tools",
-                    "[V] View Configuration Summary",
-                    "<- Back",
-                ],
+                choices,
                 default=last_choice,
-                qmark=">",
-            ).ask()
+            )
         except KeyboardInterrupt:
             break
 
-        if answer is None or answer == "<- Back":
+        if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
             break
 
         _advanced_dispatch = {
@@ -1830,22 +1921,19 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
     config = base_config.model_copy(deep=True)
     _sync_preset_cache(config)
 
-    last_main_choice: str | None = None
     while True:
         console.clear()
         _show_main_menu_header()
 
         try:
-            answer = _get_questionary().select(
+            answer = _select_with_back(
                 "What would you like to do?",
-                choices=_get_main_menu_choices(_has_unsaved_changes(original_config, config)),
-                default=last_main_choice,
-                qmark=">",
-            ).ask()
+                _get_main_menu_choices(_has_unsaved_changes(original_config, config)),
+            )
         except KeyboardInterrupt:
             answer = None
 
-        if answer is None:
+        if answer is _BACK_PRESSED or answer is None:
             action = _prompt_main_menu_exit(_has_unsaved_changes(original_config, config))
             if action == "save":
                 return OnboardResult(config=config, should_save=True)
@@ -1863,5 +1951,4 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
         if answer in {"[X] Exit", "[X] Exit Without Saving"}:
             return OnboardResult(config=original_config, should_save=False)
         if answer == "[A] Advanced Settings":
-            last_main_choice = answer
             _configure_advanced_settings(config)
