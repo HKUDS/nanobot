@@ -329,7 +329,7 @@ The example below uses a generic OpenAI-compatible `custom` provider so the comp
       "provider": "custom",
       "model": "model-id-from-your-provider",
       "maxTokens": 8192,
-      "contextWindowTokens": 65536,
+      "contextWindowTokens": 200000,
       "temperature": 0.1
     }
   },

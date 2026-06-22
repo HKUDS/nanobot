@@ -22,7 +22,7 @@ function settingsPayload(): SettingsPayload {
       has_api_key: true,
       model_preset: "default",
       max_tokens: 8192,
-      context_window_tokens: 65536,
+      context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
       timezone: "UTC",
@@ -38,7 +38,7 @@ function settingsPayload(): SettingsPayload {
       model: "openai/gpt-4o",
       provider: "auto",
       max_tokens: 8192,
-      context_window_tokens: 65536,
+      context_window_tokens: 200000,
       temperature: 0.1,
       reasoning_effort: null,
     }],
@@ -394,6 +394,7 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
   });
 

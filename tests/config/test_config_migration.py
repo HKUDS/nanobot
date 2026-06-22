@@ -34,7 +34,7 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
     config = load_config(config_path)
 
     assert config.agents.defaults.max_tokens == 1234
-    assert config.agents.defaults.context_window_tokens == 65_536
+    assert config.agents.defaults.context_window_tokens == 200_000
     assert not hasattr(config.agents.defaults, "memory_window")
 
 
@@ -60,7 +60,7 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     defaults = saved["agents"]["defaults"]
 
     assert defaults["maxTokens"] == 2222
-    assert defaults["contextWindowTokens"] == 65_536
+    assert defaults["contextWindowTokens"] == 200_000
     assert "memoryWindow" not in defaults
 
 
@@ -85,6 +85,7 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
     from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
@@ -131,6 +132,7 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     )
 
     from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")

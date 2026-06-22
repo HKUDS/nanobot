@@ -106,7 +106,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -598,7 +598,7 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
     except ValueError:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
-        raise WebUISettingsError("context_window_tokens must be 65536 or 262144")
+        raise WebUISettingsError("context_window_tokens must be 65536, 200000, or 262144")
     return parsed
 
 
