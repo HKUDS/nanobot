@@ -139,10 +139,32 @@ def test_stop_terminates_recorded_process(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
     monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
     terminated: list[int] = []
-    monkeypatch.setattr(runtime, "_terminate", lambda pid, timeout_s: terminated.append(pid))
+
+    def fake_terminate(pid, timeout_s):
+        terminated.append(pid)
+        return True
+
+    monkeypatch.setattr(runtime, "_terminate", fake_terminate)
 
     result = runtime.stop()
 
     assert result.ok is True
     assert terminated == [12345]
     assert not runtime.paths.state_path.exists()
+
+
+def test_stop_keeps_state_when_process_survives_timeout(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text('{"pid": 12345, "identity": 12345}', encoding="utf-8")
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 12345)
+    monkeypatch.setattr(runtime, "_terminate", lambda _pid, timeout_s: False)
+
+    result = runtime.stop(timeout_s=0)
+
+    assert result.ok is False
+    assert result.message == "gateway_stop_timeout"
+    assert result.status.running is True
+    assert result.status.reason == "stop_timeout"
+    assert runtime.paths.state_path.exists()
