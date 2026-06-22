@@ -80,6 +80,29 @@ def _signal_name(signum: int) -> str:
     return f"signal {signum}"
 
 
+def _ensure_gateway_tty_signal_mode() -> None:
+    """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            return
+    except Exception:
+        return
+
+    with suppress(Exception):
+        import termios
+
+        attrs = termios.tcgetattr(fd)
+        lflag = attrs[3]
+        required = termios.ISIG | termios.ICANON | termios.ECHO
+        if (lflag & required) == required:
+            return
+        attrs[3] = lflag | required
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        logger.debug("Restored foreground gateway TTY signal mode")
+
+
 def _install_gateway_shutdown_handlers(
     loop: asyncio.AbstractEventLoop,
     shutdown_event: asyncio.Event,
@@ -1166,6 +1189,7 @@ def _run_gateway(
         runtime_tasks: asyncio.Future | None = None
         runtime_tasks_drained = False
         shutdown_event = asyncio.Event()
+        _ensure_gateway_tty_signal_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
             asyncio.get_running_loop(),
             shutdown_event,

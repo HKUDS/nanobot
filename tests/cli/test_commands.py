@@ -109,6 +109,37 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
     asyncio.run(_run())
 
 
+def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
+    try:
+        import os
+        import pty
+        import termios
+    except ImportError:  # pragma: no cover - platform without POSIX termios
+        pytest.skip("termios unavailable")
+
+    master_fd, slave_fd = pty.openpty()
+
+    class _Stdin:
+        def fileno(self) -> int:
+            return slave_fd
+
+    try:
+        attrs = termios.tcgetattr(slave_fd)
+        attrs[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+
+        monkeypatch.setattr(cli_commands.sys, "stdin", _Stdin())
+        cli_commands._ensure_gateway_tty_signal_mode()
+
+        restored = termios.tcgetattr(slave_fd)
+        assert restored[3] & termios.ISIG
+        assert restored[3] & termios.ICANON
+        assert restored[3] & termios.ECHO
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
