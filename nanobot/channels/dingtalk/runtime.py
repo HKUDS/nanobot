@@ -760,14 +760,15 @@ class DingTalkChannel(BaseChannel):
                 session_key = f"{self.name}:group:{conversation_id}:{sender_id}"
 
             if not is_group and self.config.disable_private_chat:
-                # Private chat is disabled: reply with a notice and drop the
-                # message before any permission/pairing logic runs, so even
-                # allowlisted users are redirected to group chat.
+                # Group-only kill switch: drop DMs with a notice *before* any
+                # allow_from / pairing check, so even allowlisted senders are
+                # redirected — intentional, this is a hard private-chat guard
+                # rather than an authorization decision. No session is created.
                 self.logger.info("private chat disabled; rejecting DM from {}", sender_name)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
-                        chat_id=str(chat_id),
+                        chat_id=str(chat_id),  # str() guards a None sender_id
                         content="该机器人未开启私聊，请在群聊中与我对话。",
                     )
                 )
