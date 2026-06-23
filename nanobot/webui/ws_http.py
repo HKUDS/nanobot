@@ -81,6 +81,7 @@ from nanobot.webui.skills_api import webui_skill_detail_payload, webui_skills_pa
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
+from nanobot.webui.push_service import PushService
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
@@ -154,6 +155,7 @@ class GatewayHTTPHandler:
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
+        push_service: PushService | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -170,6 +172,7 @@ class GatewayHTTPHandler:
         self.cron_pending_job_ids = cron_pending_job_ids
         self._log = log
         self._runtime_surface = runtime_surface
+        self._push_service = push_service
 
         from nanobot.webui.settings_api import runtime_capabilities as _rc
         from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -316,17 +319,18 @@ class GatewayHTTPHandler:
 
         ws_url = self._bootstrap_ws_url(request)
         expected_path = _normalize_config_path(self.config.path)
-        return _http_json_response(
-            {
-                "token": token,
-                "ws_path": expected_path,
-                "ws_url": ws_url,
-                "expires_in": self.config.token_ttl_s,
-                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
-                "runtime_surface": self._runtime_surface,
-                "runtime_capabilities": self._capabilities,
-            }
-        )
+        payload: dict[str, Any] = {
+            "token": token,
+            "ws_path": expected_path,
+            "ws_url": ws_url,
+            "expires_in": self.config.token_ttl_s,
+            "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+            "runtime_surface": self._runtime_surface,
+            "runtime_capabilities": self._capabilities,
+        }
+        if self._push_service is not None:
+            payload["vapid_public_key"] = self._push_service.vapid_public_key
+        return _http_json_response(payload)
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
@@ -665,6 +669,10 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
+        if got == "/api/push/subscribe":
+            return await self._handle_push_subscribe(request)
+        if got == "/api/push/unsubscribe":
+            return await self._handle_push_unsubscribe(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -735,6 +743,51 @@ class GatewayHTTPHandler:
             return _http_error(500, "failed to write sidebar state")
         return _http_json_response(state)
 
+    # -- Push notification routes -------------------------------------------
+
+    async def _handle_push_subscribe(self, request: WsRequest) -> Response:
+        if self._push_service is None:
+            return _http_error(503, "push notifications not configured")
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            body = request.body
+            if isinstance(body, (bytes, bytearray)):
+                body = body.decode("utf-8")
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _http_error(400, "invalid JSON body")
+
+        subscription = data.get("subscription")
+        chat_id = data.get("chat_id")
+        if not isinstance(subscription, dict) or not isinstance(chat_id, str):
+            return _http_error(400, "missing subscription or chat_id")
+        self._push_service.subscribe(chat_id, subscription)
+        self._log.info("Push subscription registered for chat_id={}", chat_id)
+        return _http_json_response({"ok": True})
+
+    async def _handle_push_unsubscribe(self, request: WsRequest) -> Response:
+        if self._push_service is None:
+            return _http_error(503, "push notifications not configured")
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            body = request.body
+            if isinstance(body, (bytes, bytearray)):
+                body = body.decode("utf-8")
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return _http_error(400, "invalid JSON body")
+
+        subscription = data.get("subscription")
+        chat_id = data.get("chat_id")
+        if not isinstance(subscription, dict) or not isinstance(chat_id, str):
+            return _http_error(400, "missing subscription or chat_id")
+        removed = self._push_service.unsubscribe(chat_id, subscription)
+        if removed:
+            self._log.info("Push subscription removed for chat_id={}", chat_id)
+        return _http_json_response({"ok": removed})
+
     # -- Static file serving ------------------------------------------------
 
     def _serve_static(self, request_path: str) -> Response | None:
@@ -765,7 +818,7 @@ class GatewayHTTPHandler:
             ctype = "application/octet-stream"
         if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
             ctype = f"{ctype}; charset=utf-8"
-        if candidate.name == "index.html":
+        if candidate.name in ("index.html", "service-worker.js"):
             cache = "no-cache"
         else:
             cache = "public, max-age=31536000, immutable"
