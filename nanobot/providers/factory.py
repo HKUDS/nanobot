@@ -90,6 +90,7 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
+            spec=spec,
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider

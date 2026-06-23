@@ -293,6 +293,43 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         thinking_style="thinking_type",
     ),
 
+    # OpenCode Go: gateway aggregating GLM, Kimi, DeepSeek, MiMo, Qwen, MiniMax.
+    # Model IDs use opencode-go/<model-id> format; strip before sending to API.
+    # OpenAI-compatible endpoint at /zen/go/v1/chat/completions.
+    ProviderSpec(
+        name="opencode_go",
+        keywords=(
+            "opencode-go",
+            "glm-5",
+            "kimi-k2",
+            "deepseek-v4",
+            "mimo-v2",
+            "qwen3",
+        ),
+        env_key="OPENCODE_GO_API_KEY",
+        display_name="OpenCode Go",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode",
+        default_api_base="https://opencode.ai/zen/go/v1",
+        strip_model_prefix=True,
+        supports_max_completion_tokens=True,
+    ),
+
+    # OpenCode Go Anthropic-compatible endpoint at /zen/go/v1/messages.
+    # For MiniMax M2.5 / M2.7 models served via Anthropic Messages API.
+    ProviderSpec(
+        name="opencode_go_anthropic",
+        keywords=("opencode-go-anthropic",),
+        env_key="OPENCODE_GO_API_KEY",
+        display_name="OpenCode Go Anthropic",
+        backend="anthropic",
+        is_gateway=True,
+        detect_by_base_keyword="opencode",
+        default_api_base="https://opencode.ai/zen/go/v1",
+        strip_model_prefix=True,
+    ),
+
 
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: native Anthropic SDK
