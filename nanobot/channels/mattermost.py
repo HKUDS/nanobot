@@ -502,20 +502,35 @@ class MattermostChannel(BaseChannel):
         stream_id = meta.get("_stream_id", chat_id)
 
         if meta.get("_stream_end"):
-            self._stream_buffers.pop(stream_id, None)
+            stream_root = self._stream_root_ids.pop(stream_id, None)
+            self._stream_posts.pop(stream_id, None)
             self._stream_last_content.pop(stream_id, None)
-            post_id = self._stream_posts.pop(stream_id, None)
-            final = self._stream_committed.pop(stream_id, None)
-            if post_id and final and self.config.done_emoji:
-                try:
-                    await self._add_reaction(chat_id, post_id, self.config.done_emoji)
-                except Exception:
-                    self.logger.debug("done reaction failed")
+            buf = self._stream_buffers.pop(stream_id, None)
+            final = self._stream_committed.pop(stream_id, None) or buf
+
             if not meta.get("_progress") and meta.get("message_id"):
                 try:
                     await self._remove_reaction(meta["message_id"], self.config.react_emoji)
                 except Exception:
                     self.logger.debug("remove reaction failed")
+
+            if final and not meta.get("_progress") and not meta.get("_resuming"):
+                try:
+                    mm_meta = (meta.get("mattermost", {}) or {}) if isinstance(meta.get("mattermost"), dict) else {}
+                    root_id = mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id") or stream_root
+                    chunks = split_message(final, MATTERMOST_MAX_MESSAGE_LEN)
+                    for i, chunk in enumerate(chunks):
+                        post = await self._create_post(
+                            chat_id, chunk,
+                            root_id=root_id if self.config.reply_in_thread else None,
+                        )
+                        if i == 0 and self.config.done_emoji:
+                            try:
+                                await self._add_reaction(chat_id, post["id"], self.config.done_emoji)
+                            except Exception:
+                                self.logger.debug("done reaction failed")
+                except Exception:
+                    self.logger.exception("stream final post failed")
             return
 
         if not delta.strip():
@@ -524,46 +539,8 @@ class MattermostChannel(BaseChannel):
         committed = self._stream_committed.get(stream_id, "")
         buf = committed + delta
         self._stream_buffers[stream_id] = buf
-
-        if stream_id not in self._stream_posts:
-            try:
-                mm_meta = (meta.get("mattermost", {}) or {}) if isinstance(meta.get("mattermost"), dict) else {}
-                root_id = mm_meta.get("root_id") or mm_meta.get("thread_ts") or meta.get("root_id")
-                post = await self._create_post(
-                    chat_id, buf,
-                    root_id=root_id if self.config.reply_in_thread else None,
-                )
-                self._stream_posts[stream_id] = post["id"]
-                self._stream_committed[stream_id] = buf
-                if root_id and self.config.reply_in_thread:
-                    self._stream_root_ids[stream_id] = root_id
-            except Exception as e:
-                self.logger.warning("stream initial post failed: {}", e)
-                raise
-        else:
-            post_id = self._stream_posts[stream_id]
-            if buf == self._stream_last_content.get(stream_id):
-                return
-            self._stream_last_content[stream_id] = buf
-            if len(buf) > self.config.streaming_max_chars:
-                try:
-                    stream_root = self._stream_root_ids.get(stream_id)
-                    post = await self._create_post(
-                        chat_id, buf,
-                        root_id=stream_root if self.config.reply_in_thread else None,
-                    )
-                    self._stream_posts[stream_id] = post["id"]
-                    self._stream_committed[stream_id] = buf
-                except Exception as e:
-                    self.logger.warning("stream overflow post failed: {}", e)
-                    raise
-            else:
-                try:
-                    await self._edit_post(post_id, buf)
-                    self._stream_committed[stream_id] = buf
-                except Exception as e:
-                    self.logger.warning("stream edit failed: {}", e)
-                    raise
+        self._stream_committed[stream_id] = buf
+        return
 
     # API helpers ---------------------------------------------------------------
 
@@ -634,7 +611,7 @@ class MattermostChannel(BaseChannel):
             out = Path(get_media_dir("mattermost")) / safe_filename(f"{file_id}_{name}")
             out.parent.mkdir(parents=True, exist_ok=True)
 
-            dl = await self._http_client.get(f"/api/v4/files/{file_id}/download")
+            dl = await self._http_client.get(f"/api/v4/files/{file_id}")
             dl.raise_for_status()
             out.write_bytes(dl.content)
             return str(out)
