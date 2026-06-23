@@ -539,6 +539,18 @@ class AnthropicProvider(LLMProvider):
                     "signature": getattr(block, "signature", ""),
                 })
 
+        # Some providers (e.g. Kimi / Anthropic-compatible endpoints) reuse the
+        # same tool_use id for parallel tool calls in streaming mode. Deduplicate
+        # before building the response so downstream tool messages don't collide.
+        _seen_tc_ids: set[str] = set()
+        deduped_tool_calls: list[ToolCallRequest] = []
+        for tc in tool_calls:
+            if not tc.id or tc.id in _seen_tc_ids:
+                continue
+            _seen_tc_ids.add(tc.id)
+            deduped_tool_calls.append(tc)
+        tool_calls = deduped_tool_calls
+
         stop_map = {"tool_use": "tool_calls", "end_turn": "stop", "max_tokens": "length"}
         finish_reason = stop_map.get(response.stop_reason or "", response.stop_reason or "stop")
 
@@ -553,12 +565,10 @@ class AnthropicProvider(LLMProvider):
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": total_prompt_tokens + response.usage.output_tokens,
             }
-            for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
-                val = getattr(response.usage, attr, 0)
-                if val:
-                    usage[attr] = val
-            # Normalize to cached_tokens for downstream consistency.
+            if cache_creation:
+                usage["cache_creation_input_tokens"] = cache_creation
             if cache_read:
+                usage["cache_read_input_tokens"] = cache_read
                 usage["cached_tokens"] = cache_read
 
         return LLMResponse(
