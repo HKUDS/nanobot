@@ -417,6 +417,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
     ),
+    # Kimi Coding Plan — Anthropic Messages API at api.kimi.com/coding
+    # sk-kimi-* keys; requires User-Agent: claude-code/0.1.0 header.
+    ProviderSpec(
+        name="kimi_coding",
+        keywords=("kimi-coding", "kimi_coding", "kimi-for-coding"),
+        env_key="KIMI_CODING_API_KEY",
+        display_name="Kimi Coding",
+        backend="anthropic",
+        default_api_base="https://api.kimi.com/coding/v1",
+    ),
     # MiniMax: OpenAI-compatible API
     ProviderSpec(
         name="minimax",
