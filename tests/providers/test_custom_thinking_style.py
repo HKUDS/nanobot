@@ -11,7 +11,7 @@ class TestCustomProviderThinkingStyle:
 
     def test_default_thinking_style_is_empty(self) -> None:
         cfg = ProviderConfig()
-        assert cfg.thinking_style == ""
+        assert cfg.thinking_style is None
 
     def test_create_dynamic_spec_default(self) -> None:
         spec = create_dynamic_spec("custom")
