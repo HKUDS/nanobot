@@ -522,6 +522,10 @@ class MemoryStore:
                 name = metadata.get("name") or skill_dir.name
                 description = metadata.get("description")
                 if not description:
+                    logger.warning(
+                        "Skill '{}' has no description in frontmatter, skipping for Dream",
+                        name,
+                    )
                     continue
                 skill_lines.append(f"- {name}: {description}")
         existing_skills = (
