@@ -1130,8 +1130,6 @@ class AgentLoop:
                 # its anyio cancel scope from crashing the gateway (#4302).
                 http_gen = getattr(stack, "_mcp_http_gen", None)
                 if http_gen is not None:
-                    from contextlib import suppress
-
                     with suppress(Exception):
                         await http_gen.aclose()
         self._mcp_stacks.clear()
