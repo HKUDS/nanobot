@@ -1,0 +1,6 @@
+{
+  "identifier": "ai.nanobot.windows",
+  "bundle": {
+    "targets": ["nsis"]
+  }
+}
