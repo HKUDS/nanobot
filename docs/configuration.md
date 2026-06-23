@@ -18,6 +18,7 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 | Need | Section |
 |---|---|
 | Keep secrets out of `config.json` | [Environment Variables for Secrets](#environment-variables-for-secrets) |
+| Tune process-level behavior with env vars | [Runtime Environment Variables](#runtime-environment-variables) |
 | Trace model calls | [Langfuse Observability](#langfuse-observability) |
 | Configure credentials and endpoints | [Providers](#providers) |
 | Name and switch model choices | [Model Presets](#model-presets) |
@@ -47,6 +48,7 @@ If you are not sure where a setting belongs, start from the task you are trying 
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
+| Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Start each process with explicit paths and run `nanobot status` for the default instance only | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
 | Observe model calls | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` environment variables | Run one model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
 
@@ -158,6 +160,36 @@ ANTHROPIC_API_KEY="$(pass show api/anthropic)" nanobot agent
 # Bitwarden
 ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 ```
+
+## Runtime Environment Variables
+
+These variables are process-level switches. Set them in the same terminal, service unit, container, or supervisor that starts nanobot.
+
+### Runtime controls
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NANOBOT_MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrently running inbound agent requests. Must be an integer; set `0` or a negative value for unlimited. |
+| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds, around ordinary LLM requests. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
+| `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
+| `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
+| `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` | unset | Marks that an external workspace sandbox is already enforced. Truthy values (`1`, `true`, `yes`, `on`, `enabled`) use `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` as the label; any other non-false value is treated as the provider name. |
+| `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` | `unknown` | Display label for the external workspace sandbox when `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` is truthy, for example `macos_app_sandbox` or `bwrap`. |
+| `NANOBOT_SANDBOX_ENFORCED` | unset | Legacy compatibility alias for `NANOBOT_WORKSPACE_SANDBOX_ENFORCED`. |
+| `NANOBOT_TMUX_SOCKET_DIR` | `${TMPDIR:-/tmp}/nanobot-tmux-sockets` | Socket directory used by the bundled `tmux` skill scripts. |
+
+### Installer, build, and WebUI development
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NANOBOT_BIN_DIR` | `$HOME/.local/bin` | Installer launcher directory on macOS/Linux. |
+| `NANOBOT_VENV` | `$HOME/.nanobot/venv` | Managed virtual environment path used by the installer fallback. |
+| `NANOBOT_SKIP_WIZARD` | unset | Set to `1` to skip `nanobot onboard --wizard` after one-command install. |
+| `NANOBOT_SKIP_WEBUI_BUILD` | unset | Set to `1` to skip bundling the WebUI during package builds. |
+| `NANOBOT_FORCE_WEBUI_BUILD` | unset | Set to `1` to rebuild the bundled WebUI even when `nanobot/web/dist/index.html` already exists. |
+| `NANOBOT_API_URL` | `http://127.0.0.1:8765` | Gateway target for the Vite WebUI dev server proxy. |
+
+Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by nanobot itself and are not a supported user configuration surface.
 
 ## Langfuse Observability
 
