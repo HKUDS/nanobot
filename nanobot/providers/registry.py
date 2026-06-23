@@ -176,6 +176,32 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
     ),
+    # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
+    # OpenCode's own config uses "opencode/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode_zen",
+        keywords=("opencode/", "opencode_zen", "opencode-zen"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
+    ),
+    # OpenCode Go: OpenAI-compatible chat-completions gateway for low-cost models.
+    # OpenCode's own config uses "opencode-go/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode_go",
+        keywords=("opencode-go", "opencode_go"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Go",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen/go",
+        default_api_base="https://opencode.ai/zen/go/v1",
+        strip_model_prefixes=("opencode-go", "opencode_go"),
+    ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
         name="huggingface",
@@ -542,26 +568,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_key_prefix="nvapi-",
         detect_by_base_keyword="nvidia.com",
         default_api_base="https://integrate.api.nvidia.com/v1",
-    ),
-    # OpenCode Zen: curated reliable models for coding agents
-    ProviderSpec(
-        name="opencode_zen",
-        keywords=("opencode_zen", "opencode-zen", "zen"),
-        env_key="OPENCODE_API_KEY",
-        display_name="OpenCode Zen",
-        backend="openai_compat",
-        is_gateway=True,
-        default_api_base="https://opencode.ai/zen/v1",
-    ),
-    # OpenCode Go: low-cost coding models
-    ProviderSpec(
-        name="opencode_go",
-        keywords=("opencode_go", "opencode-go"),
-        env_key="OPENCODE_API_KEY",
-        display_name="OpenCode Go",
-        backend="openai_compat",
-        is_gateway=True,
-        default_api_base="https://opencode.ai/zen/go/v1",
     ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM

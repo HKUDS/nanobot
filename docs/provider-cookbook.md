@@ -15,6 +15,7 @@ Match the recipe to the credential or endpoint you already have:
 | What you have | Recipe | Must match |
 |---|---|---|
 | A gateway key and model IDs that include a model family path, such as `provider/model-name` | [OpenRouter Gateway](#recipe-openrouter-gateway) | API key, provider config key, preset provider, and gateway model ID |
+| An OpenCode Zen or Go key | [OpenCode Zen or Go](#recipe-opencode-zen-or-go) | `OPENCODE_API_KEY`, the Zen/Go provider key, and a model ID from the matching OpenCode endpoint |
 | An OpenAI platform API key and OpenAI model ID | [OpenAI Direct](#recipe-openai-direct) | `OPENAI_API_KEY`, `provider: "openai"`, and an OpenAI model available to that account |
 | An Anthropic API key and Anthropic model ID | [Anthropic Direct](#recipe-anthropic-direct) | `ANTHROPIC_API_KEY`, `provider: "anthropic"`, and a non-gateway model ID |
 | An OpenAI-compatible `/v1` endpoint that is not a named nanobot provider | [Custom OpenAI-Compatible Provider](#recipe-custom-openai-compatible-provider) | `apiBase`, optional API key, and the model ID served by that endpoint |
@@ -93,6 +94,79 @@ nanobot agent -m "Hello!"
 ```
 
 If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is visible in the same terminal or service that starts nanobot. If it fails with `model not found`, choose a model ID that OpenRouter lists for your account.
+
+## Recipe: OpenCode Zen or Go
+
+This recipe applies when your credential comes from OpenCode Zen or OpenCode Go.
+Both providers use `OPENCODE_API_KEY`; pick the provider block that matches the
+subscription or balance you want to use.
+
+OpenCode Zen:
+
+```json
+{
+  "providers": {
+    "opencodeZen": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "label": "OpenCode Zen",
+      "provider": "opencode_zen",
+      "model": "opencode/deepseek-v4-pro",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+OpenCode Go:
+
+```json
+{
+  "providers": {
+    "opencodeGo": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "label": "OpenCode Go",
+      "provider": "opencode_go",
+      "model": "opencode-go/deepseek-v4-flash",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Verify:
+
+```bash
+nanobot status
+nanobot agent -m "Hello!"
+```
+
+OpenCode's docs list models across multiple endpoint types. The `opencode_zen`
+and `opencode_go` providers in nanobot use the OpenAI-compatible
+`chat/completions` path. If a model fails with `model not found` or an endpoint
+shape error, choose a model that OpenCode lists under `chat/completions` for the
+matching Zen or Go endpoint.
 
 ## Recipe: OpenAI Direct
 

@@ -199,6 +199,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **MiniMax thinking mode**: `providers.minimaxAnthropic` is the config block for `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **VolcEngine / BytePlus Coding Plan**: Subscription endpoints are configured through dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan`, separate from the pay-per-use `volcengine` / `byteplus` providers.
+> - **OpenCode Zen / Go**: `providers.opencodeZen` and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **StepFun Step Plan**: If you're on StepFun's Step Plan subscription, set `"apiBase": "https://api.stepfun.ai/step_plan/v1"` in your stepfun provider config. Supported models include `step-3.5-flash`, `step-3.5-flash-2603`, and `step-router-v1`.
@@ -211,6 +212,8 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM gateway for hosted model families + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
+| `opencode_zen` | LLM gateway (OpenCode Zen coding-agent models) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
+| `opencode_go` | LLM gateway (OpenCode Go low-cost coding models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
@@ -674,6 +677,72 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>OpenCode Zen / Go</b></summary>
+
+OpenCode Zen and OpenCode Go are available through nanobot's built-in
+OpenAI-compatible provider flow. They share the `OPENCODE_API_KEY` environment
+variable, but use separate provider keys and default base URLs:
+
+| Provider | Default API base | Model prefix accepted by nanobot |
+|----------|------------------|-----------------------------------|
+| `opencode_zen` | `https://opencode.ai/zen/v1` | `opencode/<model-id>` |
+| `opencode_go` | `https://opencode.ai/zen/go/v1` | `opencode-go/<model-id>` |
+
+OpenCode Zen:
+
+```json
+{
+  "providers": {
+    "opencodeZen": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "opencodeZen": {
+      "provider": "opencode_zen",
+      "model": "opencode/deepseek-v4-pro"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "opencodeZen"
+    }
+  }
+}
+```
+
+OpenCode Go:
+
+```json
+{
+  "providers": {
+    "opencodeGo": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "opencodeGo": {
+      "provider": "opencode_go",
+      "model": "opencode-go/deepseek-v4-flash"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "opencodeGo"
+    }
+  }
+}
+```
+
+OpenCode's own docs list models across `responses`, `messages`,
+provider-specific model endpoints, and `chat/completions`. nanobot's OpenCode
+providers use the OpenAI-compatible `chat/completions` path, so pick model IDs
+from that endpoint family. The `opencode/...` and `opencode-go/...` prefixes are
+accepted for config readability and stripped before sending the request.
 
 </details>
 
