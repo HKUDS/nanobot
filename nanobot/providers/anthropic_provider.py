@@ -158,27 +158,25 @@ class AnthropicProvider(LLMProvider):
         system: str | list[dict[str, Any]] = ""
         raw: list[dict[str, Any]] = []
         seen_tool_ids: set[str] = set()
-        duplicate_counts: dict[str, int] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
 
         def unique_tool_id(value: Any) -> str:
-            raw_id = str(value) if value else _gen_tool_id()
-            mapped_id = _sanitize_tool_id(raw_id)
+            raw_key = str(value) if value else ""
+            mapped_id = _sanitize_tool_id(raw_key) if raw_key else _gen_tool_id()
             if mapped_id and mapped_id not in seen_tool_ids:
                 seen_tool_ids.add(mapped_id)
-                if value:
-                    pending_tool_ids.setdefault(str(value), deque()).append(mapped_id)
+                if raw_key:
+                    pending_tool_ids.setdefault(raw_key, deque()).append(mapped_id)
                 return mapped_id
 
             seed = mapped_id or _gen_tool_id()
-            duplicate_counts[seed] = duplicate_counts.get(seed, 1) + 1
-            suffix = duplicate_counts[seed]
+            suffix = 2
             while True:
                 candidate = f"{seed}__dedupe_{suffix}"
                 if candidate not in seen_tool_ids:
                     seen_tool_ids.add(candidate)
-                    if value:
-                        pending_tool_ids.setdefault(str(value), deque()).append(candidate)
+                    if raw_key:
+                        pending_tool_ids.setdefault(raw_key, deque()).append(candidate)
                     return candidate
                 suffix += 1
 
