@@ -73,8 +73,6 @@ class MattermostChannel(BaseChannel):
     name = "mattermost"
     display_name = "Mattermost"
 
-    _BOT_MENTION_RE = re.compile(r"@\S+")
-
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return MattermostConfig().model_dump(by_alias=True)
