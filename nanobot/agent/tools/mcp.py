@@ -745,9 +745,12 @@ async def connect_mcp_servers(
                 )
                 _http_gen = streamable_http_client(cfg.url, http_client=http_client)
                 read, write, _ = await server_stack.enter_async_context(_http_gen)
-                # Stash the generator so _close_server can force-close it
-                # if aclose() raises due to cross-task cancel scope (#4302).
-                server_stack._mcp_http_gen = _http_gen  # type: ignore[attr-defined]
+                # Stash the underlying async generator so _close_server can
+                # force-close it if stack.aclose() raises due to cross-task
+                # cancel scope (#4302).  streamable_http_client() returns an
+                # _AsyncGeneratorContextManager which has no aclose(); the
+                # real async generator lives at .gen.
+                server_stack._mcp_http_gen = _http_gen.gen  # type: ignore[attr-defined]
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 await server_stack.aclose()
