@@ -330,6 +330,27 @@ class TestDreamCursor:
     def test_initial_cursor_is_zero(self, store):
         assert store.get_last_dream_cursor() == 0
 
+    def test_returns_zero_when_empty(self, store):
+        assert store.get_latest_cursor() == 0
+
+    def test_returns_cursor_of_last_entry(self, store):
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+
+        assert store.get_latest_cursor() == 3
+
+    def test_returns_zero_when_no_entries(self, store):
+        store.history_file.write_text("", encoding="utf-8")
+
+        assert store.get_latest_cursor() == 0
+
+    def test_matches_next_cursor_minus_one(self, store):
+        store.append_history("event 1")
+        store.append_history("event 2")
+
+        assert store.get_latest_cursor() == max(store._next_cursor() - 1, 0)
+
     def test_set_and_get_cursor(self, store):
         store.set_last_dream_cursor(5)
         assert store.get_last_dream_cursor() == 5
