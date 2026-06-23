@@ -704,6 +704,46 @@ class Consolidator:
             return (datetime.now() - last_run).total_seconds() >= self.eager_min_interval_s
         return True
 
+    @staticmethod
+    def _has_pending_tool_calls(messages: list[dict[str, Any]]) -> bool:
+        pending: set[str] = set()
+        for message in messages:
+            role = message.get("role")
+            if role == "assistant":
+                for tool_call in message.get("tool_calls") or []:
+                    if isinstance(tool_call, dict) and tool_call.get("id"):
+                        pending.add(str(tool_call["id"]))
+            elif role == "tool":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id:
+                    pending.discard(str(tool_call_id))
+        return bool(pending)
+
+    def _repair_eager_boundary(self, session: Session, start: int, end: int) -> int | None:
+        minimum = start + self.eager_min_messages
+        for candidate in range(end, minimum - 1, -1):
+            if not self._has_pending_tool_calls(session.messages[start:candidate]):
+                return candidate
+        return None
+
+    def _eager_archive_cursor(self, session: Session) -> int:
+        last_consolidated = self._cursor_value(session, "last_consolidated", 0)
+        last_eager = self._cursor_value(session, "last_eager_consolidated", last_consolidated)
+        return min(len(session.messages), max(last_consolidated, last_eager))
+
+    def _advance_to_eager_archive_cursor(self, session: Session) -> bool:
+        start = self._eager_archive_cursor(session)
+        if start <= session.last_consolidated:
+            return False
+        logger.debug(
+            "Token consolidation for {}: skipping {} eagerly archived messages",
+            session.key,
+            start - session.last_consolidated,
+        )
+        session.last_consolidated = start
+        session.last_eager_consolidated = start
+        return True
+
     def _pick_eager_boundary(self, session: Session, start: int) -> int | None:
         available = len(session.messages) - start
         if available < self.eager_min_messages:
@@ -717,7 +757,7 @@ class Consolidator:
                 if idx - start >= self.eager_min_messages:
                     return idx
                 return None
-        return capped_end
+        return self._repair_eager_boundary(session, start, capped_end)
 
     def pick_consolidation_boundary(
         self,
@@ -802,7 +842,12 @@ class Consolidator:
         end_idx = self._replay_overflow_boundary(session, replay_max_messages)
         if end_idx is None:
             return None
-        chunk = session.messages[session.last_consolidated:end_idx]
+        start_idx = self._eager_archive_cursor(session)
+        if end_idx <= start_idx:
+            if self._advance_to_eager_archive_cursor(session):
+                self.sessions.save(session)
+            return None
+        chunk = session.messages[start_idx:end_idx]
         if not chunk:
             return None
         logger.info(
@@ -970,6 +1015,22 @@ class Consolidator:
                 )
                 self._persist_last_summary(session, last_summary)
                 return
+
+            if self._advance_to_eager_archive_cursor(session):
+                self.sessions.save(session)
+                try:
+                    estimated, source = self.estimate_session_prompt_tokens(
+                        session,
+                    )
+                except Exception:
+                    logger.exception("Token estimation failed for {}", session.key)
+                    estimated, source = 0, "error"
+                if estimated <= 0:
+                    self._persist_last_summary(session, last_summary)
+                    return
+                if estimated < budget:
+                    self._persist_last_summary(session, last_summary)
+                    return
 
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
