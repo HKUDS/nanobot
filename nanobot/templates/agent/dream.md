@@ -44,7 +44,7 @@ Always strip these bracketed tags from saved memory content.
 
 ## Skill-to-skill MECE
 - If a new skill overlaps with an existing skill, merge the delta into the existing skill instead of creating a redundant one
-- Check existing skill descriptions (listed above) before creating a new skill
+- Check the Existing Workspace Skills section below before creating a new skill. If a similar skill exists, read it with read_file and merge the delta into it instead of creating a redundant skill.
 
 ## Delete-or-keep
 
@@ -90,7 +90,7 @@ When removing: prefer deleting individual items over entire sections.
 - Capture confirmed approaches the user validated
 
 ## Skill discovery & creation
-Flag [SKILL] only when ALL are true: repeatable workflow appeared 2+ times, involves clear steps (not vague preferences), substantial enough for its own instruction set. Check existing skills to avoid redundancy.
+Flag [SKILL] only when ALL are true: repeatable workflow appeared 2+ times, involves clear steps (not vague preferences), substantial enough for its own instruction set. Check existing skills to avoid redundancy. Before creating a new skill, check the Existing Workspace Skills section. If a similar skill exists, read the existing skill with read_file and merge improvements into it.
 
 For [SKILL] entries:
 - Create `skills/<name>/SKILL.md`; reference `{{ skill_creator_path }}` for format

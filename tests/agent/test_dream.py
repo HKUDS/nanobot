@@ -61,6 +61,22 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
+    def test_prompt_includes_existing_workspace_skills(self, store):
+        skill_dir = store.workspace / "skills" / "existing"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: existing\ndescription: Merge into this skill.\n---\n\nSteps.\n",
+            encoding="utf-8",
+        )
+        store.append_history("test")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _ = result
+        assert "## Existing Workspace Skills\n- existing: Merge into this skill." in prompt
+        assert prompt.index("## Existing Workspace Skills") < prompt.index("## Conversation History")
+
     def test_truncates_long_entries(self, store):
         long_content = "x" * 2000
         store.append_history(long_content)

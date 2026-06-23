@@ -484,6 +484,8 @@ class MemoryStore:
 
         Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
         """
+        import yaml
+
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
         last_cursor = self.get_last_dream_cursor()
@@ -500,7 +502,33 @@ class MemoryStore:
         template = render_template(
             "agent/dream.md", strip=True, skill_creator_path=skill_creator_path,
         )
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
+        skill_lines: list[str] = []
+        skills_dir = self.workspace / "skills"
+        if skills_dir.exists():
+            for skill_dir in sorted(skills_dir.iterdir()):
+                skill_file = skill_dir / "SKILL.md"
+                if not skill_dir.is_dir() or not skill_file.exists():
+                    continue
+                content = skill_file.read_text(encoding="utf-8")
+                match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
+                if not match:
+                    continue
+                try:
+                    metadata = yaml.safe_load(match.group(1))
+                except yaml.YAMLError:
+                    continue
+                if not isinstance(metadata, dict):
+                    continue
+                name = metadata.get("name") or skill_dir.name
+                description = metadata.get("description")
+                if not description:
+                    continue
+                skill_lines.append(f"- {name}: {description}")
+        existing_skills = (
+            "\n\n## Existing Workspace Skills\n" + "\n".join(skill_lines)
+            if skill_lines else ""
+        )
+        prompt = f"{template}{existing_skills}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
 
     def build_dream_tools(self):
