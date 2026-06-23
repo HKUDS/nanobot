@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "サイドバーのナビゲーション",
+    "mobileNavigation": "モバイルサイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
     "newChat": "新しいチャット",
     "searchAria": "検索",

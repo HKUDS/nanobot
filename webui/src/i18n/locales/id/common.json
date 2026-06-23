@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
+    "mobileNavigation": "Navigasi bilah samping seluler",
     "collapse": "Ciutkan sidebar",
     "newChat": "Obrolan baru",
     "searchAria": "Cari",

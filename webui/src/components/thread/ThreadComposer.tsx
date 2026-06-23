@@ -1,87 +1,87 @@
 import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type CSSProperties,
+    type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import {
+    CliAppMentionToken,
+    McpPresetMentionToken,
+    cliAppInitials,
+    mcpPresetInitials,
+    splitCapabilityMentionSegments,
+    type CapabilityMentionSegment,
+} from "@/components/CliAppMentionText";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import {
-  CliAppMentionToken,
-  McpPresetMentionToken,
-  cliAppInitials,
-  mcpPresetInitials,
-  splitCapabilityMentionSegments,
-  type CapabilityMentionSegment,
-} from "@/components/CliAppMentionText";
-import {
-  Activity,
-  ArrowUp,
-  BookOpen,
-  Brain,
-  ChevronDown,
-  ChevronUp,
-  CircleHelp,
-  CornerDownRight,
-  GripVertical,
-  History,
-  ImageIcon,
-  Loader2,
-  Mic,
-  Plus,
-  RotateCw,
-  Shield,
-  Sparkles,
-  Square,
-  SquarePen,
-  Target,
-  Trash2,
-  Undo2,
-  X,
-  type LucideIcon,
+    Activity,
+    ArrowUp,
+    BookOpen,
+    Brain,
+    ChevronDown,
+    ChevronUp,
+    CircleHelp,
+    CornerDownRight,
+    GripVertical,
+    History,
+    ImageIcon,
+    Loader2,
+    Mic,
+    Plus,
+    RotateCw,
+    Shield,
+    Sparkles,
+    Square,
+    SquarePen,
+    Target,
+    Trash2,
+    Undo2,
+    X,
+    type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import {
+    WorkspaceAccessMenu,
+    WorkspaceProjectPicker,
+} from "@/components/thread/WorkspaceControls";
 import { Button } from "@/components/ui/button";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  WorkspaceAccessMenu,
-  WorkspaceProjectPicker,
-} from "@/components/thread/WorkspaceControls";
-import {
-  useAttachedImages,
-  type AttachedImage,
-  type AttachmentError,
-  MAX_IMAGES_PER_MESSAGE,
-  type RestoredReadyImage,
+    MAX_IMAGES_PER_MESSAGE,
+    useAttachedImages,
+    type AttachedImage,
+    type AttachmentError,
+    type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
+import type { SendImage, SendOptions } from "@/hooks/useBlackcatStream";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
-import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import { useVoiceRecorder, type VoiceRecorderErrorKey } from "@/hooks/useVoiceRecorder";
-import type {
-  CliAppInfo,
-  GoalStateWsPayload,
-  McpPresetInfo,
-  OutboundCliAppMention,
-  OutboundMcpPresetMention,
-  SlashCommand,
-  WorkspaceScopePayload,
-  WorkspacesPayload,
-} from "@/lib/types";
 import {
-  inferProviderFromModelName,
-  logoFallbackUrls,
-  providerBrand,
+    inferProviderFromModelName,
+    logoFallbackUrls,
+    providerBrand,
 } from "@/lib/provider-brand";
+import type {
+    CliAppInfo,
+    GoalStateWsPayload,
+    McpPresetInfo,
+    OutboundCliAppMention,
+    OutboundMcpPresetMention,
+    SlashCommand,
+    WorkspaceScopePayload,
+    WorkspacesPayload,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is

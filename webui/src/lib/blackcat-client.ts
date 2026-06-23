@@ -1,15 +1,15 @@
+import { createHostWebSocket } from "./runtime";
 import type {
   ConnectionStatus,
+  GoalStateWsPayload,
   InboundEvent,
   Outbound,
   OutboundCliAppMention,
   OutboundImageGeneration,
   OutboundMcpPresetMention,
   OutboundMedia,
-  GoalStateWsPayload,
   WorkspaceScopePayload,
 } from "./types";
-import { createHostWebSocket } from "./runtime";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -119,7 +119,7 @@ export interface NanobotClientOptions {
  * ``chat_id``, and this class fans those events out to handlers registered
  * per chat. Reconnects are transparent and re-attach every known chat_id.
  */
-export class NanobotClient {
+export class BlackcatClient {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
@@ -558,7 +558,7 @@ export class NanobotClient {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
-    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
+    const over = q.length - BlackcatClient.PENDING_INBOUND_MAX;
     if (over > 0) {
       q.splice(0, over);
     }

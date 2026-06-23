@@ -57,6 +57,7 @@ interface SidebarProps {
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+  ariaLabel?: string;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -86,7 +87,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
-      aria-label={t("sidebar.navigation")}
+      aria-label={props.ariaLabel ?? t("sidebar.navigation")}
       className={cn(
         "flex h-full w-full min-w-0 flex-col text-sidebar-foreground",
         props.hostChromeInset ? "bg-transparent" : "bg-sidebar",

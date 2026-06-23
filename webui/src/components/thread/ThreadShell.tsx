@@ -1,43 +1,43 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
-import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
-import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
+import { useBlackcatStream, type SendImage, type SendOptions } from "@/hooks/useBlackcatStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
-  fetchInstalledCliApps,
-  fetchMcpPresets,
-  fetchSettings,
-  listSlashCommands,
+    fetchInstalledCliApps,
+    fetchMcpPresets,
+    fetchSettings,
+    listSlashCommands,
 } from "@/lib/api";
 import {
-  CLI_APPS_CHANGED_EVENT,
-  installedCliAppsFromPayload,
-  isCliAppsPayload,
+    CLI_APPS_CHANGED_EVENT,
+    installedCliAppsFromPayload,
+    isCliAppsPayload,
 } from "@/lib/cli-app-events";
 import {
-  MCP_PRESETS_CHANGED_EVENT,
-  installedMcpPresetsFromPayload,
-  isMcpPresetsPayload,
+    MCP_PRESETS_CHANGED_EVENT,
+    installedMcpPresetsFromPayload,
+    isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import type {
-  ChatSummary,
-  SettingsPayload,
-  SlashCommand,
-  UIMessage,
-  WorkspaceScopePayload,
-  WorkspacesPayload,
-} from "@/lib/types";
-import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
+import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import type {
+    ChatSummary,
+    SettingsPayload,
+    SlashCommand,
+    UIMessage,
+    WorkspaceScopePayload,
+    WorkspacesPayload,
+} from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
@@ -319,7 +319,7 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+  } = useBlackcatStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
 
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
@@ -483,7 +483,7 @@ export function ThreadShell({
     }
   }, [chatId, messages]);
 
-  // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
+  // Persist thread to in-memory cache after paint so ``useBlackcatStream``'s chat switch
   // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
   // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
   useEffect(() => {

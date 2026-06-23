@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
 import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
+import { useChatStore } from "@/stores/chat-store";
+import { useSessionStore } from "@/stores/session-store";
+import { useShellStore } from "@/stores/shell-store";
+import { readShellRoute } from "@/utils/shell";
 
 const connectSpy = vi.fn();
 const refreshSpy = vi.fn();
@@ -212,7 +216,7 @@ vi.mock("@/lib/blackcat-client", () => {
     updateUrl = updateUrlSpy;
   }
 
-  return { NanobotClient: MockClient };
+  return { BlackcatClient: MockClient };
 });
 
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
@@ -250,6 +254,28 @@ describe("App layout", () => {
         status: 404,
       }),
     );
+    useShellStore.setState({
+      ...readShellRoute(),
+      hostSidebarOpen: true,
+      hostSidebarPreviewing: false,
+      mobileSidebarOpen: false,
+      sessionSearchOpen: false,
+      pendingDelete: null,
+      pendingRename: null,
+      pendingProjectRename: null,
+      restartToast: null,
+      isRestarting: false,
+    });
+    useSessionStore.setState({
+      runningChatIds: new Set(),
+      completedChatIds: new Set(),
+      workspaces: null,
+      workspaceError: null,
+      draftWorkspaceScope: null,
+      workspaceOverrides: {},
+      settingsSnapshot: null,
+    });
+    useChatStore.setState({ updatedChatIds: new Set() });
   });
 
   afterEach(() => {
@@ -537,7 +563,7 @@ describe("App layout", () => {
     );
     expect(updateCall).toBeTruthy();
     const headers = updateCall?.[1]?.headers as Record<string, string>;
-    expect(JSON.parse(decodeURIComponent(headers["X-Nanobot-Automation-Values"]))).toEqual({
+    expect(JSON.parse(decodeURIComponent(headers["X-Blackcat-Automation-Values"]))).toEqual({
       name: "Past one-shot",
       message: "Updated one-shot message",
     });
@@ -888,7 +914,7 @@ describe("App layout", () => {
 
     const sheet = await screen.findByRole("dialog");
     const mobileSidebar = within(sheet).getByRole("navigation", {
-      name: "Sidebar navigation",
+      name: "Mobile sidebar navigation",
     });
     await waitFor(() =>
       expect(

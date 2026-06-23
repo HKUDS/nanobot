@@ -1,35 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-    createModelConfiguration,
-    deleteSession,
-    fetchCliApps,
-    fetchMcpPresets,
-    fetchProviderModels,
-    fetchSidebarState,
-    fetchWebuiThread,
-    fetchWorkspaces,
-    importMcpConfig,
-    listSessions,
-    listSlashCommands,
-    loginProviderOAuth,
-    logoutProviderOAuth,
-    runCliAppAction,
-    runMcpPresetAction,
-    saveCustomMcpServer,
-    updateImageGenerationSettings,
-    updateMcpServerTools,
-    updateModelConfiguration,
-    updateNetworkSafetySettings,
-    updateProviderSettings,
-    updateSettings,
-    updateSidebarState,
-    updateWebSearchSettings,
   createModelConfiguration,
   deleteSession,
-  fetchFilePreview,
   fetchAutomations,
   fetchCliApps,
+  fetchFilePreview,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchProviderModels,
@@ -50,13 +26,13 @@ import {
   runMcpPresetAction,
   saveCustomMcpServer,
   updateAutomation,
-  updateSidebarState,
   updateImageGenerationSettings,
   updateModelConfiguration,
   updateMcpServerTools,
   updateNetworkSafetySettings,
   updateProviderSettings,
   updateSettings,
+  updateSidebarState,
   updateWebSearchSettings,
 } from "@/lib/api";
 
@@ -161,12 +137,12 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
-          "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)),
+          "X-Blackcat-Automation-Values": encodeURIComponent(JSON.stringify(values)),
         },
       }),
     );
     const header = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
-    expect(header["X-Nanobot-Automation-Values"]).not.toContain("每日");
+    expect(header["X-Blackcat-Automation-Values"]).not.toContain("每日");
   });
 
   it("fetches the WebUI skill summary", async () => {

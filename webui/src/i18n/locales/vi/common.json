@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
+    "mobileNavigation": "Điều hướng thanh bên di động",
     "collapse": "Thu gọn thanh bên",
     "newChat": "Cuộc trò chuyện mới",
     "searchAria": "Tìm kiếm",

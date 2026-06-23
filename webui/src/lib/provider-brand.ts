@@ -117,6 +117,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   atomic_chat: brand("atomic.chat", "#111827", "AC"),
   azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
   bedrock: brand("aws.amazon.com", "#FF9900", "AWS"),
+  bocha: brand("bochaai.com", "#3B82F6", "B"),
   brave: brand("brave.com", "#FB542B", "B"),
   byteplus: brand("byteplus.com", "#325CFF", "BP"),
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),

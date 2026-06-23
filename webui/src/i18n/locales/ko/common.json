@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "사이드바 탐색",
+    "mobileNavigation": "모바일 사이드바 탐색",
     "collapse": "사이드바 접기",
     "newChat": "새 채팅",
     "searchAria": "검색",

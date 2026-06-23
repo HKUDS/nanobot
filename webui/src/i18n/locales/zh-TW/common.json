@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "側邊欄導覽",
+    "mobileNavigation": "行動版側邊欄導覽",
     "collapse": "收合側邊欄",
     "newChat": "新增對話",
     "searchAria": "搜尋",

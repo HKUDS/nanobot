@@ -179,7 +179,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           // Test DOMs can expose read-only scrollTop; browsers keep this writable.
         }
       }
-    } else if (marker) {
+    }
+    if (marker) {
       marker.scrollIntoView({ block: "end", behavior });
     }
     userReadingHistoryRef.current = false;

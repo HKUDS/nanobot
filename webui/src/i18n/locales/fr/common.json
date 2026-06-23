@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
+    "mobileNavigation": "Navigation de la barre latérale mobile",
     "collapse": "Réduire la barre latérale",
     "newChat": "Nouvelle discussion",
     "searchAria": "Rechercher",
