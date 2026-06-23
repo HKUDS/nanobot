@@ -370,7 +370,7 @@ def _resolve_settings_provider(
     normalized = provider_name.replace("-", "_")
     for extra_name, provider_config in _dynamic_provider_items(config):
         if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
-            return create_dynamic_spec(extra_name), extra_name, provider_config
+            return create_dynamic_spec(extra_name, thinking_style=provider_config.thinking_style), extra_name, provider_config
     return None
 
 
@@ -750,7 +750,7 @@ def settings_payload(
         providers.append(
             _provider_settings_row(
                 provider_key,
-                create_dynamic_spec(provider_key),
+                create_dynamic_spec(provider_key, thinking_style=provider_config.thinking_style),
                 provider_config,
             )
         )

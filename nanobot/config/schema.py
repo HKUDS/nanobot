@@ -179,6 +179,7 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
+    thinking_style: str = ""  # Thinking injection style for custom providers: "thinking_type", "enable_thinking", "reasoning_split"
 
 
 class BedrockProviderConfig(ProviderConfig):
