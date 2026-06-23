@@ -2,9 +2,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [main]
+    branches: blackcat
   pull_request:
-    branches: [main]
+    branches: blackcat
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,3 +47,24 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install webui dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+
+      - name: Run webui tests
+        working-directory: webui
+        run: bun run test
+
+      - name: Lint webui
+        working-directory: webui
+        run: bun run lint
+
+      - name: Build webui
+        working-directory: webui
+        run: bun run build
