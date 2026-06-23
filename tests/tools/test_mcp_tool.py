@@ -1059,6 +1059,26 @@ async def test_connect_mcp_servers_enabled_tools_allows_prompt_raw_name(
     assert registry.tool_names == ["mcp_test_prompt_prompt_c"]
 
 
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_allows_prompt_wrapped_name(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["tool_a"],
+        resource_names=["res_b"],
+        prompt_names=["prompt_c"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_prompt_prompt_c"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_prompt_prompt_c"]
+
+
 # ---------------------------------------------------------------------------
 # _sanitize_name tests
 # ---------------------------------------------------------------------------
