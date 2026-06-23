@@ -16,7 +16,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
-from nanobot.utils.helpers import split_message
+from nanobot.pairing import PAIRING_CODE_META_KEY, format_pairing_reply, generate_code
+from nanobot.utils.helpers import safe_filename, split_message
 
 MATTERMOST_MAX_MESSAGE_LEN = 16383
 MATTERMOST_WS_RECONNECT_BASE_DELAY = 1
@@ -217,11 +218,18 @@ class MattermostChannel(BaseChannel):
 
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             if is_dm and self.config.dm.enabled:
-                await self._handle_message(
-                    sender_id=sender_id,
-                    chat_id=channel_id,
-                    content="",
-                    is_dm=True,
+                code = generate_code(self.name, str(sender_id))
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(channel_id),
+                        content=format_pairing_reply(code),
+                        metadata={PAIRING_CODE_META_KEY: code},
+                    )
+                )
+                self.logger.info(
+                    "Sent pairing code {} to sender {} in chat {}",
+                    code, sender_id, channel_id,
                 )
             return
 
@@ -287,7 +295,7 @@ class MattermostChannel(BaseChannel):
         if not sender_id or not channel_id or not value:
             return
 
-        channel_type = self._channel_types.get(channel_id, "public")
+        channel_type = await self.resolve_channel_type(channel_id)
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             return
 
@@ -343,10 +351,15 @@ class MattermostChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return False
 
+    _BOT_MENTION_RE: re.Pattern | None = None
+
     def _is_mentioned(self, text: str) -> bool:
         if not self._self_username:
             return False
-        return f"@{self._self_username}" in text
+        if self._BOT_MENTION_RE is None:
+            pat = r"(?<![@\w])@" + re.escape(self._self_username) + r"(?![@\w])"
+            self._BOT_MENTION_RE = re.compile(pat)
+        return bool(self._BOT_MENTION_RE.search(text))
 
     def _strip_bot_mention(self, text: str) -> str:
         if not text or not self._self_username:
@@ -618,7 +631,7 @@ class MattermostChannel(BaseChannel):
             info_resp.raise_for_status()
             info = info_resp.json()
             name = Path(info.get("name", file_id)).name
-            out = Path(get_media_dir("mattermost")) / f"{file_id}_{name}"
+            out = Path(get_media_dir("mattermost")) / safe_filename(f"{file_id}_{name}")
             out.parent.mkdir(parents=True, exist_ok=True)
 
             dl = await self._http_client.get(f"/api/v4/files/{file_id}/download")

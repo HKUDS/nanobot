@@ -11,6 +11,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.pairing import PAIRING_CODE_META_KEY
 from nanobot.channels.mattermost import (
     MATTERMOST_MAX_MESSAGE_LEN,
     MattermostChannel,
@@ -669,6 +670,7 @@ async def test_thread_session_key():
 async def test_action_event():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
+    fake.set_get_response("/api/v4/channels/c1", {"id": "c1", "type": "O"})
     with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
         ws_msg = {
             "event": "action",
@@ -686,6 +688,25 @@ async def test_action_event():
             content="Approve",
             metadata={"mattermost": {"channel_type": "public", "is_action": True}},
         )
+
+
+@pytest.mark.asyncio
+async def test_action_event_denied_dm():
+    channel, fake = _make_channel({"dm": {"policy": "allowlist", "allowFrom": ["u_other"]}})
+    channel._self_id = "bot_id"
+    fake.set_get_response("/api/v4/channels/c1", {"id": "c1", "type": "D"})
+    with patch.object(channel, "_handle_message", AsyncMock()) as mock_handle:
+        ws_msg = {
+            "event": "action",
+            "data": {
+                "user_id": "u1",
+                "channel_id": "c1",
+                "context": {"selected_option": "Approve"},
+            },
+            "broadcast": {},
+        }
+        await channel._handle_ws_message(ws_msg)
+        mock_handle.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -740,6 +761,64 @@ async def test_dm_allowlist_with_username_match():
     fake.set_get_response("/api/v4/users/u1", {"id": "u1", "username": "alice", "email": ""})
     assert await channel._is_allowed("u1", "dm_chan", "dm") is True
     assert await channel._is_allowed("u2", "dm_chan", "dm") is False
+
+
+# ---------------------------------------------------------------------------
+# Denied DM sends pairing code (not empty message)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_denied_dm_sends_pairing_not_empty_inbound():
+    channel, fake = _make_channel({"dm": {"policy": "allowlist", "allowFrom": ["u_allowed"]}})
+    channel._self_id = "botuserid123"
+    channel._self_username = "nanobot"
+
+    ws_msg = {
+        "event": "posted",
+        "data": {
+            "channel_type": "D",
+            "post": json.dumps({
+                "id": "p1", "user_id": "u_denied",
+                "channel_id": "dm_chan", "message": "hello", "root_id": "",
+            }),
+        },
+        "broadcast": {"channel_id": "dm_chan", "team_id": ""},
+    }
+
+    inbound_events = []
+    channel.bus.publish_inbound = AsyncMock(side_effect=lambda e: inbound_events.append(e))
+
+    with patch.object(channel, "send", AsyncMock()) as mock_send:
+        await channel._handle_ws_message(ws_msg)
+        mock_send.assert_awaited_once()
+        sent = mock_send.call_args[0][0]
+        assert sent.channel == "mattermost"
+        assert sent.chat_id == "dm_chan"
+        assert "pairing" in sent.content.lower() or "code" in sent.content.lower()
+        assert PAIRING_CODE_META_KEY in (sent.metadata or {})
+
+    assert len(inbound_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bot mention boundary
+# ---------------------------------------------------------------------------
+
+
+def test_is_mentioned_exact():
+    channel, fake = _make_channel({"groupPolicy": "mention"})
+    channel._self_username = "nanobot"
+    assert channel._is_mentioned("hello @nanobot how are you") is True
+    assert channel._is_mentioned("hello @nanobotty") is False
+    assert channel._is_mentioned("@nanobot_extra") is False
+    assert channel._is_mentioned("plain text") is False
+
+
+def test_is_mentioned_no_username():
+    channel, fake = _make_channel({"groupPolicy": "mention"})
+    channel._self_username = None
+    assert channel._is_mentioned("hello @nanobot") is False
 
 
 # ---------------------------------------------------------------------------
