@@ -759,7 +759,7 @@ class WebSearchTool(Tool):
             # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
-            ddgs = DDGS(timeout=10)
+            ddgs = DDGS(timeout=10, proxy=self.proxy)
             raw = await asyncio.wait_for(
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
