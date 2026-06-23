@@ -845,6 +845,67 @@ function Shell({
     showMainSidebar,
   ]);
 
+  // Swipe from left edge to open mobile sidebar; swipe left to close
+  const mobileSidebarOpenRef = useRef(mobileSidebarOpen);
+  mobileSidebarOpenRef.current = mobileSidebarOpen;
+
+  useEffect(() => {
+    const EDGE = 20;
+    const THRESHOLD = 60;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    let direction: "open" | "close" | null = null;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (mobileSidebarOpenRef.current) {
+        // Sidebar open: track swipe from anywhere for close
+        startX = touch.clientX;
+        startY = touch.clientY;
+        tracking = true;
+        direction = "close";
+      } else if (touch.clientX <= EDGE) {
+        // Sidebar closed: track left-edge swipe for open
+        startX = touch.clientX;
+        startY = touch.clientY;
+        tracking = true;
+        direction = "open";
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking) return;
+      const dx = Math.abs(e.touches[0].clientX - startX);
+      const dy = Math.abs(e.touches[0].clientY - startY);
+      if (dy > 30 && dy > dx) {
+        tracking = false;
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - startX;
+      if (direction === "open" && dx >= THRESHOLD) {
+        setMobileSidebarOpen(true);
+      } else if (direction === "close" && dx <= -THRESHOLD) {
+        setMobileSidebarOpen(false);
+      }
+      direction = null;
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, []);
+
   const closeHostSidebar = useCallback(() => {
     closeHostSidebarPreview();
     setHostSidebarOpen(false);
