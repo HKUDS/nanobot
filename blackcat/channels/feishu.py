@@ -1,5 +1,7 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib.util
 import json
@@ -11,10 +13,8 @@ import uuid
 from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
-from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 from pydantic import Field
 
 from blackcat.bus.events import OutboundMessage
@@ -25,7 +25,41 @@ from blackcat.config.schema import Base
 from blackcat.utils.helpers import safe_filename
 from blackcat.utils.logging_bridge import redirect_lib_logging
 
+if TYPE_CHECKING:
+    from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
+
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
+
+
+def _load_lark_runtime() -> tuple[Any, str, str]:
+    """Import the heavy Feishu SDK lazily.
+
+    lark_oapi imports a large generated API surface at module import time, so
+    keep it out of channel discovery and constructor paths.
+    """
+    import sys
+
+    ws_client_already_imported = "lark_oapi.ws.client" in sys.modules
+    import lark_oapi as lark
+    import lark_oapi.ws.client as lark_ws_client
+    from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+
+    if (
+        not ws_client_already_imported
+        and threading.current_thread() is not threading.main_thread()
+    ):
+        import_loop = getattr(lark_ws_client, "loop", None)
+        if (
+            import_loop is not None
+            and not import_loop.is_running()
+            and not import_loop.is_closed()
+        ):
+            import_loop.close()
+        lark_ws_client.loop = None
+        with suppress(Exception):
+            asyncio.set_event_loop(None)
+
+    return lark, FEISHU_DOMAIN, LARK_DOMAIN
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -297,13 +331,11 @@ class FeishuChannel(BaseChannel):
         return FeishuConfig().model_dump(by_alias=True)
 
     def __init__(self, config: Any, bus: MessageBus):
-        import lark_oapi as lark
-
         if isinstance(config, dict):
             config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: FeishuConfig = config
-        self._client: lark.Client = None
+        self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
@@ -329,7 +361,7 @@ class FeishuChannel(BaseChannel):
             self.logger.error("app_id and app_secret not configured")
             return
 
-        import lark_oapi as lark
+        lark, feishu_domain, lark_domain = await asyncio.to_thread(_load_lark_runtime)
 
         redirect_lib_logging("Lark")
 
@@ -337,7 +369,7 @@ class FeishuChannel(BaseChannel):
         self._loop = asyncio.get_running_loop()
 
         # Create Lark client for sending messages
-        domain = LARK_DOMAIN if self.config.domain == "lark" else FEISHU_DOMAIN
+        domain = lark_domain if self.config.domain == "lark" else feishu_domain
         self._client = (
             lark.Client.builder()
             .app_id(self.config.app_id)
@@ -397,6 +429,7 @@ class FeishuChannel(BaseChannel):
 
             import lark_oapi.ws.client as _lark_ws_client
 
+            previous_loop = getattr(_lark_ws_client, "loop", None)
             ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(ws_loop)
             # Patch the module-level loop used by lark's ws Client.start()
@@ -410,6 +443,10 @@ class FeishuChannel(BaseChannel):
                     if self._running:
                         time.sleep(5)
             finally:
+                if getattr(_lark_ws_client, "loop", None) is ws_loop:
+                    _lark_ws_client.loop = previous_loop
+                with suppress(Exception):
+                    asyncio.set_event_loop(None)
                 ws_loop.close()
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
@@ -1383,16 +1420,11 @@ class FeishuChannel(BaseChannel):
             self.logger.warning("Error stream-updating card {}: {}", card_id, e)
             return False
 
-    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
-        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
-
-        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
-        streaming_mode is set to false via card settings (after final content update).
-        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
-        """
+    def _set_streaming_mode_sync(self, card_id: str, enabled: bool, sequence: int) -> bool:
+        """Set CardKit streaming_mode using a strictly increasing sequence."""
         from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
 
-        settings_payload = json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False)
+        settings_payload = json.dumps({"config": {"streaming_mode": enabled}}, ensure_ascii=False)
         try:
             request = (
                 SettingsCardRequest.builder()
@@ -1409,7 +1441,8 @@ class FeishuChannel(BaseChannel):
             response = self._client.cardkit.v1.card.settings(request)
             if not response.success():
                 self.logger.warning(
-                    "Failed to close streaming on card {}: code={}, msg={}",
+                    "Failed to set streaming={} on card {}: code={}, msg={}",
+                    enabled,
                     card_id,
                     response.code,
                     response.msg,
@@ -1417,11 +1450,34 @@ class FeishuChannel(BaseChannel):
                 return False
             return True
         except Exception as e:
-            self.logger.warning("Error closing streaming on card {}: {}", card_id, e)
+            self.logger.warning("Error setting streaming={} on card {}: {}", enabled, card_id, e)
             return False
 
+    def _close_streaming_mode_sync(self, card_id: str, sequence: int) -> bool:
+        """Turn off CardKit streaming_mode so the chat list preview exits the streaming placeholder.
+
+        Per Feishu docs, streaming cards keep a generating-style summary in the session list until
+        streaming_mode is set to false via card settings (after final content update).
+        Sequence must strictly exceed the previous card OpenAPI operation on this entity.
+        """
+        return self._set_streaming_mode_sync(card_id, False, sequence)
+
+    def _stream_update_text_with_reopen_sync(
+        self,
+        card_id: str,
+        content: str,
+        sequence: int,
+    ) -> tuple[bool, int]:
+        if self._stream_update_text_sync(card_id, content, sequence):
+            return True, sequence
+        sequence += 1
+        if not self._set_streaming_mode_sync(card_id, True, sequence):
+            return False, sequence
+        sequence += 1
+        return self._stream_update_text_sync(card_id, content, sequence), sequence
+
     async def send_delta(
-        self, chat_id: str, content: str, metadata: dict[str, Any] | None = None
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
         """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
 
@@ -1462,22 +1518,37 @@ class FeishuChannel(BaseChannel):
             # back to sending a regular interactive card.
             if buf.card_id:
                 buf.sequence += 1
-                ok = await loop.run_in_executor(
+                ok, buf.sequence = await loop.run_in_executor(
                     None,
-                    self._stream_update_text_sync,
+                    self._stream_update_text_with_reopen_sync,
                     buf.card_id,
                     buf.text,
                     buf.sequence,
                 )
                 if ok:
                     buf.sequence += 1
-                    await loop.run_in_executor(
+                    closed = await loop.run_in_executor(
                         None,
                         self._close_streaming_mode_sync,
                         buf.card_id,
                         buf.sequence,
                     )
+                    if not closed:
+                        buf.sequence += 1
+                        await loop.run_in_executor(
+                            None,
+                            self._close_streaming_mode_sync,
+                            buf.card_id,
+                            buf.sequence,
+                        )
                     return
+                buf.sequence += 1
+                await loop.run_in_executor(
+                    None,
+                    self._close_streaming_mode_sync,
+                    buf.card_id,
+                    buf.sequence,
+                )
                 self.logger.warning(
                     "Streaming card {} final update failed, falling back to regular card",
                     buf.card_id,
@@ -1510,7 +1581,7 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[stream_key] = buf
-        buf.text += content
+        buf.text += delta
         if not buf.text.strip():
             return
 
@@ -1530,18 +1601,36 @@ class FeishuChannel(BaseChannel):
                 ),
             )
             if card_id:
-                buf.card_id = card_id
-                buf.sequence = 1
-                await loop.run_in_executor(
-                    None, self._stream_update_text_sync, card_id, buf.text, 1
+                ok, sequence = await loop.run_in_executor(
+                    None, self._stream_update_text_with_reopen_sync, card_id, buf.text, 1
                 )
-                buf.last_edit = now
+                if ok:
+                    buf.card_id = card_id
+                    buf.sequence = sequence
+                    buf.last_edit = now
+                else:
+                    await loop.run_in_executor(
+                        None, self._close_streaming_mode_sync, card_id, sequence + 1
+                    )
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
-            buf.sequence += 1
-            await loop.run_in_executor(
-                None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence
+            ok, buf.sequence = await loop.run_in_executor(
+                None,
+                self._stream_update_text_with_reopen_sync,
+                buf.card_id,
+                buf.text,
+                buf.sequence + 1,
             )
-            buf.last_edit = now
+            if ok:
+                buf.last_edit = now
+            else:
+                buf.sequence += 1
+                await loop.run_in_executor(
+                    None,
+                    self._close_streaming_mode_sync,
+                    buf.card_id,
+                    buf.sequence,
+                )
+                buf.card_id = None
 
     async def _send_impl(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""

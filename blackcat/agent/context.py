@@ -104,11 +104,14 @@ class ContextBuilder:
         session_manager: SessionManager | None = None,
         timezone: str | None = None,
         disabled_skills: list[str] | None = None,
+        authors: dict[str, Any] | None = None,
+        bot_name: str | None = None,
     ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
-        self.authors: dict[str, Any] = {}
+        self.authors: dict[str, Any] = authors or {}
+        self.bot_name = bot_name or "blackcat"
         self.skills = SkillsLoader(
             workspace,
             disabled_skills=set(disabled_skills) if disabled_skills else None,
@@ -218,9 +221,10 @@ class ContextBuilder:
             Author name if found in config, otherwise "unknown".
         """
         if sender_id and channel:
-            for author_name, identity in self.authors.items(): # FIXME: iterate through the config files for authors
+            sender_str = str(sender_id)
+            for author_name, identity in self.authors.items():
                 platform_id = getattr(identity, channel, None)
-                if platform_id and platform_id == sender_id:
+                if platform_id is not None and str(platform_id) == sender_str:
                     return author_name
         return "unknown"
 
@@ -497,6 +501,8 @@ class ContextBuilder:
         session_summary: str | None = None,
         include_memory_recent_history: bool = True,
         channel: str | None = None,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Build static blocks for Anthropic-style prompt caching.
@@ -539,7 +545,11 @@ class ContextBuilder:
             blocks.append({"type": "text", "text": render_template("agent/skills_section.md", skills_summary=skills_summary)})
 
         if include_memory_recent_history:
-            entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+            entries = self.memory.read_recent_history_for_prompt(
+                since_cursor=self.memory.get_last_dream_cursor(),
+                session_key=session_key,
+                unified_session=unified_session,
+            )
             if entries:
                 capped = entries[-self._MAX_RECENT_HISTORY:]
                 history_text = "\n".join(
@@ -589,6 +599,8 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         history: list[dict[str, Any]] | None = None,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> str:
         """
         Build the complete system prompt for non-Anthropic providers.
@@ -602,9 +614,15 @@ class ContextBuilder:
         intro_block = [{"type": "text", "text": """# Blackcat 🐈‍⬛
 You are within blackcat harness/structure.
 """}] # FIXME: brings the name and sigil of the app dynamically
-        author = self.resolve_author(channel, sender_id)
+        author = self.resolve_author(sender_id, channel)
 
-        static_blocks = self._build_static_blocks(skill_names, channel=channel, include_memory_recent_history=include_memory_recent_history)
+        static_blocks = self._build_static_blocks(
+            skill_names,
+            channel=channel,
+            include_memory_recent_history=include_memory_recent_history,
+            session_key=session_key,
+            unified_session=unified_session,
+        )
         dynamic_blocks = await self._build_dynamic_blocks(author, sender_id, channel, chat_id, history)
 
         # Convert blocks to string
@@ -661,7 +679,7 @@ You are within blackcat harness/structure.
             return text
         return images + [{"type": "text", "text": text}]
 
-    async def build_messages( # FIXME: check with Blackcat's for params allocation
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -679,11 +697,15 @@ You are within blackcat harness/structure.
         inbound_message: Any | None = None,
         skip_runtime_lines: bool = False,
         include_memory_recent_history: bool = True,
+        session_key: str | None = None,
+        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call (blackcat-compatible)."""
         system_prompt = await self.build_system_prompt(
             sender_id, channel, chat_id, skill_names, history,
             include_memory_recent_history=include_memory_recent_history,
+            session_key=session_key,
+            unified_session=unified_session,
             )
 
         messages = [{"role": "system", "content": system_prompt}]

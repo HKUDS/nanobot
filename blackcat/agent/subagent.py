@@ -118,6 +118,7 @@ class SubagentManager:
         return ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
+            file=self.tools_config.file,
             restrict_to_workspace=self.restrict_to_workspace,
         )
 
@@ -155,13 +156,19 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        origin_sender_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
+        origin = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+            "sender_id": origin_sender_id,
+        }
 
         status = SubagentStatus(
             task_id=task_id,
@@ -248,6 +255,7 @@ class SubagentManager:
                     max_tool_result_chars=self.max_tool_result_chars,
                     hook=_SubagentHook(task_id, status),
                     max_iterations_message="Task completed but no final response was generated.",
+                    finalize_on_max_iterations=False,
                     error_message=None,
                     fail_on_tool_error=True,
                     checkpoint_callback=_on_checkpoint,
@@ -316,6 +324,10 @@ class SubagentManager:
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
         }
+        origin_sender_id = origin.get("sender_id")
+        if origin_sender_id:
+            metadata["origin_sender_id"] = origin_sender_id
+            metadata["origin_channel"] = origin.get("channel")
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
         msg = InboundMessage(

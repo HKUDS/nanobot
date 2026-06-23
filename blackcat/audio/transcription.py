@@ -8,6 +8,7 @@ HTTP details; those live in ``blackcat.providers.transcription``.
 
 from __future__ import annotations
 
+import os
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,13 +98,15 @@ def resolve_transcription_config(config: Any) -> EffectiveTranscriptionConfig:
         spec = get_transcription_provider(provider)
     default_model = spec.default_model if spec else ""
     provider_cfg = _provider_config(config, provider)
+    env_key = spec.env_key if spec else ""
+    default_api_base = spec.default_api_base if spec else ""
     return EffectiveTranscriptionConfig(
         enabled=bool(getattr(top, "enabled", True)),
         provider=provider,
         model=(getattr(top, "model", None) or default_model).strip(),
         language=getattr(top, "language", None) or getattr(channels, "transcription_language", None),
-        api_key=getattr(provider_cfg, "api_key", None) or "",
-        api_base=getattr(provider_cfg, "api_base", None) or "",
+        api_key=getattr(provider_cfg, "api_key", None) or (os.environ.get(env_key) if env_key else "") or "",
+        api_base=getattr(provider_cfg, "api_base", None) or default_api_base or "",
         max_duration_sec=int(getattr(top, "max_duration_sec", 120)),
         max_upload_mb=int(getattr(top, "max_upload_mb", 25)),
     )

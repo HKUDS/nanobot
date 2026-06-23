@@ -43,7 +43,7 @@ Use `/model` to inspect the current runtime model:
 /model
 ```
 
-The response shows the current model, the current preset, and the available preset names. `default` is always available and represents the model settings from `agents.defaults.*`.
+The response shows the current model, the current preset, and the available preset names. Named presets come from the top-level `modelPresets` config and are the recommended way to configure model choices. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
 
 To switch presets for future turns:
 
@@ -57,17 +57,32 @@ Preset names come from the top-level `modelPresets` config. Switching is runtime
 
 ## Periodic Tasks
 
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.blackcat/workspace/HEARTBEAT.md`). If the file has tasks under `## Active Tasks`, the agent executes them and delivers results to your most recently active chat channel. If there are no active tasks, the heartbeat is skipped silently.
+Periodic tasks are driven by `HEARTBEAT.md` in your workspace (`~/.blackcat/workspace/HEARTBEAT.md`). When `blackcat gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers results to your most recently active chat channel. If there are no active tasks, the heartbeat is skipped silently.
 
 **Setup:** edit `~/.blackcat/workspace/HEARTBEAT.md` (created automatically by `blackcat onboard`):
 
 ```markdown
 ## Active Tasks
 
-- [ ] Check weather forecast and send a summary
-- [ ] Scan inbox for urgent emails
+- Check weather forecast and send a summary
+- Scan inbox for urgent emails
 ```
 
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
+
+You can change the interval or disable the built-in heartbeat in `~/.blackcat/config.json`:
+
+```json
+{
+  "gateway": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800
+    }
+  }
+}
+```
+
+The heartbeat job is visible in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. To stop it, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
 
 > **Note:** The gateway must be running (`blackcat gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.

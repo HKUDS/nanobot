@@ -55,6 +55,23 @@ describe("ThreadMessages", () => {
     expect(rows[1]).toHaveClass("mt-4");
   });
 
+  it("renders a fork boundary divider after the copied history", () => {
+    const messages: UIMessage[] = [
+      { id: "u1", role: "user", content: "original", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer", createdAt: 2 },
+      { id: "u2", role: "user", content: "branch prompt", createdAt: 3 },
+    ];
+
+    render(
+      <ThreadMessages
+        messages={messages}
+        forkBoundaryMessageCount={2}
+      />,
+    );
+
+    expect(screen.getByText("Forked from history")).toBeInTheDocument();
+  });
+
   it("keeps file edits as their own activity row inside a turn", () => {
     const messages: UIMessage[] = [
       {
@@ -291,8 +308,45 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Thought for 9s")).toBeInTheDocument();
+    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
+  });
+
+  it("uses final turn latency when an earlier reasoning segment has its own latency", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "r1",
+        role: "assistant",
+        content: "",
+        reasoning: "plan",
+        reasoningStreaming: false,
+        latencyMs: 3_000,
+        createdAt: 1,
+      },
+      {
+        id: "t1",
+        role: "tool",
+        kind: "trace",
+        content: "shell()",
+        traces: ["shell()"],
+        createdAt: 2,
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "done",
+        latencyMs: 20_000,
+        createdAt: 3,
+      },
+    ];
+
+    const units = buildDisplayUnits(messages);
+
+    expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
   });
 
   it("keeps late activity after the live assistant answer while streaming", () => {
@@ -609,8 +663,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getByText("Thought for 15s")).toBeInTheDocument();
-    expect(screen.queryByText("Thought for 0s")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
   });
 
   it("shows copy only on the last assistant slice before the next user turn", () => {
@@ -639,7 +693,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
     expect(screen.getByText("final reply")).toBeInTheDocument();
   });
 
@@ -649,7 +703,7 @@ describe("ThreadMessages", () => {
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
   it("uses turn ids as activity grouping boundaries when available", () => {

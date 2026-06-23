@@ -1,7 +1,6 @@
 # Tool Usage Notes
 
-Tool signatures are provided automatically via function calling. This section
-documents the general tool contract and non-obvious usage patterns.
+Tool signatures are provided automatically via function calling. This section documents the general tool contract and non-obvious usage patterns.
 
 ## General Tool Contract
 
@@ -63,5 +62,5 @@ documents the general tool contract and non-obvious usage patterns.
 ## Scheduling and Background Work
 
 - Use `cron` for scheduled reminders or recurring jobs; do not run `blackcat cron` through `exec`.
-- For heartbeat tasks, register `HEARTBEAT.md` as a cron job according to the agent instructions.
+- For heartbeat tasks, update `HEARTBEAT.md`; the default gateway heartbeat cron job handles periodic checks when enabled.
 - Do not write reminders only to memory files when the user expects an actual notification.

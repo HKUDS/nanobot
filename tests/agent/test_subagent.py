@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from blackcat.agent.subagent import SubagentManager
+from blackcat.agent.tools.filesystem import FileToolsConfig
 from blackcat.bus.queue import MessageBus
+from blackcat.config.schema import ToolsConfig
 from blackcat.providers.base import LLMProvider
 
 
@@ -51,3 +53,29 @@ async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
     second_result = await second_read.execute(path="note.txt")
     assert second_result.startswith("1| hello")
     assert "File unchanged" not in second_result
+
+
+def test_subagent_respects_file_tool_toggle(tmp_path):
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    sm = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=MessageBus(),
+        model="test",
+        max_tool_result_chars=16_000,
+        tools_config=ToolsConfig(file=FileToolsConfig(enable=False)),
+    )
+
+    tools = sm._build_tools()
+
+    file_tools = {
+        "apply_patch",
+        "edit_file",
+        "find_files",
+        "grep",
+        "list_dir",
+        "read_file",
+        "write_file",
+    }
+    assert file_tools.isdisjoint(tools.tool_names)

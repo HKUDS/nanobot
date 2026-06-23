@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from blackcat.providers.openai_compat_provider import OpenAICompatProvider
-from blackcat.utils.formatting import build_assistant_message
+from blackcat.utils.helpers import build_assistant_message
 
 # ── _parse: non-streaming ─────────────────────────────────────────────────
 

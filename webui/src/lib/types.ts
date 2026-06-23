@@ -100,6 +100,10 @@ export interface SessionAutomationJob {
   id: string;
   name: string;
   enabled: boolean;
+  protected?: boolean;
+  delete_after_run?: boolean;
+  created_at_ms?: number | null;
+  updated_at_ms?: number | null;
   schedule: {
     kind: "at" | "every" | "cron" | string;
     at_ms?: number | null;
@@ -109,14 +113,49 @@ export interface SessionAutomationJob {
   };
   payload: {
     message: string;
+    kind?: "agent_turn" | "system_event" | string;
   };
   state: {
     next_run_at_ms?: number | null;
+    last_run_at_ms?: number | null;
     last_status?: "ok" | "error" | "skipped" | string | null;
+    last_error?: string | null;
+    pending?: boolean;
+    run_history?: Array<{
+      run_at_ms: number;
+      status: "ok" | "error" | "skipped" | string;
+      duration_ms?: number;
+      error?: string | null;
+    }>;
   };
+  origin?: {
+    session_key?: string;
+    channel: string;
+    chat_id?: string;
+    title?: string;
+    preview?: string;
+  } | null;
 }
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
+export interface AutomationUpdatePayload {
+  name?: string;
+  message?: string;
+  schedule?: {
+    kind: "at" | "every" | "cron";
+    at_ms?: number;
+    every_ms?: number;
+    expr?: string;
+    tz?: string;
+  };
+}
+
+export interface SessionDeleteResult {
+  deleted: boolean;
+  blocked_by_automations?: boolean;
+  automations?: SessionAutomationJob[];
+}
 
 export interface SkillSummary {
   name: string;
@@ -333,6 +372,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    reasoning_effort_values?: string[];
   }>;
   providers: Array<{
     name: string;
@@ -861,11 +901,22 @@ export interface OutboundMcpPresetMention {
 }
 
 /** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
+export interface WebuiThreadPagePayload {
+  before_cursor?: string | null;
+  has_more_before?: boolean;
+  loaded_message_count?: number;
+  total_known_message_count?: number;
+  user_message_offset?: number;
+}
+
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
   messages: UIMessage[];
+  fork_boundary_message_count?: number;
+  has_pending_tool_calls?: boolean;
+  page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
 }
 
@@ -881,6 +932,7 @@ export interface FilePreviewPayload {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }

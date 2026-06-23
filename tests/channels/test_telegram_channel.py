@@ -17,6 +17,8 @@ from blackcat.channels.telegram import (
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
     TelegramChannel,
     TelegramConfig,
+    _markdown_to_telegram_html,
+    _split_telegram_markdown,
     _StreamBuf,
 )
 
@@ -177,6 +179,67 @@ def _make_telegram_update(
         message_id=1,
     )
     return SimpleNamespace(message=message, effective_user=user)
+
+
+def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
+    for chunk in chunks:
+        html = _markdown_to_telegram_html(chunk)
+        assert html.count("<pre><code>") == html.count("</code></pre>")
+
+
+def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
+    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=35)
+
+    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[1].startswith("```python\nprint('a')")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_long_code_block_closes_and_reopens() -> None:
+    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    assert chunks[0].endswith("\n```")
+    assert chunks[1].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_multiple_code_blocks() -> None:
+    content = (
+        "First\n"
+        "```js\n"
+        "one();\n"
+        "```\n"
+        "Middle paragraph here\n"
+        "```py\n"
+        "two()\n"
+        "three()\n"
+        "```\n"
+        "End"
+    )
+
+    chunks = _split_telegram_markdown(content, max_len=55)
+
+    assert chunks[0].endswith("Middle paragraph here\n")
+    assert chunks[1].startswith("```py\n")
+    _assert_code_blocks_render_balanced(chunks)
+
+
+def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
+    content = "\n```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+
+    chunks = _split_telegram_markdown(content, max_len=60)
+
+    assert chunks
+    assert all(chunk.strip() for chunk in chunks)
+    assert chunks[0].startswith("```python\n")
+    _assert_code_blocks_render_balanced(chunks)
 
 
 @pytest.mark.asyncio
@@ -657,6 +720,36 @@ async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering() -> None:
+    """Final streamed replies must not split Telegram HTML inside <pre><code>."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    raw_text = "```python\n" + ("print(\"line\")\n" * 450) + "```\nDone"
+    channel._stream_bufs["123"] = _StreamBuf(text=raw_text, message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    html_chunks = [
+        channel._app.bot.edit_message_text.call_args.kwargs.get("text", ""),
+        *[
+            call.kwargs.get("text", "")
+            for call in channel._app.bot.send_message.call_args_list
+        ],
+    ]
+    assert len(html_chunks) > 1
+    for html in html_chunks:
+        assert len(html) <= 4096
+        assert html.count("<pre><code>") == html.count("</code></pre>")
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_send_delta_new_stream_id_replaces_stale_buffer() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -943,7 +1036,8 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
 
@@ -965,7 +1059,8 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(_make_telegram_update(text="@blackcat_test hi", entities=[mention]), None)
@@ -989,7 +1084,8 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(
@@ -1015,7 +1111,8 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
@@ -1037,7 +1134,8 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
 
@@ -1109,7 +1207,8 @@ async def test_on_message_includes_reply_context() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     reply = SimpleNamespace(text="Hello", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="translate this", reply_to_message=reply)
@@ -1230,7 +1329,8 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -1269,7 +1369,8 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -1313,7 +1414,8 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     reply_with_caption_and_photo = SimpleNamespace(
         text=None,
@@ -1427,10 +1529,10 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/goal ship the feature")
     assert pat.fullmatch("/pairing list")
     assert pat.fullmatch("/model fast")
-    assert pat.fullmatch("/new@blackcat_bot")
-    assert pat.fullmatch("/goal@blackcat_bot refine objective")
     assert pat.fullmatch("/skill")
     assert pat.fullmatch("/skill@blackcat_bot")
+    assert pat.fullmatch("/new@blackcat_bot")
+    assert pat.fullmatch("/goal@blackcat_bot refine objective")
     assert pat.fullmatch("/dream-log deadbeef") is None
     assert pat.fullmatch("/dream-restore deadbeef") is None
 
@@ -1509,9 +1611,8 @@ async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
     )
     channel._app = _FakeApp(lambda: None)
     started_typing: list[str] = []
-    handled: list[dict] = []
-    channel._start_typing = AsyncMock(side_effect=lambda chat_id: started_typing.append(chat_id))
-    channel._start_typing = lambda chat_id: started_typing.append(chat_id)
+    async def _fake_typing2(chat_id): started_typing.append(chat_id)
+    channel._start_typing = _fake_typing2
     channel._add_reaction = AsyncMock(return_value=None)
     channel._download_message_media = AsyncMock(return_value=([], []))
     monkeypatch.setattr(
@@ -1539,7 +1640,8 @@ async def test_on_message_location_content() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     location = SimpleNamespace(latitude=48.8566, longitude=2.3522)
     update = _make_telegram_update(location=location)
@@ -1561,7 +1663,8 @@ async def test_on_message_location_with_text() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = AsyncMock()
+    async def _fake_typing(_chat_id): pass
+    channel._start_typing = _fake_typing
 
     location = SimpleNamespace(latitude=51.5074, longitude=-0.1278)
     update = _make_telegram_update(text="meet me here", location=location)

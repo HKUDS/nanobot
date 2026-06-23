@@ -98,8 +98,8 @@ class TestRestartCommand:
         )
 
         with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
-             patch("blackcat.command.builtin.os.execv"), \
-             patch("blackcat.command.builtin.asyncio", new=fake_asyncio):
+             patch("blackcat.command.builtin.asyncio", new=fake_asyncio), \
+             patch("blackcat.command.builtin.os.execv"):
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -186,7 +186,7 @@ class TestRestartCommand:
         assert "Context: 20k/65k (31% of input budget)" in response.content
         assert "Session: 3 messages" in response.content
         assert "Uptime: 2m 5s" in response.content
-        assert "Active tasks" not in response.content
+        assert "Tasks: 0 active" in response.content
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
@@ -257,7 +257,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
         assert "Context: 1k/65k (1% of input budget)" in response.content
-        assert "Active tasks" not in response.content
+        assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio
     async def test_history_shows_recent_messages(self):

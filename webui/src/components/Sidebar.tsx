@@ -1,13 +1,14 @@
+import { useState, type ReactNode } from "react";
 import {
   Archive,
-  Blocks,
   Brain,
+  CalendarClock,
   Menu,
   Search,
   Settings,
-  SquarePen
+  SquarePen,
+  Blocks,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
@@ -19,7 +20,6 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { BlackcatBrandLogo } from "./settings/SettingsView";
 
 interface SidebarProps {
   sessions: ChatSummary[];
@@ -37,8 +37,9 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenApps: () => void;
   onOpenSkills: () => void;
+  onOpenAutomations: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | null;
+  activeUtility?: "apps" | "skills" | "automations" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -50,12 +51,13 @@ interface SidebarProps {
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
-  completedChatIds?: string[];
+  updatedChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
+  ariaLabel?: string;
 }
 
 type NavigatorWithUserAgentData = Navigator & {
@@ -85,7 +87,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
-      aria-label={t("sidebar.navigation")}
+      aria-label={props.ariaLabel ?? t("sidebar.navigation")}
       className={cn(
         "flex h-full w-full min-w-0 flex-col text-sidebar-foreground",
         props.hostChromeInset ? "bg-transparent" : "bg-sidebar",
@@ -113,7 +115,12 @@ export function Sidebar(props: SidebarProps) {
               : "pointer-events-none -ml-0.5",
           )}
         >
-          <BlackcatBrandLogo />
+          <img
+            src="/brand/blackcat_icon.png"
+            alt=""
+            className="h-8 w-8 select-none object-contain"
+            draggable={false}
+          />
         </button>
         {!collapsed && !props.hostChromeInset && (
           <Button
@@ -162,6 +169,13 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "skills"}
           icon={<Brain className="h-4 w-4" />}
         />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("sidebar.automations", { defaultValue: "Automations" })}
+          onClick={props.onOpenAutomations}
+          active={props.activeUtility === "automations"}
+          icon={<CalendarClock className="h-4 w-4" />}
+        />
         {props.archivedCount ? (
           <SidebarActionButton
             collapsed={collapsed}
@@ -197,7 +211,7 @@ export function Sidebar(props: SidebarProps) {
             projectNameOverrides={props.projectNameOverrides}
             collapsedGroups={props.collapsedGroups}
             runningChatIds={props.runningChatIds}
-            completedChatIds={props.completedChatIds}
+            updatedChatIds={props.updatedChatIds}
             density={props.viewState?.density}
             showPreviews={props.viewState?.show_previews}
             showTimestamps={props.viewState?.show_timestamps}

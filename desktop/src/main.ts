@@ -43,9 +43,9 @@ let mainWindow: BrowserWindow | null = null;
 let crashRestartAttempts = 0;
 let isQuitting = false;
 const hostSockets = new Map<string, UnixWebSocketClient>();
-const APP_PROTOCOL = "nanobot-app:";
+const APP_PROTOCOL = "blackcat-app:";
 const APP_HOST = "app";
-const HOST_SOCKET_PROTOCOL = "nanobot-host:";
+const HOST_SOCKET_PROTOCOL = "blackcat-host:";
 const HOST_SOCKET_HOST = "engine";
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 const GATEWAY_REQUEST_TIMEOUT_MS = 12_000;
@@ -54,7 +54,7 @@ const GATEWAY_RETRY_DELAY_MS = 80;
 
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: "nanobot-app",
+    scheme: "blackcat-app",
     privileges: {
       standard: true,
       secure: true,
@@ -80,11 +80,11 @@ function webDistPath(root: string): string {
   if (process.env.NANOBOT_DESKTOP_WEB_DIST) {
     return path.resolve(process.env.NANOBOT_DESKTOP_WEB_DIST);
   }
-  const bundled = path.join(process.resourcesPath, "nanobot-webui");
+  const bundled = path.join(process.resourcesPath, "blackcat-webui");
   if (app.isPackaged && existsSync(path.join(bundled, "index.html"))) {
     return bundled;
   }
-  return path.join(root, "nanobot", "web", "dist");
+  return path.join(root, "blackcat", "web", "dist");
 }
 
 function webDevUrl(): string | null {
@@ -186,7 +186,7 @@ function openExternalIfSafe(rawUrl: string): void {
 }
 
 function desktopContentSecurityPolicy(devUrl: string | null): string {
-  const connectSrc = ["'self'", "nanobot-host:"];
+  const connectSrc = ["'self'", "blackcat-host:"];
   if (devUrl) {
     const url = new URL(devUrl);
     connectSrc.push(url.origin, url.origin.replace(/^http/, "ws"));
@@ -199,7 +199,7 @@ function desktopContentSecurityPolicy(devUrl: string | null): string {
     "form-action 'none'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https: nanobot-app:",
+    "img-src 'self' data: blob: https: blackcat-app:",
     "font-src 'self' data:",
     "media-src 'self' data: blob:",
     "worker-src 'self' blob:",
@@ -245,7 +245,7 @@ function pythonExecutable(): string {
   if (process.env.NANOBOT_DESKTOP_PYTHON) {
     return path.resolve(process.env.NANOBOT_DESKTOP_PYTHON);
   }
-  const bundled = path.join(bundledResourcePath("nanobot-engine"), "bin", "python3");
+  const bundled = path.join(bundledResourcePath("blackcat-engine"), "bin", "python3");
   if (existsSync(bundled)) return bundled;
   return "python3";
 }
@@ -289,21 +289,21 @@ function appendGatewayLogs(gateway: ChildProcess, logsDir: string): void {
   const stream = createWriteStream(logPath, { flags: "a" });
   gateway.stdout?.on("data", (chunk) => {
     stream.write(chunk);
-    process.stdout.write(`[nanobot] ${chunk}`);
+    process.stdout.write(`[blackcat] ${chunk}`);
   });
   gateway.stderr?.on("data", (chunk) => {
     stream.write(chunk);
-    process.stderr.write(`[nanobot] ${chunk}`);
+    process.stderr.write(`[blackcat] ${chunk}`);
   });
   gateway.once("exit", (code, signal) => {
-    stream.write(`\n[nanobot] engine exited code=${code ?? ""} signal=${signal ?? ""}\n`);
+    stream.write(`\n[blackcat] engine exited code=${code ?? ""} signal=${signal ?? ""}\n`);
     stream.end();
   });
 }
 
 function notifyRuntimeStatus(status: EngineStatus): void {
   if (runtime) runtime.status = status;
-  sendToRenderer(mainWindow?.webContents, "nanobot:runtime-status", status);
+  sendToRenderer(mainWindow?.webContents, "blackcat:runtime-status", status);
 }
 
 function sendToRenderer(
@@ -440,7 +440,7 @@ async function startGateway(): Promise<HostRuntime> {
   const python = pythonExecutable();
   const args = [
     "-m",
-    "nanobot",
+    "blackcat",
     "desktop-gateway",
     "--config",
     dirs.configPath,
@@ -542,7 +542,7 @@ function scheduleCrashRestart(gateway: ChildProcess): void {
   setTimeout(() => {
     if (runtime?.gateway !== gateway || runtime.status === "stopped") return;
     void startRuntime().catch((error) => {
-      console.error("failed to restart nanobot engine", error);
+      console.error("failed to restart blackcat engine", error);
       notifyRuntimeStatus("crashed");
     });
   }, 1000);
@@ -589,7 +589,7 @@ async function proxyToGateway(request: Request): Promise<Response> {
   const normalizedWsPath = wsPath.startsWith("/") ? wsPath : `/${wsPath}`;
   return Response.json({
     ...body,
-    ws_url: `nanobot-host://engine${normalizedWsPath}`,
+    ws_url: `blackcat-host://engine${normalizedWsPath}`,
     runtime_surface: "native",
   });
 }
@@ -608,7 +608,7 @@ function resolveStaticAsset(webDist: string, requestUrl: string): string | null 
 }
 
 function registerAppProtocol(webDist: string, devUrl: string | null): void {
-  protocol.handle("nanobot-app", async (request) => {
+  protocol.handle("blackcat-app", async (request) => {
     if (!isTrustedAppUrl(request.url)) {
       return new Response("Forbidden", { status: 403 });
     }
@@ -645,7 +645,7 @@ function createWindow(): BrowserWindow {
     height: 820,
     minWidth: 920,
     minHeight: 640,
-    title: "nanobot",
+    title: "blackcat",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 14, y: 16 },
     backgroundColor: process.platform === "darwin" ? "#00000000" : "#ffffff",
@@ -708,27 +708,27 @@ function runtimeInfo() {
 }
 
 function registerIpcHandlers(): void {
-  handleHostIpc("nanobot:get-runtime-info", () => runtimeInfo());
-  handleHostIpc("nanobot:restart-engine", async () => {
+  handleHostIpc("blackcat:get-runtime-info", () => runtimeInfo());
+  handleHostIpc("blackcat:restart-engine", async () => {
     await restartRuntime();
   });
-  handleHostIpc("nanobot:pick-folder", async () => {
+  handleHostIpc("blackcat:pick-folder", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
     });
     if (result.canceled || !result.filePaths[0]) return null;
     return path.resolve(result.filePaths[0]);
   });
-  handleHostIpc("nanobot:open-logs", async () => {
+  handleHostIpc("blackcat:open-logs", async () => {
     const logsDir = runtime?.logsDir ?? userDataPath("logs");
     await mkdir(logsDir, { recursive: true });
     const error = await shell.openPath(logsDir);
     if (error) throw new Error(error);
   });
-  handleHostIpc("nanobot:export-diagnostics", async () => {
+  handleHostIpc("blackcat:export-diagnostics", async () => {
     const diagnosticsPath = path.join(
       app.getPath("temp"),
-      `nanobot-diagnostics-${Date.now()}.json`,
+      `blackcat-diagnostics-${Date.now()}.json`,
     );
     await writeFile(
       diagnosticsPath,
@@ -738,24 +738,24 @@ function registerIpcHandlers(): void {
     shell.showItemInFolder(diagnosticsPath);
     return diagnosticsPath;
   });
-  handleHostIpc("nanobot:check-for-updates", () => ({
+  handleHostIpc("blackcat:check-for-updates", () => ({
     supported: false,
     message: "Auto update is not configured for this build.",
   }));
-  handleHostIpc("nanobot:ws-connect", (event, rawUrl) => {
-    if (!runtime) throw new Error("nanobot engine is not running");
+  handleHostIpc("blackcat:ws-connect", (event, rawUrl) => {
+    if (!runtime) throw new Error("blackcat engine is not running");
     const url = parseHostSocketUrl(rawUrl);
     const id = randomBytes(12).toString("hex");
     const client = new UnixWebSocketClient(runtime.socketPath, url, {
-      onOpen: () => sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "open" }),
+      onOpen: () => sendToRenderer(event.sender, "blackcat:ws-event", { id, type: "open" }),
       onMessage: (data) => {
         handleDesktopNotificationFrame(data, { getWindow: () => mainWindow });
-        sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "message", data });
+        sendToRenderer(event.sender, "blackcat:ws-event", { id, type: "message", data });
       },
-      onError: (message) => sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "error", message }),
+      onError: (message) => sendToRenderer(event.sender, "blackcat:ws-event", { id, type: "error", message }),
       onClose: (code, reason) => {
         hostSockets.delete(id);
-        sendToRenderer(event.sender, "nanobot:ws-event", { id, type: "close", code, reason });
+        sendToRenderer(event.sender, "blackcat:ws-event", { id, type: "close", code, reason });
       },
     });
     hostSockets.set(id, client);
@@ -766,7 +766,7 @@ function registerIpcHandlers(): void {
     });
     return id;
   });
-  handleHostIpc("nanobot:ws-send", (_event, id, data) => {
+  handleHostIpc("blackcat:ws-send", (_event, id, data) => {
     if (typeof id !== "string" || typeof data !== "string") {
       throw new Error("Invalid host socket send arguments");
     }
@@ -774,7 +774,7 @@ function registerIpcHandlers(): void {
     if (!socket) throw new Error("Host socket not found");
     socket.send(data);
   });
-  handleHostIpc("nanobot:ws-close", (_event, id) => {
+  handleHostIpc("blackcat:ws-close", (_event, id) => {
     if (typeof id !== "string") {
       throw new Error("Invalid host socket close argument");
     }
@@ -787,7 +787,7 @@ async function loadAppWindow(win: BrowserWindow): Promise<void> {
   if (!runtime || runtime.status === "stopped" || runtime.status === "crashed") {
     await startRuntime();
   }
-  await win.loadURL("nanobot-app://app/index.html");
+  await win.loadURL("blackcat-app://app/index.html");
 }
 
 app.whenReady().then(async () => {

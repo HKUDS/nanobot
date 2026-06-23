@@ -21,7 +21,7 @@ class _DummyChannel(BaseChannel):
     async def stop(self) -> None:
         return None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def _send_impl(self, msg: OutboundMessage) -> None:
         self._sent.append(msg)
 
 

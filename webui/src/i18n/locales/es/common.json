@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Navegación de la barra lateral",
+    "mobileNavigation": "Navegación de la barra lateral móvil",
     "collapse": "Contraer barra lateral",
     "newChat": "Nuevo chat",
     "searchAria": "Buscar",
@@ -55,6 +56,7 @@
       "ariaLabel": "Cambiar idioma"
     },
     "apps": "Apps",
+    "automations": "Automatizaciones",
     "skills": {
       "title": "Habilidades"
     }
@@ -80,12 +82,14 @@
       "cliApps": "Apps CLI",
       "mcp": "MCP",
       "apps": "Aplicaciones",
+      "automations": "Automatizaciones",
       "skills": "Habilidades"
     },
     "sections": {
       "interface": "Interfaz",
       "ai": "AI",
       "system": "Sistema",
+      "about": "Acerca de",
       "status": "Estado",
       "localPreferences": "Preferencias locales",
       "presets": "Preajustes",
@@ -248,7 +252,7 @@
       "exporting": "Exportando..."
     },
     "byok": {
-      "description": "Usa tus propias claves de proveedor. Blackcat lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
+      "description": "Usa tus propias claves de proveedor. Nanobot lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
       "configured": "Configurado",
       "notConfigured": "Sin configurar",
       "configuredSection": "Configurados",
@@ -391,6 +395,13 @@
       "unavailable": "No disponible",
       "noDescription": "Sin descripción disponible."
     },
+    "about": {
+      "version": "Versión",
+      "checking": "Buscando actualizaciones...",
+      "checkForUpdates": "Buscar actualizaciones",
+      "upToDate": "Estás al día",
+      "updateAvailable": "Actualización disponible v{{version}}"
+    },
     "mcp": {
       "allCategories": "Todas las categorías",
       "summary": "{{installed}} de {{total}} presets habilitados",
@@ -461,6 +472,127 @@
       "loading": "Cargando apps...",
       "empty": "Ninguna app coincide con este filtro."
     },
+    "automations": {
+      "filters": {
+        "all": "Todas",
+        "active": "Activas",
+        "paused": "Pausadas",
+        "failed": "Requieren atención",
+        "system": "Sistema"
+      },
+      "sort": {
+        "next": "Próxima ejecución",
+        "last": "Última ejecución",
+        "updated": "Actualizada",
+        "name": "Nombre"
+      },
+      "search": "Buscar tarea, mensaje, chat vinculado u horario",
+      "queue": "Cola",
+      "loading": "Cargando automatizaciones...",
+      "noMatches": "No hay automatizaciones que coincidan con esta vista.",
+      "empty": "Aún no hay automatizaciones.",
+      "emptyHint": "Créala desde donde debe ejecutarse para que nanobot conserve el contexto correcto.",
+      "oneShot": "Una vez",
+      "systemTask": "Automatización administrada por el sistema",
+      "labels": {
+        "schedule": "Programación",
+        "next": "Siguiente",
+        "origin": "Chat vinculado",
+        "created": "Creada",
+        "updated": "Actualizada"
+      },
+      "runNow": "Ejecutar ahora",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "protected": "Protegida",
+      "editTitle": "Editar automatización",
+      "save": "Guardar",
+      "deleteTitle": "Eliminar automatización",
+      "deleteDescription": "Esto elimina {{name}} del almacén cron. Los mensajes de chat anteriores permanecen en la sesión.",
+      "cancel": "Cancelar",
+      "status": {
+        "system": "Sistema",
+        "running": "Ejecutándose ahora",
+        "paused": "Pausada",
+        "failed": "Fallida",
+        "completed": "Completada",
+        "noSchedule": "Sin programación",
+        "active": "Activa"
+      },
+      "origin": {
+        "system": "Sistema",
+        "unknown": "Sin chat vinculado"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "A las {{time}}",
+        "every": "Cada {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Diaria a las {{time}}",
+        "weekdaysAt": "Días laborables a las {{time}}",
+        "hourlyAt": "Cada hora en :{{minute}}",
+        "hourlyWindow": "Cada hora {{start}}-{{end}} en :{{minute}}",
+        "custom": "Programación personalizada"
+      },
+      "next": {
+        "paused": "Pausada",
+        "pending": "Ejecutándose ahora",
+        "none": "Sin próxima ejecución"
+      },
+      "message": {
+        "showMore": "Mostrar mensaje completo",
+        "showLess": "Mostrar menos"
+      },
+      "fields": {
+        "name": "Nombre",
+        "message": "Mensaje",
+        "scheduleType": "Tipo de programación",
+        "every": "Cada",
+        "unit": "Unidad",
+        "cronExpression": "Expresión cron",
+        "timezone": "Zona horaria",
+        "runAt": "Ejecutar a las"
+      },
+      "scheduleTypes": {
+        "every": "Intervalo",
+        "cron": "Cron",
+        "at": "Una vez"
+      },
+      "everyUnits": {
+        "second": "Segundos",
+        "minute": "Minutos",
+        "hour": "Horas",
+        "day": "Días"
+      },
+      "validation": {
+        "nameRequired": "El nombre es obligatorio.",
+        "messageRequired": "El mensaje es obligatorio.",
+        "intervalRequired": "El intervalo debe ser un número positivo.",
+        "cronRequired": "La expresión cron es obligatoria.",
+        "timeRequired": "La hora de ejecución es obligatoria.",
+        "futureRequired": "La hora de ejecución debe estar en el futuro."
+      }
+    },
     "oauth": {
       "authentication": "Autenticación OAuth",
       "signIn": "Iniciar sesión",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
+    "forkTitle": "Bifurcación: {{title}}",
     "loading": "Cargando…",
     "noSessions": "Todavía no hay sesiones.",
     "showMore": "Mostrar {{count}} más",
@@ -518,7 +651,8 @@
     "newInProject": "Iniciar un chat nuevo en {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -550,7 +684,22 @@
     "title": "¿Eliminar este chat?",
     "description": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
-    "confirm": "Eliminar"
+    "confirm": "Eliminar",
+    "automationsDescription": "Este chat tiene automatizaciones programadas. Al eliminarlo también se eliminarán.",
+    "moreAutomations": "+ {{count}} más",
+    "confirmWithAutomations": "Eliminar",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Cada {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Programación personalizada"
+    },
+    "next": {
+      "label": "Siguiente: {{time}}",
+      "disabled": "Pausada",
+      "none": "Sin próxima ejecución"
+    }
   },
   "connection": {
     "idle": "Inactivo",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "Siguiente {{time}}",
+        "pending": "Se ejecutará pronto",
         "disabled": "En pausa",
         "none": "Sin próxima ejecución"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "Desplazarse al final",
     "loadEarlier": "Cargar mensajes anteriores",
+    "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {
       "open": "Abrir navegador de prompts",
       "title": "Prompts",
@@ -835,12 +986,16 @@
     "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
     "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
     "imageAttachment": "Imagen adjunta",
-    "copyReply": "Copiar respuesta",
-    "copiedReply": "Respuesta copiada",
+    "forkFromHere": "Bifurcar",
+    "copyReply": "Copiar",
+    "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
     "activityThoughtFor": "Pensó durante {{duration}}",
+    "activityWorkingFor": "Trabajando durante {{duration}}",
+    "activityWorked": "Trabajo completado",
+    "activityWorkedFor": "Trabajó durante {{duration}}",
     "cliActivityRunningOne": "Usando @{{name}}",
     "cliActivityRanOne": "Usó @{{name}}",
     "cliActivityFailedOne": "Falló @{{name}}",
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {

@@ -15,7 +15,7 @@ import httpx
 from loguru import logger
 
 from blackcat.providers.registry import find_by_name
-from blackcat.utils.media import detect_image_mime
+from blackcat.utils.helpers import detect_image_mime
 
 _OPENROUTER_ATTRIBUTION_HEADERS = {
     "HTTP-Referer": "https://github.com/HKUDS/blackcat",
@@ -522,12 +522,6 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
             return base
         return self._default_base_url()
 
-    def _ollama_model(self, model: str) -> str:
-        """Strip the ``ollama/`` prefix if present."""
-        if model.startswith(("ollama/", "ollama_")):
-            return model.split("/", 1)[1]
-        return model
-
     async def generate(
         self,
         *,
@@ -544,7 +538,7 @@ class OllamaImageGenerationClient(ImageGenerationProvider):
 
         width, height = _ollama_dimensions(aspect_ratio, image_size)
         body: dict[str, Any] = {
-            "model": self._ollama_model(model),
+            "model": model,
             "prompt": prompt,
             "width": width,
             "height": height,
@@ -1376,6 +1370,8 @@ async def _parse_codex_sse_images(
                         logger.error("Codex SSE failure: {}", raw[:2000])
                     _collect_images_from_sse_event(event, images)
                     _collect_text_from_sse_event(event, text_parts)
+                    if ev_type == "response.completed":
+                        break
             continue
         buffer.append(line)
 

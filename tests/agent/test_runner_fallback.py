@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from blackcat.config.schema import ModelPresetConfig
 from blackcat.providers.base import LLMProvider, LLMResponse
@@ -283,6 +284,30 @@ class TestFallbackOnPrimaryError:
         factory.assert_called_once_with(_fallback("fallback-a"))
         assert primary.chat_calls[0]["model"] == "primary-model"
         assert fallback.chat_calls[0]["model"] == "fallback-a"
+
+    @pytest.mark.asyncio
+    async def test_logs_primary_error_before_fallback(self) -> None:
+        primary = _FakeProvider("primary", _error_response("primary overloaded"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        logs: list[str] = []
+        sink_id = logger.add(lambda message: logs.append(str(message)), format="{message}")
+
+        try:
+            fb = FallbackProvider(
+                primary=primary,
+                fallback_presets=[_fallback("fallback-a")],
+                provider_factory=factory,
+            )
+            await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        finally:
+            logger.remove(sink_id)
+
+        assert any(
+            "Primary model 'primary-model' failed: primary overloaded; trying fallback 'fallback-a'"
+            in line
+            for line in logs
+        )
 
 
 class TestNoFallbackWhenContentStreamed:

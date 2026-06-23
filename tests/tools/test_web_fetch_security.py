@@ -94,7 +94,7 @@ async def test_web_fetch_result_contains_untrusted_flag():
 
     data = json.loads(result)
     assert data.get("untrusted") is True
-    assert "<!-- external content" in data.get("text", "")
+    assert "[External content" in data.get("text", "")
 
 
 @pytest.mark.asyncio
@@ -151,8 +151,8 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
-    monkeypatch.setattr("blackcat.agent.tools.web.httpx.AsyncClient", FakeClient)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "Hello world")
+    monkeypatch.setattr("blackcat.agent.tools.web.httpx.AsyncClient", FakeClient)
 
     with patch("blackcat.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")

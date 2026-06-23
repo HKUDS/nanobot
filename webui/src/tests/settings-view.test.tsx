@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "@/components/settings/SettingsView";
-import type { SettingsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { SettingsPayload } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -100,6 +100,46 @@ function settingsPayload(): SettingsPayload {
   };
 }
 
+function autoDynamicProviderPayload(
+  options: {
+    configured: boolean;
+    hasApiKey: boolean;
+    apiBase: string | null;
+    apiKeyHint: string | null;
+  },
+): SettingsPayload {
+  const base = settingsPayload();
+  return {
+    ...base,
+    agent: {
+      ...base.agent,
+      model: "companyProxy/gpt-4o",
+      provider: "companyProxy",
+      resolved_provider: "companyProxy",
+      has_api_key: options.hasApiKey,
+    },
+    model_presets: [
+      {
+        ...base.model_presets[0],
+        model: "companyProxy/gpt-4o",
+        provider: "auto",
+      },
+    ],
+    providers: [
+      {
+        name: "companyProxy",
+        label: "Company Proxy",
+        configured: options.configured,
+        auth_type: "api_key",
+        api_key_required: false,
+        api_key_hint: options.apiKeyHint,
+        api_base: options.apiBase,
+        default_api_base: null,
+      },
+    ],
+  };
+}
+
 const installedAnyGen = {
   name: "anygen",
   display_name: "AnyGen",
@@ -119,8 +159,9 @@ const installedAnyGen = {
 
 function renderSettingsView(
   options: {
-    initialSection?: "overview" | "apps" | "advanced" | "models";
+    initialSection?: "overview" | "apps" | "automations" | "advanced" | "models";
     initialSettings?: SettingsPayload;
+    showSidebar?: boolean;
     onSettingsChange?: (payload: SettingsPayload) => void;
     onNativeEngineRestart?: () => Promise<string>;
   } = {},
@@ -131,6 +172,7 @@ function renderSettingsView(
         theme="light"
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
+        showSidebar={options.showSidebar}
         onToggleTheme={() => {}}
         onBackToChat={() => {}}
         onModelNameChange={() => {}}
@@ -145,6 +187,25 @@ describe("SettingsView Apps catalog", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("does not show the Settings kicker on the standalone Automations surface", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/webui/automations") return jsonResponse({ jobs: [] });
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({
+      initialSection: "automations",
+      initialSettings: settingsPayload(),
+      showSidebar: false,
+    });
+
+    expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
+    expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
   });
 
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
@@ -277,11 +338,10 @@ describe("SettingsView Apps catalog", () => {
   it("aligns token activity days with the configured timezone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-02T18:00:00Z"));
-    const basePayload = settingsPayload();
     const payload: SettingsPayload = {
-      ...basePayload,
+      ...settingsPayload(),
       agent: {
-        ...basePayload.agent,
+        ...settingsPayload().agent,
         timezone: "Asia/Shanghai",
       },
       usage: {
@@ -334,6 +394,47 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
+  });
+
+  it("uses the resolved provider row for auto dynamic providers without api keys", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({
+      initialSection: "models",
+      initialSettings: autoDynamicProviderPayload({
+        configured: true,
+        hasApiKey: false,
+        apiBase: "https://proxy.example.test/v1",
+        apiKeyHint: null,
+      }),
+    });
+
+    const configurationButton = await screen.findByRole("button", {
+      name: "Current configuration",
+    });
+    expect(configurationButton).toHaveTextContent("companyProxy/gpt-4o");
+    expect(configurationButton).toHaveTextContent("Company Proxy");
+    expect(configurationButton).not.toHaveTextContent("Not configured");
+  });
+
+  it("does not treat auto dynamic provider api keys as configured without apiBase", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+
+    renderSettingsView({
+      initialSection: "models",
+      initialSettings: autoDynamicProviderPayload({
+        configured: false,
+        hasApiKey: true,
+        apiBase: null,
+        apiKeyHint: "sk-...",
+      }),
+    });
+
+    const configurationButton = await screen.findByRole("button", {
+      name: "Current configuration",
+    });
+    expect(configurationButton).toHaveTextContent("Not configured");
+    expect(configurationButton).toHaveTextContent("Company Proxy · companyProxy/gpt-4o");
   });
 
   it("marks the current model as unconfigured when its provider needs setup", async () => {

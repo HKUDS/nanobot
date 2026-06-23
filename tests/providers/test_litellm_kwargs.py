@@ -1178,12 +1178,9 @@ def test_openai_compat_stringifies_dict_tool_arguments() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "ls -la"}'
 
 
-def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
+def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
     with patch("blackcat.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
-
-def test_openai_compat_repairs_object_like_history_tool_arguments_string() -> None:
-    provider = OpenAICompatProvider()
 
     sanitized = provider._sanitize_messages([
         {"role": "user", "content": "hi"},
@@ -1231,7 +1228,7 @@ def test_openai_compat_defaults_missing_tool_arguments_to_empty_object() -> None
 
 @pytest.mark.asyncio
 async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
-    monkeypatch.setenv("BLACKCAT_STREAM_IDLE_TIMEOUT_S", "0")
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
     mock_create = AsyncMock(return_value=_StalledStream())
     spec = find_by_name("openai")
 
@@ -1576,9 +1573,46 @@ def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
     assert "reasoning_effort" not in kw
 
 
+def test_kimi_k27_code_thinking_enabled() -> None:
+    """Kimi K2.7 Code supports native thinking controls."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_enabled_with_openrouter_prefix() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should carry both thinking shapes."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="high")
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "high"},
+    }
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_omits_disabled() -> None:
+    """Kimi K2.7 Code is always-thinking; disabled thinking is invalid upstream."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
+def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> None:
+    """OpenRouter-routed Kimi K2.7 Code should not request disabled thinking."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
 def test_moonshot_kimi_k26_temperature_override() -> None:
     """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
+    assert kw["temperature"] == 1.0
+
+
+def test_moonshot_kimi_k27_code_temperature_override() -> None:
+    """Moonshot registry should force temperature 1.0 for Kimi K2.7 Code."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort=None)
     assert kw["temperature"] == 1.0
 
 

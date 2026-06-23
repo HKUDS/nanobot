@@ -1,78 +1,130 @@
 # Install and Quick Start
 
-## Install
+This page gets one local blackcat reply working. After that, you can add the WebUI, chat apps, local models, web search, MCP, deployment, or custom plugins.
+
+If you have never used a terminal or edited a config file before, use [`start-without-technical-background.md`](./start-without-technical-background.md) first. This page assumes you are comfortable pasting commands and editing JSON snippets.
+
+## Before You Start
+
+You need:
+
+- Python 3.11 or newer.
+- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use OpenRouter only so the snippets are concrete; any supported provider works when the key, provider name, and model ID match.
+- Git only if you install from source.
+- Node.js or Bun only if you are developing the WebUI itself.
 
 > [!IMPORTANT]
-> This README may describe features that are available first in the latest source code.
-> If you want the newest features and experiments, install from source.
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+> Repository docs may describe features that are available first in source. Install from PyPI or `uv` for the stable day-to-day release; install from source when you want the newest repository behavior or plan to contribute.
 
-**Install from source** (latest features, experimental changes may land here first; recommended for development)
+## 1. Install
+
+Pick one install method.
+
+**One-command setup:**
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd blackcat
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.sh | sh
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.ps1 | iex
+```
+
+The default command installs or upgrades `blackcat-ai` from PyPI, then starts `blackcat onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.blackcat/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+
+To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.sh | sh -s -- --dry-run
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.ps1))) --dry-run
+```
+
+To install the current `main` branch instead, pass `--dev`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.sh | sh -s -- --dev
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/blackcat/main/scripts/install.ps1))) --dev
+```
+
+If `curl` or `irm` is unavailable, or GitHub raw downloads are blocked on your network, use one of the manual install methods below.
+
+If you prefer to inspect the script first, open [`../scripts/install.sh`](../scripts/install.sh) or [`../scripts/install.ps1`](../scripts/install.ps1).
+
+**Stable release with `uv`:**
 
 ```bash
 uv tool install blackcat-ai
-```
-
-**Install from PyPI** (stable release)
-
-```bash
-pip install blackcat-ai
-```
-
-### Update to latest version
-
-**PyPI / pip**
-
-```bash
-pip install -U blackcat-ai
 blackcat --version
 ```
 
-**uv**
+**Stable release with pip:**
 
 ```bash
-uv tool upgrade blackcat-ai
+python -m pip install blackcat-ai
 blackcat --version
 ```
 
-**Using WhatsApp?** Rebuild the local bridge after upgrading:
+Use pip only inside an environment you control. If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install blackcat-ai`, `pipx install blackcat-ai`, or create a virtual environment first.
+
+**Latest source checkout:**
 
 ```bash
-rm -rf ~/.blackcat/bridge
-blackcat channels login whatsapp
+git clone https://github.com/HKUDS/blackcat.git
+cd blackcat
+python -m pip install -e .
+blackcat --version
 ```
 
-## Quick Start
+If your shell cannot find `blackcat` after a pip install, run the module form:
 
-> [!TIP]
-> Set your API key in `~/.blackcat/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
->
-> For other LLM providers, please see [`configuration.md`](./configuration.md).
->
-> For web search capability setup, please see the web-search section in [`configuration.md`](./configuration.md#web-search).
+```bash
+python -m blackcat --version
+python -m blackcat onboard
+```
 
-**1. Initialize**
+On Windows, `~` in the docs means your user profile directory, for example `C:\Users\you`.
+
+The docs use `python` in commands. If your system exposes Python 3.11+ as `python3` or `py`, use that command in the same place, for example `python3 -m pip install blackcat-ai` or `py -m blackcat --version`.
+
+## 2. Initialize
+
+Skip this section if the one-command setup already started the wizard and you saved the config there.
 
 ```bash
 blackcat onboard
 ```
 
-Use `blackcat onboard --wizard` if you want the interactive setup wizard.
+Use the wizard if you prefer prompts instead of editing JSON by hand:
 
-**2. Configure** (`~/.blackcat/config.json`)
+```bash
+blackcat onboard --wizard
+```
 
-Configure these **two parts** in your config (other options have defaults).
+Initialization creates:
 
-*Set your API key* (e.g. OpenRouter, recommended for global users):
+| Path | What it is |
+|------|------------|
+| `~/.blackcat/config.json` | Main settings file for providers, models, channels, tools, gateway, and API |
+| `~/.blackcat/workspace/` | Agent workspace for memory, sessions, heartbeat tasks, skills, and artifacts |
+
+If you already have a config, `blackcat onboard` can refresh missing default fields without overwriting your existing values.
+
+## 3. Configure a Provider
+
+Skip this section if you already configured provider and model settings in the wizard.
+
+Open `~/.blackcat/config.json`. Add or merge these blocks into the file created by `blackcat onboard`; do not replace the whole file unless you want to reset the config.
+
+**API key:**
+
 ```json
 {
   "providers": {
@@ -83,22 +135,200 @@ Configure these **two parts** in your config (other options have defaults).
 }
 ```
 
-*Set your model* (optionally pin a provider — defaults to auto-detection):
+**Model preset:**
+
 ```json
 {
+  "modelPresets": {
+    "primary": {
+      "label": "Primary",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.5",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
+      "modelPreset": "primary"
     }
   }
 }
 ```
 
-**3. Chat**
+The provider and model inside a preset must match. The snippet above is only an example. For another provider, replace these values together:
+
+| Replace | Where |
+|---|---|
+| Provider config key, such as `openrouter` | `providers.<provider>` |
+| API key or environment variable | `providers.<provider>.apiKey` |
+| Preset provider name | `modelPresets.primary.provider` |
+| Model ID | `modelPresets.primary.model` |
+| Endpoint URL, only when needed | `providers.<provider>.apiBase` |
+
+Direct `agents.defaults.provider` and `agents.defaults.model` still work for existing configs, but named presets are the recommended path because they also power `/model` switching and fallback chains. For provider-specific examples across direct, gateway, OAuth, cloud, and local setups, see [`providers.md`](./providers.md).
+
+**What about `apiBase` / base URL?**
+
+`apiBase` is the HTTP base URL of the provider endpoint, not the model name. Most hosted providers in blackcat already know their default endpoint, so you usually only set `apiKey` and a model preset. Set `apiBase` when you are using:
+
+- `custom` for a third-party or self-hosted OpenAI-compatible API;
+- a local OpenAI-compatible server such as Ollama, vLLM, or LM Studio;
+- a provider-specific alternate endpoint, regional endpoint, proxy, or subscription endpoint.
+
+Examples:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "${CUSTOM_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
+    }
+  }
+}
+```
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiBase": "http://localhost:11434/v1"
+    }
+  }
+}
+```
+
+If the provider's docs say the endpoint is `/v1`, include `/v1` in `apiBase`. The model ID still belongs in the active `modelPresets` entry.
+
+If you prefer not to store secrets in `config.json`, reference an environment variable and set it before starting blackcat:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  }
+}
+```
+
+## 4. Check the Setup
+
+```bash
+blackcat status
+```
+
+This should show the config path, workspace path, active model or preset, and provider summary. It does not send a message to the model, so use it as a quick config check before the first real request.
+
+Read it like this:
+
+| Status line | What you want |
+|---|---|
+| `Config` | A check mark. |
+| `Workspace` | A check mark. |
+| `Model` | The model or preset you expect. |
+| Provider list | Most providers can say `not set`; the provider used by the active preset should show a check mark, OAuth status, or local URL. |
+
+## 5. Test One Message
+
+Run a one-shot CLI message:
+
+```bash
+blackcat agent -m "Hello!"
+```
+
+A successful first run proves that:
+
+- the `blackcat` command is installed;
+- `~/.blackcat/config.json` can be loaded;
+- the selected provider and model can answer;
+- the default workspace can be created and used.
+
+The reply text itself will vary. Any normal assistant answer means the install, config, provider, model, and workspace path are all usable.
+
+If that works, start an interactive CLI chat:
 
 ```bash
 blackcat agent
 ```
 
-That's it! You have a working AI agent in 2 minutes.
+After the interactive session can answer normally, blackcat can help with its own next setup step. Ask it to read the relevant docs, inspect your current `~/.blackcat/config.json`, and make one concrete change such as enabling WebUI, adding a provider preset, or configuring one chat channel. When blackcat says the config is updated, run `/restart` in the chat or restart the blackcat process manually so long-running processes reload `config.json`.
+
+Example prompt:
+
+```text
+Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
+Then update ~/.blackcat/config.json to add an OpenRouter model preset named "primary".
+Tell me exactly what changed and whether I need to run /restart.
+```
+
+Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+## 6. Choose Your Next Step
+
+| Want to... | Go to |
+|---|---|
+| Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
+| Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
+| Understand provider/model matching | [`providers.md`](./providers.md) |
+| Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) |
+| Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
+| Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
+| Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
+| Debug a failure | [`troubleshooting.md`](./troubleshooting.md) |
+
+## Updating
+
+**pip:**
+
+```bash
+python -m pip install -U blackcat-ai
+blackcat --version
+```
+
+If pip reports `externally-managed-environment`, upgrade with the same isolated method you used to install blackcat, such as `uv tool upgrade blackcat-ai`, `pipx upgrade blackcat-ai`, or the managed venv created by the one-command installer.
+
+**uv:**
+
+```bash
+uv tool upgrade blackcat-ai
+blackcat --version
+```
+
+**pipx:**
+
+```bash
+pipx upgrade blackcat-ai
+blackcat --version
+```
+
+**Source checkout:**
+
+```bash
+git pull
+python -m pip install -e .
+blackcat --version
+```
+
+If you use WhatsApp, rebuild the local bridge after upgrading:
+
+```bash
+rm -rf ~/.blackcat/bridge
+blackcat channels login whatsapp
+```
+
+## First-Run Troubleshooting
+
+| Symptom | What to check |
+|---------|---------------|
+| `blackcat: command not found` | Use `python -m blackcat ...`, or add your Python scripts directory to `PATH`. |
+| `ModuleNotFoundError: blackcat` | Confirm you installed into the same Python environment that is running the command. |
+| JSON parse errors | Check commas and braces in `~/.blackcat/config.json`; examples above are partial snippets to merge. |
+| Authentication or 401 errors | Check that the API key is valid, copied without spaces, and placed under the provider you selected. |
+| Provider/model errors | Make sure the active preset uses the provider that owns your API key and that the model exists there. |
+| The CLI works but a chat app does not reply | First keep `blackcat gateway` running, then follow [`chat-apps.md`](./chat-apps.md). |
+| WebUI does not open | Enable the WebSocket channel and open port `8765`, not the gateway health port `18790`. |
+
+For a fuller diagnosis flow, see [`troubleshooting.md`](./troubleshooting.md).

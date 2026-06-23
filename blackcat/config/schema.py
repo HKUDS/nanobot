@@ -4,25 +4,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
-from pydantic.alias_generators import to_camel
+from pydantic import AliasChoices, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from blackcat.config.paths import get_workspace_path
+from blackcat.config_base import Base
 from blackcat.cron.types import CronSchedule
 
 if TYPE_CHECKING:
     from blackcat.agent.tools.cli_apps import CliAppsToolConfig
+    from blackcat.agent.tools.filesystem import FileToolsConfig
     from blackcat.agent.tools.image_generation import ImageGenerationToolConfig
     from blackcat.agent.tools.self import MyToolConfig
     from blackcat.agent.tools.shell import ExecToolConfig
     from blackcat.agent.tools.web import WebToolsConfig
-
-
-class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 class ChannelsConfig(Base):
@@ -92,9 +87,6 @@ class InlineFallbackConfig(Base):
     provider: str
     max_tokens: int | None = None
     context_window_tokens: int | None = None
-    daily_summary_hour: int = 3  # Hour to run daily summary (0-23)
-    llm_timeout: int = 60  # Timeout for LLM API calls in seconds
-    summarizer_model: str | None = None  # Model for summarization
     temperature: float | None = None
     reasoning_effort: str | None = None
 
@@ -154,7 +146,7 @@ class AgentDefaults(Base):
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
-        default=0,
+        default=15,
         ge=0,
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
@@ -198,7 +190,13 @@ class BedrockProviderConfig(ProviderConfig):
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers."""
+    """Configuration for LLM providers.
+
+    Supports custom providers via extra fields — any additional field
+    becomes an OpenAI-compatible custom provider.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
@@ -223,7 +221,7 @@ class ProvidersConfig(Base):
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax_anthropic: ProviderConfig = Field(default_factory=ProviderConfig)  # MiniMax Anthropic endpoint (thinking)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
-    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
+    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰) — LLM + ASR (set apiBase to Plan URL for ASR)
     xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     longcat: ProviderConfig = Field(default_factory=ProviderConfig)  # LongCat
     ant_ling: ProviderConfig = Field(default_factory=ProviderConfig)  # Ant Ling
@@ -240,11 +238,30 @@ class ProvidersConfig(Base):
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
 
     @model_validator(mode="after")
+    def convert_extra_providers(self):
+        """Convert extra fields (custom providers) to ProviderConfig objects."""
+        if self.model_extra:
+            from blackcat.providers.registry import find_by_name
+
+            for key, value in self.model_extra.items():
+                if spec := find_by_name(key):
+                    raise ValueError(
+                        f"providers.{key} conflicts with built-in provider {spec.name!r}; "
+                        "use the built-in provider key or choose a different custom provider name"
+                    )
+                if isinstance(value, dict):
+                    self.model_extra[key] = ProviderConfig.model_validate(value)
+        return self
+
+    @model_validator(mode="after")
     def _validate_api_type_scope(self) -> "ProvidersConfig":
         for name in self.__class__.model_fields:
             if name == "openai":
                 continue
             provider = getattr(self, name, None)
+            if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
+                raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+        for provider in (self.model_extra or {}).values():
             if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
         return self
@@ -273,19 +290,6 @@ class GatewayConfig(Base):
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
-
-class MCPServerConfig(Base):
-    """MCP server connection configuration (stdio or HTTP)."""
-
-    type: Literal["stdio", "sse", "streamableHttp"] | None = None  # auto-detected if omitted
-    command: str = ""  # Stdio: command to run (e.g. "npx")
-    args: list[str] = Field(default_factory=list)  # Stdio: command arguments
-    env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
-    cwd: str = ""  # Stdio: working directory for MCP server runtime artifacts
-    url: str = ""  # HTTP/SSE: endpoint URL
-    headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
-    tool_timeout: int = 30  # seconds before a tool call is cancelled
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 class WorkspaceConfig(Base):
     """Per-workspace Lens configuration."""
@@ -337,11 +341,20 @@ class LensConfig(Base):
             return ws_config.diagnostics_source
         return self.diagnostics_source
 
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
 
-    enable: bool = True
-    allow_set: bool = Field(default=False, alias="allowSet")
+class MCPServerConfig(Base):
+    """MCP server connection configuration (stdio or HTTP)."""
+
+    type: Literal["stdio", "sse", "streamableHttp"] | None = None  # auto-detected if omitted
+    command: str = ""  # Stdio: command to run (e.g. "npx")
+    args: list[str] = Field(default_factory=list)  # Stdio: command arguments
+    env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
+    cwd: str = ""  # Stdio: working directory for MCP server runtime artifacts
+    url: str = ""  # HTTP/SSE: endpoint URL
+    headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
+    tool_timeout: int = 30  # seconds before a tool call is cancelled
+    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
+
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
@@ -349,26 +362,25 @@ def _lazy_default(module_path: str, class_name: str) -> Any:
     module = importlib.import_module(module_path)
     return getattr(module, class_name)()
 
+class PlatformIdentity(Base): # TODO: add all the other platforms
+    """Platform identifiers for a single author (user IDs per channel)."""
 
-class AuthorIdentity(Base): # FIXME: add all the other platforms
-    """Platform identities for an author (like API keys, keep private)."""
-
-    whatsapp: str | None = None
-    telegram: str | None = None
-    discord: str | None = None
-    cli: str | None = None
-
+    whatsapp: str | int | None = None
+    telegram: str | int | None = None
+    discord: str | int | None = None
+    cli: str | int | None = None
 
 class ToolsConfig(Base):
     """Tools configuration.
 
     Field types for tool-specific sub-configs are resolved via model_rebuild()
-    at the bottom of this file to avoid circular imports (tool modules import
-    Base from schema.py).
+    at the bottom of this file so tool config classes can stay next to their
+    tool implementations.
     """
 
     web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.web", "WebToolsConfig"))
     exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.shell", "ExecToolConfig"))
+    file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.filesystem", "FileToolsConfig"))
     cli_apps: CliAppsToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.cli_apps", "CliAppsToolConfig"))
     my: MyToolConfig = Field(default_factory=lambda: _lazy_default("blackcat.agent.tools.self", "MyToolConfig"))
     image_generation: ImageGenerationToolConfig = Field(
@@ -385,7 +397,6 @@ class ToolsConfig(Base):
         ),
     )  # allow WebUI Full Access shell checks against localhost services; legacy allowLocalPreviewAccess still reads
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-    lens: LensConfig = Field(default_factory=LensConfig)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
@@ -399,8 +410,8 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    my_tool: MyToolConfig = Field(default_factory=MyToolConfig, alias="myTool")
-    author_identity: AuthorIdentity | None = None
+    lens: LensConfig = Field(default_factory=LensConfig)
+    authors: dict[str, PlatformIdentity] = Field(default_factory=dict)
     model_presets: dict[str, ModelPresetConfig] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("modelPresets", "model_presets"),
@@ -446,31 +457,37 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    @staticmethod
-    def _is_cloud_model(model: str) -> bool:
-        """Check if model name ends with :cloud suffix (e.g., 'glm-5.1:cloud')."""
-        return model.lower().endswith(":cloud")
-
-    @staticmethod
-    def _strip_cloud_suffix(model: str) -> str:
-        """Remove :cloud suffix from model name for provider matching."""
-        return model[:-6] if model.lower().endswith(":cloud") else model
-
     def _match_provider(
         self, model: str | None = None,
         *,
         preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from blackcat.providers.registry import PROVIDERS, find_by_name
+        from blackcat.providers.registry import (
+            PROVIDERS,
+            find_by_name,
+        )
 
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
+
+        def _custom_provider_by_name(name: str) -> tuple[ProviderConfig, str] | None:
+            normalized = name.replace("-", "_").lower()
+            for attr_name, provider in (self.providers.model_extra or {}).items():
+                if not isinstance(provider, ProviderConfig):
+                    continue
+                if attr_name.replace("-", "_").lower() == normalized:
+                    return provider, attr_name
+            return None
+
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
+            custom = _custom_provider_by_name(forced)
+            if custom is not None:
+                return custom
             return None, None
 
         model_lower = (model or resolved.model).lower()
@@ -490,6 +507,15 @@ class Config(BaseSettings):
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
+
+        # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
+        # Return the matching provider even when apiBase is missing, so a
+        # malformed explicit prefix fails instead of falling through to a
+        # different custom provider.
+        if model_prefix:
+            custom = _custom_provider_by_name(normalized_prefix)
+            if custom is not None:
+                return custom
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
@@ -526,6 +552,12 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
+
+        # Final fallback: check for any configured custom provider
+        for attr_name, p in (self.providers.model_extra or {}).items():
+            if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
         return None, None
 
     def get_provider(
@@ -567,12 +599,7 @@ class Config(BaseSettings):
         """Get API base URL for the given model, falling back to the provider default when present."""
         from blackcat.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
-
-        # Ollama cloud routing: models ending with :cloud use ollama.com
-        if name == "ollama" and model and self._is_cloud_model(model):
-            return "https://ollama.com/v1/" # TODO: a better integration of this so it can be reflected in the webui too
-
+        p, name = self._match_provider(model, preset=preset)
         if p and p.api_base:
             return p.api_base
         if name:
@@ -594,6 +621,7 @@ def _resolve_tool_config_refs() -> None:
     import sys
 
     from blackcat.agent.tools.cli_apps import CliAppsToolConfig
+    from blackcat.agent.tools.filesystem import FileToolsConfig
     from blackcat.agent.tools.image_generation import ImageGenerationToolConfig
     from blackcat.agent.tools.self import MyToolConfig
     from blackcat.agent.tools.shell import ExecToolConfig
@@ -602,6 +630,7 @@ def _resolve_tool_config_refs() -> None:
     # Re-export into this module's namespace
     mod = sys.modules[__name__]
     mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
+    mod.FileToolsConfig = FileToolsConfig  # type: ignore[attr-defined]
     mod.CliAppsToolConfig = CliAppsToolConfig  # type: ignore[attr-defined]
     mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]
     mod.WebSearchConfig = WebSearchConfig  # type: ignore[attr-defined]

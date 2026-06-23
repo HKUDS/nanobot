@@ -1,7 +1,7 @@
 """Cron types."""
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 
 @dataclass
@@ -25,12 +25,15 @@ class CronPayload:
 
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
-    # Deliver response to channel
+    # Legacy delivery fields used by pre-session-bound cron jobs.
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
-    channel_meta: dict = field(default_factory=dict)  # channel-specific routing (e.g. Slack thread_ts)
+    channel_meta: dict[str, Any] = field(default_factory=dict)
     session_key: str | None = None  # original session key for correct session recording
+    origin_channel: str | None = None
+    origin_chat_id: str | None = None
+    origin_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

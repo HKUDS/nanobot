@@ -60,6 +60,7 @@ function fakeClient() {
       },
       sendMessage: vi.fn(),
       newChat: vi.fn(),
+      forkChat: vi.fn(),
       attach: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
@@ -179,6 +180,36 @@ describe("useBlackcatStream", () => {
     });
   });
 
+  it("does not start streaming from completed trailing activity after an answer", () => {
+    const fake = fakeClient();
+    const initialMessages = [
+      {
+        id: "a1",
+        role: "assistant" as const,
+        content: "Cron test",
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t1",
+        role: "tool" as const,
+        kind: "trace" as const,
+        content: "message({})",
+        traces: ["message({})"],
+        turnId: "cron:run",
+        createdAt: Date.now(),
+      },
+    ];
+
+    const { result } = renderHook(
+      () => useBlackcatStream("chat-cron-done", initialMessages),
+      { wrapper: wrap(fake.client) },
+    );
+
+    expect(result.current.messages.at(-1)?.kind).toBe("trace");
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("drops pending stream work when switching chats", async () => {
     const fake = fakeClient();
     const { result, rerender } = renderHook(
@@ -275,7 +306,7 @@ describe("useBlackcatStream", () => {
     expect(result.current.messages[1].kind).toBeUndefined();
   });
 
-it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
+  it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useBlackcatStream("chat-au", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -1389,7 +1420,7 @@ it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
     ]);
   });
 
-it("keeps assistant html media as a file attachment", () => {
+  it("keeps assistant html media as a file attachment", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useBlackcatStream("chat-html-media", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -1806,4 +1837,5 @@ it("keeps assistant html media as a file attachment", () => {
     });
     expect(result.current.goalState).toEqual({ active: false });
   });
+
 });

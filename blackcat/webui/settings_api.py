@@ -15,26 +15,25 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from blackcat import __version__
 from blackcat.audio.transcription import resolve_transcription_config
 from blackcat.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
 from blackcat.config.loader import get_config_path, load_config, save_config
-from blackcat.config.schema import ModelPresetConfig
+from blackcat.config.schema import ModelPresetConfig, ProviderConfig
 from blackcat.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
-from blackcat.providers.registry import PROVIDERS, find_by_name
+from blackcat.providers.registry import PROVIDERS, create_dynamic_spec, find_by_name
 from blackcat.security.workspace_access import workspace_sandbox_status
 from blackcat.webui.token_usage import token_usage_payload
 from blackcat.webui.workspaces import (
     read_webui_default_access_mode,
     write_webui_default_access_mode,
 )
-
-from blackcat import __version__
 
 QueryParams = dict[str, list[str]]
 RuntimeSurface = Literal["browser", "native"]
@@ -87,8 +86,11 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
     {"name": "jina", "label": "Jina", "credential": "api_key"},
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
+    {"name": "exa", "label": "Exa", "credential": "api_key"},
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+    {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -269,6 +271,12 @@ def _provider_requires_api_key(spec: Any) -> bool:
     return True
 
 
+def _provider_requires_api_base(spec: Any) -> bool:
+    if spec.name == "azure_openai":
+        return True
+    return bool(spec.backend == "openai_compat" and spec.is_direct and not spec.default_api_base)
+
+
 def _oauth_provider_status(spec: Any) -> dict[str, Any]:
     if not getattr(spec, "is_oauth", False):
         return {"configured": False, "account": None, "expires_at": None, "login_supported": False}
@@ -320,7 +328,7 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     if spec.is_oauth:
         return bool(_oauth_provider_status(spec)["configured"])
-    if spec.name == "azure_openai":
+    if _provider_requires_api_base(spec):
         return bool(provider_config.api_base)
     if _provider_requires_api_key(spec):
         return bool(provider_config.api_key)
@@ -330,6 +338,62 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
         or getattr(provider_config, "region", None)
         or getattr(provider_config, "profile", None)
     )
+
+
+def _dynamic_provider_items(config: Any) -> list[tuple[str, ProviderConfig]]:
+    return [
+        (name, provider_config)
+        for name, provider_config in (config.providers.model_extra or {}).items()
+        if isinstance(provider_config, ProviderConfig)
+    ]
+
+
+def _resolve_settings_provider(
+    config: Any,
+    provider_name: str,
+) -> tuple[Any, str, ProviderConfig] | None:
+    spec = find_by_name(provider_name)
+    if spec is not None:
+        provider_config = getattr(config.providers, spec.name, None)
+        if isinstance(provider_config, ProviderConfig):
+            return spec, spec.name, provider_config
+        return None
+
+    normalized = provider_name.replace("-", "_")
+    for extra_name, provider_config in _dynamic_provider_items(config):
+        if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
+            return create_dynamic_spec(extra_name), extra_name, provider_config
+    return None
+
+
+def _provider_settings_row(
+    name: str,
+    spec: Any,
+    provider_config: ProviderConfig,
+) -> dict[str, Any]:
+    oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
+    row = {
+        "name": name,
+        "label": spec.label,
+        "configured": (
+            bool(oauth_status["configured"])
+            if oauth_status is not None
+            else _provider_configured_for_settings(spec, provider_config)
+        ),
+        "auth_type": "oauth" if spec.is_oauth else "api_key",
+        "api_key_required": _provider_requires_api_key(spec),
+        "api_key_hint": _mask_secret_hint(provider_config.api_key),
+        "api_base": provider_config.api_base,
+        "default_api_base": spec.default_api_base or None,
+        "model_selectable": not spec.is_transcription_only,
+    }
+    if oauth_status is not None:
+        row["oauth_account"] = oauth_status["account"]
+        row["oauth_expires_at"] = oauth_status["expires_at"]
+        row["oauth_login_supported"] = oauth_status["login_supported"]
+    if spec.name == "openai":
+        row["api_type"] = provider_config.api_type
+    return row
 
 
 def _model_catalog_kind(spec: Any) -> str:
@@ -422,12 +486,15 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
-    spec = find_by_name(provider_name)
-    if spec is None:
+
+    config = load_config()
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
 
     base_payload: dict[str, Any] = {
-        "provider": spec.name,
+        "provider": provider_key,
         "label": spec.label,
         "catalog_kind": _model_catalog_kind(spec),
         "models": [],
@@ -449,11 +516,6 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
             "catalog_kind": "unsupported",
             "message": "Model list is not available for this provider. Type a model ID manually.",
         }
-
-    config = load_config()
-    provider_config = getattr(config.providers, spec.name, None)
-    if provider_config is None:
-        raise WebUISettingsError("unknown provider")
 
     api_base = _resolve_env_placeholders(provider_config.api_base) or spec.default_api_base
     if spec.name == "openai" and not api_base:
@@ -555,16 +617,13 @@ def _model_configuration_slug(label: str) -> str:
 def _validate_configured_provider(config: Any, provider: str) -> None:
     if provider == "auto":
         return
-    spec = find_by_name(provider)
-    if spec is None:
+    resolved_provider = _resolve_settings_provider(config, provider)
+    if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
+    spec, _, provider_config = resolved_provider
     if spec.is_transcription_only:
         raise WebUISettingsError("provider does not support chat models")
-    provider_config = getattr(config.providers, provider, None)
-    if (
-        provider_config is None
-        or not _provider_configured_for_settings(spec, provider_config)
-    ):
+    if not _provider_configured_for_settings(spec, provider_config):
         raise WebUISettingsError("provider is not configured")
 
 
@@ -594,6 +653,40 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+_DEFAULT_REASONING_EFFORT_VALUES: tuple[str, ...] = ("", "low", "medium", "high")
+
+
+def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
+    """Return user-facing reasoning_effort options for this provider+model.
+
+    Mistral chat models accept only "high"/"none"; Magistral rejects the
+    kwarg entirely (reasoning is implicit). For everyone else, return the
+    full OpenAI vocab.
+    """
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+    model_lower = (model or "").lower()
+    implicit = getattr(spec, "implicit_reasoning_models", ())
+    if implicit and any(pat in model_lower for pat in implicit):
+        # Reasoning is always on; only "Default" makes sense.
+        return [""]
+
+    remap = getattr(spec, "reasoning_effort_remap", ())
+    if remap:
+        # Reverse the remap: surface the distinct wire-vocab outputs as the
+        # user's options. Mistral collapses to "high"/"none" → UI shows
+        # "Default" + "High".
+        wire_values: list[str] = []
+        for _user_val, wire_val in remap:
+            if wire_val and wire_val != "none" and wire_val not in wire_values:
+                wire_values.append(wire_val)
+        return ["", *wire_values]
+
+    return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
 def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
@@ -644,29 +737,15 @@ def settings_payload(
         provider_config = getattr(config.providers, spec.name, None)
         if provider_config is None:
             continue
-        oauth_status = _oauth_provider_status(spec) if spec.is_oauth else None
-        row = {
-            "name": spec.name,
-            "label": spec.label,
-            "configured": (
-                bool(oauth_status["configured"])
-                if oauth_status is not None
-                else _provider_configured_for_settings(spec, provider_config)
-            ),
-            "auth_type": "oauth" if spec.is_oauth else "api_key",
-            "api_key_required": _provider_requires_api_key(spec),
-            "api_key_hint": _mask_secret_hint(provider_config.api_key),
-            "api_base": provider_config.api_base,
-            "default_api_base": spec.default_api_base or None,
-            "model_selectable": not spec.is_transcription_only,
-        }
-        if oauth_status is not None:
-            row["oauth_account"] = oauth_status["account"]
-            row["oauth_expires_at"] = oauth_status["expires_at"]
-            row["oauth_login_supported"] = oauth_status["login_supported"]
-        if spec.name == "openai":
-            row["api_type"] = provider_config.api_type
-        providers.append(row)
+        providers.append(_provider_settings_row(spec.name, spec, provider_config))
+    for provider_key, provider_config in _dynamic_provider_items(config):
+        providers.append(
+            _provider_settings_row(
+                provider_key,
+                create_dynamic_spec(provider_key),
+                provider_config,
+            )
+        )
 
     search_config = config.tools.web.search
     image_config = config.tools.image_generation
@@ -697,6 +776,9 @@ def settings_payload(
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
             "reasoning_effort": defaults.reasoning_effort,
+            "reasoning_effort_values": _reasoning_effort_values_for(
+                defaults.provider, defaults.model
+            ),
         }
     ]
     for name, preset in config.model_presets.items():
@@ -712,6 +794,9 @@ def settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "reasoning_effort_values": _reasoning_effort_values_for(
+                    preset.provider, preset.model
+                ),
             }
         )
 
@@ -1023,13 +1108,13 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     provider_name = (_query_first(query, "provider") or "").strip()
     if not provider_name:
         raise WebUISettingsError("provider is required")
-    spec = find_by_name(provider_name)
-    if spec is None or spec.is_oauth:
-        raise WebUISettingsError("unknown provider")
 
     config = load_config()
-    provider_config = getattr(config.providers, spec.name, None)
-    if provider_config is None:
+    resolved_provider = _resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        raise WebUISettingsError("unknown provider")
+    spec, provider_key, provider_config = resolved_provider
+    if spec.is_oauth:
         raise WebUISettingsError("unknown provider")
 
     changed = False
@@ -1064,8 +1149,8 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
     restart_required = (
         changed
         and image_config.enabled
-        and image_config.provider == spec.name
-        and get_image_gen_provider(spec.name) is not None
+        and image_config.provider == provider_key
+        and get_image_gen_provider(provider_key) is not None
     )
     return settings_payload(requires_restart=restart_required)
 

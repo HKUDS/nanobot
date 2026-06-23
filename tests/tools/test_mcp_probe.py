@@ -1,6 +1,7 @@
 """Tests for MCP HTTP probe guard (prevents event-loop crash on unreachable servers)."""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -110,6 +111,3 @@ async def test_probe_not_called_for_stdio():
         await connect_mcp_servers({"s": cfg}, registry)
 
     assert not called, "probe should not be called for stdio transport"
-
-
-import asyncio

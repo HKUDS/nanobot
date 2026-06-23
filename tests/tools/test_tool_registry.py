@@ -107,7 +107,6 @@ def test_suggest_name_updates_after_register_and_unregister() -> None:
 
 
 def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
-    """prepare_call expects dict params - list input triggers validation error."""
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
 
@@ -140,6 +139,7 @@ def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
 
     assert tool is not None
     assert params == '{path:"foo.txt"}'
+    assert error is not None
     assert "parameters must be a JSON object" in error
 
 
@@ -158,6 +158,7 @@ def test_prepare_call_rejects_scalar_for_single_required_parameter() -> None:
 
     assert tool is not None
     assert params == "https://example.com"
+    assert error is not None
     assert "parameters must be a JSON object" in error
 
 
@@ -176,6 +177,7 @@ def test_prepare_call_rejects_unquoted_scalar_strings_before_schema_cast() -> No
 
     assert tool is not None
     assert params == "true"
+    assert error is not None
     assert "parameters must be a JSON object" in error
 
 
@@ -214,6 +216,7 @@ def test_prepare_call_treats_none_arguments_as_empty_object() -> None:
 
     assert tool is not None
     assert params == "null"
+    assert error is not None
     assert "parameters must be a JSON object" in error
 
 
@@ -232,11 +235,11 @@ def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
     )
 
 
-def test_get_definitions_returns_stable_result() -> None:
-    """get_definitions returns stable ordering (cache test removed - no caching in current impl)."""
+def test_get_definitions_returns_cached_result() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
     first = registry.get_definitions()
+    assert registry._cached_definitions is not None
     second = registry.get_definitions()
     assert first == second
 

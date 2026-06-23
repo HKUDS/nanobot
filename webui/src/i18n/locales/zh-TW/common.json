@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "側邊欄導覽",
+    "mobileNavigation": "行動版側邊欄導覽",
     "collapse": "收合側邊欄",
     "newChat": "新增對話",
     "searchAria": "搜尋",
@@ -55,6 +56,7 @@
       "ariaLabel": "切換語言"
     },
     "apps": "應用",
+    "automations": "自動任務",
     "skills": {
       "title": "技能"
     }
@@ -80,12 +82,14 @@
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用",
+      "automations": "自動任務",
       "skills": "技能"
     },
     "sections": {
       "interface": "介面",
       "ai": "AI",
       "system": "系統",
+      "about": "關於",
       "status": "狀態",
       "localPreferences": "本機偏好",
       "presets": "預設",
@@ -248,7 +252,7 @@
       "exporting": "正在匯出..."
     },
     "byok": {
-      "description": "自帶 provider key。Blackcat 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
+      "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
       "configured": "已設定",
       "notConfigured": "未設定",
       "configuredSection": "已設定",
@@ -391,6 +395,13 @@
       "unavailable": "不可用",
       "noDescription": "暫無描述。"
     },
+    "about": {
+      "version": "版本",
+      "checking": "正在檢查...",
+      "checkForUpdates": "檢查更新",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有可用更新 v{{version}}"
+    },
     "mcp": {
       "allCategories": "全部分類",
       "summary": "已啟用 {{installed}} / {{total}} 個預設",
@@ -461,6 +472,127 @@
       "loading": "正在載入應用...",
       "empty": "沒有符合的應用。"
     },
+    "automations": {
+      "filters": {
+        "all": "全部",
+        "active": "執行中",
+        "paused": "已暫停",
+        "failed": "異常",
+        "system": "系統"
+      },
+      "sort": {
+        "next": "下次執行",
+        "last": "上次執行",
+        "updated": "更新時間",
+        "name": "名稱"
+      },
+      "search": "搜尋任務、訊息、關聯對話或排程",
+      "queue": "任務佇列",
+      "loading": "正在載入自動任務...",
+      "noMatches": "目前檢視沒有符合的自動任務。",
+      "empty": "尚無自動任務。",
+      "emptyHint": "請從它應該執行的來源處建立，這樣 nanobot 才能保留正確上下文。",
+      "oneShot": "一次性",
+      "systemTask": "系統管理的自動任務",
+      "labels": {
+        "schedule": "排程",
+        "next": "下次",
+        "origin": "關聯會話",
+        "created": "建立於",
+        "updated": "更新於"
+      },
+      "runNow": "立即執行",
+      "pause": "暫停",
+      "resume": "恢復",
+      "edit": "編輯",
+      "delete": "刪除",
+      "protected": "受保護",
+      "editTitle": "編輯自動任務",
+      "save": "儲存",
+      "deleteTitle": "刪除自動任務",
+      "deleteDescription": "這會從 cron 儲存中刪除 {{name}}，歷史聊天訊息會保留在會話中。",
+      "cancel": "取消",
+      "status": {
+        "system": "系統",
+        "running": "正在執行",
+        "paused": "已暫停",
+        "failed": "失敗",
+        "completed": "已完成",
+        "noSchedule": "無排程",
+        "active": "執行中"
+      },
+      "origin": {
+        "system": "系統",
+        "unknown": "未關聯會話"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "釘釘",
+        "discord": "Discord",
+        "email": "電子郵件",
+        "feishu": "飛書",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "微信",
+        "wecom": "企業微信",
+        "weixin": "微信",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "於 {{time}}",
+        "every": "每 {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "每天 {{time}}",
+        "weekdaysAt": "工作日 {{time}}",
+        "hourlyAt": "每小時第 {{minute}} 分鐘",
+        "hourlyWindow": "{{start}}-{{end}} 點每小時第 {{minute}} 分鐘",
+        "custom": "自訂排程"
+      },
+      "next": {
+        "paused": "已暫停",
+        "pending": "正在執行",
+        "none": "沒有下次執行"
+      },
+      "message": {
+        "showMore": "查看完整訊息",
+        "showLess": "收起訊息"
+      },
+      "fields": {
+        "name": "名稱",
+        "message": "訊息",
+        "scheduleType": "排程類型",
+        "every": "每隔",
+        "unit": "單位",
+        "cronExpression": "Cron 表達式",
+        "timezone": "時區",
+        "runAt": "執行時間"
+      },
+      "scheduleTypes": {
+        "every": "間隔",
+        "cron": "Cron",
+        "at": "一次性"
+      },
+      "everyUnits": {
+        "second": "秒",
+        "minute": "分鐘",
+        "hour": "小時",
+        "day": "天"
+      },
+      "validation": {
+        "nameRequired": "名稱不能為空。",
+        "messageRequired": "訊息不能為空。",
+        "intervalRequired": "間隔必須是正整數。",
+        "cronRequired": "Cron 表達式不能為空。",
+        "timeRequired": "執行時間不能為空。",
+        "futureRequired": "執行時間必須晚於目前時間。"
+      }
+    },
     "oauth": {
       "authentication": "OAuth 認證",
       "signIn": "登入",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "對話 {{id}}",
+    "forkTitle": "分叉：{{title}}",
     "loading": "載入中…",
     "noSessions": "目前還沒有會話。",
     "showMore": "再顯示 {{count}} 個",
@@ -518,7 +651,8 @@
     "newInProject": "在 {{project}} 中開始新對話",
     "activity": {
       "running": "Agent 正在執行",
-      "complete": "Agent 已完成"
+      "complete": "Agent 已完成",
+      "updated": "有新內容"
     },
     "pin": "置頂",
     "unpin": "取消置頂",
@@ -550,7 +684,22 @@
     "title": "刪除這個對話？",
     "description": "此操作無法復原。",
     "cancel": "取消",
-    "confirm": "刪除"
+    "confirm": "刪除",
+    "automationsDescription": "這個對話有關聯的自動任務。刪除對話也會刪除這些自動任務。",
+    "moreAutomations": "另有 {{count}} 個",
+    "confirmWithAutomations": "刪除",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "每 {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "自訂計畫"
+    },
+    "next": {
+      "label": "下次：{{time}}",
+      "disabled": "已暫停",
+      "none": "沒有下次執行"
+    }
   },
   "connection": {
     "idle": "閒置",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "下次 {{time}}",
+        "pending": "即將執行",
         "disabled": "已暫停",
         "none": "沒有下次執行"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息",
+    "forkedFromHistory": "從歷史訊息分叉",
     "promptNavigator": {
       "open": "開啟輸入導覽",
       "title": "輸入列表",
@@ -835,12 +986,16 @@
     "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
     "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
     "imageAttachment": "圖片附件",
-    "copyReply": "複製回覆",
-    "copiedReply": "已複製回覆",
+    "forkFromHere": "分叉",
+    "copyReply": "複製",
+    "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",
     "activityThoughtFor": "已思考 {{duration}}",
+    "activityWorkingFor": "處理中，已 {{duration}}",
+    "activityWorked": "已處理",
+    "activityWorkedFor": "已處理 {{duration}}",
     "cliActivityRunningOne": "正在使用 @{{name}}",
     "cliActivityRanOne": "已使用 @{{name}}",
     "cliActivityFailedOne": "@{{name}} 失敗",
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "工作區未變更",
-      "body": "閘道拒絕了要求的專案或存取權限，Blackcat 已繼續使用先前的工作區。"
+      "body": "閘道拒絕了要求的專案或存取權限，Nanobot 已繼續使用先前的工作區。"
     }
   },
   "workspace": {

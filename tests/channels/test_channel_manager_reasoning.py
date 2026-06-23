@@ -45,7 +45,7 @@ class _MockChannel(BaseChannel):
     async def stop(self):  # pragma: no cover - not exercised
         pass
 
-    async def send(self, msg):
+    async def _send_impl(self, msg):
         return await self._send_mock(msg)
 
     async def send_reasoning_delta(self, chat_id, delta, metadata=None):
@@ -213,7 +213,7 @@ async def test_base_channel_reasoning_primitives_are_noop_safe():
         async def stop(self):  # pragma: no cover
             pass
 
-        async def send(self, msg):  # pragma: no cover
+        async def _send_impl(self, msg):  # pragma: no cover
             pass
 
     channel = _Plain({}, MessageBus())
@@ -256,7 +256,7 @@ async def test_base_channel_file_edit_events_are_noop_safe():
         async def stop(self):  # pragma: no cover
             pass
 
-        async def send(self, msg):  # pragma: no cover
+        async def _send_impl(self, msg):  # pragma: no cover
             raise AssertionError("file edit events should not call send")
 
     channel = _Plain({}, MessageBus())

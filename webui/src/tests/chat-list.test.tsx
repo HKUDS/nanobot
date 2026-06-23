@@ -18,6 +18,44 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
 }
 
 describe("ChatList", () => {
+  it("orders chats by latest session activity by default", () => {
+    const sessions = [
+      session({
+        chatId: "older",
+        title: "Older chat",
+        updatedAt: "2026-05-21T10:00:00Z",
+      }),
+      session({
+        chatId: "newest",
+        title: "Newest chat",
+        updatedAt: "2026-05-21T12:00:00Z",
+      }),
+      session({
+        chatId: "middle",
+        title: "Middle chat",
+        updatedAt: "2026-05-21T11:00:00Z",
+      }),
+    ];
+
+    render(
+      <ChatList
+        sessions={sessions}
+        activeKey={null}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const chatsSection = screen.getAllByRole("region")[0];
+    const text = chatsSection.textContent ?? "";
+
+    expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
+    expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
+  });
+
   it("groups WebUI chats by workspace project while preserving in-project sorting and activity", () => {
     const sessions = [
       session({
@@ -179,7 +217,7 @@ describe("ChatList", () => {
     expect(onRequestRenameProject).toHaveBeenCalledWith("/Users/me/blackcat", "Photos");
   });
 
-  it("hides the completed dot for the active chat", () => {
+  it("hides the updated dot for the active chat", () => {
     const sessions = [
       session({
         chatId: "active",
@@ -200,13 +238,13 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        completedChatIds={["active", "done"]}
+        updatedChatIds={["active", "done"]}
       />,
     );
 
-    const finished = screen.getAllByLabelText("Agent finished");
-    expect(finished).toHaveLength(1);
-    expect(finished[0].firstElementChild).toHaveClass("h-2", "w-2");
+    const updated = screen.getAllByLabelText("New activity");
+    expect(updated).toHaveLength(1);
+    expect(updated[0].firstElementChild).toHaveClass("h-2", "w-2");
   });
 
   it("folds long default workspace chats and can show all", () => {

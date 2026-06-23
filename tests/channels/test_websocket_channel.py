@@ -45,6 +45,7 @@ from blackcat.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
 from blackcat.webui.settings_api import settings_payload, update_provider_settings
+from blackcat.webui.transcript import append_transcript_object, read_transcript_lines
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -118,6 +119,42 @@ async def _http_get(url: str, headers: dict[str, str] | None = None) -> httpx.Re
     )
 
 
+@pytest.mark.asyncio
+async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -> None:
+    class Conn:
+        remote_address = None
+
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(raw)
+
+    channel = _ch(bus)
+    active_conn = Conn()
+    other_conn = Conn()
+    channel._attach(active_conn, "chat-a")
+    channel._attach(other_conn, "chat-b")
+    assert sorted(channel._subs) == ["chat-a", "chat-b"]
+    assert sum(len(conns) for conns in channel._subs.values()) == 2
+
+    await channel.send_session_updated("chat-a", scope="thread")
+
+    active_events = [json.loads(raw)["event"] for raw in active_conn.sent]
+    other_events = [json.loads(raw)["event"] for raw in other_conn.sent]
+
+    assert (active_events, other_events) == (
+        ["session_updated"],
+        ["session_updated"],
+    )
+    payload = json.loads(other_conn.sent[0])
+    assert payload == {
+        "event": "session_updated",
+        "chat_id": "chat-a",
+        "scope": "thread",
+    }
+
+
 async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
     """Receive until a specific websocket event appears."""
     for _ in range(10):
@@ -125,6 +162,10 @@ async def _recv_ws_event(client: Any, event: str) -> dict[str, Any]:
         if payload.get("event") == event:
             return payload
     raise AssertionError(f"websocket event {event!r} was not received")
+
+
+def _sent_ws_payloads(mock_ws: AsyncMock) -> list[dict[str, Any]]:
+    return [json.loads(call.args[0]) for call in mock_ws.send.await_args_list]
 
 
 def test_normalize_http_path_strips_trailing_slash_except_root() -> None:
@@ -1233,9 +1274,10 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         metadata={"_turn_end": True},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1"},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1252,9 +1294,10 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         metadata={"_turn_end": True, "latency_ms": 1500},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1272,9 +1315,10 @@ async def test_send_turn_end_includes_goal_state_when_present() -> None:
         metadata={"_turn_end": True, "goal_state": blob},
     ))
 
-    mock_ws.send.assert_awaited_once()
-    body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
+    assert _sent_ws_payloads(mock_ws) == [
+        {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob},
+        {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1720,7 +1764,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["web"]["fetch"]["use_jina_reader"] is True
         search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
         assert search_providers["duckduckgo"]["credential"] == "none"
+        assert search_providers["exa"]["credential"] == "api_key"
+        assert search_providers["bocha"]["credential"] == "api_key"
         assert search_providers["volcengine"]["credential"] == "api_key"
+        assert search_providers["keenable"]["credential"] == "api_key"
         assert search_providers["searxng"]["credential"] == "base_url"
         assert body["image_generation"]["enabled"] is False
         assert body["image_generation"]["provider"] == "openrouter"
@@ -2408,6 +2455,99 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_fork_chat_copies_only_prefix_session_and_transcript(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    source = sessions.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "future")
+    sessions.save(source)
+    for ev in (
+        {"event": "user", "chat_id": "source", "text": "round1"},
+        {"event": "message", "chat_id": "source", "text": "answer1"},
+        {"event": "user", "chat_id": "source", "text": "future"},
+    ):
+        append_transcript_object("websocket:source", ev)
+
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "fork_chat",
+            "source_chat_id": "source",
+            "before_user_index": 1,
+            "title": "Fork: Old title",
+        },
+    )
+
+    sent = [json.loads(call.args[0]) for call in conn.send.await_args_list]
+    attached = next(item for item in sent if item["event"] == "attached")
+    fork_id = attached["chat_id"]
+    saved = sessions.read_session_file(f"websocket:{fork_id}")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+    assert saved["metadata"]["title"] == "Fork: Old title"
+    fork_lines = read_transcript_lines(f"websocket:{fork_id}")
+    assert [line.get("text") for line in fork_lines] == ["round1", "answer1", None]
+    assert fork_lines[-1]["event"] == "fork_marker"
+    assert all(line.get("chat_id") == fork_id for line in fork_lines)
+    assert "future" not in json.dumps(saved, ensure_ascii=False)
+    bus.publish_inbound.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_webui_message_envelope_appends_user_transcript(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "source",
+            "content": "round1",
+            "webui": True,
+        },
+    )
+
+    [line] = read_transcript_lines("websocket:source")
+    assert {
+        "event": line.get("event"),
+        "chat_id": line.get("chat_id"),
+        "text": line.get("text"),
+    } == {"event": "user", "chat_id": "source", "text": "round1"}
+    assert isinstance(line.get("turn_id"), str)
+    assert line.get("turn_phase") == "user"
+    assert line.get("turn_seq") == 1
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.chat_id == "source"
+    assert inbound.content == "round1"
+
+
+@pytest.mark.asyncio
 async def test_multiplex_two_chats_isolated(bus: MagicMock) -> None:
     port = 29932
     channel = _ch(bus, port=port)
@@ -2522,15 +2662,16 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
-def test_sessions_list_includes_active_run_started_at() -> None:
+def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
     from blackcat.session import webui_turns as wth
+    from blackcat.webui import ws_http as ws_http_module
 
     bus = MagicMock()
     session_manager = MagicMock()
-    session_manager.list_sessions.return_value = [
+    sessions = [
         {
             "key": "websocket:chat-1",
             "created_at": "2026-05-19T10:00:00Z",
@@ -2545,6 +2686,7 @@ def test_sessions_list_includes_active_run_started_at() -> None:
             "updated_at": "2026-05-19T10:01:00Z",
         },
     ]
+    monkeypatch.setattr(ws_http_module, "list_webui_sessions", lambda _session_manager: sessions)
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -2556,7 +2698,7 @@ def test_sessions_list_includes_active_run_started_at() -> None:
     try:
         wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
-        resp = channel.gateway.http._handle_sessions_list(req)
+        resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
         wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
 
@@ -2620,6 +2762,45 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert len(body["messages"]) == 1
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["content"] == "hi"
+
+
+def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from blackcat.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:paged-route"
+    for idx in range(1, 4):
+        append_transcript_object(
+            key,
+            {"event": "user", "chat_id": "paged-route", "text": f"q{idx}"},
+        )
+        append_transcript_object(
+            key,
+            {"event": "message", "chat_id": "paged-route", "text": f"a{idx}"},
+        )
+        append_transcript_object(key, {"event": "turn_end", "chat_id": "paged-route"})
+
+    bus = MagicMock()
+    channel = _ch(bus)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(
+        f"/api/sessions/{enc}/webui-thread?limit=2&direction=latest",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["content"] for message in body["messages"]] == ["q3", "a3"]
+    assert body["page"]["has_more_before"] is True
+    assert body["page"]["before_cursor"]
 
 
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
@@ -2729,3 +2910,49 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
         "legacy question",
         "legacy answer",
     ]
+
+
+def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from blackcat.cron.session_turns import CRON_HISTORY_META
+    from blackcat.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("blackcat.config.paths.get_data_dir", lambda: tmp_path)
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    key = "websocket:c-cron"
+    session = sessions.get_or_create(key)
+    session.add_message(
+        "user",
+        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
+        **{CRON_HISTORY_META: True},
+    )
+    session.add_message("assistant", "提醒已经到期。")
+    sessions.save(session)
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "c-cron", "text": "提醒已经到期。"},
+    )
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=workspace),
+    )
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel.gateway.http._handle_webui_thread_get(req, enc)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert [message["role"] for message in body["messages"]] == ["assistant"]
+    assert [message["content"] for message in body["messages"]] == ["提醒已经到期。"]

@@ -42,6 +42,7 @@
   },
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
+    "mobileNavigation": "Điều hướng thanh bên di động",
     "collapse": "Thu gọn thanh bên",
     "newChat": "Cuộc trò chuyện mới",
     "searchAria": "Tìm kiếm",
@@ -55,6 +56,7 @@
       "ariaLabel": "Đổi ngôn ngữ"
     },
     "apps": "Ứng dụng",
+    "automations": "Tự động hóa",
     "skills": {
       "title": "Kỹ năng"
     }
@@ -80,12 +82,14 @@
       "cliApps": "Ứng dụng CLI",
       "mcp": "MCP",
       "apps": "Ứng dụng",
+      "automations": "Tự động hóa",
       "skills": "Kỹ năng"
     },
     "sections": {
       "interface": "Giao diện",
       "ai": "AI",
       "system": "Hệ thống",
+      "about": "Giới thiệu",
       "status": "Trạng thái",
       "localPreferences": "Tùy chọn cục bộ",
       "presets": "Preset",
@@ -248,7 +252,7 @@
       "exporting": "Đang xuất..."
     },
     "byok": {
-      "description": "Dùng key provider của riêng bạn. Blackcat đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
+      "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
       "configured": "Đã cấu hình",
       "notConfigured": "Chưa cấu hình",
       "configuredSection": "Đã cấu hình",
@@ -391,6 +395,13 @@
       "unavailable": "Không khả dụng",
       "noDescription": "Không có mô tả."
     },
+    "about": {
+      "version": "Phiên bản",
+      "checking": "Đang kiểm tra...",
+      "checkForUpdates": "Kiểm tra bản cập nhật",
+      "upToDate": "Bạn đang dùng phiên bản mới nhất",
+      "updateAvailable": "Có bản cập nhật v{{version}}"
+    },
     "mcp": {
       "allCategories": "Tất cả danh mục",
       "summary": "Đã bật {{installed}} / {{total}} preset",
@@ -461,6 +472,127 @@
       "loading": "Đang tải ứng dụng...",
       "empty": "Không có ứng dụng phù hợp."
     },
+    "automations": {
+      "filters": {
+        "all": "Tất cả",
+        "active": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Cần xử lý",
+        "system": "Hệ thống"
+      },
+      "sort": {
+        "next": "Lần chạy tiếp theo",
+        "last": "Lần chạy trước",
+        "updated": "Đã cập nhật",
+        "name": "Tên"
+      },
+      "search": "Tìm tác vụ, tin nhắn, cuộc trò chuyện liên kết hoặc lịch",
+      "queue": "Hàng đợi",
+      "loading": "Đang tải tự động hóa...",
+      "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
+      "empty": "Chưa có tự động hóa.",
+      "emptyHint": "Tạo từ nơi tác vụ sẽ chạy để nanobot giữ đúng ngữ cảnh.",
+      "oneShot": "Một lần",
+      "systemTask": "Tự động hóa do hệ thống quản lý",
+      "labels": {
+        "schedule": "Lịch",
+        "next": "Tiếp theo",
+        "origin": "Cuộc trò chuyện liên kết",
+        "created": "Đã tạo",
+        "updated": "Đã cập nhật"
+      },
+      "runNow": "Chạy ngay",
+      "pause": "Tạm dừng",
+      "resume": "Tiếp tục",
+      "edit": "Sửa",
+      "delete": "Xóa",
+      "protected": "Được bảo vệ",
+      "editTitle": "Sửa tự động hóa",
+      "save": "Lưu",
+      "deleteTitle": "Xóa tự động hóa",
+      "deleteDescription": "Thao tác này xóa {{name}} khỏi kho cron. Tin nhắn chat trước đó vẫn ở trong phiên.",
+      "cancel": "Hủy",
+      "status": {
+        "system": "Hệ thống",
+        "running": "Đang chạy",
+        "paused": "Đã tạm dừng",
+        "failed": "Thất bại",
+        "completed": "Hoàn tất",
+        "noSchedule": "Không có lịch",
+        "active": "Đang chạy"
+      },
+      "origin": {
+        "system": "Hệ thống",
+        "unknown": "Chưa liên kết cuộc trò chuyện"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "Vào {{time}}",
+        "every": "Mỗi {{duration}}",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "Hằng ngày lúc {{time}}",
+        "weekdaysAt": "Ngày làm việc lúc {{time}}",
+        "hourlyAt": "Mỗi giờ tại :{{minute}}",
+        "hourlyWindow": "Mỗi giờ {{start}}-{{end}} tại :{{minute}}",
+        "custom": "Lịch tùy chỉnh"
+      },
+      "next": {
+        "paused": "Đã tạm dừng",
+        "pending": "Đang chạy",
+        "none": "Không có lần chạy tiếp theo"
+      },
+      "message": {
+        "showMore": "Hiển thị toàn bộ tin nhắn",
+        "showLess": "Thu gọn"
+      },
+      "fields": {
+        "name": "Tên",
+        "message": "Tin nhắn",
+        "scheduleType": "Loại lịch",
+        "every": "Mỗi",
+        "unit": "Đơn vị",
+        "cronExpression": "Biểu thức cron",
+        "timezone": "Múi giờ",
+        "runAt": "Chạy lúc"
+      },
+      "scheduleTypes": {
+        "every": "Khoảng lặp",
+        "cron": "Cron",
+        "at": "Một lần"
+      },
+      "everyUnits": {
+        "second": "Giây",
+        "minute": "Phút",
+        "hour": "Giờ",
+        "day": "Ngày"
+      },
+      "validation": {
+        "nameRequired": "Tên là bắt buộc.",
+        "messageRequired": "Tin nhắn là bắt buộc.",
+        "intervalRequired": "Khoảng lặp phải là số dương.",
+        "cronRequired": "Biểu thức cron là bắt buộc.",
+        "timeRequired": "Thời gian chạy là bắt buộc.",
+        "futureRequired": "Thời gian chạy phải ở tương lai."
+      }
+    },
     "oauth": {
       "authentication": "Xác thực OAuth",
       "signIn": "Đăng nhập",
@@ -509,6 +641,7 @@
   },
   "chat": {
     "fallbackTitle": "Trò chuyện {{id}}",
+    "forkTitle": "Nhánh: {{title}}",
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "showMore": "Hiển thị thêm {{count}}",
@@ -518,7 +651,8 @@
     "newInProject": "Bắt đầu cuộc trò chuyện mới trong {{project}}",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -550,7 +684,22 @@
     "title": "Xóa cuộc trò chuyện này?",
     "description": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
-    "confirm": "Xóa"
+    "confirm": "Xóa",
+    "automationsDescription": "Cuộc trò chuyện này có các tự động hóa đã lên lịch. Xóa cuộc trò chuyện cũng sẽ xóa chúng.",
+    "moreAutomations": "+ {{count}} mục nữa",
+    "confirmWithAutomations": "Xóa",
+    "schedule": {
+      "at": "{{time}}",
+      "every": "Mỗi {{duration}}",
+      "cron": "Cron {{expr}}",
+      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "unknown": "Lịch tùy chỉnh"
+    },
+    "next": {
+      "label": "Tiếp theo: {{time}}",
+      "disabled": "Đã tạm dừng",
+      "none": "Không có lần chạy tiếp theo"
+    }
   },
   "connection": {
     "idle": "Rảnh",
@@ -647,6 +796,7 @@
       },
       "next": {
         "label": "Tiếp theo {{time}}",
+        "pending": "Sắp chạy",
         "disabled": "Đã tạm dừng",
         "none": "Không có lần chạy tiếp theo"
       }
@@ -810,6 +960,7 @@
     },
     "scrollToBottom": "Cuộn xuống cuối",
     "loadEarlier": "Tải tin nhắn trước đó",
+    "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {
       "open": "Mở trình điều hướng prompt",
       "title": "Prompt",
@@ -835,12 +986,16 @@
     "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
     "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
     "imageAttachment": "Tệp hình ảnh đính kèm",
-    "copyReply": "Sao chép trả lời",
-    "copiedReply": "Đã sao chép trả lời",
+    "forkFromHere": "Tách nhánh",
+    "copyReply": "Sao chép",
+    "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",
     "activityThoughtFor": "Đã suy nghĩ trong {{duration}}",
+    "activityWorkingFor": "Đang xử lý trong {{duration}}",
+    "activityWorked": "Đã xử lý",
+    "activityWorkedFor": "Đã xử lý trong {{duration}}",
     "cliActivityRunningOne": "Đang dùng @{{name}}",
     "cliActivityRanOne": "Đã dùng @{{name}}",
     "cliActivityFailedOne": "@{{name}} thất bại",
@@ -885,7 +1040,7 @@
     },
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
-      "body": "Blackcat kept the previous workspace because the requested project or access mode was rejected by the gateway."
+      "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
     }
   },
   "workspace": {
