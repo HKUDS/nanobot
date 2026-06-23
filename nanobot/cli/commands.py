@@ -1065,8 +1065,15 @@ def _run_gateway(
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
+
+        from nanobot.webui.sidebar_state import read_webui_sidebar_state
+        sidebar_state = read_webui_sidebar_state()
+        archived_keys = set(sidebar_state.get("archived_keys", []))
+
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
+            if key in archived_keys:
+                continue
             if ":" not in key:
                 continue
             channel, chat_id = key.split(":", 1)

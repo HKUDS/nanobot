@@ -269,13 +269,20 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
                 if not fallback_preview and item.get("role") == "assistant":
                     fallback_preview = text
             signature = _file_signature(path)
+            created_at_s = data.get("created_at")
+            updated_at_s = data.get("updated_at")
+            if not created_at_s or not updated_at_s:
+                from datetime import datetime
+                fallback_time = datetime.fromtimestamp(signature["mtime_ns"] / 1e9).isoformat()
+                created_at_s = created_at_s or fallback_time
+                updated_at_s = updated_at_s or fallback_time
             key = data.get("key") or fallback_key
             activity_signature = _webui_activity_signature(key)
             activity_updated_at = _webui_activity_updated_at(activity_signature)
             return {
                 "key": key,
-                "created_at": data.get("created_at"),
-                "updated_at": _latest_updated_at(data.get("updated_at"), activity_updated_at),
+                "created_at": created_at_s,
+                "updated_at": _latest_updated_at(updated_at_s, activity_updated_at),
                 "title": _metadata_title(data.get("metadata", {})),
                 "preview": preview or fallback_preview,
                 "file": path.name,

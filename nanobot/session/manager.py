@@ -843,11 +843,13 @@ class SessionManager:
                                 if not fallback_preview and item.get("role") == "assistant":
                                     fallback_preview = text
                             preview = preview or fallback_preview
+                            from datetime import datetime
+                            fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
                             sessions.append(
                                 {
                                     "key": key,
-                                    "created_at": data.get("created_at"),
-                                    "updated_at": data.get("updated_at"),
+                                    "created_at": data.get("created_at") or fallback_time,
+                                    "updated_at": data.get("updated_at") or fallback_time,
                                     "title": title,
                                     "preview": preview,
                                     "path": str(path),
