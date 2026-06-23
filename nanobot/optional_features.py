@@ -32,6 +32,9 @@ class InstallResult:
     output: str = ""
 
 
+_INSTALL_TIMEOUT_SECONDS = 300
+
+
 def load_pyproject(path: Path) -> dict[str, Any]:
     try:
         import tomllib
@@ -154,7 +157,19 @@ def extra_installed(extra: str, deps: list[str] | None) -> bool:
 
 
 def run_install_command(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True)
+    try:
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
+        message = f"Timed out after {_INSTALL_TIMEOUT_SECONDS}s"
+        stderr = "\n".join(part for part in ((stderr or "").rstrip(), message) if part)
+        return subprocess.CompletedProcess(argv, 124, stdout=stdout or "", stderr=stderr)
 
 
 def command_text(argv: list[str]) -> str:

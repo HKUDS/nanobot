@@ -663,6 +663,21 @@ def test_enable_bootstraps_pip_with_ensurepip(monkeypatch):
     ]
 
 
+def test_run_install_command_returns_failure_on_timeout(monkeypatch):
+    from nanobot import optional_features
+
+    def _run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["pip"], 300, output="partial", stderr=b"still running")
+
+    monkeypatch.setattr(optional_features.subprocess, "run", _run)
+
+    result = optional_features.run_install_command(["pip"])
+
+    assert result.returncode == 124
+    assert result.stdout == "partial"
+    assert result.stderr == "still running\nTimed out after 300s"
+
+
 def test_optional_dependency_metadata_for_enable():
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     deps = data["project"]["optional-dependencies"]
