@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMResponse
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -184,7 +184,7 @@ async def test_backfill_missing_tool_results_inserts_error():
     assert backfilled[0]["name"] == "read_file"
 
 
-def test_dedupe_tool_calls_removes_duplicate_ids():
+def test_dedupe_tool_calls_remaps_duplicate_ids():
     from nanobot.agent.runner import AgentRunner
 
     messages = [
@@ -194,15 +194,14 @@ def test_dedupe_tool_calls_removes_duplicate_ids():
             "content": "",
             "tool_calls": [
                 {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
-                # Duplicate of "b" — would trigger "tool_use ids must be unique".
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"a.txt"}'}},
+                # Duplicate id with different arguments should be preserved, not dropped.
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"b.txt"}'}},
             ],
         },
         {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
         {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
-        # Duplicate result for "b".
-        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb-dup"},
+        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb-remapped"},
     ]
 
     cleaned = AgentRunner._dedupe_tool_calls(messages)
@@ -214,11 +213,13 @@ def test_dedupe_tool_calls_removes_duplicate_ids():
             "content": "",
             "tool_calls": [
                 {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"a.txt"}'}},
+                {"id": "b__dedupe_2", "type": "function", "function": {"name": "y", "arguments": '{"path":"b.txt"}'}},
             ],
         },
         {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
         {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
+        {"role": "tool", "tool_call_id": "b__dedupe_2", "name": "y", "content": "rb-remapped"},
     ]
 
 

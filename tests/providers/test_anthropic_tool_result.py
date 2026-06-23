@@ -10,6 +10,8 @@ Also tests that bare dicts without a "type" field are coerced to text
 blocks, fixing Anthropic "content.0.type: Field required" rejections (#3993).
 """
 
+from types import SimpleNamespace
+
 from nanobot.providers.anthropic_provider import AnthropicProvider
 
 
@@ -132,3 +134,33 @@ def test_anthropic_sanitized_tool_ids_avoid_simple_collisions():
     ids = [block["id"] for block in blocks if block["type"] == "tool_use"]
     assert len(ids) == len(set(ids)) == 2
     assert all(all(ch.isalnum() or ch in "_-" for ch in tool_id) for tool_id in ids)
+
+
+def test_anthropic_parse_response_remaps_duplicate_tool_use_ids():
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_same",
+                name="read_file",
+                input={"path": "a.txt"},
+            ),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_same",
+                name="read_file",
+                input={"path": "b.txt"},
+            ),
+        ],
+        stop_reason="tool_use",
+        usage=None,
+    )
+
+    result = AnthropicProvider._parse_response(response)
+
+    assert len(result.tool_calls) == 2
+    assert result.tool_calls[0].id == "toolu_same"
+    assert result.tool_calls[0].arguments == {"path": "a.txt"}
+    assert result.tool_calls[1].id != "toolu_same"
+    assert result.tool_calls[1].id.startswith("toolu_")
+    assert result.tool_calls[1].arguments == {"path": "b.txt"}

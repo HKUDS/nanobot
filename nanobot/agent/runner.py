@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from collections import deque
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -1361,18 +1362,29 @@ class AgentRunner:
     def _dedupe_tool_calls(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Remove duplicate tool_call / tool_result ids from the history.
+        """Make duplicate tool_call ids unique while keeping matching results paired.
 
         Anthropic rejects any request where two tool_use blocks share an id
         ("tool_use ids must be unique"). An accidental duplicate (e.g. from a
-        mis-assembled stream) otherwise poisons the session permanently, since
-        the bad message is re-sent on every turn. Keep the first occurrence of
-        each id across all assistant tool_calls, and likewise keep only the
-        first tool result per id so pairing stays 1:1.
+        mis-assembled stream) otherwise poisons the session permanently. Some
+        Anthropic-compatible providers also reuse ids for distinct parallel
+        calls, so preserve every call and rewrite later duplicates instead of
+        silently dropping work. Tool results are remapped in call order.
         """
         seen_call_ids: set[str] = set()
-        seen_result_ids: set[str] = set()
+        duplicate_counts: dict[str, int] = {}
+        pending_result_ids: dict[str, deque[str]] = {}
         updated: list[dict[str, Any]] | None = None
+
+        def _unique_id(raw_id: str) -> str:
+            duplicate_counts[raw_id] = duplicate_counts.get(raw_id, 1) + 1
+            suffix = duplicate_counts[raw_id]
+            while True:
+                candidate = f"{raw_id}__dedupe_{suffix}"
+                if candidate not in seen_call_ids:
+                    return candidate
+                suffix += 1
+
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             replacement: dict[str, Any] | None = None
@@ -1383,11 +1395,20 @@ class AgentRunner:
                 changed = False
                 for tc in msg.get("tool_calls") or []:
                     tid = tc.get("id") if isinstance(tc, dict) else None
-                    if tid and str(tid) in seen_call_ids:
-                        changed = True
+                    if not tid:
+                        kept.append(tc)
                         continue
-                    if tid:
-                        seen_call_ids.add(str(tid))
+                    raw_id = str(tid)
+                    mapped_id = raw_id
+                    if raw_id in seen_call_ids:
+                        mapped_id = _unique_id(raw_id)
+                        changed = True
+                    seen_call_ids.add(mapped_id)
+                    pending_result_ids.setdefault(raw_id, deque()).append(mapped_id)
+                    if mapped_id != tid:
+                        tc = dict(tc)
+                        tc["id"] = mapped_id
+                        changed = True
                     kept.append(tc)
                 if changed:
                     replacement = dict(msg)
@@ -1395,10 +1416,17 @@ class AgentRunner:
             elif role == "tool":
                 tid = msg.get("tool_call_id")
                 if tid:
-                    if str(tid) in seen_result_ids:
+                    raw_id = str(tid)
+                    queue = pending_result_ids.get(raw_id)
+                    if not queue:
                         drop = True
                     else:
-                        seen_result_ids.add(str(tid))
+                        mapped_id = queue.popleft()
+                        if not queue:
+                            pending_result_ids.pop(raw_id, None)
+                        if mapped_id != tid:
+                            replacement = dict(msg)
+                            replacement["tool_call_id"] = mapped_id
 
             if (replacement is not None or drop) and updated is None:
                 updated = [dict(m) for m in messages[:idx]]

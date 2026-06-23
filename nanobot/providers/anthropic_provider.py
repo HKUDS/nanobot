@@ -530,15 +530,19 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
-                # Anthropic requires every tool_use id to be unique. A mis-assembled
-                # stream can occasionally surface the same block twice; keep the first
-                # and drop the duplicate so it never poisons the persisted history.
-                if block.id in seen_tool_ids:
-                    logger.warning("dropping duplicate tool_use id from response: {}", block.id)
-                    continue
-                seen_tool_ids.add(block.id)
+                tool_id = str(block.id or _gen_tool_id())
+                if tool_id in seen_tool_ids:
+                    original_id = tool_id
+                    while tool_id in seen_tool_ids:
+                        tool_id = _gen_tool_id()
+                    logger.warning(
+                        "remapping duplicate tool_use id from response: {} -> {}",
+                        original_id,
+                        tool_id,
+                    )
+                seen_tool_ids.add(tool_id)
                 tool_calls.append(ToolCallRequest(
-                    id=block.id,
+                    id=tool_id,
                     name=block.name,
                     arguments=block.input,
                 ))
