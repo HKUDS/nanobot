@@ -543,6 +543,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="nvidia.com",
         default_api_base="https://integrate.api.nvidia.com/v1",
     ),
+    # OpenCode Zen: curated reliable models for coding agents
+    ProviderSpec(
+        name="opencode_zen",
+        keywords=("opencode_zen", "opencode-zen", "zen"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        backend="openai_compat",
+        is_gateway=True,
+        default_api_base="https://opencode.ai/zen/v1",
+    ),
+    # OpenCode Go: low-cost coding models
+    ProviderSpec(
+        name="opencode_go",
+        keywords=("opencode_go", "opencode-go"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Go",
+        backend="openai_compat",
+        is_gateway=True,
+        default_api_base="https://opencode.ai/zen/go/v1",
+    ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM
     ProviderSpec(
