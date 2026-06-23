@@ -183,6 +183,22 @@ class TestLoadBootstrapFiles:
         assert "Default soul." not in result
         assert "Default user." in result
 
+    def test_default_workspace_load_does_not_use_project_fallback(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (tmp_path / "SOUL.md").write_text("Default soul.", encoding="utf-8")
+        (tmp_path / "USER.md").write_text("Default user.", encoding="utf-8")
+        (project / "SOUL.md").write_text("Project soul.", encoding="utf-8")
+        (project / "USER.md").write_text("Project user.", encoding="utf-8")
+
+        builder = _builder(tmp_path)
+        result = builder._load_bootstrap_files()
+
+        assert "Default soul." in result
+        assert "Default user." in result
+        assert "Project soul." not in result
+        assert "Project user." not in result
+
 
 # ---------------------------------------------------------------------------
 # _is_template_content (static)
