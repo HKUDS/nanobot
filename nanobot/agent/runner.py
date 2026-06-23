@@ -373,7 +373,7 @@ class AgentRunner:
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._dedup_tool_calls(messages)
+                messages_for_model = self._dedupe_tool_calls(messages)
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
@@ -389,7 +389,7 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._dedup_tool_calls(messages)
+                    messages_for_model = self._dedupe_tool_calls(messages)
                     messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
@@ -1358,7 +1358,7 @@ class AgentRunner:
         return content
 
     @staticmethod
-    def _dedup_tool_calls(
+    def _dedupe_tool_calls(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Remove duplicate tool_call / tool_result ids from the history.
@@ -1383,11 +1383,11 @@ class AgentRunner:
                 changed = False
                 for tc in msg.get("tool_calls") or []:
                     tid = tc.get("id") if isinstance(tc, dict) else None
-                    if tid and tid in seen_call_ids:
+                    if tid and str(tid) in seen_call_ids:
                         changed = True
                         continue
                     if tid:
-                        seen_call_ids.add(tid)
+                        seen_call_ids.add(str(tid))
                     kept.append(tc)
                 if changed:
                     replacement = dict(msg)

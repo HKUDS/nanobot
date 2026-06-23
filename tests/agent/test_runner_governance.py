@@ -184,7 +184,7 @@ async def test_backfill_missing_tool_results_inserts_error():
     assert backfilled[0]["name"] == "read_file"
 
 
-def test_dedup_tool_calls_removes_duplicate_ids():
+def test_dedupe_tool_calls_removes_duplicate_ids():
     from nanobot.agent.runner import AgentRunner
 
     messages = [
@@ -205,7 +205,7 @@ def test_dedup_tool_calls_removes_duplicate_ids():
         {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb-dup"},
     ]
 
-    cleaned = AgentRunner._dedup_tool_calls(messages)
+    cleaned = AgentRunner._dedupe_tool_calls(messages)
 
     assert cleaned == [
         {"role": "user", "content": "hi"},
@@ -222,7 +222,7 @@ def test_dedup_tool_calls_removes_duplicate_ids():
     ]
 
 
-def test_dedup_tool_calls_noop_when_unique():
+def test_dedupe_tool_calls_noop_when_unique():
     from nanobot.agent.runner import AgentRunner
 
     messages = [
@@ -238,7 +238,7 @@ def test_dedup_tool_calls_noop_when_unique():
     ]
 
     # No duplicates -> identical list object returned (cheap no-op path).
-    assert AgentRunner._dedup_tool_calls(messages) is messages
+    assert AgentRunner._dedupe_tool_calls(messages) is messages
 
 
 def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
