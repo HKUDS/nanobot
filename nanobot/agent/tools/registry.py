@@ -3,6 +3,8 @@
 import json
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 
 
@@ -19,6 +21,8 @@ class ToolRegistry:
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
+        if tool.name in self._tools:
+            logger.warning("Tool '{}' already registered, overwriting", tool.name)
         self._tools[tool.name] = tool
         self._cached_definitions = None
 
