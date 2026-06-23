@@ -34,6 +34,7 @@ from nanobot.utils.helpers import (
     extract_reasoning,
     find_legal_message_start,
     maybe_persist_tool_result,
+    strip_reasoning_tags,
     strip_think,
     truncate_text,
 )
@@ -766,8 +767,10 @@ class AgentRunner:
             async def _thinking(delta: str) -> None:
                 if not delta:
                     return
-                context.streamed_reasoning = True
-                await hook.emit_reasoning(delta)
+                delta = strip_reasoning_tags(delta)
+                if delta:
+                    context.streamed_reasoning = True
+                    await hook.emit_reasoning(delta)
 
             async def _stream_recover() -> None:
                 await hook.on_stream_end(context, resuming=True)
