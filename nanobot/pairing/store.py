@@ -44,10 +44,7 @@ def _load() -> dict[str, Any]:
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
 
-    # Convert approved lists to sets for O(1) lookup. Sender IDs are normalized
-    # to str so lookups match is_approved()/revoke(), which coerce with str():
-    # IDs may be numeric (e.g. Telegram/QQ) in code or in a hand-edited
-    # pairing.json, and an int entry would never match the str() lookup.
+    # Convert approved lists to str sets for O(1) lookup.
     for channel, users in data.get("approved", {}).items():
         data["approved"][channel] = {str(u) for u in users}
     return data
@@ -113,9 +110,6 @@ def approve_code(code: str) -> tuple[str, str] | None:
         if info is None:
             return None
         channel = info["channel"]
-        # Coerce to str: a hand-edited pending entry may carry a numeric
-        # sender_id, which would otherwise add an int to the (str-normalized)
-        # approved set and break _save()'s sorted() on the mixed-type set.
         sender_id = str(info["sender_id"])
         data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
