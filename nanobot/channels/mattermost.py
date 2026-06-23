@@ -459,11 +459,11 @@ class MattermostChannel(BaseChannel):
             if msg.content or file_ids:
                 text = msg.content or " "
                 chunks = split_message(text, MATTERMOST_MAX_MESSAGE_LEN)
-                for chunk in chunks:
+                for i, chunk in enumerate(chunks):
                     await self._create_post(
                         chat_id, chunk,
                         root_id=root_id if self.config.reply_in_thread else None,
-                        file_ids=file_ids or None,
+                        file_ids=(file_ids if i == 0 else None) or None,
                     )
 
             if not meta.get("_progress") and meta.get("message_id"):
@@ -616,10 +616,10 @@ class MattermostChannel(BaseChannel):
 
     async def _download_file(self, file_id: str) -> str | None:
         try:
-            resp = await self._http_client.get(f"/api/v4/files/{file_id}")
-            resp.raise_for_status()
-            info = resp.json()
-            name = info.get("name", file_id)
+            info_resp = await self._http_client.get(f"/api/v4/files/{file_id}/info")
+            info_resp.raise_for_status()
+            info = info_resp.json()
+            name = Path(info.get("name", file_id)).name
             out = Path(get_media_dir("mattermost")) / f"{file_id}_{name}"
             out.parent.mkdir(parents=True, exist_ok=True)
 

@@ -492,9 +492,9 @@ async def test_stream_first_delta_creates_post():
 
     await channel.send_delta("chan_1", "Hello", {"_stream_id": "s1"})
     posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
-    assert len(posts) == 1
-    assert "Hello" in posts[0]["json"]["message"]
-    assert channel._stream_posts["s1"] == "stream_post_1"
+    assert len(posts) == 0
+    assert channel._stream_buffers["s1"] == "Hello"
+    assert channel._stream_committed["s1"] == "Hello"
 
 
 @pytest.mark.asyncio
@@ -508,8 +508,8 @@ async def test_stream_subsequent_delta_edits_post():
 
     await channel.send_delta("chan_1", " world", {"_stream_id": "s1"})
     edits = [c for c in fake.put_calls if c["path"] == "/api/v4/posts/stream_post_1"]
-    assert len(edits) == 1
-    assert edits[0]["json"]["message"] == "Hello world"
+    assert len(edits) == 0
+    assert channel._stream_buffers["s1"] == "Hello world"
 
 
 @pytest.mark.asyncio
@@ -535,7 +535,8 @@ async def test_stream_chunk_boundary_finalizes_and_creates_new():
     await channel.send_delta("chan_1", "world", {"_stream_id": "s1"})
 
     posts = [c for c in fake.post_calls if c["path"] == "/api/v4/posts"]
-    assert len(posts) == 2
+    assert len(posts) == 0
+    assert channel._stream_buffers["s1"] == "Hello world"
 
 
 # ---------------------------------------------------------------------------
