@@ -15,10 +15,19 @@ First confirm your provider and model can answer:
 nanobot agent -m "Hello!"
 ```
 
-Then merge the WebSocket channel into your existing `~/.nanobot/config.json`:
+Then merge the WebSocket channel into your existing `~/.nanobot/config.json`.
+Set `tokenIssueSecret` to the password you will enter in the WebUI login form:
 
 ```json
-{ "channels": { "websocket": { "enabled": true } } }
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
+    }
+  }
+}
 ```
 
 If you are new to JSON snippets, see
@@ -34,6 +43,7 @@ Leave the gateway running and open
 [`http://127.0.0.1:8765`](http://127.0.0.1:8765). The WebUI is served by the
 WebSocket channel on port `8765` by default. The gateway health endpoint,
 `18790` by default, is not the browser UI.
+Enter `tokenIssueSecret` when the WebUI asks for a password.
 
 ## What It Is For
 

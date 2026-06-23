@@ -931,6 +931,75 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.getByText("live assistant reply")).toBeInTheDocument());
   });
 
+  it("keeps live fork replies when a canonical refresh is missing an earlier assistant answer", async () => {
+    const client = makeClient();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-fork/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "first fork question" }]
+                : [
+                    { role: "user", content: "first fork question" },
+                    { role: "user", content: "second fork question" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-fork")}
+          title="Chat chat-fork"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("first fork question")).toBeInTheDocument());
+    await act(async () => {
+      client._emitChat("chat-fork", {
+        event: "message",
+        chat_id: "chat-fork",
+        text: "first fork answer",
+      });
+    });
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "second fork question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expectSendMessageWithTurn(client, "chat-fork", "second fork question"),
+    );
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+
+    await act(async () => {
+      client._emitSessionUpdate("chat-fork");
+    });
+
+    await waitFor(() => expect(historyCalls).toBe(2));
+    expect(screen.getByText("first fork question")).toBeInTheDocument();
+    expect(screen.getByText("first fork answer")).toBeInTheDocument();
+    expect(screen.getByText("second fork question")).toBeInTheDocument();
+  });
+
   it("does not refetch thread history on turn_end", async () => {
     const client = makeClient();
     let historyCalls = 0;
@@ -1035,11 +1104,74 @@ describe("ThreadShell", () => {
     expect(historyCalls).toBe(1);
   });
 
+  it("does not scroll again when canonical history refreshes after a session update", async () => {
+    const client = makeClient();
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    HTMLElement.prototype.scrollTo = scrollTo;
+    let historyCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          historyCalls += 1;
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "canonical answer" },
+                  ],
+            ),
+          );
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    try {
+      render(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+
+      await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+      await act(async () => {
+        for (let i = 0; i < 8; i += 1) {
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        }
+      });
+      scrollTo.mockClear();
+
+      await act(async () => {
+        client._emitSessionUpdate("chat-a");
+      });
+
+      await waitFor(() => expect(historyCalls).toBe(2));
+      await waitFor(() => expect(screen.getByText("canonical answer")).toBeInTheDocument());
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo;
+    }
+  });
+
   it("scrolls to the bottom after loading a session from the blank new-chat page", async () => {
     const client = makeClient();
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1060,46 +1192,49 @@ describe("ThreadShell", () => {
       }),
     );
 
-    try {
-      const { rerender } = render(
+    const { container, rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    scrollTo.mockClear();
+
+    await act(async () => {
+      rerender(
         wrap(
           client,
           <ThreadShell
-            session={null}
-            title="nanobot"
+            session={session("chat-a")}
+            title="Chat chat-a"
             onToggleSidebar={() => {}}
             onNewChat={() => {}}
           />,
         ),
       );
+    });
 
-      expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
-      scrollIntoView.mockClear();
-
-      await act(async () => {
-        rerender(
-          wrap(
-            client,
-            <ThreadShell
-              session={session("chat-a")}
-              title="Chat chat-a"
-              onToggleSidebar={() => {}}
-              onNewChat={() => {}}
-            />,
-          ),
-        );
-      });
-
-      await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          block: "end",
-          behavior: "auto",
-        }),
-      );
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
+    await waitFor(() => expect(screen.getByText("loaded answer")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1800,
+        behavior: "auto",
+      }),
+    );
   });
 
   it("opens slash commands on the blank welcome page", async () => {

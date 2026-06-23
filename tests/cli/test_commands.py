@@ -2,6 +2,8 @@ import asyncio
 import json
 import re
 import shutil
+import signal
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,6 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.cli import commands as cli_commands
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
@@ -58,6 +61,85 @@ def _fake_provider():
 
 class _StopGatewayError(RuntimeError):
     pass
+
+
+def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
+    class _FakeLoop:
+        def __init__(self) -> None:
+            self.handlers: dict[int, tuple[object, tuple[object, ...]]] = {}
+            self.removed: list[int] = []
+
+        def add_signal_handler(self, signum, callback, *args) -> None:
+            self.handlers[int(signum)] = (callback, args)
+
+        def remove_signal_handler(self, signum) -> bool:
+            self.removed.append(int(signum))
+            self.handlers.pop(int(signum), None)
+            return True
+
+    async def _run() -> None:
+        loop = _FakeLoop()
+        shutdown_event = asyncio.Event()
+        never = asyncio.Event()
+        task = asyncio.create_task(never.wait())
+        output: list[str] = []
+
+        restore = cli_commands._install_gateway_shutdown_handlers(
+            loop, shutdown_event, [task], output.append,
+        )
+        try:
+            callback, args = loop.handlers[int(signal.SIGINT)]
+            assert callable(callback)
+
+            callback(*args)
+            assert shutdown_event.is_set()
+            assert output == ["\nShutting down... Press Ctrl+C again to force."]
+            assert not task.done()
+
+            callback(*args)
+            await asyncio.sleep(0)
+            assert task.cancelled()
+        finally:
+            restore()
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        assert int(signal.SIGINT) in loop.removed
+        assert int(signal.SIGTERM) in loop.removed
+
+    asyncio.run(_run())
+
+
+def test_gateway_tty_signal_mode_restores_ctrl_c(monkeypatch) -> None:
+    try:
+        import os
+        import pty
+        import termios
+    except ImportError:  # pragma: no cover - platform without POSIX termios
+        pytest.skip("termios unavailable")
+
+    master_fd, slave_fd = pty.openpty()
+
+    class _Stdin:
+        def fileno(self) -> int:
+            return slave_fd
+
+    try:
+        attrs = termios.tcgetattr(slave_fd)
+        attrs[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+
+        monkeypatch.setattr(cli_commands.sys, "stdin", _Stdin())
+        cli_commands._ensure_gateway_tty_signal_mode()
+
+        restored = termios.tcgetattr(slave_fd)
+        assert restored[3] & termios.ISIG
+        assert restored[3] & termios.ICANON
+        assert restored[3] & termios.ECHO
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
 
 
 @pytest.fixture
@@ -2134,6 +2216,221 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_writer.closed is True
     assert "HTTP/1.0 404 Not Found" in missing_response
     assert missing_response.endswith("\r\n\r\nNot Found")
+
+
+def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.gateway.port = 18791
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, **_kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["agent_task_cleaned_up"] = True
+
+        async def close_mcp(self) -> None:
+            raise AssertionError("gateway must not close MCP from the outer task")
+
+        def stop(self) -> None:
+            seen["agent_stopped"] = True
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
+            self.enabled_channels = ["telegram"]
+
+        async def start_all(self) -> None:
+            await asyncio.Event().wait()
+
+        async def stop_all(self) -> None:
+            seen["channels_stopped"] = True
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            seen["cron_stopped"] = True
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeServer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def serve_forever(self) -> None:
+            raise _StopGatewayError("stop")
+
+    async def _fake_start_server(_handler, _host: str, _port: int):
+        return _FakeServer()
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("asyncio.start_server", _fake_start_server)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["agent_stopped"] is True
+    assert seen["agent_task_cleaned_up"] is True
+    assert seen["channels_stopped"] is True
+    assert seen["cron_stopped"] is True
+
+
+def test_gateway_shutdown_event_exits_forever_runtime_tasks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.gateway.port = 18791
+    seen: dict[str, object] = {}
+
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
+    class _FakeAgentLoop:
+        @classmethod
+        def from_config(cls, config, bus=None, **extra):
+            return cls(**extra)
+
+        def __init__(self, **_kwargs) -> None:
+            self.model = "test-model"
+            self.provider = object()
+            self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["agent_task_cleaned_up"] = True
+
+        async def close_mcp(self) -> None:
+            raise AssertionError("gateway must not close MCP from the outer task")
+
+        def stop(self) -> None:
+            seen["agent_stopped"] = True
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
+            self.enabled_channels = ["websocket"]
+
+        async def start_all(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["channel_task_cleaned_up"] = True
+
+        async def stop_all(self) -> None:
+            seen["channels_stopped"] = True
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            seen["cron_stopped"] = True
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeServer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def serve_forever(self) -> None:
+            await asyncio.Event().wait()
+
+    async def _fake_start_server(_handler, _host: str, _port: int):
+        return _FakeServer()
+
+    def _fake_install_shutdown_handlers(_loop, event, _tasks, _print_status):
+        async def _trigger_shutdown() -> None:
+            await asyncio.sleep(0)
+            event.set()
+
+        asyncio.create_task(_trigger_shutdown())
+
+        def _restore() -> None:
+            seen["shutdown_handlers_restored"] = True
+
+        return _restore
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+    )
+    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("asyncio.start_server", _fake_start_server)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._install_gateway_shutdown_handlers",
+        _fake_install_shutdown_handlers,
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["agent_stopped"] is True
+    assert seen["agent_task_cleaned_up"] is True
+    assert seen["channel_task_cleaned_up"] is True
+    assert seen["channels_stopped"] is True
+    assert seen["cron_stopped"] is True
+    assert seen["shutdown_handlers_restored"] is True
 
 
 def test_serve_uses_api_config_defaults_and_workspace_override(

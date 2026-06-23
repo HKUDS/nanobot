@@ -5,8 +5,8 @@ import functools
 import json
 import random
 import socket
-import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -415,9 +415,8 @@ async def test_cli_apps_routes_require_token_and_return_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.cli_apps_payload",
-        lambda: {
+    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
+        return {
             "apps": [
                 {
                     "name": "gimp",
@@ -438,7 +437,11 @@ async def test_cli_apps_routes_require_token_and_return_payload(
             ],
             "installed_count": 0,
             "catalog_updated_at": "2026-04-18",
-        },
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.cli_apps_payload",
+        payload,
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.cli_apps_action",
@@ -484,12 +487,14 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entered = threading.Event()
-    release = threading.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
-    def slow_payload() -> dict[str, Any]:
+    async def slow_payload(*, installed_only: bool = False) -> dict[str, Any]:
+        assert installed_only is False
         entered.set()
-        release.wait(2.0)
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(release.wait(), 2.0)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 
     monkeypatch.setattr("nanobot.webui.settings_routes.cli_apps_payload", slow_payload)
@@ -505,7 +510,7 @@ async def test_cli_apps_catalog_does_not_block_other_webui_http_routes(
         catalog_task = asyncio.create_task(
             _http_get("http://127.0.0.1:29935/api/settings/cli-apps", headers=auth)
         )
-        assert await asyncio.to_thread(entered.wait, 2.0)
+        assert await asyncio.wait_for(entered.wait(), 2.0)
         assert time.perf_counter() - started < 1.0
 
         workspaces_started = time.perf_counter()
@@ -531,7 +536,7 @@ async def test_cli_apps_route_supports_installed_only_payload(
 ) -> None:
     calls: list[bool] = []
 
-    def payload(*, installed_only: bool = False) -> dict[str, Any]:
+    async def payload(*, installed_only: bool = False) -> dict[str, Any]:
         calls.append(installed_only)
         return {"apps": [], "installed_count": 0, "catalog_updated_at": None}
 

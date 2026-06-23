@@ -605,6 +605,7 @@ export interface CliAppsPayload {
   apps: CliAppInfo[];
   installed_count: number;
   catalog_updated_at?: string | null;
+  catalog_refresh_pending?: boolean;
   last_action?: {
     ok: boolean;
     message: string;

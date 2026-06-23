@@ -56,6 +56,9 @@
 
 ## 📢 News
 
+- **2026-06-22** 🚀 Released **v0.2.2** — **The Durability Release** makes nanobot sturdier for daily agent work: segmented WebUI transcripts, first-class Python SDK runtime controls, automation management, richer search/STT providers, and stronger gateway/session/provider reliability. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.2.2) for details.
+- **2026-06-21** 🧰 Python SDK runtime controls, optional Keenable key, cleaner run hooks.
+- **2026-06-20** 💬 Telegram rich messages, safer SDK concurrency, smoother Quick Start.
 - **2026-06-19** 🔎 Firecrawl app, OpenAI image edits, safer session deletion.
 - **2026-06-18** 💬 Feishu recovery, Keenable search, Mistral polish, workspace-aware git.
 - **2026-06-17** 🧠 Default idle auto-compact, clearer `/dream`, macOS installer fixes.
@@ -63,13 +66,13 @@
 - **2026-06-15** 📱 Mobile WebUI polish, optional file tools, real API usage.
 - **2026-06-14** 🖼️ Themed cover, partner links, stronger Codex image streaming.
 - **2026-06-13** 🗓️ Session-bound automations, sturdier WhatsApp, faster WebUI startup.
-- **2026-06-12** 💬 Slack allowlisted channels can require mentions.
-- **2026-06-11** ✂️ Fenced-code message splitting.
-- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
 
 <details>
 <summary>Earlier news</summary>
 
+- **2026-06-12** 💬 Slack allowlisted channels can require mentions.
+- **2026-06-11** ✂️ Fenced-code message splitting.
+- **2026-06-10** 📜 Segmented transcripts, Exa/Bocha search, StepFun/SiliconFlow ASR.
 - **2026-06-09** 🎙️ Shared voice input, more STT providers, TeX and email polish.
 - **2026-06-08** 🧮 Token heatmap fix, safer MCP HTTP probing, docs cleanup.
 - **2026-06-06** 🧰 SDK MCP cleanup, removable OpenAI image defaults.
@@ -234,7 +237,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If you finish the wizard and save the config, skip the manual initialize/configure steps below and go straight to **Test one message**.
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, skip the manual initialize/configure steps below and go straight to **Open the WebUI**.
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
@@ -290,7 +293,7 @@ nanobot --version
 
 **1. Initialize**
 
-Skip this step if the one-command setup already started the wizard and you saved the config there.
+Skip this step if the one-command setup already started the wizard and Quick Start finished there.
 
 ```bash
 nanobot onboard
@@ -304,15 +307,16 @@ Skip this step if you already configured provider and model settings in the wiza
 
 `nanobot onboard` creates `~/.nanobot/config.json` and `~/.nanobot/workspace/`. Configure these **two parts** in the config file. Add or merge the following blocks into the existing file instead of replacing the whole file.
 
-The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON has concrete names. Provider examples are recipes, not rankings or endorsements. If you use another provider, replace the provider config key, API key, preset provider name, and model ID together.
+The example below uses a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service. Provider examples are recipes, not rankings or endorsements. For copyable provider-specific setup, see [Provider Cookbook](./docs/provider-cookbook.md).
 
 *Set your API key*:
 
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -325,10 +329,10 @@ The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4.5",
+      "provider": "custom",
+      "model": "model-id-from-your-provider",
       "maxTokens": 8192,
-      "contextWindowTokens": 65536,
+      "contextWindowTokens": 200000,
       "temperature": 0.1
     }
   },
@@ -352,7 +356,18 @@ For another provider, the same config shape still applies:
 | Model ID | `modelPresets.primary.model` |
 | Endpoint URL, only when needed | `providers.<provider>.apiBase` |
 
-**3. Test one message**
+**3. Open the WebUI**
+
+If Quick Start enabled the WebSocket channel, start the gateway:
+
+```bash
+nanobot gateway
+```
+
+Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
+Prefer not to keep a terminal open? Use `nanobot gateway --background`, then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+
+For manual or terminal-only setup, test one CLI message:
 
 ```bash
 nanobot status
@@ -389,7 +404,15 @@ The WebUI ships **inside the published wheel** — no extra build step. It is th
 Merge this block into your existing config:
 
 ```json
-{ "channels": { "websocket": { "enabled": true } } }
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "tokenIssueSecret": "your-webui-password",
+      "websocketRequiresToken": true
+    }
+  }
+}
 ```
 
 **2. Start the gateway**
@@ -397,6 +420,8 @@ Merge this block into your existing config:
 ```bash
 nanobot gateway
 ```
+
+Use `nanobot gateway --background` for a local background process you can manage later with `nanobot gateway status`, `logs`, `restart`, and `stop`.
 
 **3. Open the WebUI**
 
