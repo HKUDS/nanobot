@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from collections import deque
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -374,8 +373,7 @@ class AgentRunner:
                 # may repair or compact historical messages for the model, but
                 # those synthetic edits must not shift the append boundary used
                 # later when the caller saves only the new turn.
-                messages_for_model = self._dedupe_tool_calls(messages)
-                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
+                messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
@@ -390,8 +388,7 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
                 try:
-                    messages_for_model = self._dedupe_tool_calls(messages)
-                    messages_for_model = self._drop_orphan_tool_results(messages_for_model)
+                    messages_for_model = self._drop_orphan_tool_results(messages)
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
@@ -1357,85 +1354,6 @@ class AgentRunner:
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
-
-    @staticmethod
-    def _dedupe_tool_calls(
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Make duplicate tool_call ids unique while keeping matching results paired.
-
-        Anthropic rejects any request where two tool_use blocks share an id
-        ("tool_use ids must be unique"). An accidental duplicate (e.g. from a
-        mis-assembled stream) otherwise poisons the session permanently. Some
-        Anthropic-compatible providers also reuse ids for distinct parallel
-        calls, so preserve every call and rewrite later duplicates instead of
-        silently dropping work. Tool results are remapped in call order.
-        """
-        seen_call_ids: set[str] = set()
-        duplicate_counts: dict[str, int] = {}
-        pending_result_ids: dict[str, deque[str]] = {}
-        updated: list[dict[str, Any]] | None = None
-
-        def _unique_id(raw_id: str) -> str:
-            duplicate_counts[raw_id] = duplicate_counts.get(raw_id, 1) + 1
-            suffix = duplicate_counts[raw_id]
-            while True:
-                candidate = f"{raw_id}__dedupe_{suffix}"
-                if candidate not in seen_call_ids:
-                    return candidate
-                suffix += 1
-
-        for idx, msg in enumerate(messages):
-            role = msg.get("role")
-            replacement: dict[str, Any] | None = None
-            drop = False
-
-            if role == "assistant" and msg.get("tool_calls"):
-                kept = []
-                changed = False
-                for tc in msg.get("tool_calls") or []:
-                    tid = tc.get("id") if isinstance(tc, dict) else None
-                    if not tid:
-                        kept.append(tc)
-                        continue
-                    raw_id = str(tid)
-                    mapped_id = raw_id
-                    if raw_id in seen_call_ids:
-                        mapped_id = _unique_id(raw_id)
-                        changed = True
-                    seen_call_ids.add(mapped_id)
-                    pending_result_ids.setdefault(raw_id, deque()).append(mapped_id)
-                    if mapped_id != tid:
-                        tc = dict(tc)
-                        tc["id"] = mapped_id
-                        changed = True
-                    kept.append(tc)
-                if changed:
-                    replacement = dict(msg)
-                    replacement["tool_calls"] = kept
-            elif role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid:
-                    raw_id = str(tid)
-                    queue = pending_result_ids.get(raw_id)
-                    if not queue:
-                        drop = True
-                    else:
-                        mapped_id = queue.popleft()
-                        if not queue:
-                            pending_result_ids.pop(raw_id, None)
-                        if mapped_id != tid:
-                            replacement = dict(msg)
-                            replacement["tool_call_id"] = mapped_id
-
-            if (replacement is not None or drop) and updated is None:
-                updated = [dict(m) for m in messages[:idx]]
-            if drop:
-                continue
-            if updated is not None:
-                updated.append(replacement if replacement is not None else dict(msg))
-
-        return messages if updated is None else updated
 
     @staticmethod
     def _drop_orphan_tool_results(

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -182,64 +182,6 @@ async def test_backfill_missing_tool_results_inserts_error():
     assert len(backfilled) == 1
     assert backfilled[0]["content"] == _BACKFILL_CONTENT
     assert backfilled[0]["name"] == "read_file"
-
-
-def test_dedupe_tool_calls_remaps_duplicate_ids():
-    from nanobot.agent.runner import AgentRunner
-
-    messages = [
-        {"role": "user", "content": "hi"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"a.txt"}'}},
-                # Duplicate id with different arguments should be preserved, not dropped.
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"b.txt"}'}},
-            ],
-        },
-        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
-        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
-        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb-remapped"},
-    ]
-
-    cleaned = AgentRunner._dedupe_tool_calls(messages)
-
-    assert cleaned == [
-        {"role": "user", "content": "hi"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
-                {"id": "b", "type": "function", "function": {"name": "y", "arguments": '{"path":"a.txt"}'}},
-                {"id": "b__dedupe_2", "type": "function", "function": {"name": "y", "arguments": '{"path":"b.txt"}'}},
-            ],
-        },
-        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
-        {"role": "tool", "tool_call_id": "b", "name": "y", "content": "rb"},
-        {"role": "tool", "tool_call_id": "b__dedupe_2", "name": "y", "content": "rb-remapped"},
-    ]
-
-
-def test_dedupe_tool_calls_noop_when_unique():
-    from nanobot.agent.runner import AgentRunner
-
-    messages = [
-        {"role": "user", "content": "hi"},
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
-            ],
-        },
-        {"role": "tool", "tool_call_id": "a", "name": "x", "content": "ra"},
-    ]
-
-    # No duplicates -> identical list object returned (cheap no-op path).
-    assert AgentRunner._dedupe_tool_calls(messages) is messages
 
 
 def test_drop_orphan_tool_results_removes_unmatched_tool_messages():

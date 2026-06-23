@@ -136,6 +136,52 @@ def test_anthropic_sanitized_tool_ids_avoid_simple_collisions():
     assert all(all(ch.isalnum() or ch in "_-" for ch in tool_id) for tool_id in ids)
 
 
+def test_anthropic_convert_messages_remaps_duplicate_history_tool_ids():
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+
+    _system, messages = provider._convert_messages([
+        {"role": "user", "content": "check both files"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "toolu_same",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
+                },
+                {
+                    "id": "toolu_same",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"b.txt"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "toolu_same", "name": "read_file", "content": "a"},
+        {"role": "tool", "tool_call_id": "toolu_same", "name": "read_file", "content": "b"},
+    ])
+
+    tool_uses = [
+        block
+        for block in messages[1]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+    tool_results = [
+        block
+        for block in messages[2]["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_result"
+    ]
+    tool_use_ids = [block["id"] for block in tool_uses]
+    tool_result_ids = [block["tool_use_id"] for block in tool_results]
+
+    assert len(tool_use_ids) == 2
+    assert tool_use_ids[0] == "toolu_same"
+    assert tool_use_ids[1] == "toolu_same__dedupe_2"
+    assert tool_result_ids == tool_use_ids
+    assert tool_uses[0]["input"] == {"path": "a.txt"}
+    assert tool_uses[1]["input"] == {"path": "b.txt"}
+
+
 def test_anthropic_parse_response_remaps_duplicate_tool_use_ids():
     response = SimpleNamespace(
         content=[
