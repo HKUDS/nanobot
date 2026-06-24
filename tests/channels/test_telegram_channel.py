@@ -506,6 +506,23 @@ async def test_send_rich_bad_request_does_not_latch_capability() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rich_messages_config_disabled_skips_sendRichMessage() -> None:
+    """When rich_messages=False, sendRichMessage should not be called."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=False),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.do_api_request = AsyncMock()
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="**hello**"))
+
+    channel._app.bot.do_api_request.assert_not_called()
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._app.bot.sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
     from telegram.error import NetworkError
 
