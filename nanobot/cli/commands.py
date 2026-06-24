@@ -80,6 +80,28 @@ def _signal_name(signum: int) -> str:
     return f"signal {signum}"
 
 
+def _pick_heartbeat_target_from_sessions(
+    sessions: list[dict[str, Any]],
+    enabled_channels: set[str],
+) -> tuple[str, str]:
+    """Pick the most recently active enabled chat session for heartbeat delivery."""
+    ordered = sorted(
+        sessions,
+        key=lambda item: str(item.get("updated_at") or ""),
+        reverse=True,
+    )
+    for item in ordered:
+        key = item.get("key") or ""
+        if ":" not in key:
+            continue
+        channel, chat_id = key.split(":", 1)
+        if channel in {"cli", "system"}:
+            continue
+        if channel in enabled_channels and chat_id:
+            return channel, chat_id
+    return "cli", "direct"
+
+
 def _ensure_gateway_tty_signal_mode() -> None:
     """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
     try:
@@ -1019,17 +1041,10 @@ def _run_gateway(
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        return "cli", "direct"
+        return _pick_heartbeat_target_from_sessions(
+            session_manager.list_sessions(),
+            set(channels.enabled_channels),
+        )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")

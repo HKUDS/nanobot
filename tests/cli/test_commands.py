@@ -1242,6 +1242,21 @@ def test_heartbeat_has_active_tasks(content, expected):
     assert _heartbeat_has_active_tasks(content) is expected
 
 
+def test_pick_heartbeat_target_uses_most_recent_enabled_channel() -> None:
+    target = cli_commands._pick_heartbeat_target_from_sessions(
+        [
+            {"key": "telegram:old", "updated_at": "2026-06-23T09:00:00"},
+            {"key": "cli:direct", "updated_at": "2026-06-24T12:00:00"},
+            {"key": "feishu:latest", "updated_at": "2026-06-24T10:00:00"},
+            {"key": "discord:disabled", "updated_at": "2026-06-24T11:00:00"},
+            {"key": "system:heartbeat", "updated_at": "2026-06-24T13:00:00"},
+        ],
+        {"telegram", "feishu"},
+    )
+
+    assert target == ("feishu", "latest")
+
+
 def test_heartbeat_skips_bundled_template():
     from nanobot.cli.commands import _heartbeat_has_active_tasks
     from nanobot.utils.helpers import load_bundled_template
