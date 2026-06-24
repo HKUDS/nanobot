@@ -37,8 +37,9 @@ class ProviderSpec:
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
-    # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
+    # extra env vars / request headers supplied by the provider integration.
     env_extras: tuple[tuple[str, str], ...] = ()
+    default_extra_headers: tuple[tuple[str, str], ...] = ()
 
     # gateway / local detection
     is_gateway: bool = False  # routes any model (OpenRouter, AiHubMix)
@@ -426,6 +427,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Kimi Coding",
         backend="anthropic",
         default_api_base="https://api.kimi.com/coding/v1",
+        default_extra_headers=(("User-Agent", "claude-code/0.1.0"),),
     ),
     # MiniMax: OpenAI-compatible API
     ProviderSpec(

@@ -18,7 +18,7 @@ Match the recipe to the credential or endpoint you already have:
 | An OpenCode Zen or Go key | [OpenCode Zen or Go](#recipe-opencode-zen-or-go) | `OPENCODE_API_KEY`, the Zen/Go provider key, and a model ID from the matching OpenCode endpoint |
 | An OpenAI platform API key and OpenAI model ID | [OpenAI Direct](#recipe-openai-direct) | `OPENAI_API_KEY`, `provider: "openai"`, and an OpenAI model available to that account |
 | An Anthropic API key and Anthropic model ID | [Anthropic Direct](#recipe-anthropic-direct) | `ANTHROPIC_API_KEY`, `provider: "anthropic"`, and a non-gateway model ID |
-| A Kimi Coding Plan key | [Kimi Coding Plan](#recipe-kimi-coding-plan) | `KIMI_CODING_API_KEY`, `provider: "kimi_coding"`, `model: "kimi-for-coding"`, and `extraHeaders.User-Agent` |
+| A Kimi Coding Plan key | [Kimi Coding Plan](#recipe-kimi-coding-plan) | `KIMI_CODING_API_KEY`, `provider: "kimi_coding"`, and `model: "kimi-for-coding"` |
 | An OpenAI-compatible `/v1` endpoint that is not a named nanobot provider | [Custom OpenAI-Compatible Provider](#recipe-custom-openai-compatible-provider) | `apiBase`, optional API key, and the model ID served by that endpoint |
 | Ollama already running locally | [Ollama Local Model](#recipe-ollama-local-model) | Ollama `apiBase`, pulled model name, and local server availability |
 | vLLM, LM Studio, or another local OpenAI-compatible server | [vLLM or LM Studio](#recipe-vllm-or-lm-studio) | Local `/v1` base URL, any required key, and served model name |
@@ -281,10 +281,7 @@ This recipe applies when your key comes from Kimi's Coding Plan endpoint. Nanobo
 {
   "providers": {
     "kimiCoding": {
-      "apiKey": "${KIMI_CODING_API_KEY}",
-      "extraHeaders": {
-        "User-Agent": "claude-code/0.1.0"
-      }
+      "apiKey": "${KIMI_CODING_API_KEY}"
     }
   },
   "modelPresets": {
@@ -311,7 +308,7 @@ nanobot status
 nanobot agent -m "Hello!"
 ```
 
-The default base URL is `https://api.kimi.com/coding/v1`. This endpoint **requires** the `User-Agent` header; omitting it returns `403`. Keep the value above or use another Claude-compatible value accepted by your Kimi account.
+The default base URL is `https://api.kimi.com/coding/v1`. This endpoint requires a Claude-compatible `User-Agent`; nanobot sends `claude-code/0.1.0` by default. If your account requires a different value, override it with `providers.kimiCoding.extraHeaders.User-Agent`.
 
 ## Recipe: Custom OpenAI-Compatible Provider
 
