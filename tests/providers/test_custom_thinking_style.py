@@ -45,3 +45,18 @@ class TestCustomProviderThinkingStyle:
         }
         pc = ProvidersConfig.model_validate(data)
         assert pc.custom.thinking_style == "enable_thinking"
+
+    def test_invalid_thinking_style_raises_with_clear_message(self) -> None:
+        """An invalid thinking_style must raise a ValidationError whose message
+        lists the valid options (not just Pydantic's generic Literal error)."""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ProviderConfig.model_validate({"thinkingStyle": "thinking_typ"})
+
+        message = str(exc_info.value)
+        assert "Invalid thinking_style" in message
+        assert "thinking_type" in message
+        assert "enable_thinking" in message
+        assert "reasoning_split" in message
