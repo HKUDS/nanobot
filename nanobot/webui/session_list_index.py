@@ -272,7 +272,6 @@ def _scan_session_row(session_manager: SessionManager, path: Path) -> dict[str, 
             created_at_s = data.get("created_at")
             updated_at_s = data.get("updated_at")
             if not created_at_s or not updated_at_s:
-                from datetime import datetime
                 fallback_time = datetime.fromtimestamp(signature["mtime_ns"] / 1e9).isoformat()
                 created_at_s = created_at_s or fallback_time
                 updated_at_s = updated_at_s or fallback_time

@@ -843,7 +843,6 @@ class SessionManager:
                                 if not fallback_preview and item.get("role") == "assistant":
                                     fallback_preview = text
                             preview = preview or fallback_preview
-                            from datetime import datetime
                             fallback_time = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
                             sessions.append(
                                 {
