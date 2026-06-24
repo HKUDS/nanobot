@@ -403,7 +403,7 @@ def _ensure_bridge_setup() -> Path:
 
     npm_path = shutil.which("npm")
     if not npm_path:
-        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+        raise RuntimeError("npm not found. Please install Node.js >= 20.")
 
     logger.info("Setting up WhatsApp bridge...")
     user_bridge.parent.mkdir(parents=True, exist_ok=True)

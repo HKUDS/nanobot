@@ -37,8 +37,9 @@ class ProviderSpec:
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
-    # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
+    # extra env vars / request headers supplied by the provider integration.
     env_extras: tuple[tuple[str, str], ...] = ()
+    default_extra_headers: tuple[tuple[str, str], ...] = ()
 
     # gateway / local detection
     is_gateway: bool = False  # routes any model (OpenRouter, AiHubMix)
@@ -175,6 +176,32 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
         gateway_reasoning_style="reasoning_effort",
+    ),
+    # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
+    # OpenCode's own config uses "opencode/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode_zen",
+        keywords=("opencode/", "opencode_zen", "opencode-zen"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefixes=("opencode", "opencode_zen", "opencode-zen"),
+    ),
+    # OpenCode Go: OpenAI-compatible chat-completions gateway for low-cost models.
+    # OpenCode's own config uses "opencode-go/<model>"; send the bare model upstream.
+    ProviderSpec(
+        name="opencode_go",
+        keywords=("opencode-go", "opencode_go"),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Go",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opencode.ai/zen/go",
+        default_api_base="https://opencode.ai/zen/go/v1",
+        strip_model_prefixes=("opencode-go", "opencode_go"),
     ),
     # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
     ProviderSpec(
@@ -390,6 +417,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
             ("kimi-k2.7-code", {"temperature": 1.0}),
             ("kimi-k2.7-code-highspeed", {"temperature": 1.0}),
         ),
+    ),
+    # Kimi Coding Plan — Anthropic Messages API at api.kimi.com/coding
+    # sk-kimi-* keys; requires User-Agent: claude-code/0.1.0 header.
+    ProviderSpec(
+        name="kimi_coding",
+        keywords=("kimi-coding", "kimi_coding", "kimi-for-coding"),
+        env_key="KIMI_CODING_API_KEY",
+        display_name="Kimi Coding",
+        backend="anthropic",
+        default_api_base="https://api.kimi.com/coding/v1",
+        default_extra_headers=(("User-Agent", "claude-code/0.1.0"),),
     ),
     # MiniMax: OpenAI-compatible API
     ProviderSpec(

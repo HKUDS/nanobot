@@ -171,3 +171,40 @@ def test_webui_session_list_rescans_when_transcript_changes(
 
 def list_webui_sessions(manager: SessionManager) -> list[dict]:
     return session_list_index.list_webui_sessions(manager)
+
+
+def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    path = manager._get_session_path("websocket:missing-time")
+    path.write_text(
+        '{"_type": "metadata", "key": "websocket:missing-time"}\n'
+        '{"_type": "message", "role": "user", "content": "hello"}\n',
+        encoding="utf-8",
+    )
+
+    rows = list_webui_sessions(manager)
+    assert len(rows) == 1
+    assert rows[0]["key"] == "websocket:missing-time"
+    assert rows[0]["created_at"] is not None
+    assert rows[0]["updated_at"] is not None
+    datetime.fromisoformat(rows[0]["created_at"])
+    datetime.fromisoformat(rows[0]["updated_at"])
+
+
+def test_session_manager_list_sessions_fallback_time_when_missing(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    path = manager._get_session_path("websocket:missing-time2")
+    path.write_text(
+        '{"_type": "metadata", "key": "websocket:missing-time2"}\n'
+        '{"_type": "message", "role": "user", "content": "hello"}\n',
+        encoding="utf-8",
+    )
+
+    sessions = manager.list_sessions()
+    assert len(sessions) == 1
+    assert sessions[0]["key"] == "websocket:missing-time2"
+    assert sessions[0]["created_at"] is not None
+    assert sessions[0]["updated_at"] is not None
+    datetime.fromisoformat(sessions[0]["created_at"])
+    datetime.fromisoformat(sessions[0]["updated_at"])
+

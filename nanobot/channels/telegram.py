@@ -907,8 +907,11 @@ class TelegramChannel(BaseChannel):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
 
-            # Try sendRichMessage for final output (Bot API 10.1)
-            if not getattr(self, "_rich_send_disabled", False):
+            # Try sendRichMessage for final output (Bot API 10.1).
+            # Skip when a streaming preview already exists to avoid the
+            # delete-and-resend pattern that causes flickering and drops
+            # line breaks (issue #4470).
+            if not buf.message_id and not getattr(self, "_rich_send_disabled", False):
                 reply_params = None
                 if reply_to_message_id := meta.get("message_id"):
                     reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}

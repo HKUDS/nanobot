@@ -34,6 +34,7 @@ from nanobot.utils.helpers import (
     extract_reasoning,
     find_legal_message_start,
     maybe_persist_tool_result,
+    strip_reasoning_tags,
     strip_think,
     truncate_text,
 )
@@ -770,16 +771,24 @@ class AgentRunner:
                 await live_file_edits.update(delta)
 
         if wants_streaming:
+            thinking_buf = ""
+
             async def _stream(delta: str) -> None:
                 if delta:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
 
             async def _thinking(delta: str) -> None:
+                nonlocal thinking_buf
                 if not delta:
                     return
-                context.streamed_reasoning = True
-                await hook.emit_reasoning(delta)
+                prev_clean = strip_reasoning_tags(thinking_buf)
+                thinking_buf += delta
+                new_clean = strip_reasoning_tags(thinking_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental:
+                    context.streamed_reasoning = True
+                    await hook.emit_reasoning(incremental)
 
             async def _stream_recover() -> None:
                 await hook.on_stream_end(context, resuming=True)

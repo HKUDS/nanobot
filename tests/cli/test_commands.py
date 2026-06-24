@@ -1244,14 +1244,15 @@ def test_heartbeat_has_active_tasks(content, expected):
 
 def test_pick_heartbeat_target_uses_most_recent_enabled_channel() -> None:
     target = cli_commands._pick_heartbeat_target_from_sessions(
-        [
+        sessions=[
             {"key": "telegram:old", "updated_at": "2026-06-23T09:00:00"},
             {"key": "cli:direct", "updated_at": "2026-06-24T12:00:00"},
             {"key": "feishu:latest", "updated_at": "2026-06-24T10:00:00"},
             {"key": "discord:disabled", "updated_at": "2026-06-24T11:00:00"},
             {"key": "system:heartbeat", "updated_at": "2026-06-24T13:00:00"},
         ],
-        {"telegram", "feishu"},
+        enabled_channels={"telegram", "feishu"},
+        archived_keys=[],
     )
 
     assert target == ("feishu", "latest")
@@ -1436,6 +1437,21 @@ def test_run_heartbeat_trigger_executes_phase_two_and_delivers(monkeypatch, tmp_
     assert seen["session_key"] == "heartbeat"
     assert delivered[0][0].content == "Build status looks healthy."
     assert delivered[0][1]["record"] is True
+
+
+def test_heartbeat_target_skips_archived_webui_sessions():
+    from nanobot.cli.commands import _pick_heartbeat_target_from_sessions
+
+    target = _pick_heartbeat_target_from_sessions(
+        enabled_channels=["websocket"],
+        archived_keys=["websocket:archived"],
+        sessions=[
+            {"key": "websocket:archived"},
+            {"key": "websocket:active"},
+        ],
+    )
+
+    assert target == ("websocket", "active")
 
 
 def _write_instance_config(tmp_path: Path) -> Path:

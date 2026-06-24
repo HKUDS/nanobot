@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig
+from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfig, ProviderConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.registry import create_dynamic_spec, find_by_name
+from nanobot.providers.registry import ProviderSpec, create_dynamic_spec, find_by_name
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,16 @@ def _resolve_model_preset(
     preset: ModelPresetConfig | None = None,
 ) -> ModelPresetConfig:
     return preset if preset is not None else config.resolve_preset(preset_name)
+
+
+def _provider_extra_headers(
+    spec: ProviderSpec | None,
+    provider_config: ProviderConfig | None,
+) -> dict[str, str] | None:
+    headers = dict(spec.default_extra_headers) if spec else {}
+    if provider_config and provider_config.extra_headers:
+        headers.update(provider_config.extra_headers)
+    return headers or None
 
 
 def _make_provider_core(
@@ -89,7 +99,7 @@ def _make_provider_core(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -109,7 +119,7 @@ def _make_provider_core(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model, preset=resolved),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=_provider_extra_headers(spec, p),
             spec=spec,
             extra_body=p.extra_body if p else None,
             api_type=p.api_type if p and provider_name == "openai" else "auto",
@@ -191,13 +201,14 @@ def provider_signature(
 
     def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
         fp = config.get_provider(fallback.model, preset=fallback)
+        provider_name = config.get_provider_name(fallback.model, preset=fallback)
         return (
             fallback.model,
             fallback.provider,
-            config.get_provider_name(fallback.model, preset=fallback),
+            provider_name,
             config.get_api_key(fallback.model, preset=fallback),
             config.get_api_base(fallback.model, preset=fallback),
-            fp.extra_headers if fp else None,
+            _provider_extra_headers(find_by_name(provider_name) if provider_name else None, fp),
             fp.extra_body if fp else None,
             fp.api_type if fp else "auto",
             fp.extra_query if fp else None,
@@ -209,13 +220,14 @@ def provider_signature(
             fallback.context_window_tokens,
         )
 
+    provider_name = config.get_provider_name(resolved.model, preset=resolved)
     return (
         resolved.model,
         resolved.provider,
-        config.get_provider_name(resolved.model, preset=resolved),
+        provider_name,
         config.get_api_key(resolved.model, preset=resolved),
         config.get_api_base(resolved.model, preset=resolved),
-        p.extra_headers if p else None,
+        _provider_extra_headers(find_by_name(provider_name) if provider_name else None, p),
         p.extra_body if p else None,
         p.api_type if p else "auto",
         p.extra_query if p else None,
