@@ -405,3 +405,42 @@ async def test_runner_strips_thinking_tags_from_native_thinking_deltas():
 
     assert result.final_content == "done"
     assert hook.emitted == ["Preparing final response"]
+
+
+@pytest.mark.asyncio
+async def test_runner_ignores_empty_thinking_marker_before_final_reasoning():
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("<thinking/>")
+        if on_content_delta:
+            await on_content_delta("done")
+        return LLMResponse(
+            content="done",
+            reasoning_content="Preparing final response",
+            tool_calls=[],
+            usage={},
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    hook = _StreamRecordingHook()
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "q"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert hook.emitted == ["Preparing final response"]
