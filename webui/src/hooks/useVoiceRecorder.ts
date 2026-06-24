@@ -42,6 +42,8 @@ interface VoiceRecorderOptions {
   onError: (key: VoiceRecorderErrorKey) => void;
   onTranscript: (text: string) => void;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
+  /** When true, convert recorded audio to WAV before sending (needed for providers that don't support WebM). */
+  wantsWav?: boolean;
 }
 
 export function useVoiceRecorder({
@@ -50,6 +52,7 @@ export function useVoiceRecorder({
   onError,
   onTranscript,
   onTranscribeAudio,
+  wantsWav = false,
 }: VoiceRecorderOptions) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -223,7 +226,9 @@ export function useVoiceRecorder({
           return;
         }
         setState("transcribing");
-        void blobToDataUrl(new Blob(chunks, { type: mimeType }))
+        const blob = new Blob(chunks, { type: mimeType });
+        const audioPromise = wantsWav ? convertBlobToWav(blob) : blobToDataUrl(blob);
+        void audioPromise
           .then((dataUrl) => onTranscribeAudio(dataUrl, { durationMs }))
           .then(onTranscript)
           .catch((error) => onError(transcriptionErrorKey(error)))
@@ -260,6 +265,7 @@ export function useVoiceRecorder({
     startWaveform,
     state,
     stopRecording,
+    wantsWav,
   ]);
 
   const startRecordingWithDeferredStop = useCallback(() => {
@@ -412,6 +418,90 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("read_failed"));
     reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * Convert any browser-recorded audio blob (typically webm/opus) to WAV
+ * using the Web Audio API. This avoids sending unsupported formats
+ * (e.g. webm) to ASR providers that only accept wav/mp3/mpeg.
+ */
+async function convertBlobToWav(blob: Blob): Promise<string> {
+  const AudioCtx = audioContextConstructor();
+  if (!AudioCtx) return blobToDataUrl(blob);
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const ctx = new AudioCtx();
+  try {
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const wavBlob = audioBufferToWav(audioBuffer);
+    return blobToDataUrl(wavBlob);
+  } finally {
+    void ctx.close();
+  }
+}
+
+/**
+ * Encode an AudioBuffer as a 16-bit PCM WAV Blob.
+ */
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitsPerSample = 16;
+
+  // Interleave channels
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < numChannels; ch++) {
+    channels.push(buffer.getChannelData(ch));
+  }
+  const length = channels[0].length;
+  const interleaved = new Int16Array(length * numChannels);
+  for (let i = 0; i < length; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const sample = Math.max(-1, Math.min(1, channels[ch][i]));
+      interleaved[i * numChannels + ch] = sample < 0
+        ? sample * 0x8000
+        : sample * 0x7FFF;
+    }
+  }
+
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = interleaved.byteLength;
+  const headerSize = 44;
+  const totalSize = headerSize + dataSize;
+
+  const buffer2 = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer2);
+
+  // RIFF header
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, totalSize - 8, true);
+  writeString(view, 8, "WAVE");
+
+  // fmt sub-chunk
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true); // sub-chunk size
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+
+  // data sub-chunk
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  new Int16Array(buffer2, headerSize).set(interleaved);
+
+  return new Blob([buffer2], { type: "audio/wav" });
+}
+
+function writeString(view: DataView, offset: number, str: string): void {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
 }
 
 function transcriptionErrorKey(error: unknown): VoiceRecorderErrorKey {

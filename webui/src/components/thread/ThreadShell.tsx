@@ -736,6 +736,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={chatId}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
         />
       ) : (
         <ThreadComposer
@@ -765,6 +766,7 @@ export function ThreadShell({
           workspaceScopeDisabled={workspaceScopeDisabled}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
         />
       )}
     </>
