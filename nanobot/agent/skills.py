@@ -36,13 +36,10 @@ class SkillsLoader:
         if not base.exists():
             return []
         entries: list[dict[str, str]] = []
-        for skill_dir in base.iterdir():
-            if not skill_dir.is_dir():
+        for skill_file in base.rglob("SKILL.md"):
+            if skill_file.parent == base:
                 continue
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                continue
-            name = skill_dir.name
+            name = skill_file.parent.name
             if skip_names is not None and name in skip_names:
                 continue
             entries.append({"name": name, "path": str(skill_file), "source": source})
@@ -86,9 +83,9 @@ class SkillsLoader:
         if self.builtin_skills:
             roots.append(self.builtin_skills)
         for root in roots:
-            path = root / name / "SKILL.md"
-            if path.exists():
-                return path.read_text(encoding="utf-8")
+            matches = list(root.rglob(f"{name}/SKILL.md"))
+            if matches:
+                return matches[0].read_text(encoding="utf-8")
         return None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
