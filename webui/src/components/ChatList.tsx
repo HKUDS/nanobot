@@ -60,7 +60,7 @@ interface ChatListProps {
   projectNameOverrides?: Record<string, string>;
   collapsedGroups?: Record<string, boolean>;
   runningChatIds?: string[];
-  completedChatIds?: string[];
+  updatedChatIds?: string[];
   density?: SidebarDensity;
   showPreviews?: boolean;
   showTimestamps?: boolean;
@@ -89,7 +89,7 @@ export const ChatList = memo(function ChatList({
   projectNameOverrides = {},
   collapsedGroups = {},
   runningChatIds = [],
-  completedChatIds = [],
+  updatedChatIds = [],
   density = "comfortable",
   showPreviews = false,
   showTimestamps = false,
@@ -175,7 +175,7 @@ export const ChatList = memo(function ChatList({
   const pinned = new Set(pinnedKeys);
   const archived = new Set(archivedKeys);
   const running = new Set(runningChatIds);
-  const completed = new Set(completedChatIds);
+  const updated = new Set(updatedChatIds);
   const compact = density === "compact";
   const firstProjectGroupIndex = limitedGroups.findIndex((group) => group.kind === "project");
 
@@ -245,8 +245,8 @@ export const ChatList = memo(function ChatList({
                     const projectMode = group.kind === "project";
                     const activityState = running.has(s.chatId)
                       ? "running"
-                      : completed.has(s.chatId) && !active
-                        ? "complete"
+                      : updated.has(s.chatId) && !active
+                        ? "updated"
                         : null;
                     return (
                       <li key={s.key} className="min-w-0">
@@ -525,7 +525,7 @@ function ChatsFoldFooter({
 function SessionActivityIndicator({
   state,
 }: {
-  state: "running" | "complete" | null;
+  state: "running" | "updated" | null;
 }) {
   const { t } = useTranslation();
 
@@ -542,15 +542,15 @@ function SessionActivityIndicator({
     );
   }
 
-  if (state === "complete") {
-    const label = t("chat.activity.complete");
+  if (state === "updated") {
+    const label = t("chat.activity.updated");
     return (
       <span
         aria-label={label}
         title={label}
         className="grid h-4 w-4 shrink-0 place-items-center"
       >
-        <span className="h-2 w-2 rounded-full bg-blue-500 dark:bg-blue-400" />
+        <span className="h-2 w-2 rounded-full bg-[#ff8a3d] shadow-[0_0_0_2px_rgba(255,138,61,0.16)]" />
       </span>
     );
   }

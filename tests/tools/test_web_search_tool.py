@@ -131,6 +131,76 @@ async def test_tavily_search(monkeypatch):
     assert "https://openclaw.io" in result
 
 
+def test_keenable_without_api_key_is_concurrency_safe(monkeypatch):
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+@pytest.mark.asyncio
+async def test_keenable_search(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert "keenable" in url
+        assert kw["headers"]["X-API-Key"] == "keen-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Keen", "url": "https://keenable.ai", "description": "short", "snippet": "longer excerpt"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="keen-key", user_agent="nanobot-search-test")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Keen" in result
+    assert "https://keenable.ai" in result
+    assert "longer excerpt" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_without_api_key_uses_public_endpoint(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert url == "https://api.keenable.ai/v1/search/public"
+        assert "X-API-Key" not in kw["headers"]
+        assert kw["headers"]["X-Keenable-Title"] == "nanobot"
+        return _response(json={
+            "results": [{"title": "Public", "url": "https://keenable.ai/pub", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Public" in result
+    assert "https://keenable.ai/pub" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_uses_env_api_key(monkeypatch):
+    async def mock_post(self, url, **kw):
+        assert kw["headers"]["X-API-Key"] == "env-keen-key"
+        return _response(json={
+            "results": [{"title": "Env", "url": "https://keenable.ai/env", "description": "ok"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setenv("KEENABLE_API_KEY", "env-keen-key")
+    tool = _tool(provider="keenable", api_key="")
+    result = await tool.execute(query="keenable", count=1)
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_keenable_search_http_error(monkeypatch):
+    async def mock_post(self, url, **kw):
+        return _response(status=401, json={"error": "invalid key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="keenable", api_key="bad-keen-key")
+    result = await tool.execute(query="keenable")
+    assert "Error: Keenable search failed (401)" in result
+
+
 @pytest.mark.asyncio
 async def test_bocha_search(monkeypatch):
     async def mock_post(self, url, **kw):
@@ -293,6 +363,31 @@ async def test_duckduckgo_search(monkeypatch):
     tool = _tool(provider="duckduckgo")
     result = await tool.execute(query="hello")
     assert "DDG Result" in result
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_search_passes_proxy(monkeypatch):
+    """DDGS client must receive the configured proxy so search works behind a proxy."""
+    captured: dict = {}
+    proxy_url = "http://proxy.example:8080"
+
+    class ProxyCaptorDDGS:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def text(self, query, max_results=5):
+            return [{"title": "Result", "href": "https://example.com", "body": "OK"}]
+
+    monkeypatch.setattr("ddgs.DDGS", ProxyCaptorDDGS)
+
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="duckduckgo"),
+        proxy=proxy_url,
+    )
+    result = await tool.execute(query="test")
+    assert captured["proxy"] == proxy_url
+    assert captured["timeout"] == 10
+    assert "Result" in result
 
 
 @pytest.mark.asyncio

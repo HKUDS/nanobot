@@ -14,7 +14,6 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.providers.image_generation import (
@@ -22,6 +21,7 @@ from nanobot.providers.image_generation import (
     ImageGenerationProvider,
     get_image_gen_provider,
 )
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, resolve_allowed_path
 from nanobot.utils.artifacts import (
     ArtifactError,

@@ -20,6 +20,14 @@ def _make_tool_with_tz(tmp_path, tz: str) -> CronTool:
     return CronTool(service, default_timezone=tz)
 
 
+def _bound_chat(chat_id: str = "chat-1") -> dict[str, str]:
+    return {
+        "session_key": f"websocket:{chat_id}",
+        "origin_channel": "websocket",
+        "origin_chat_id": chat_id,
+    }
+
+
 # -- _format_timing tests --
 
 
@@ -146,6 +154,7 @@ def test_list_cron_job_shows_expression_and_timezone(tmp_path) -> None:
         name="Morning scan",
         schedule=CronSchedule(kind="cron", expr="0 9 * * 1-5", tz="America/Denver"),
         message="scan",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "cron: 0 9 * * 1-5 (America/Denver)" in result
@@ -157,6 +166,7 @@ def test_list_every_job_shows_human_interval(tmp_path) -> None:
         name="Frequent check",
         schedule=CronSchedule(kind="every", every_ms=1_800_000),
         message="check",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "every 30m" in result
@@ -168,6 +178,7 @@ def test_list_every_job_hours(tmp_path) -> None:
         name="Hourly check",
         schedule=CronSchedule(kind="every", every_ms=7_200_000),
         message="check",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "every 2h" in result
@@ -179,6 +190,7 @@ def test_list_every_job_seconds(tmp_path) -> None:
         name="Fast check",
         schedule=CronSchedule(kind="every", every_ms=30_000),
         message="check",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "every 30s" in result
@@ -190,6 +202,7 @@ def test_list_every_job_non_minute_seconds(tmp_path) -> None:
         name="Ninety-second check",
         schedule=CronSchedule(kind="every", every_ms=90_000),
         message="check",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "every 90s" in result
@@ -201,6 +214,7 @@ def test_list_every_job_milliseconds(tmp_path) -> None:
         name="Sub-second check",
         schedule=CronSchedule(kind="every", every_ms=200),
         message="check",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "every 200ms" in result
@@ -212,6 +226,7 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
         name="One-shot",
         schedule=CronSchedule(kind="at", at_ms=1773684000000),
         message="fire",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "at 2026-" in result
@@ -226,6 +241,7 @@ async def test_list_shows_last_run_state(tmp_path) -> None:
         name="Stateful job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
         message="test",
+        **_bound_chat(),
     )
     # Simulate a completed run by updating state in the store
     job.state.last_run_at_ms = 1773673200000
@@ -245,6 +261,7 @@ async def test_list_shows_error_message(tmp_path) -> None:
         name="Failed job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
         message="test",
+        **_bound_chat(),
     )
     job.state.last_run_at_ms = 1773673200000
     job.state.last_status = "error"
@@ -262,6 +279,7 @@ def test_list_shows_next_run(tmp_path) -> None:
         name="Upcoming job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
         message="test",
+        **_bound_chat(),
     )
     result = tool._list_jobs()
     assert "Next run:" in result

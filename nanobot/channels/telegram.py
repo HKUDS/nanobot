@@ -358,6 +358,10 @@ class TelegramConfig(Base):
     webhook_path: str = "/telegram"
     webhook_secret_token: str = ""
     webhook_max_connections: int = Field(default=4, ge=1, le=100)
+    # Messages older than this many minutes on startup are treated as backlog
+    # and summarised in a single notification instead of being processed individually.
+    # Set to 0 to disable (process all pending messages normally).
+    startup_backlog_threshold_minutes: int = Field(default=2, ge=0)
 
     @field_validator("webhook_path")
     @classmethod
@@ -443,6 +447,7 @@ class TelegramChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
         self._inbound_buffers: dict[str, list[_QueuedTelegramUpdate]] = {}
         self._inbound_workers: dict[str, asyncio.Task] = {}
+        self._rich_send_disabled: bool = False  # Latch off if Bot API < 10.1
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -578,16 +583,117 @@ class TelegramChannel(BaseChannel):
                 max_connections=self.config.webhook_max_connections,
             )
         else:
+            # Drain stale Telegram backlog before starting the live polling loop.
+            # Any messages older than ``startup_backlog_threshold_minutes`` are
+            # acknowledged (so they are never replayed) and summarised in a
+            # single notification that Frank processes instead.
+            await self._drain_stale_updates()
+
             # Start polling (this runs until stopped)
             await self._app.updater.start_polling(
                 allowed_updates=allowed_updates,
-                drop_pending_updates=False,  # Process pending messages on startup
+                drop_pending_updates=False,
                 error_callback=self._on_polling_error,
             )
 
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
+
+    async def _drain_stale_updates(self) -> None:
+        """Drain Telegram pending-update queue on startup.
+
+        Messages older than ``startup_backlog_threshold_minutes`` are treated as
+        backlog: they are acknowledged (so the live polling loop never sees them)
+        and replaced by a single summary notification that Frank can act on.
+        Fresh messages (within the threshold) are also acknowledged here so they
+        are not double-delivered by ``start_polling``; they are then processed
+        inline before the loop starts.
+        """
+        import time as _time
+
+        threshold_min = self.config.startup_backlog_threshold_minutes
+        if threshold_min <= 0:
+            return
+
+        try:
+            pending = await self._app.bot.get_updates(timeout=0, limit=100)
+        except Exception as e:
+            self.logger.warning("Could not fetch pending updates on startup: {}", e)
+            return
+
+        if not pending:
+            return
+
+        now = _time.time()
+        threshold_s = threshold_min * 60
+
+        stale, fresh = [], []
+        for upd in pending:
+            msg = upd.message
+            if not msg:
+                continue
+            age = now - msg.date.timestamp()
+            (stale if age >= threshold_s else fresh).append(upd)
+
+        # Acknowledge ALL pending updates so start_polling starts from a clean
+        # offset and none are double-delivered.
+        max_update_id = max(u.update_id for u in pending)
+        try:
+            await self._app.bot.get_updates(timeout=0, offset=max_update_id + 1)
+        except Exception as e:
+            self.logger.warning("Could not advance Telegram update offset: {}", e)
+
+        # Process fresh updates inline (they were acknowledged; re-inject them).
+        for upd in fresh:
+            try:
+                await self._process_message_update(upd, None)  # type: ignore[arg-type]
+            except Exception as e:
+                self.logger.warning("Error processing fresh startup update: {}", e)
+
+        if not stale:
+            return
+
+        # Build summary from the stale backlog and deliver it as a single turn.
+        first_msg = next((u.message for u in stale if u.message), None)
+        if not first_msg:
+            return
+
+        user = first_msg.from_user
+        sender_id = self._sender_id(user) if user else str(first_msg.chat_id)
+        chat_id = str(first_msg.chat_id)
+
+        lines = []
+        for upd in stale:
+            if not upd.message:
+                continue
+            m = upd.message
+            text = m.text or m.caption or "[media/allegato]"
+            dt = m.date.strftime("%H:%M")
+            name = m.from_user.full_name if m.from_user else "?"
+            lines.append(f"• {dt} — {name}: {text[:120]}")
+
+        n = len(stale)
+        summary = (
+            f"⚠️ Ero offline e ho ricevuto {n} messaggio{'/i' if n > 1 else ''} "
+            f"arretrato{'/i' if n > 1 else ''} che non ho processato:\n\n"
+            + "\n".join(lines)
+            + "\n\nCosa vuoi che faccia? Posso ignorarli o gestirli — dimmi tu."
+        )
+
+        self.logger.info(
+            "Startup backlog: {} stale message(s) summarised for sender {}", n, sender_id
+        )
+
+        try:
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=summary,
+                metadata={"_startup_backlog": True, "stale_count": n},
+            )
+        except Exception as e:
+            self.logger.warning("Could not deliver startup backlog summary: {}", e)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -631,6 +737,71 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _is_remote_media_url(path: str) -> bool:
         return path.startswith(("http://", "https://"))
+
+    @staticmethod
+    def _is_rich_capability_error(exc: Exception) -> bool:
+        """True when the error indicates sendRichMessage is unavailable."""
+        err = str(exc).lower()
+        return (
+            "method not found" in err
+            or "unknown method" in err
+            or "bad request: invalid parameter" in err
+        )
+
+    async def _try_send_rich(
+        self,
+        chat_id: int,
+        content: str,
+        reply_params=None,
+        thread_kwargs: dict | None = None,
+        reply_markup=None,
+    ) -> bool:
+        """Attempt sendRichMessage (Bot API 10.1). Returns True on success."""
+        if not self._app:
+            return False
+
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "rich_message": {
+                "markdown": content,
+            },
+        }
+        if reply_params is not None:
+            # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
+            if hasattr(reply_params, "message_id"):
+                payload["reply_parameters"] = {
+                    "message_id": reply_params.message_id,
+                    "allow_sending_without_reply": True,
+                }
+            else:
+                payload["reply_parameters"] = reply_params
+        if thread_kwargs:
+            payload.update({k: v for k, v in thread_kwargs.items() if v is not None})
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+
+        try:
+            await self._call_with_retry(
+                self._app.bot.do_api_request,
+                "sendRichMessage",
+                api_kwargs=payload,
+            )
+            return True
+        except BadRequest as exc:
+            if self._is_rich_capability_error(exc):
+                self.logger.debug("sendRichMessage not available, disabling")
+                self._rich_send_disabled = True
+            else:
+                self.logger.debug("sendRichMessage rejected: {}", exc)
+            return False
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_timeout = "timed out" in err_str or isinstance(exc, TimedOut)
+            if is_timeout:
+                self.logger.debug("sendRichMessage timeout, falling back to legacy path")
+                return False
+            self.logger.debug("sendRichMessage failed: {}", exc)
+            return False
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -731,6 +902,20 @@ class TelegramChannel(BaseChannel):
             # Fallback: no native keyboard → splice labels into the message so the choices survive.
             if buttons and reply_markup is None:
                 text = f"{text}\n\n{self._buttons_as_text(buttons)}"
+
+            # Bot API 10.1 rich fast-path: send raw markdown via sendRichMessage.
+            # All non-blockquote content tries rich first; _rich_send_disabled
+            # latches off permanently if the server doesn't support it.
+            if (
+                not render_as_blockquote
+                and not getattr(self, "_rich_send_disabled", False)
+            ):
+                rich_ok = await self._try_send_rich(
+                    chat_id, text, reply_params, thread_kwargs, reply_markup,
+                )
+                if rich_ok:
+                    return
+
             chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
@@ -826,6 +1011,31 @@ class TelegramChannel(BaseChannel):
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
             raw_text = buf.text
+
+            # Try sendRichMessage for final output (Bot API 10.1).
+            # Skip when a streaming preview already exists to avoid the
+            # delete-and-resend pattern that causes flickering and drops
+            # line breaks (issue #4470).
+            if not buf.message_id and not getattr(self, "_rich_send_disabled", False):
+                reply_params = None
+                if reply_to_message_id := meta.get("message_id"):
+                    reply_params = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                rich_ok = await self._try_send_rich(
+                    int_chat_id, raw_text, reply_params, thread_kwargs, None,
+                )
+                if rich_ok:
+                    # Delete the streaming preview message
+                    try:
+                        await self._call_with_retry(
+                            self._app.bot.delete_message,
+                            chat_id=int_chat_id, message_id=buf.message_id,
+                        )
+                    except Exception:
+                        pass  # Preview stays if delete fails
+                    self._stream_bufs.pop(chat_id, None)
+                    return
+
+            # Legacy path: edit existing streaming message with HTML
             html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
             primary_html = html_chunks[0]
             extra_html_chunks = html_chunks[1:]

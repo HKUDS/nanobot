@@ -171,7 +171,7 @@ class ChannelManager:
         """Return whether progress (or tool-hints) may be sent to *channel_name*."""
         ch = self.channels.get(channel_name)
         if ch is None:
-            logger.warning("Progress check for unknown channel: {}", channel_name)
+            logger.debug("Progress check for unknown channel: {}", channel_name)
             return False
         return ch.send_tool_hints if tool_hint else ch.send_progress
 
@@ -252,6 +252,10 @@ class ChannelManager:
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
+            except asyncio.CancelledError:
+                if asyncio.current_task() and asyncio.current_task().cancelling():
+                    raise
+                logger.debug("Channel {} stop task was already cancelled", name)
             except Exception:
                 logger.exception("Error stopping {}", name)
 

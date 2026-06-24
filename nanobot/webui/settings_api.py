@@ -90,6 +90,7 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "olostep", "label": "Olostep", "credential": "api_key"},
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
+    {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
@@ -105,7 +106,7 @@ _IMAGE_GENERATION_ASPECT_RATIOS = {
     "2:3",
     "21:9",
 }
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 262_144}
+_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144}
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -282,7 +283,8 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
 
     if spec.name == "openai_codex":
         try:
-            from oauth_cli_kit import get_token as get_codex_token
+            from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+            from oauth_cli_kit.storage import FileTokenStorage
         except Exception:
             return {
                 "configured": False,
@@ -292,10 +294,17 @@ def _oauth_provider_status(spec: Any) -> dict[str, Any]:
             }
         token = None
         with suppress(Exception):
-            token = get_codex_token()
+            token = FileTokenStorage(
+                token_filename=OPENAI_CODEX_PROVIDER.token_filename,
+            ).load()
         expires_at = getattr(token, "expires", None) if token else None
+        now_ms = int(time.time() * 1000)
         return {
-            "configured": bool(token and token.access),
+            "configured": bool(
+                token
+                and token.access
+                and (getattr(token, "refresh", None) or (expires_at and expires_at > now_ms))
+            ),
             "account": getattr(token, "account_id", None) if token else None,
             "expires_at": expires_at,
             "login_supported": True,
@@ -597,7 +606,7 @@ def _parse_context_window_tokens(value: str | None) -> int | None:
     except ValueError:
         raise WebUISettingsError("context_window_tokens must be an integer") from None
     if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
-        raise WebUISettingsError("context_window_tokens must be 65536 or 262144")
+        raise WebUISettingsError("context_window_tokens must be 65536, 200000, or 262144")
     return parsed
 
 
@@ -652,6 +661,40 @@ def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+_DEFAULT_REASONING_EFFORT_VALUES: tuple[str, ...] = ("", "low", "medium", "high")
+
+
+def _reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
+    """Return user-facing reasoning_effort options for this provider+model.
+
+    Mistral chat models accept only "high"/"none"; Magistral rejects the
+    kwarg entirely (reasoning is implicit). For everyone else, return the
+    full OpenAI vocab.
+    """
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        return list(_DEFAULT_REASONING_EFFORT_VALUES)
+
+    model_lower = (model or "").lower()
+    implicit = getattr(spec, "implicit_reasoning_models", ())
+    if implicit and any(pat in model_lower for pat in implicit):
+        # Reasoning is always on; only "Default" makes sense.
+        return [""]
+
+    remap = getattr(spec, "reasoning_effort_remap", ())
+    if remap:
+        # Reverse the remap: surface the distinct wire-vocab outputs as the
+        # user's options. Mistral collapses to "high"/"none" → UI shows
+        # "Default" + "High".
+        wire_values: list[str] = []
+        for _user_val, wire_val in remap:
+            if wire_val and wire_val != "none" and wire_val not in wire_values:
+                wire_values.append(wire_val)
+        return ["", *wire_values]
+
+    return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
 def _transcription_provider_rows(config: Any) -> list[dict[str, Any]]:
@@ -741,6 +784,9 @@ def settings_payload(
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
             "reasoning_effort": defaults.reasoning_effort,
+            "reasoning_effort_values": _reasoning_effort_values_for(
+                defaults.provider, defaults.model
+            ),
         }
     ]
     for name, preset in config.model_presets.items():
@@ -756,6 +802,9 @@ def settings_payload(
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
                 "reasoning_effort": preset.reasoning_effort,
+                "reasoning_effort_values": _reasoning_effort_values_for(
+                    preset.provider, preset.model
+                ),
             }
         )
 
@@ -1264,15 +1313,17 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
             raise WebUISettingsError("base_url is required")
         set_search_value("base_url", base_url)
         set_search_value("api_key", "")
-    else:
-        api_key = _query_first_alias(query, "api_key", "apiKey")
-        api_key = api_key.strip() if api_key is not None else None
-        if not api_key and previous_provider == provider_name and search_config.api_key:
+    elif credential in {"api_key", "optional_api_key"}:
+        raw_api_key = _query_first_alias(query, "api_key", "apiKey")
+        api_key = raw_api_key.strip() if raw_api_key is not None else None
+        if api_key is None and previous_provider == provider_name and search_config.api_key:
             api_key = search_config.api_key
-        if not api_key:
+        if credential == "api_key" and not api_key:
             raise WebUISettingsError("api_key is required")
-        set_search_value("api_key", api_key)
+        set_search_value("api_key", api_key or "")
         set_search_value("base_url", "")
+    else:
+        raise WebUISettingsError("unknown web search credential type")
 
     max_results = _query_first_alias(query, "max_results", "maxResults")
     if max_results is not None:

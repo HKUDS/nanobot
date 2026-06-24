@@ -359,6 +359,20 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText("Thought for 12s")).toBeInTheDocument();
   });
 
+  it("labels mixed tool activity as work instead of thought", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages()}
+        isTurnStreaming={false}
+        hasBodyBelow
+        turnLatencyMs={12_400}
+      />,
+    );
+
+    expect(screen.getByText("Worked for 12s")).toBeInTheDocument();
+    expect(screen.queryByText("Thought for 12s")).not.toBeInTheDocument();
+  });
+
   it("omits the duration when completed history has no reliable timing", () => {
     render(
       <AgentActivityCluster
@@ -497,6 +511,50 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("-3")).toBeInTheDocument();
+  });
+
+  it("renders every file from one apply_patch call", () => {
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-file-many",
+          role: "tool",
+          kind: "trace",
+          content: "apply_patch()",
+          traces: ["apply_patch()"],
+          fileEdits: [
+            {
+              call_id: "call-patch",
+              tool: "apply_patch",
+              path: "USER.md",
+              phase: "end",
+              added: 0,
+              deleted: 3,
+              approximate: false,
+              status: "done",
+            },
+            {
+              call_id: "call-patch",
+              tool: "apply_patch",
+              path: "MEMORY.md",
+              phase: "end",
+              added: 0,
+              deleted: 4,
+              approximate: false,
+              status: "done",
+            },
+          ],
+          createdAt: 3,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+      />,
+    );
+
+    const fileRefs = screen.getAllByTestId("activity-file-reference");
+    expect(fileRefs).toHaveLength(2);
+    expect(fileRefs[0]).toHaveTextContent("USER.md");
+    expect(fileRefs[1]).toHaveTextContent("MEMORY.md");
   });
 
   it("renders CLI app runs as dedicated activity rows", () => {

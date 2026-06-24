@@ -42,6 +42,7 @@ _FALLBACK_ERROR_TOKENS = (
     "timeout",
     "timed out",
     "connection",
+    "empty",  # API returned empty choices (e.g. DeepSeek peak hours), transient
     "insufficient_quota",
     "insufficient quota",
     "quota_exceeded",
@@ -152,8 +153,11 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         primary_model = kwargs.get("model") or self._primary.get_default_model()
+        primary_was_attempted = False
+        primary_error = "unknown error"
 
         if self._primary_available():
+            primary_was_attempted = True
             response = await call(self._primary, kwargs)
             if response.finish_reason != "error":
                 previously_tripped = self._primary_tripped_at is not None
@@ -164,6 +168,7 @@ class FallbackProvider(LLMProvider):
                         f"✅ {primary_model} è di nuovo disponibile, continuo su di lui."
                     )
                 return response
+            primary_error = (response.content or primary_error)[:120]
 
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (response.error_kind or "").lower() == "timeout"
@@ -203,7 +208,7 @@ class FallbackProvider(LLMProvider):
             logger.debug("Primary model '{}' circuit open; skipping", primary_model)
 
         last_response: LLMResponse | None = None
-        primary_skipped = not self._primary_available()
+        primary_skipped = not primary_was_attempted
         for idx, fallback in enumerate(self._fallback_presets):
             fallback_model = fallback.model
             if has_streamed is not None and has_streamed[0]:
@@ -231,8 +236,8 @@ class FallbackProvider(LLMProvider):
                 )
             elif idx == 0:
                 logger.info(
-                    "Primary model '{}' failed, trying fallback '{}'",
-                    primary_model, fallback_model,
+                    "Primary model '{}' failed: {}; trying fallback '{}'",
+                    primary_model, primary_error, fallback_model,
                 )
                 await self._notify(
                     f"⚠️ {primary_model} ha restituito un errore, passo a {fallback_model}."

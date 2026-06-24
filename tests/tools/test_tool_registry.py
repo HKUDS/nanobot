@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 
 
@@ -233,6 +234,27 @@ def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
         'Use named parameters like tool_name(param1="value1", param2="value2") '
         "matching the tool schema."
     )
+
+
+async def test_registry_rejects_unknown_builtin_tool_parameters(tmp_path) -> None:
+    (tmp_path / "sample.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(
+        ReadFileTool(
+            workspace=tmp_path,
+            allowed_dir=tmp_path,
+            restrict_to_workspace=True,
+        )
+    )
+
+    result = await registry.execute(
+        "read_file",
+        {"path": "sample.txt", "line_limit": 1},
+    )
+
+    assert "Invalid parameters" in result
+    assert "unexpected parameter line_limit" in result
+    assert "one" not in result
 
 
 def test_get_definitions_returns_cached_result() -> None:

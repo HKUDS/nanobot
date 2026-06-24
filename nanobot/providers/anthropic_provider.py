@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import hashlib
 import re
 import secrets
 import string
+from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+from loguru import logger
 
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
+    resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
 
@@ -22,6 +26,24 @@ _ALNUM = string.ascii_letters + string.digits
 
 def _gen_tool_id() -> str:
     return "toolu_" + "".join(secrets.choice(_ALNUM) for _ in range(22))
+
+
+_VALID_TOOL_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _sanitize_tool_id(tid: str) -> str:
+    """Ensure tool_use/tool_result IDs match Anthropic's required pattern.
+
+    The Anthropic API rejects tool IDs that don't match ``^[a-zA-Z0-9_-]+$``
+    with a 400 ("String should match pattern") error. IDs coming from other
+    providers or restored sessions can contain pipes, dots or other invalid
+    characters, so coerce them to the allowed charset.
+    """
+    if not tid or _VALID_TOOL_ID.match(tid):
+        return tid
+    safe_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", tid)[:48].strip("_") or "toolu"
+    digest = hashlib.sha1(tid.encode()).hexdigest()[:8]
+    return f"{safe_prefix}_{digest}"
 
 
 class AnthropicProvider(LLMProvider):
@@ -135,6 +157,40 @@ class AnthropicProvider(LLMProvider):
         """Return ``(system, anthropic_messages)``."""
         system: str | list[dict[str, Any]] = ""
         raw: list[dict[str, Any]] = []
+        seen_tool_ids: set[str] = set()
+        pending_tool_ids: dict[str, deque[str]] = {}
+
+        def unique_tool_id(value: Any) -> str:
+            raw_key = str(value) if value else ""
+            mapped_id = _sanitize_tool_id(raw_key) if raw_key else _gen_tool_id()
+            if mapped_id and mapped_id not in seen_tool_ids:
+                seen_tool_ids.add(mapped_id)
+                if raw_key:
+                    pending_tool_ids.setdefault(raw_key, deque()).append(mapped_id)
+                return mapped_id
+
+            seed = mapped_id or _gen_tool_id()
+            suffix = 2
+            while True:
+                candidate = f"{seed}__dedupe_{suffix}"
+                if candidate not in seen_tool_ids:
+                    seen_tool_ids.add(candidate)
+                    if raw_key:
+                        pending_tool_ids.setdefault(raw_key, deque()).append(candidate)
+                    return candidate
+                suffix += 1
+
+        def map_tool_result_id(value: Any) -> str:
+            if not value:
+                return _sanitize_tool_id(value or "")
+            raw_id = str(value)
+            queue = pending_tool_ids.get(raw_id)
+            if queue:
+                mapped_id = queue.popleft()
+                if not queue:
+                    pending_tool_ids.pop(raw_id, None)
+                return mapped_id
+            return _sanitize_tool_id(raw_id)
 
         for msg in messages:
             role = msg.get("role", "")
@@ -145,7 +201,7 @@ class AnthropicProvider(LLMProvider):
                 continue
 
             if role == "tool":
-                block = self._tool_result_block(msg)
+                block = self._tool_result_block(msg, map_tool_result_id=map_tool_result_id)
                 if raw and raw[-1]["role"] == "user":
                     prev_c = raw[-1]["content"]
                     if isinstance(prev_c, list):
@@ -159,7 +215,10 @@ class AnthropicProvider(LLMProvider):
                 continue
 
             if role == "assistant":
-                raw.append({"role": "assistant", "content": self._assistant_blocks(msg)})
+                raw.append({
+                    "role": "assistant",
+                    "content": self._assistant_blocks(msg, map_tool_id=unique_tool_id),
+                })
                 continue
 
             if role == "user":
@@ -172,11 +231,20 @@ class AnthropicProvider(LLMProvider):
         return system, self._merge_consecutive(raw)
 
     @staticmethod
-    def _tool_result_block(msg: dict[str, Any]) -> dict[str, Any]:
+    def _tool_result_block(
+        msg: dict[str, Any],
+        *,
+        map_tool_result_id: Callable[[Any], str] | None = None,
+    ) -> dict[str, Any]:
         content = msg.get("content")
+        tool_call_id = msg.get("tool_call_id", "")
         block: dict[str, Any] = {
             "type": "tool_result",
-            "tool_use_id": msg.get("tool_call_id", ""),
+            "tool_use_id": (
+                map_tool_result_id(tool_call_id)
+                if map_tool_result_id is not None
+                else _sanitize_tool_id(tool_call_id)
+            ),
         }
         if isinstance(content, list):
             block["content"] = AnthropicProvider._convert_user_content(content)
@@ -187,7 +255,11 @@ class AnthropicProvider(LLMProvider):
         return block
 
     @staticmethod
-    def _assistant_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    def _assistant_blocks(
+        msg: dict[str, Any],
+        *,
+        map_tool_id: Callable[[Any], str] | None = None,
+    ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         content = msg.get("content")
 
@@ -210,9 +282,10 @@ class AnthropicProvider(LLMProvider):
                 continue
             func = tc.get("function", {})
             args = func.get("arguments", "{}")
+            raw_id = tc.get("id") or _gen_tool_id()
             blocks.append({
                 "type": "tool_use",
-                "id": tc.get("id") or _gen_tool_id(),
+                "id": map_tool_id(raw_id) if map_tool_id is not None else _sanitize_tool_id(raw_id),
                 "name": func.get("name", ""),
                 "input": tool_arguments_object_for_replay(args),
             })
@@ -503,13 +576,25 @@ class AnthropicProvider(LLMProvider):
         content_parts: list[str] = []
         tool_calls: list[ToolCallRequest] = []
         thinking_blocks: list[dict[str, Any]] = []
+        seen_tool_ids: set[str] = set()
 
         for block in response.content:
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
+                tool_id = str(block.id or _gen_tool_id())
+                if tool_id in seen_tool_ids:
+                    original_id = tool_id
+                    while tool_id in seen_tool_ids:
+                        tool_id = _gen_tool_id()
+                    logger.warning(
+                        "remapping duplicate tool_use id from response: {} -> {}",
+                        original_id,
+                        tool_id,
+                    )
+                seen_tool_ids.add(tool_id)
                 tool_calls.append(ToolCallRequest(
-                    id=block.id,
+                    id=tool_id,
                     name=block.name,
                     arguments=block.input,
                 ))
@@ -613,7 +698,7 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = resolve_stream_idle_timeout_s()
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta or on_thinking_delta or on_tool_call_delta:
@@ -682,7 +767,7 @@ class AnthropicProvider(LLMProvider):
             return LLMResponse(
                 content=(
                     f"Error calling LLM: stream stalled for more than "
-                    f"{idle_timeout_s} seconds"
+                    f"{idle_timeout_s:g} seconds"
                 ),
                 finish_reason="error",
                 error_kind="timeout",

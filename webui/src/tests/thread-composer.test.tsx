@@ -134,6 +134,28 @@ function mockBlobUrls() {
   });
 }
 
+function stubVisualViewport({
+  height,
+  offsetTop = 0,
+}: {
+  height: number;
+  offsetTop?: number;
+}) {
+  const target = new EventTarget();
+  vi.stubGlobal("visualViewport", {
+    width: 390,
+    height,
+    offsetTop,
+    offsetLeft: 0,
+    pageTop: offsetTop,
+    pageLeft: 0,
+    scale: 1,
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+  } as unknown as VisualViewport);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -259,6 +281,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.className).toContain("pt-[27px]");
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
@@ -280,6 +303,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByTestId("composer-model-logo-openai")).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
+    expect(input.className).toContain("text-[16px]");
     expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-[22px]");
     expect(input.parentElement?.parentElement?.className).toContain("shadow-[0_12px_30px_rgba(15,23,42,0.07)]");
@@ -1121,6 +1145,33 @@ describe("ThreadComposer", () => {
       const palette = screen.getByRole("listbox", { name: "Slash commands" });
       expect(palette.className).toContain("top-full");
       expect(palette).toHaveStyle({ maxHeight: "162px" });
+    });
+  });
+
+  it("keeps the slash command palette above a keyboard-constrained visual viewport", async () => {
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 120, bottom: 220, width: 390, height: 100 }),
+    );
+    Object.defineProperty(window, "innerHeight", {
+      value: 800,
+      configurable: true,
+    });
+    stubVisualViewport({ height: 300 });
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        slashCommands={COMMANDS}
+      />,
+    );
+    const input = screen.getByLabelText("Message input");
+
+    fireEvent.change(input, { target: { value: "/" } });
+
+    await waitFor(() => {
+      const palette = screen.getByRole("listbox", { name: "Slash commands" });
+      expect(palette.className).toContain("bottom-full");
+      expect(palette).toHaveStyle({ maxHeight: "112px" });
     });
   });
 

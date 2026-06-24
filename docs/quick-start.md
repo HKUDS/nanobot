@@ -9,7 +9,7 @@ If you have never used a terminal or edited a config file before, use [`start-wi
 You need:
 
 - Python 3.11 or newer.
-- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use OpenRouter only so the snippets are concrete; any supported provider works when the key, provider name, and model ID match.
+- One LLM provider, company endpoint, subscription endpoint, or local model server you can call. The examples below use a generic OpenAI-compatible `custom` provider so the compact path does not recommend one hosted service; any supported provider works when the key, provider name, and model ID match.
 - Git only if you install from source.
 - Node.js or Bun only if you are developing the WebUI itself.
 
@@ -23,7 +23,7 @@ Pick one install method.
 **One-command setup:**
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
 ```
 
 On Windows PowerShell:
@@ -32,12 +32,12 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | iex
 ```
 
-The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. If you finish the wizard and save the config, skip the manual initialize/configure steps and go straight to [Check the Setup](#4-check-the-setup).
+The default command installs or upgrades `nanobot-ai` from PyPI, then starts `nanobot onboard --wizard`. It avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`. If Quick Start finishes and you enabled the WebSocket channel, go straight to [Open the WebUI](#5-open-the-webui).
 
 To preview the plan without changing your environment, pass `--dry-run`; combine it with `--dev` when you want to preview the main-branch install.
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
 ```
 
 ```powershell
@@ -47,7 +47,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts
 To install the current `main` branch instead, pass `--dev`:
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
 ```
 
 ```powershell
@@ -72,6 +72,8 @@ python -m pip install nanobot-ai
 nanobot --version
 ```
 
+Use pip only inside an environment you control. If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment first.
+
 **Latest source checkout:**
 
 ```bash
@@ -94,7 +96,7 @@ The docs use `python` in commands. If your system exposes Python 3.11+ as `pytho
 
 ## 2. Initialize
 
-Skip this section if the one-command setup already started the wizard and you saved the config there.
+Skip this section if the one-command setup already started the wizard and Quick Start finished there.
 
 ```bash
 nanobot onboard
@@ -126,8 +128,9 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -140,8 +143,8 @@ Open `~/.nanobot/config.json`. Add or merge these blocks into the file created b
   "modelPresets": {
     "primary": {
       "label": "Primary",
-      "provider": "openrouter",
-      "model": "anthropic/claude-opus-4.5",
+      "provider": "custom",
+      "model": "model-id-from-your-provider",
       "maxTokens": 8192,
       "contextWindowTokens": 65536,
       "temperature": 0.1
@@ -159,7 +162,7 @@ The provider and model inside a preset must match. The snippet above is only an 
 
 | Replace | Where |
 |---|---|
-| Provider config key, such as `openrouter` | `providers.<provider>` |
+| Provider config key, such as `custom` | `providers.<provider>` |
 | API key or environment variable | `providers.<provider>.apiKey` |
 | Preset provider name | `modelPresets.primary.provider` |
 | Model ID | `modelPresets.primary.model` |
@@ -205,8 +208,9 @@ If you prefer not to store secrets in `config.json`, reference an environment va
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "${OPENROUTER_API_KEY}"
+    "custom": {
+      "apiKey": "${PROVIDER_API_KEY}",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
@@ -229,7 +233,19 @@ Read it like this:
 | `Model` | The model or preset you expect. |
 | Provider list | Most providers can say `not set`; the provider used by the active preset should show a check mark, OAuth status, or local URL. |
 
-## 5. Test One Message
+## 5. Open the WebUI
+
+If Quick Start enabled the WebSocket channel, start the gateway:
+
+```bash
+nanobot gateway
+```
+
+Leave that terminal open, then open `http://127.0.0.1:8765` in your browser. Enter the WebUI password you set in the wizard, then send your first message there.
+
+## 6. Test One CLI Message
+
+Use this path if you skipped Quick Start, declined the WebSocket channel, or want a terminal-only check.
 
 Run a one-shot CLI message:
 
@@ -258,20 +274,20 @@ Example prompt:
 
 ```text
 Read docs/quick-start.md, docs/providers.md, and docs/configuration.md in this checkout.
-Then update ~/.nanobot/config.json to add an OpenRouter model preset named "primary".
+Then update ~/.nanobot/config.json to add a model preset named "primary" for my provider.
 Tell me exactly what changed and whether I need to run /restart.
 ```
 
 Exit interactive mode with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
-## 6. Choose Your Next Step
+## 7. Choose Your Next Step
 
 | Want to... | Go to |
 |---|---|
 | Understand config, workspace, gateway, channels, memory, and tools | [`concepts.md`](./concepts.md) |
 | Copy another provider or local model setup | [`provider-cookbook.md`](./provider-cookbook.md) |
 | Understand provider/model matching | [`providers.md`](./providers.md) |
-| Open the bundled browser UI | [`../webui/README.md`](../webui/README.md) |
+| Open the bundled browser UI | [`webui.md`](./webui.md) |
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [`chat-apps.md`](./chat-apps.md) |
 | Configure web search, MCP, security, memory, gateway, or runtime settings | [`configuration.md`](./configuration.md) |
 | Run with Docker, systemd, or LaunchAgent | [`deployment.md`](./deployment.md) |
@@ -286,10 +302,19 @@ python -m pip install -U nanobot-ai
 nanobot --version
 ```
 
+If pip reports `externally-managed-environment`, upgrade with the same isolated method you used to install nanobot, such as `uv tool upgrade nanobot-ai`, `pipx upgrade nanobot-ai`, or the managed venv created by the one-command installer.
+
 **uv:**
 
 ```bash
 uv tool upgrade nanobot-ai
+nanobot --version
+```
+
+**pipx:**
+
+```bash
+pipx upgrade nanobot-ai
 nanobot --version
 ```
 

@@ -107,7 +107,7 @@ export function FilePreviewPanel({
         "--file-preview-slot-width": !entered || isClosing ? "0px" : `${desktopWidth}px`,
       } as CSSProperties}
       className={cn(
-        "absolute inset-y-0 right-0 z-30 w-[min(92vw,var(--file-preview-slot-width))] overflow-hidden",
+        "absolute inset-y-0 right-0 z-30 w-[min(100vw,var(--file-preview-slot-width))] overflow-hidden",
         "transition-[width] duration-300 ease-out will-change-[width]",
         "md:relative md:z-auto md:w-[var(--file-preview-slot-width)] md:min-w-0 md:shrink-0",
         isClosing && "pointer-events-none",
@@ -117,7 +117,7 @@ export function FilePreviewPanel({
     >
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex w-[min(92vw,var(--file-preview-width))] flex-col overflow-hidden md:w-[var(--file-preview-width)]",
+          "absolute inset-y-0 right-0 flex w-[min(100vw,var(--file-preview-width))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:w-[var(--file-preview-width)] md:pb-0",
           "border-l border-border/70 bg-background shadow-2xl md:shadow-none",
           "transition-[opacity,transform] duration-300 ease-out will-change-transform",
           !entered || isClosing ? "translate-x-full opacity-0" : "translate-x-0 opacity-100",

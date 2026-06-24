@@ -7,7 +7,7 @@ import pathlib as _pathlib
 import select
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
@@ -52,6 +52,7 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot.agent.loop import AgentLoop  # noqa: E402
+from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner  # noqa: E402
 from nanobot.config.paths import get_workspace_path, is_default_workspace  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
@@ -62,6 +63,7 @@ from nanobot.utils.restart import (  # noqa: E402
     format_restart_completed_message,
     should_show_cli_restart_notice,
 )
+from nanobot.webui.sidebar_state import read_webui_sidebar_state  # noqa: E402
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -73,6 +75,85 @@ def _sanitize_surrogates(text: str) -> str:
     with U+FFFD.
     """
     return text.encode("utf-16-le", errors="surrogatepass").decode("utf-16-le", errors="replace")
+
+
+def _signal_name(signum: int) -> str:
+    with suppress(ValueError):
+        return signal.Signals(signum).name
+    return f"signal {signum}"
+
+
+def _ensure_gateway_tty_signal_mode() -> None:
+    """Keep foreground gateway Ctrl+C usable even after a raw-mode TTY leak."""
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            return
+    except Exception:
+        return
+
+    with suppress(Exception):
+        import termios
+
+        attrs = termios.tcgetattr(fd)
+        lflag = attrs[3]
+        required = termios.ISIG | termios.ICANON | termios.ECHO
+        if (lflag & required) == required:
+            return
+        attrs[3] = lflag | required
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        logger.debug("Restored foreground gateway TTY signal mode")
+
+
+def _install_gateway_shutdown_handlers(
+    loop: asyncio.AbstractEventLoop,
+    shutdown_event: asyncio.Event,
+    tasks: list[asyncio.Task],
+    print_status: Callable[[str], None],
+) -> Callable[[], None]:
+    """Install foreground gateway signal handlers and return a restore callback."""
+    loop_signals: list[int] = []
+    previous_handlers: list[tuple[int, Any]] = []
+    shutdown_requested = False
+
+    def request_shutdown(signum: int) -> None:
+        nonlocal shutdown_requested
+        sig_name = _signal_name(signum)
+        if shutdown_requested:
+            logger.warning("Forcing gateway shutdown after repeated {}", sig_name)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            return
+        shutdown_requested = True
+        logger.info("Gateway shutdown requested by {}", sig_name)
+        print_status("\nShutting down... Press Ctrl+C again to force.")
+        shutdown_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(signum, request_shutdown, signum)
+        except (NotImplementedError, RuntimeError, ValueError):
+            try:
+                previous = signal.getsignal(signum)
+                signal.signal(signum, lambda sig, _frame: request_shutdown(sig))
+            except (RuntimeError, ValueError):
+                logger.debug("Could not install gateway handler for {}", _signal_name(signum))
+                continue
+            previous_handlers.append((signum, previous))
+        else:
+            loop_signals.append(signum)
+
+    def restore() -> None:
+        for signum in loop_signals:
+            with suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(signum)
+        for signum, handler in previous_handlers:
+            with suppress(RuntimeError, ValueError):
+                signal.signal(signum, handler)
+
+    return restore
 
 
 class SafeFileHistory(FileHistory):
@@ -131,6 +212,29 @@ def _heartbeat_has_active_tasks(content: str) -> bool:
             continue
         return True
     return False
+
+
+def _pick_heartbeat_target_from_sessions(
+    *,
+    enabled_channels: Iterable[str],
+    sessions: Iterable[dict[str, Any]],
+    archived_keys: Iterable[str],
+) -> tuple[str, str]:
+    enabled = set(enabled_channels)
+    archived = set(archived_keys)
+    for item in sessions:
+        key = item.get("key") or ""
+        if key in archived:
+            continue
+        if ":" not in key:
+            continue
+        channel, chat_id = key.split(":", 1)
+        if channel in {"cli", "system"}:
+            continue
+        if channel in enabled and chat_id:
+            return channel, chat_id
+    return "cli", "direct"
+
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -716,32 +820,6 @@ def serve(
 # ============================================================================
 
 
-@app.command()
-def gateway(
-    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Start the nanobot gateway."""
-    if verbose:
-        logger.remove(_log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
-    cfg = _load_runtime_config(config, workspace)
-    _run_gateway(cfg, port=port)
-
-
 def _run_gateway(
     config: Config,
     *,
@@ -1012,17 +1090,12 @@ def _run_gateway(
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        return "cli", "direct"
+        sidebar_state = read_webui_sidebar_state()
+        return _pick_heartbeat_target_from_sessions(
+            enabled_channels=channels.enabled_channels,
+            sessions=session_manager.list_sessions(),
+            archived_keys=sidebar_state.get("archived_keys", []),
+        )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -1397,6 +1470,163 @@ def _run_gateway(
                     f"Content-Length: {len(body)}\r\n"
                     f"\r\n{body}"
                 )
+            elif method == "GET" and (path == "/logs" or path.startswith("/logs?") or path.startswith("/logs/")):
+                import os as _os
+                import urllib.parse as _urlparse
+
+                _parsed = _urlparse.urlparse(path)
+                _qs = _urlparse.parse_qs(_parsed.query)
+                _logs_token = _os.environ.get("FRANK_LOGS_TOKEN", "")
+                _req_token = (_qs.get("token") or [""])[0]
+
+                if _logs_token and _req_token != _logs_token:
+                    _b = "Unauthorized"
+                    resp = (
+                        f"HTTP/1.0 401 Unauthorized\r\nContent-Type: text/plain\r\n"
+                        f"Content-Length: {len(_b)}\r\n\r\n{_b}"
+                    )
+                elif _parsed.path == "/logs/data":
+                    # JSON endpoint — last N lines, optional level filter
+                    _level_filter = (_qs.get("level") or [""])[0].upper()
+                    _n = int((_qs.get("n") or ["500"])[0])
+                    _log_path = _os.path.join(
+                        _os.path.dirname(_os.path.abspath(__file__)),
+                        "../../../.nanobot/frank.log",
+                    )
+                    _log_path = _os.path.normpath(_log_path)
+                    try:
+                        with open(_log_path, "rb") as _lf:
+                            _lf.seek(0, 2)
+                            _size = _lf.tell()
+                            _chunk = min(_size, 256 * 1024)
+                            _lf.seek(_size - _chunk)
+                            _raw = _lf.read().decode("utf-8", errors="replace")
+                        _all_lines = _raw.splitlines()[-_n:]
+                        if _level_filter and _level_filter != "ALL":
+                            _all_lines = [_line for _line in _all_lines if f"| {_level_filter}" in _line or f"| {_level_filter.lower()}" in _line]
+                        body = _json.dumps({"lines": _all_lines, "total": len(_all_lines)})
+                    except Exception as _e:
+                        body = _json.dumps({"lines": [], "error": str(_e)})
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
+                        f"Access-Control-Allow-Origin: *\r\n"
+                        f"Content-Length: {len(body.encode())}\r\n\r\n{body}"
+                    )
+                elif _parsed.path == "/logs/manifest.json":
+                    _manifest = _json.dumps({
+                        "name": "Frank Logs",
+                        "short_name": "Frank",
+                        "start_url": f"/logs?token={_logs_token}",
+                        "display": "standalone",
+                        "background_color": "#0d1117",
+                        "theme_color": "#0d1117",
+                        "icons": [{"src": "https://fav.farm/🐈", "sizes": "192x192", "type": "image/png"}],
+                    })
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\nContent-Type: application/manifest+json\r\n"
+                        f"Content-Length: {len(_manifest.encode())}\r\n\r\n{_manifest}"
+                    )
+                else:
+                    _tok_param = f"?token={_logs_token}" if _logs_token else ""
+                    _html_page = """<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="/logs/manifest.json">
+<title>Frank Logs</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#c9d1d9;font-family:'SF Mono',monospace;font-size:12px;overflow-x:hidden}}
+#header{{position:sticky;top:0;background:#161b22;border-bottom:1px solid #30363d;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;z-index:10}}
+#header h1{{font-size:14px;font-weight:600;color:#f0f6fc;flex:1}}
+.dot{{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block}}
+.dot.off{{background:#6e7681}}
+button{{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer}}
+button.active{{background:#1f6feb;border-color:#1f6feb;color:#fff}}
+#log{{padding:8px 12px;padding-bottom:80px}}
+.line{{padding:2px 0;border-bottom:1px solid #0d1117;white-space:pre-wrap;word-break:break-all;line-height:1.5}}
+.ERROR{{color:#ff7b72}}.WARNING{{color:#d29922}}.INFO{{color:#8b949e}}.other{{color:#c9d1d9}}
+#bottom{{position:fixed;bottom:0;left:0;right:0;background:#161b22;border-top:1px solid #30363d;padding:8px 12px;display:flex;gap:6px;align-items:center}}
+#status{{font-size:11px;color:#8b949e;flex:1}}
+#scroll-btn{{background:#238636;border-color:#2ea043;color:#fff}}
+</style>
+</head>
+<body>
+<div id="header">
+  <span class="dot" id="dot"></span>
+  <h1>🐈 Frank Logs</h1>
+  <button onclick="setFilter('ALL')" id="f-ALL" class="active">Tutti</button>
+  <button onclick="setFilter('ERROR')" id="f-ERROR">Error</button>
+  <button onclick="setFilter('WARNING')" id="f-WARNING">Warn</button>
+  <button onclick="setFilter('INFO')" id="f-INFO">Info</button>
+</div>
+<div id="log"></div>
+<div id="bottom">
+  <span id="status">Caricamento...</span>
+  <button id="scroll-btn" onclick="scrollToBottom()">↓ Fine</button>
+</div>
+<script>
+let filter='ALL', atBottom=true, lines=[];
+const logEl=document.getElementById('log');
+const dot=document.getElementById('dot');
+const status=document.getElementById('status');
+const token=new URLSearchParams(location.search).get('token')||'';
+
+function setFilter(f){{
+  filter=f;
+  document.querySelectorAll('[id^=f-]').forEach(b=>b.classList.remove('active'));
+  document.getElementById('f-'+f).classList.add('active');
+  render();
+}}
+
+function classify(line){{
+  if(line.includes('| ERROR'))return 'ERROR';
+  if(line.includes('| WARNING'))return 'WARNING';
+  if(line.includes('| INFO'))return 'INFO';
+  return 'other';
+}}
+
+function render(){{
+  const filtered=filter==='ALL'?lines:lines.filter(l=>classify(l)===filter);
+  logEl.innerHTML=filtered.map(l=>
+    `<div class="line ${{classify(l)}}">${{l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}}</div>`
+  ).join('');
+  if(atBottom)scrollToBottom();
+  status.textContent=filtered.length+' righe';
+}}
+
+function scrollToBottom(){{
+  window.scrollTo(0,document.body.scrollHeight);
+}}
+
+window.addEventListener('scroll',()=>{{
+  atBottom=(window.innerHeight+window.scrollY)>=document.body.scrollHeight-50;
+}});
+
+async function refresh(){{
+  try{{
+    const r=await fetch('/logs/data?n=600&level='+filter+(token?'&token='+token:''));
+    const d=await r.json();
+    if(d.lines){{lines=d.lines;render();}}
+    dot.className='dot';
+  }}catch(e){{dot.className='dot off';}}
+}}
+
+refresh();
+setInterval(refresh,5000);
+
+if('serviceWorker' in navigator){{
+  navigator.serviceWorker.register('/logs/sw.js').catch(()=>{{}});
+}}
+</script>
+</body>
+</html>"""
+                    resp = (
+                        f"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                        f"Content-Length: {len(_html_page.encode())}\r\n\r\n{_html_page}"
+                    )
             elif method == "POST" and path == "/hooks/foolish-storefront-order":
                 import os as _os
                 _hdr_end = data.find(b"\r\n\r\n")
@@ -2120,17 +2350,48 @@ def _run_gateway(
             console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
     async def run():
+        tasks: list[asyncio.Task] = []
+        shutdown_task: asyncio.Task | None = None
+        runtime_tasks: asyncio.Future | None = None
+        runtime_tasks_drained = False
+        shutdown_event = asyncio.Event()
+        _ensure_gateway_tty_signal_mode()
+        restore_shutdown_handlers = _install_gateway_shutdown_handlers(
+            asyncio.get_running_loop(),
+            shutdown_event,
+            tasks,
+            console.print,
+        )
         try:
             await cron.start()
             tasks = [
-                agent.run(),
-                channels.start_all(),
+                asyncio.create_task(agent.run(), name="nanobot-agent-loop"),
+                asyncio.create_task(channels.start_all(), name="nanobot-channels"),
             ]
             if health_server_enabled:
-                tasks.append(_health_server(config.gateway.host, port))
+                tasks.append(asyncio.create_task(
+                    _health_server(config.gateway.host, port),
+                    name="nanobot-health-server",
+                ))
             if open_browser_url:
-                tasks.append(_open_browser_when_ready())
-            await asyncio.gather(*tasks)
+                tasks.append(asyncio.create_task(
+                    _open_browser_when_ready(),
+                    name="nanobot-open-browser",
+                ))
+            runtime_tasks = asyncio.gather(*tasks)
+            shutdown_task = asyncio.create_task(
+                shutdown_event.wait(),
+                name="nanobot-gateway-shutdown",
+            )
+            done, _pending = await asyncio.wait(
+                {runtime_tasks, shutdown_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if runtime_tasks in done:
+                runtime_tasks_drained = True
+                await runtime_tasks
+            elif runtime_tasks is not None:
+                runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -2139,18 +2400,43 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            await agent.close_mcp()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
-            # Flush all cached sessions to durable storage before exit.
-            # This prevents data loss on filesystems with write-back
-            # caching (rclone VFS, NFS, FUSE mounts, etc.).
-            flushed = agent.sessions.flush_all()
-            if flushed:
-                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            try:
+                if shutdown_task and not shutdown_task.done():
+                    shutdown_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await shutdown_task
+                cron.stop()
+                agent.stop()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                if runtime_tasks is not None and not runtime_tasks_drained:
+                    with suppress(asyncio.CancelledError, Exception):
+                        await runtime_tasks
+                await channels.stop_all()
+                # Flush all cached sessions to durable storage before exit.
+                # This prevents data loss on filesystems with write-back
+                # caching (rclone VFS, NFS, FUSE mounts, etc.).
+                flushed = agent.sessions.flush_all()
+                if flushed:
+                    logger.info("Shutdown: flushed {} session(s) to disk", flushed)
+            finally:
+                restore_shutdown_handlers()
 
     asyncio.run(run())
+
+
+app.add_typer(
+    create_gateway_app(
+        console=console,
+        log_handler_id=_log_handler_id,
+        load_runtime_config=_load_runtime_config,
+        run_gateway=_run_gateway,
+    ),
+    name="gateway",
+)
 
 
 # ============================================================================

@@ -17,6 +17,7 @@ The docs show concrete provider names so the JSON is copyable, not because nanob
 | If you have... | Configure... |
 |---|---|
 | An API key from a hosted provider or gateway | That provider's `providers.<name>.apiKey`, then a preset with that provider name and a model ID from that service. |
+| An OpenCode Zen or Go key | `providers.opencodeZen.apiKey` or `providers.opencodeGo.apiKey`, then a preset with `provider: "opencode_zen"` or `provider: "opencode_go"`. |
 | A company proxy or regional endpoint | The matching provider block plus `apiBase` if the proxy gives you a URL. |
 | A local OpenAI-compatible server | A local provider block such as `ollama`, `vllm`, `lmStudio`, or `custom`, usually with `apiBase`. |
 | An OAuth-based account | Run the matching `nanobot provider login ...` command, then select that provider explicitly in a preset. |
@@ -93,6 +94,62 @@ Gateway-style setup for model IDs served through OpenRouter.
 ```
 
 Use the model ID exactly as OpenRouter lists it.
+
+### OpenCode Zen and Go
+
+OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
+They share `OPENCODE_API_KEY`, but use separate provider config keys and default base
+URLs in nanobot.
+
+```json
+{
+  "providers": {
+    "opencodeZen": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opencode_zen",
+      "model": "opencode/deepseek-v4-pro",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+For OpenCode Go, switch the provider block and preset:
+
+```json
+{
+  "providers": {
+    "opencodeGo": {
+      "apiKey": "${OPENCODE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opencode_go",
+      "model": "opencode-go/deepseek-v4-flash",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  }
+}
+```
+
+OpenCode documents model IDs with `opencode/<model-id>` for Zen and
+`opencode-go/<model-id>` for Go. nanobot accepts those prefixes and strips them
+before sending the request to OpenCode. Use model IDs that OpenCode lists under
+the `chat/completions` endpoint; models listed only under `responses`,
+`messages`, or provider-specific endpoints are not handled by this
+OpenAI-compatible provider path.
 
 ### Anthropic Direct
 

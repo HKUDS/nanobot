@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.nanobot import Nanobot, RunResult
+from nanobot.nanobot import (
+    STREAM_EVENT_REASONING_COMPLETED,
+    STREAM_EVENT_REASONING_DELTA,
+    STREAM_EVENT_RUN_COMPLETED,
+    STREAM_EVENT_RUN_FAILED,
+    STREAM_EVENT_RUN_STARTED,
+    STREAM_EVENT_TEXT_COMPLETED,
+    STREAM_EVENT_TEXT_DELTA,
+    STREAM_EVENT_TOOL_COMPLETED,
+    STREAM_EVENT_TOOL_FAILED,
+    STREAM_EVENT_TOOL_STARTED,
+    STREAM_EVENT_TYPES,
+    Nanobot,
+    RunResult,
+    RunStream,
+    SessionInfo,
+    SessionSnapshot,
+    StreamEvent,
+    StreamEventType,
+)
 
 
 def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
@@ -23,6 +44,17 @@ def _write_config(tmp_path: Path, overrides: dict | None = None) -> Path:
     return config_path
 
 
+def _fake_provider(name: str, *, max_tokens: int = 8192) -> MagicMock:
+    provider = MagicMock(name=name)
+    provider.get_default_model.return_value = name
+    provider.generation = SimpleNamespace(
+        max_tokens=max_tokens,
+        temperature=0.1,
+        reasoning_effort=None,
+    )
+    return provider
+
+
 def test_from_config_missing_file():
     with pytest.raises(FileNotFoundError):
         Nanobot.from_config("/nonexistent/config.json")
@@ -33,6 +65,50 @@ def test_from_config_creates_instance(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     assert bot._loop is not None
     assert bot._loop.workspace == tmp_path
+
+
+def test_from_config_accepts_default_model_override(tmp_path):
+    config_path = _write_config(tmp_path)
+
+    bot = Nanobot.from_config(
+        config_path,
+        workspace=tmp_path,
+        model="openai/gpt-4.1-mini",
+    )
+
+    assert bot.runtime.model == "openai/gpt-4.1-mini"
+    assert bot._loop.model_preset is None
+
+
+def test_from_config_accepts_default_model_preset(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        {
+            "modelPresets": {
+                "fast": {
+                    "model": "openai/gpt-4.1-mini",
+                    "provider": "openrouter",
+                }
+            }
+        },
+    )
+
+    bot = Nanobot.from_config(config_path, workspace=tmp_path, model_preset="fast")
+
+    assert bot.runtime.model == "openai/gpt-4.1-mini"
+    assert bot._loop.model_preset == "fast"
+
+
+def test_from_config_rejects_multiple_model_selectors(tmp_path):
+    config_path = _write_config(tmp_path)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Nanobot.from_config(
+            config_path,
+            workspace=tmp_path,
+            model="openai/gpt-4.1",
+            model_preset="fast",
+        )
 
 
 def test_from_config_default_path():
@@ -64,12 +140,16 @@ async def test_run_returns_result(tmp_path):
 
     assert isinstance(result, RunResult)
     assert result.content == "Hello back!"
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="sdk:default")
+    bot._loop.process_direct.assert_awaited_once_with(
+        "hi",
+        session_key="sdk:default",
+        hooks=ANY,
+    )
 
 
 @pytest.mark.asyncio
 async def test_run_with_hooks(tmp_path):
-    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.hook import AgentHook, AgentHookContext, SDKCaptureHook
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -88,6 +168,10 @@ async def test_run_with_hooks(tmp_path):
 
     assert result.content == "done"
     assert bot._loop._extra_hooks == []
+    hooks = bot._loop.process_direct.await_args.kwargs["hooks"]
+    assert len(hooks) == 2
+    assert isinstance(hooks[0], SDKCaptureHook)
+    assert isinstance(hooks[1], TestHook)
 
 
 @pytest.mark.asyncio
@@ -159,7 +243,11 @@ async def test_run_custom_session_key(tmp_path):
     bot._loop.process_direct = AsyncMock(return_value=mock_response)
 
     await bot.run("hi", session_key="user-alice")
-    bot._loop.process_direct.assert_awaited_once_with("hi", session_key="user-alice")
+    bot._loop.process_direct.assert_awaited_once_with(
+        "hi",
+        session_key="user-alice",
+        hooks=ANY,
+    )
 
 
 def test_import_from_top_level():
@@ -167,6 +255,42 @@ def test_import_from_top_level():
 
     assert nanobot.Nanobot is Nanobot
     assert nanobot.RunResult is RunResult
+    assert nanobot.RunStream is RunStream
+    assert nanobot.SessionInfo is SessionInfo
+    assert nanobot.SessionSnapshot is SessionSnapshot
+    assert nanobot.StreamEvent is StreamEvent
+    assert nanobot.StreamEventType is StreamEventType
+    assert nanobot.STREAM_EVENT_TEXT_DELTA == STREAM_EVENT_TEXT_DELTA
+    assert nanobot.STREAM_EVENT_RUN_COMPLETED == STREAM_EVENT_RUN_COMPLETED
+    assert nanobot.STREAM_EVENT_TYPES == STREAM_EVENT_TYPES
+
+
+def test_stream_event_constants_are_stable():
+    assert STREAM_EVENT_TYPES == (
+        STREAM_EVENT_RUN_STARTED,
+        STREAM_EVENT_TEXT_DELTA,
+        STREAM_EVENT_TEXT_COMPLETED,
+        STREAM_EVENT_REASONING_DELTA,
+        STREAM_EVENT_REASONING_COMPLETED,
+        STREAM_EVENT_TOOL_STARTED,
+        STREAM_EVENT_TOOL_COMPLETED,
+        STREAM_EVENT_TOOL_FAILED,
+        STREAM_EVENT_RUN_COMPLETED,
+        STREAM_EVENT_RUN_FAILED,
+    )
+    assert STREAM_EVENT_TYPES == (
+        "run.started",
+        "text.delta",
+        "text.completed",
+        "reasoning.delta",
+        "reasoning.completed",
+        "tool.started",
+        "tool.completed",
+        "tool.failed",
+        "run.completed",
+        "run.failed",
+    )
+    assert len(set(STREAM_EVENT_TYPES)) == len(STREAM_EVENT_TYPES)
 
 
 # ---------------------------------------------------------------------------
@@ -183,21 +307,19 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        # Whatever hooks the SDK installed are now on the loop.
-        extras = bot._loop._extra_hooks
+    async def fake_process_direct(message, *, session_key, hooks):
         messages = [{"role": "user", "content": message}]
         ctx1 = AgentHookContext(iteration=0, messages=messages)
         ctx1.tool_calls = [
             ToolCallRequest(id="c1", name="read_file", arguments={}),
             ToolCallRequest(id="c2", name="grep", arguments={}),
         ]
-        for h in extras:
+        for h in hooks:
             await h.after_iteration(ctx1)
         messages.append({"role": "assistant", "content": "ok"})
         ctx2 = AgentHookContext(iteration=1, messages=messages)
         ctx2.tool_calls = [ToolCallRequest(id="c3", name="web_fetch", arguments={})]
-        for h in extras:
+        for h in hooks:
             await h.after_iteration(ctx2)
         return OutboundMessage(channel="cli", chat_id="direct", content="final")
 
@@ -216,14 +338,13 @@ async def test_run_populates_final_messages(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
-    async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
+    async def fake_process_direct(message, *, session_key, hooks):
         messages = [
             {"role": "user", "content": message},
             {"role": "assistant", "content": "hi there"},
         ]
         ctx = AgentHookContext(iteration=0, messages=messages)
-        for h in extras:
+        for h in hooks:
             await h.after_iteration(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="hi there")
 
@@ -248,6 +369,271 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     result = await bot.run("hi")
     assert result.tools_used == []
     assert result.messages == []
+    assert result.usage == {}
+    assert result.stop_reason is None
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_run_populates_observability_fields(tmp_path):
+    from nanobot.agent.hook import AgentRunHookContext
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, hooks):
+        ctx = AgentRunHookContext(
+            messages=[
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "done"},
+            ],
+            final_content="done",
+            tools_used=["read_file"],
+            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            stop_reason="completed",
+            error=None,
+            tool_events=[{"tool": "read_file", "status": "ok"}],
+        )
+        for h in hooks:
+            await h.after_run(ctx)
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"latency_ms": 42},
+        )
+
+    bot._loop.process_direct = fake_process_direct
+    result = await bot.run("work")
+
+    assert result.content == "done"
+    assert result.tools_used == ["read_file"]
+    assert result.usage == {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    assert result.stop_reason == "completed"
+    assert result.error is None
+    assert result.metadata == {"latency_ms": 42}
+
+
+@pytest.mark.asyncio
+async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done",
+        tool_calls=[],
+        usage={"total_tokens": 3},
+    ))
+    bot = Nanobot(AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    ))
+
+    result = await bot.run("hi", ephemeral=True)
+
+    assert result.content == "done"
+    assert result.usage["total_tokens"] == 3
+    assert result.usage["provider_tokens"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_forwards_non_default_runtime_options(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.process_direct = AsyncMock(
+        return_value=OutboundMessage(channel="sdk", chat_id="chat-a", content="ok"),
+    )
+
+    await bot.run(
+        "hi",
+        session_key="sdk:chat-a",
+        channel="sdk",
+        chat_id="chat-a",
+        sender_id="alice",
+        media=["/tmp/image.png"],
+        ephemeral=True,
+    )
+
+    bot._loop.process_direct.assert_awaited_once_with(
+        "hi",
+        session_key="sdk:chat-a",
+        channel="sdk",
+        chat_id="chat-a",
+        sender_id="alice",
+        media=["/tmp/image.png"],
+        ephemeral=True,
+        _run_extra_hooks_for_ephemeral=True,
+        hooks=ANY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_allows_parallel_sessions_without_model_override(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    entered: list[str] = []
+    both_entered = asyncio.Event()
+
+    async def fake_process_direct(message, *, session_key, hooks):
+        entered.append(session_key)
+        if len(entered) == 2:
+            both_entered.set()
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        return OutboundMessage(channel="cli", chat_id="direct", content=message)
+
+    bot._loop.process_direct = fake_process_direct
+
+    left, right = await asyncio.gather(
+        bot.run("left", session_key="sdk:left"),
+        bot.run("right", session_key="sdk:right"),
+    )
+
+    assert left.content == "left"
+    assert right.content == "right"
+    assert set(entered) == {"sdk:left", "sdk:right"}
+
+
+@pytest.mark.asyncio
+async def test_run_model_overrides_are_serialized_before_snapshot_build(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.factory import ProviderSnapshot
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    original_model = bot._loop.model
+    active_models: list[str] = []
+    snapshot_base_models: list[str] = []
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+
+    def fake_snapshot(*, model, model_preset):
+        assert model is not None
+        assert model_preset is None
+        snapshot_base_models.append(bot._loop.model)
+        return ProviderSnapshot(
+            provider=_fake_provider(model, max_tokens=2048),
+            model=model,
+            context_window_tokens=4096,
+            signature=("sdk", model),
+        )
+
+    bot._runtime_overrides.model_override_snapshot = MagicMock(side_effect=fake_snapshot)
+
+    async def fake_process_direct(message, *, session_key, hooks):
+        active_models.append(bot._loop.model)
+        if message == "first":
+            first_entered.set()
+            await asyncio.wait_for(release_first.wait(), timeout=1)
+        return OutboundMessage(channel="cli", chat_id="direct", content=message)
+
+    bot._loop.process_direct = fake_process_direct
+
+    first = asyncio.create_task(bot.run("first", model="model:first"))
+    await asyncio.wait_for(first_entered.wait(), timeout=1)
+
+    second = asyncio.create_task(bot.run("second", model="model:second"))
+    await asyncio.sleep(0)
+    assert not second.done()
+
+    release_first.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result.content == "first"
+    assert second_result.content == "second"
+    assert active_models == ["model:first", "model:second"]
+    assert snapshot_base_models == [original_model, original_model]
+    assert bot._loop.model == original_model
+
+
+@pytest.mark.asyncio
+async def test_run_model_override_is_per_run_and_restores_default(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.factory import ProviderSnapshot
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    original_provider = bot._loop.provider
+    original_model = bot._loop.model
+    original_signature = bot._loop._provider_signature
+    override_provider = _fake_provider("override-provider", max_tokens=2048)
+    override = ProviderSnapshot(
+        provider=override_provider,
+        model="openai/gpt-4.1-mini",
+        context_window_tokens=4096,
+        signature=("sdk", "override"),
+    )
+    bot._runtime_overrides.model_override_snapshot = MagicMock(return_value=override)
+
+    async def fake_process_direct(message, *, session_key, hooks):
+        assert bot._loop.provider is override_provider
+        assert bot._loop.runner.provider is override_provider
+        assert bot._loop.model == "openai/gpt-4.1-mini"
+        assert bot._loop.context_window_tokens == 4096
+        return OutboundMessage(channel="cli", chat_id="direct", content="ok")
+
+    bot._loop.process_direct = fake_process_direct
+
+    result = await bot.run("hi", model="openai/gpt-4.1-mini")
+
+    assert result.content == "ok"
+    bot._runtime_overrides.model_override_snapshot.assert_called_once_with(
+        model="openai/gpt-4.1-mini",
+        model_preset=None,
+    )
+    assert bot._loop.provider is original_provider
+    assert bot._loop.runner.provider is original_provider
+    assert bot._loop.model == original_model
+    assert bot._loop._provider_signature == original_signature
+
+
+@pytest.mark.asyncio
+async def test_run_model_preset_override_is_per_run(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.factory import ProviderSnapshot
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    original_model = bot._loop.model
+    override_provider = _fake_provider("preset-provider", max_tokens=1024)
+    override = ProviderSnapshot(
+        provider=override_provider,
+        model="openai/gpt-4.1-mini",
+        context_window_tokens=2048,
+        signature=("preset", "fast"),
+    )
+    bot._loop._build_model_preset_snapshot = MagicMock(return_value=override)
+
+    async def fake_process_direct(message, *, session_key, hooks):
+        assert bot._loop.provider is override_provider
+        assert bot._loop.model == "openai/gpt-4.1-mini"
+        return OutboundMessage(channel="cli", chat_id="direct", content="ok")
+
+    bot._loop.process_direct = fake_process_direct
+
+    await bot.run("hi", model_preset="fast")
+
+    bot._loop._build_model_preset_snapshot.assert_called_once_with("fast")
+    assert bot._loop.model == original_model
+    assert bot._loop.model_preset is None
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_multiple_model_selectors(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        await bot.run("hi", model="openai/gpt-4.1", model_preset="fast")
 
 
 @pytest.mark.asyncio
@@ -265,17 +651,68 @@ async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
         async def after_iteration(self, context: AgentHookContext) -> None:
             seen_iterations.append(context.iteration)
 
-    async def fake_process_direct(message, *, session_key):
-        extras = bot._loop._extra_hooks
-        assert len(extras) == 2, f"expected capture + user hook, got {len(extras)}"
+    async def fake_process_direct(message, *, session_key, hooks):
+        assert len(hooks) == 2, f"expected capture + user hook, got {len(hooks)}"
         ctx = AgentHookContext(iteration=7, messages=[])
-        for h in extras:
+        for h in hooks:
             await h.after_iteration(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
     bot._loop.process_direct = fake_process_direct
     await bot.run("x", hooks=[UserHook()])
     assert seen_iterations == [7]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_hooks_are_isolated_per_call(tmp_path):
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.base import ToolCallRequest
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    seen_by_hook: dict[str, list[str]] = {"alpha": [], "beta": []}
+
+    class UserHook(AgentHook):
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def after_iteration(self, context: AgentHookContext) -> None:
+            seen_by_hook[self.name].append(context.messages[0]["content"])
+
+    started = 0
+    both_started = asyncio.Event()
+
+    async def fake_process_direct(message, *, session_key, hooks=None):
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await both_started.wait()
+
+        active_hooks = hooks or []
+        messages = [{"role": "user", "content": message}]
+        ctx = AgentHookContext(iteration=0, messages=messages)
+        ctx.tool_calls = [
+            ToolCallRequest(id=f"call-{message}", name=f"tool_{message}", arguments={})
+        ]
+        for h in active_hooks:
+            await h.after_iteration(ctx)
+        return OutboundMessage(channel="cli", chat_id="direct", content=f"done {message}")
+
+    bot._loop.process_direct = fake_process_direct
+
+    alpha, beta = await asyncio.gather(
+        bot.run("alpha", hooks=[UserHook("alpha")]),
+        bot.run("beta", hooks=[UserHook("beta")]),
+    )
+
+    assert alpha.content == "done alpha"
+    assert beta.content == "done beta"
+    assert alpha.tools_used == ["tool_alpha"]
+    assert beta.tools_used == ["tool_beta"]
+    assert seen_by_hook == {"alpha": ["alpha"], "beta": ["beta"]}
 
 
 @pytest.mark.asyncio
@@ -290,15 +727,357 @@ async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
     sentinel_hook = AgentHook()
     bot._loop._extra_hooks = [sentinel_hook]
 
-    async def fake_process_direct(message, *, session_key):
+    async def fake_process_direct(message, *, session_key, hooks):
         ctx = AgentHookContext(iteration=0, messages=[])
-        for h in bot._loop._extra_hooks:
+        for h in [*bot._loop._extra_hooks, *hooks]:
             await h.after_iteration(ctx)
         return OutboundMessage(channel="cli", chat_id="direct", content="done")
 
     bot._loop.process_direct = fake_process_direct
     await bot.run("hello")
     assert bot._loop._extra_hooks == [sentinel_hook]
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_text_events_in_order(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        assert message == "hi"
+        assert session_key == "sdk:default"
+        await on_stream("Hel")
+        await on_stream("lo")
+        await on_stream_end(resuming=False)
+        return OutboundMessage(channel="cli", chat_id="direct", content="Hello")
+
+    bot._loop.process_direct = fake_process_direct
+
+    events = [event async for event in bot.stream("hi")]
+
+    assert all(event.type in STREAM_EVENT_TYPES for event in events)
+    assert [event.type for event in events] == [
+        "run.started",
+        "text.delta",
+        "text.delta",
+        "text.completed",
+        "run.completed",
+    ]
+    assert events[1].delta == "Hel"
+    assert events[2].delta == "lo"
+    assert events[3].content == "Hello"
+    assert events[4].result is not None
+    assert events[4].result.content == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_wait_returns_full_result_without_consuming_events(tmp_path):
+    from nanobot.agent.hook import AgentRunHookContext
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        await on_stream("done")
+        await on_stream_end(resuming=False)
+        ctx = AgentRunHookContext(
+            messages=[
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "done"},
+            ],
+            final_content="done",
+            tools_used=["read_file"],
+            usage={"total_tokens": 9},
+            stop_reason="completed",
+        )
+        for hook in hooks:
+            await hook.after_run(ctx)
+        return OutboundMessage(
+            channel="cli",
+            chat_id="direct",
+            content="done",
+            metadata={"latency_ms": 5},
+        )
+
+    bot._loop.process_direct = fake_process_direct
+
+    run = await bot.run_streamed("work")
+    assert isinstance(run, RunStream)
+    result = await run.wait()
+
+    assert result.content == "done"
+    assert result.tools_used == ["read_file"]
+    assert result.usage == {"total_tokens": 9}
+    assert result.stop_reason == "completed"
+    assert result.metadata == {"latency_ms": 5}
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_cancel_releases_full_queue_without_consuming(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        for i in range(400):
+            await on_stream(str(i))
+        await on_stream_end(resuming=False)
+        return OutboundMessage(channel="cli", chat_id="direct", content="done")
+
+    bot._loop.process_direct = fake_process_direct
+
+    run = await bot.run_streamed("many")
+    await asyncio.sleep(0.05)
+    assert not run.done
+
+    await asyncio.wait_for(run.cancel(), timeout=1)
+    assert run.done
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_text_returns_final_content(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.process_direct = AsyncMock(
+        return_value=OutboundMessage(channel="cli", chat_id="direct", content="plain text"),
+    )
+
+    run = await bot.run_streamed("hi")
+
+    assert await run.text() == "plain text"
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_forwards_runtime_options(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.process_direct = AsyncMock(
+        return_value=OutboundMessage(channel="sdk", chat_id="chat-a", content="ok"),
+    )
+
+    run = await bot.run_streamed(
+        "hi",
+        session_key="sdk:chat-a",
+        channel="sdk",
+        chat_id="chat-a",
+        sender_id="alice",
+        media=["/tmp/image.png"],
+        ephemeral=True,
+    )
+    await run.wait()
+
+    bot._loop.process_direct.assert_awaited_once()
+    args, kwargs = bot._loop.process_direct.call_args
+    assert args == ("hi",)
+    assert kwargs["session_key"] == "sdk:chat-a"
+    assert kwargs["channel"] == "sdk"
+    assert kwargs["chat_id"] == "chat-a"
+    assert kwargs["sender_id"] == "alice"
+    assert kwargs["media"] == ["/tmp/image.png"]
+    assert kwargs["ephemeral"] is True
+    assert callable(kwargs["on_stream"])
+    assert callable(kwargs["on_stream_end"])
+    assert kwargs["hooks"]
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_model_override_reports_model_and_restores(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.factory import ProviderSnapshot
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    original_model = bot._loop.model
+    override_provider = _fake_provider("stream-provider", max_tokens=2048)
+    override = ProviderSnapshot(
+        provider=override_provider,
+        model="openai/gpt-4.1-mini",
+        context_window_tokens=4096,
+        signature=("sdk", "stream"),
+    )
+    bot._runtime_overrides.model_override_snapshot = MagicMock(return_value=override)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        assert bot._loop.provider is override_provider
+        assert bot._loop.model == "openai/gpt-4.1-mini"
+        await on_stream("ok")
+        await on_stream_end(resuming=False)
+        return OutboundMessage(channel="cli", chat_id="direct", content="ok")
+
+    bot._loop.process_direct = fake_process_direct
+
+    run = await bot.run_streamed("hi", model="openai/gpt-4.1-mini")
+    events = [event async for event in run.stream_events()]
+    result = await run.wait()
+
+    assert result.content == "ok"
+    assert events[0].type == "run.started"
+    assert events[0].metadata["model"] == "openai/gpt-4.1-mini"
+    assert events[0].metadata["model_preset"] is None
+    assert bot._loop.model == original_model
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_multiple_model_selectors(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _ = [event async for event in bot.stream(
+            "hi",
+            model="openai/gpt-4.1",
+            model_preset="fast",
+        )]
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_emits_tool_events(tmp_path):
+    from nanobot.agent.hook import AgentHookContext
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.providers.base import ToolCallRequest
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        calls = [
+            ToolCallRequest(id="call_ok", name="read_file", arguments={"path": "README.md"}),
+            ToolCallRequest(id="call_bad", name="exec", arguments={"cmd": "false"}),
+        ]
+        ctx = AgentHookContext(iteration=2, messages=[{"role": "user", "content": message}])
+        ctx.tool_calls = calls
+        for hook in hooks:
+            await hook.before_execute_tools(ctx)
+        ctx.tool_events = [
+            {"name": "read_file", "status": "ok", "detail": "README.md"},
+            {"name": "exec", "status": "error", "detail": "exit 1"},
+        ]
+        for hook in hooks:
+            await hook.after_iteration(ctx)
+        return OutboundMessage(channel="cli", chat_id="direct", content="done")
+
+    bot._loop.process_direct = fake_process_direct
+
+    run = await bot.run_streamed("inspect")
+    events = [event async for event in run.stream_events()]
+    await run.wait()
+
+    assert [event.type for event in events] == [
+        "run.started",
+        "tool.started",
+        "tool.started",
+        "tool.completed",
+        "tool.failed",
+        "run.completed",
+    ]
+    assert events[1].name == "read_file"
+    assert events[1].tool_call_id == "call_ok"
+    assert events[1].arguments == {"path": "README.md"}
+    assert events[3].metadata["status"] == "ok"
+    assert events[4].name == "exec"
+    assert events[4].error == "exit 1"
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_emits_reasoning_events(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        for hook in hooks:
+            await hook.emit_reasoning("thinking")
+            await hook.emit_reasoning_end()
+        return OutboundMessage(channel="cli", chat_id="direct", content="done")
+
+    bot._loop.process_direct = fake_process_direct
+
+    events = [event async for event in bot.stream("think")]
+
+    assert [event.type for event in events] == [
+        "run.started",
+        "reasoning.delta",
+        "reasoning.completed",
+        "run.completed",
+    ]
+    assert events[1].delta == "thinking"
+
+
+@pytest.mark.asyncio
+async def test_stream_generator_break_cancels_underlying_run(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    cancelled = asyncio.Event()
+
+    async def fake_process_direct(message, *, session_key, on_stream, on_stream_end, hooks):
+        try:
+            await on_stream("first")
+            await asyncio.sleep(10)
+        finally:
+            cancelled.set()
+        return OutboundMessage(channel="cli", chat_id="direct", content="done")
+
+    bot._loop.process_direct = fake_process_direct
+
+    async for event in bot.stream("stop early"):
+        if event.type == STREAM_EVENT_TEXT_DELTA:
+            break
+
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_restores_hooks_and_reports_failure(tmp_path):
+    from nanobot.agent.hook import AgentHook
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    sentinel_hook = AgentHook()
+    bot._loop._extra_hooks = [sentinel_hook]
+
+    async def fake_process_direct(message, **kwargs):
+        raise RuntimeError("boom")
+
+    bot._loop.process_direct = fake_process_direct
+
+    run = await bot.run_streamed("fail")
+    events = [event async for event in run.stream_events()]
+
+    assert [event.type for event in events] == ["run.started", "run.failed"]
+    assert events[1].error == "boom"
+    with pytest.raises(RuntimeError, match="boom"):
+        await run.wait()
+    assert bot._loop._extra_hooks == [sentinel_hook]
+
+
+@pytest.mark.asyncio
+async def test_run_streamed_stream_events_is_single_consumer(tmp_path):
+    from nanobot.bus.events import OutboundMessage
+
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.process_direct = AsyncMock(
+        return_value=OutboundMessage(channel="cli", chat_id="direct", content="done"),
+    )
+
+    run = await bot.run_streamed("hi")
+    events = [event async for event in run.stream_events()]
+    assert [event.type for event in events] == ["run.started", "run.completed"]
+    await run.wait()
+
+    with pytest.raises(RuntimeError, match="only be consumed once"):
+        _ = [event async for event in run.stream_events()]
 
 
 @pytest.mark.asyncio
@@ -322,10 +1101,133 @@ async def test_sdk_capture_prefers_run_level_snapshot():
     await hook.after_run(AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
+        usage={"total_tokens": 3},
+        stop_reason="completed",
     ))
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
+    assert hook.usage == {"total_tokens": 3}
+    assert hook.stop_reason == "completed"
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    bot._loop.process_direct = AsyncMock()
+    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+
+    snapshot = await bot.sessions.ingest(
+        "sdk:history",
+        [
+            {
+                "role": "user",
+                "content": "I graduated with a Business Administration degree.",
+                "timestamp": "2023/05/30 (Tue) 17:27",
+                "source_session_id": "answer_1",
+            },
+            {
+                "role": "assistant",
+                "content": "Congratulations on your degree.",
+                "timestamp": "2023/05/30 (Tue) 17:27",
+            },
+        ],
+        metadata={"title": "LongMemEval case"},
+        source="longmemeval",
+    )
+
+    assert isinstance(snapshot, SessionSnapshot)
+    assert snapshot.key == "sdk:history"
+    assert snapshot.metadata["title"] == "LongMemEval case"
+    assert snapshot.messages[0]["role"] == "user"
+    assert snapshot.messages[0]["timestamp"] == "2023/05/30 (Tue) 17:27"
+    assert snapshot.messages[0]["source_session_id"] == "answer_1"
+    assert snapshot.messages[0]["source"] == "longmemeval"
+    assert snapshot.messages[1]["source"] == "longmemeval"
+    bot._loop.process_direct.assert_not_called()
+    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
+
+    reloaded = bot.sessions.get("sdk:history")
+    assert reloaded is not None
+    assert reloaded.messages == snapshot.messages
+
+
+@pytest.mark.asyncio
+async def test_sessions_ingest_validates_message_shape(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    with pytest.raises(ValueError, match="role"):
+        await bot.sessions.ingest("sdk:bad", [{"content": "missing role"}])
+
+    with pytest.raises(ValueError, match="unsupported message role"):
+        await bot.sessions.ingest("sdk:bad", [{"role": "developer", "content": "nope"}])
+
+
+@pytest.mark.asyncio
+async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    await bot.sessions.ingest("sdk:first", [{"role": "user", "content": "hello"}])
+
+    listed = bot.sessions.list()
+    assert listed
+    assert isinstance(listed[0], SessionInfo)
+    assert {row.key for row in listed} == {"sdk:first"}
+
+    exported = bot.sessions.export("sdk:first")
+    assert exported is not None
+    exported.messages[0]["content"] = "mutated copy"
+    assert bot.sessions.get("sdk:first").messages[0]["content"] == "hello"
+
+    cleared = bot.sessions.clear("sdk:first")
+    assert cleared.messages == []
+    assert bot.sessions.flush() >= 1
+    assert bot.sessions.delete("sdk:first") is True
+    assert bot.sessions.get("sdk:first") is None
+
+
+def test_memory_helpers_read_write_append_and_filter_history(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+
+    assert bot.memory.read() == ""
+    bot.memory.write("# Memory\n- User likes concise APIs.")
+    assert "concise APIs" in bot.memory.read()
+
+    c1 = bot.memory.append_history("general event")
+    c2 = bot.memory.append_history("session event", session_key="sdk:history")
+
+    all_entries = bot.memory.read_history()
+    assert [entry["cursor"] for entry in all_entries] == [c1, c2]
+
+    session_entries = bot.memory.read_history(session_key="sdk:history")
+    assert len(session_entries) == 1
+    assert session_entries[0]["content"] == "session event"
+
+
+@pytest.mark.asyncio
+async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    await bot.sessions.ingest("sdk:history", [{"role": "user", "content": "hello"}])
+
+    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    snapshot = await bot.runtime.compact_session("sdk:history")
+    assert snapshot.key == "sdk:history"
+    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once()
+    assert bot.runtime.model == bot._loop.model
+    assert bot.runtime.workspace == tmp_path
+
+    bot._loop.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
+    summary = await bot.runtime.compact_idle_session("sdk:history", max_suffix=4)
+    assert summary == "Summary."
+    bot._loop.consolidator.compact_idle_session.assert_awaited_once_with(
+        "sdk:history",
+        max_suffix=4,
+    )
 
 
 @pytest.mark.asyncio

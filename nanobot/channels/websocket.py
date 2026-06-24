@@ -827,6 +827,10 @@ class WebSocketChannel(BaseChannel):
         if self._server_task:
             try:
                 await self._server_task
+            except asyncio.CancelledError:
+                if asyncio.current_task() and asyncio.current_task().cancelling():
+                    raise
+                self.logger.debug("server task was already cancelled during shutdown")
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
@@ -896,6 +900,7 @@ class WebSocketChannel(BaseChannel):
                 goal_state=gs_blob,
                 metadata=msg.metadata,
             )
+            await self.send_session_updated(msg.chat_id, scope="thread")
             return
         if msg.metadata.get("_session_updated"):
             if conns:
@@ -1146,8 +1151,8 @@ class WebSocketChannel(BaseChannel):
             await self._safe_send_to(connection, raw, label=" goal_status ")
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
-        """Notify clients that session metadata changed outside the main turn."""
-        conns = list(self._subs.get(chat_id, ()))
+        """Notify WebUI clients that a session row should refresh."""
+        conns = list(self._conn_chats)
         if not conns:
             return
         body: dict[str, Any] = {"event": "session_updated", "chat_id": chat_id}

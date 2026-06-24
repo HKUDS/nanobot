@@ -20,6 +20,7 @@ from nanobot.webui.settings_api import (
     update_network_safety_settings,
     update_provider_settings,
     update_transcription_settings,
+    update_web_search_settings,
 )
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
@@ -232,11 +233,11 @@ def test_update_agent_settings_accepts_context_window_options(
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    payload = update_agent_settings({"context_window_tokens": ["262144"]})
+    payload = update_agent_settings({"context_window_tokens": ["200000"]})
 
-    assert payload["agent"]["context_window_tokens"] == 262144
+    assert payload["agent"]["context_window_tokens"] == 200000
     saved = load_config(config_path)
-    assert saved.agents.defaults.context_window_tokens == 262144
+    assert saved.agents.defaults.context_window_tokens == 200000
 
 
 def test_update_model_configuration_accepts_context_window_options(
@@ -273,7 +274,10 @@ def test_update_context_window_rejects_unknown_values(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="context_window_tokens must be 65536 or 262144"):
+    with pytest.raises(
+        WebUISettingsError,
+        match="context_window_tokens must be 65536, 200000, or 262144",
+    ):
         update_agent_settings({"context_window_tokens": ["128000"]})
 
 
@@ -400,6 +404,44 @@ def test_settings_payload_includes_exec_path_flags(
 
     assert payload["advanced"]["exec_path_prepend_set"] is True
     assert payload["advanced"]["exec_path_append_set"] is True
+
+
+def test_update_web_search_settings_accepts_keenable_without_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "brave"
+    config.tools.web.search.api_key = "brave-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_web_search_settings({"provider": ["keenable"]})
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "keenable"
+    assert saved.tools.web.search.api_key == ""
+    option = next(item for item in payload["web_search"]["providers"] if item["name"] == "keenable")
+    assert option["credential"] == "optional_api_key"
+
+
+def test_update_web_search_settings_can_clear_optional_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "keenable"
+    config.tools.web.search.api_key = "keen-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    update_web_search_settings({"provider": ["keenable"], "api_key": [""]})
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "keenable"
+    assert saved.tools.web.search.api_key == ""
 
 
 def test_settings_payload_includes_effective_transcription_config(
@@ -749,19 +791,17 @@ def test_update_network_safety_settings_default_access_is_webui_only(
 def test_openai_codex_oauth_status_uses_available_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_get_token():
-        return type(
-            "Token",
-            (),
-            {
-                "access": "access-token",
-                "refresh": "refresh-token",
-                "expires": 2_000_000_000_000,
-                "account_id": "acct-codex",
-            },
-        )()
-
-    monkeypatch.setattr("oauth_cli_kit.get_token", fake_get_token)
+    token = type(
+        "Token",
+        (),
+        {
+            "access": "access-token",
+            "refresh": "refresh-token",
+            "expires": 2_000_000_000_000,
+            "account_id": "acct-codex",
+        },
+    )()
+    monkeypatch.setattr("oauth_cli_kit.storage.FileTokenStorage.load", lambda _self: token)
 
     status = _oauth_provider_status(find_by_name("openai_codex"))
 
@@ -769,13 +809,34 @@ def test_openai_codex_oauth_status_uses_available_token(
     assert status["account"] == "acct-codex"
 
 
+def test_openai_codex_oauth_status_uses_refreshable_expired_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = type(
+        "Token",
+        (),
+        {
+            "access": "access-token",
+            "refresh": "refresh-token",
+            "expires": 1,
+            "account_id": "acct-codex",
+        },
+    )()
+    monkeypatch.setattr("oauth_cli_kit.storage.FileTokenStorage.load", lambda _self: token)
+
+    status = _oauth_provider_status(find_by_name("openai_codex"))
+
+    assert status["configured"] is True
+    assert status["expires_at"] == 1
+
+
 def test_openai_codex_oauth_status_rejects_unavailable_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_get_token():
+    def fake_load(_self):
         raise RuntimeError("refresh failed")
 
-    monkeypatch.setattr("oauth_cli_kit.get_token", fake_get_token)
+    monkeypatch.setattr("oauth_cli_kit.storage.FileTokenStorage.load", fake_load)
 
     status = _oauth_provider_status(find_by_name("openai_codex"))
 

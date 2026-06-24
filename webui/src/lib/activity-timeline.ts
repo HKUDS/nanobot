@@ -308,12 +308,12 @@ function activityItemsForMessage(message: UIMessage): ActivityItem[] {
 }
 
 function activityTurnLatencyMs(activityMessages: UIMessage[], visibleMessages: UIMessage[]): number | undefined {
-  for (let i = activityMessages.length - 1; i >= 0; i -= 1) {
-    const latency = activityMessages[i].latencyMs;
-    if (isValidLatency(latency)) return latency;
-  }
   for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
     const latency = visibleMessages[i].latencyMs;
+    if (isValidLatency(latency)) return latency;
+  }
+  for (let i = activityMessages.length - 1; i >= 0; i -= 1) {
+    const latency = activityMessages[i].latencyMs;
     if (isValidLatency(latency)) return latency;
   }
   return undefined;

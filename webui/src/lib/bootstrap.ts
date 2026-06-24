@@ -72,19 +72,19 @@ export function deriveWsUrl(
   wsUrl?: string | null,
 ): string {
   const query = `?token=${encodeURIComponent(token)}`;
-  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
-    const join = wsUrl.includes("?") ? "&" : "?";
-    return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
-  }
   const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
-  if (typeof window === "undefined") {
-    return `ws://127.0.0.1:8765${path}${query}`;
-  }
-  if (window.location.port === "5173") {
+  if (typeof window !== "undefined" && window.location.port === "5173") {
     const host = window.location.hostname.includes(":")
       ? `[${window.location.hostname}]`
       : window.location.hostname;
     return `ws://${host}:8765${path}${query}`;
+  }
+  if (wsUrl && /^(wss?|nanobot-host):\/\//i.test(wsUrl)) {
+    const join = wsUrl.includes("?") ? "&" : "?";
+    return `${wsUrl}${join}token=${encodeURIComponent(token)}`;
+  }
+  if (typeof window === "undefined") {
+    return `ws://127.0.0.1:8765${path}${query}`;
   }
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;

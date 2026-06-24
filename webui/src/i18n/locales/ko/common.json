@@ -55,6 +55,7 @@
       "ariaLabel": "언어 변경"
     },
     "apps": "앱",
+    "automations": "자동화",
     "skills": {
       "title": "스킬"
     }
@@ -80,6 +81,7 @@
       "cliApps": "CLI 앱",
       "mcp": "MCP",
       "apps": "앱",
+      "automations": "자동화",
       "skills": "스킬"
     },
     "sections": {
@@ -469,6 +471,127 @@
       "loading": "앱을 불러오는 중...",
       "empty": "일치하는 앱이 없습니다."
     },
+    "automations": {
+      "filters": {
+        "all": "전체",
+        "active": "활성",
+        "paused": "일시 중지",
+        "failed": "확인 필요",
+        "system": "시스템"
+      },
+      "sort": {
+        "next": "다음 실행",
+        "last": "마지막 실행",
+        "updated": "업데이트",
+        "name": "이름"
+      },
+      "search": "작업, 메시지, 연결된 채팅 또는 일정 검색",
+      "queue": "대기열",
+      "loading": "자동화를 불러오는 중...",
+      "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
+      "empty": "아직 자동화가 없습니다.",
+      "emptyHint": "실행될 위치에서 만들면 nanobot이 올바른 컨텍스트를 유지합니다.",
+      "oneShot": "일회성",
+      "systemTask": "시스템 관리 자동화",
+      "labels": {
+        "schedule": "일정",
+        "next": "다음",
+        "origin": "연결된 채팅",
+        "created": "생성",
+        "updated": "업데이트"
+      },
+      "runNow": "지금 실행",
+      "pause": "일시 중지",
+      "resume": "재개",
+      "edit": "편집",
+      "delete": "삭제",
+      "protected": "보호됨",
+      "editTitle": "자동화 편집",
+      "save": "저장",
+      "deleteTitle": "자동화 삭제",
+      "deleteDescription": "{{name}}을 cron 저장소에서 삭제합니다. 이전 채팅 메시지는 세션에 남습니다.",
+      "cancel": "취소",
+      "status": {
+        "system": "시스템",
+        "running": "실행 중",
+        "paused": "일시 중지",
+        "failed": "실패",
+        "completed": "완료",
+        "noSchedule": "일정 없음",
+        "active": "활성"
+      },
+      "origin": {
+        "system": "시스템",
+        "unknown": "연결된 채팅 없음"
+      },
+      "channels": {
+        "api": "API",
+        "cli": "CLI",
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "email": "Email",
+        "feishu": "Feishu",
+        "matrix": "Matrix",
+        "msteams": "Microsoft Teams",
+        "qq": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat": "WeChat",
+        "wecom": "WeCom",
+        "weixin": "WeChat",
+        "whatsapp": "WhatsApp"
+      },
+      "schedule": {
+        "at": "{{time}}",
+        "every": "{{duration}}마다",
+        "cron": "Cron {{expr}}",
+        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "withTz": "{{summary}} · {{tz}}",
+        "dailyAt": "매일 {{time}}",
+        "weekdaysAt": "평일 {{time}}",
+        "hourlyAt": "매시간 :{{minute}}",
+        "hourlyWindow": "{{start}}-{{end}} 사이 매시간 :{{minute}}",
+        "custom": "사용자 지정 일정"
+      },
+      "next": {
+        "paused": "일시 중지",
+        "pending": "실행 중",
+        "none": "다음 실행 없음"
+      },
+      "message": {
+        "showMore": "전체 메시지 보기",
+        "showLess": "접기"
+      },
+      "fields": {
+        "name": "이름",
+        "message": "메시지",
+        "scheduleType": "일정 유형",
+        "every": "간격",
+        "unit": "단위",
+        "cronExpression": "Cron 식",
+        "timezone": "시간대",
+        "runAt": "실행 시간"
+      },
+      "scheduleTypes": {
+        "every": "간격",
+        "cron": "Cron",
+        "at": "일회성"
+      },
+      "everyUnits": {
+        "second": "초",
+        "minute": "분",
+        "hour": "시간",
+        "day": "일"
+      },
+      "validation": {
+        "nameRequired": "이름은 필수입니다.",
+        "messageRequired": "메시지는 필수입니다.",
+        "intervalRequired": "간격은 양수여야 합니다.",
+        "cronRequired": "Cron 식은 필수입니다.",
+        "timeRequired": "실행 시간은 필수입니다.",
+        "futureRequired": "실행 시간은 현재보다 이후여야 합니다."
+      }
+    },
     "oauth": {
       "authentication": "OAuth 인증",
       "signIn": "로그인",
@@ -527,7 +650,8 @@
     "newInProject": "{{project}}에서 새 채팅 시작",
     "activity": {
       "running": "Agent running",
-      "complete": "Agent finished"
+      "complete": "Agent finished",
+      "updated": "New activity"
     },
     "pin": "Pin",
     "unpin": "Unpin",
@@ -562,7 +686,7 @@
     "confirm": "삭제",
     "automationsDescription": "이 채팅에는 예약된 자동화가 있습니다. 채팅을 삭제하면 자동화도 함께 삭제됩니다.",
     "moreAutomations": "+ {{count}}개 더",
-    "confirmWithAutomations": "채팅과 자동화 삭제",
+    "confirmWithAutomations": "삭제",
     "schedule": {
       "at": "{{time}}",
       "every": "{{duration}}마다",
@@ -868,6 +992,9 @@
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",
     "activityThoughtFor": "{{duration}} 동안 생각함",
+    "activityWorkingFor": "{{duration}} 동안 작업 중",
+    "activityWorked": "작업함",
+    "activityWorkedFor": "{{duration}} 동안 작업함",
     "cliActivityRunningOne": "@{{name}} 사용 중",
     "cliActivityRanOne": "@{{name}} 사용함",
     "cliActivityFailedOne": "@{{name}} 실패",
