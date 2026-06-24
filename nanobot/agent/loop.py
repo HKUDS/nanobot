@@ -868,6 +868,16 @@ class AgentLoop:
             effective_key = self._effective_session_key(msg)
             if await agent_context.handle_runtime_control(self, msg, self.tools):
                 continue
+            # Read-only sessions: reply with a hint and skip all dispatch
+            # (priority commands, mid-turn injection, new tasks).
+            session = self.sessions.get_or_create(effective_key)
+            if session.metadata.get("read_only"):
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="ℹ️ This session is read-only.",
+                    metadata=msg.metadata or {},
+                ))
+                continue
             if self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
                     msg, effective_key, raw,
@@ -927,16 +937,6 @@ class AgentLoop:
         pending: asyncio.Queue | None = None
         try:
             async with lock, gate:
-                # Read-only sessions: reply with a hint and skip LLM.
-                session = self.sessions.get_or_create(session_key)
-                if session.metadata.get("read_only"):
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="ℹ️ This session is read-only.",
-                        metadata=msg.metadata or {},
-                    ))
-                    return
-
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.
                 pending = asyncio.Queue(maxsize=20)
