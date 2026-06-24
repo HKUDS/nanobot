@@ -2057,6 +2057,241 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_response.endswith("\r\n\r\nNot Found")
 
 
+def _gateway_send_test_factory(tmp_path, *, send_token: str = "", remote_peer: bool = False):
+    """Spin up the gateway HTTP handler in isolation and return (caller, delivered)."""
+    _write_instance_config(tmp_path)
+    captured: dict[str, object] = {}
+    delivered: list[OutboundMessage] = []
+
+    async def _deliver(msg: OutboundMessage) -> None:
+        delivered.append(msg)
+
+    class _FakeServer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def serve_forever(self) -> None:
+            raise _StopGatewayError("stop")
+
+    async def _fake_start_server(handler, host, port):
+        captured["handler"] = handler
+        captured["host"] = host
+        captured["port"] = port
+        return _FakeServer()
+
+    class _DrainingReader:
+        def __init__(self, payload: bytes) -> None:
+            self._buf = payload
+
+        async def read(self, size: int) -> bytes:
+            chunk, self._buf = self._buf[:size], self._buf[size:]
+            return chunk
+
+    class _FakeWriter:
+        def __init__(self) -> None:
+            self.output = b""
+            self.closed = False
+
+        def write(self, data: bytes) -> None:
+            self.output += data
+
+        async def drain(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+
+        def get_extra_info(self, key: str):
+            if remote_peer and key == "peername":
+                return ("203.0.113.5", 54321)
+            return None
+
+    async def _build():
+        await cli_commands._gateway_http_server(
+            "127.0.0.1", 18791, deliver=_deliver, send_token=send_token,
+        )
+
+    import unittest.mock as _mock
+
+    with _mock.patch("asyncio.start_server", _fake_start_server):
+        try:
+            asyncio.run(_build())
+        except _StopGatewayError:
+            pass
+
+    def call(method: str, path: str, *, body: bytes = b"", headers: dict[str, str] | None = None):
+        hdrs = headers or {}
+        lines = [f"{method} {path} HTTP/1.1", "Host: localhost"]
+        for k, v in hdrs.items():
+            lines.append(f"{k}: {v}")
+        request = ("\r\n".join(lines) + "\r\n\r\n").encode() + body
+        writer = _FakeWriter()
+        handler = captured["handler"]
+        asyncio.run(handler(_DrainingReader(request), writer))
+        return writer
+
+    return call, delivered
+
+
+def test_gateway_send_endpoint_delivers_cross_channel_message(tmp_path):
+    call, delivered = _gateway_send_test_factory(tmp_path)
+    body = json.dumps(
+        {"channel": "telegram", "chat_id": "123", "content": "hi", "media": ["/a/b.png"]}
+    ).encode()
+    writer = call("POST", "/api/send", body=body, headers={"Content-Length": str(len(body))})
+
+    assert writer.closed is True
+    response = writer.output.decode()
+    assert "HTTP/1.0 200 OK" in response
+    assert response.endswith("\r\n\r\n" + '{"ok":true}')
+    assert len(delivered) == 1
+    msg = delivered[0]
+    assert msg.channel == "telegram"
+    assert msg.chat_id == "123"
+    assert msg.content == "hi"
+    assert msg.media == ["/a/b.png"]
+    assert msg.metadata.get("_record_channel_delivery") is True
+
+
+def test_gateway_send_endpoint_rejects_missing_fields(tmp_path):
+    call, _ = _gateway_send_test_factory(tmp_path)
+    body = json.dumps({"channel": "telegram"}).encode()  # no chat_id/content
+    writer = call("POST", "/api/send", body=body, headers={"Content-Length": str(len(body))})
+    response = writer.output.decode()
+    assert "HTTP/1.0 400 Bad Request" in response
+
+
+def test_gateway_send_endpoint_requires_token_for_remote_peer(tmp_path):
+    # Token set + remote peer without auth header → 401.
+    call, _ = _gateway_send_test_factory(tmp_path, send_token="s3cr3t", remote_peer=True)
+    body = json.dumps({"channel": "telegram", "chat_id": "1", "content": "x"}).encode()
+    writer = call("POST", "/api/send", body=body, headers={"Content-Length": str(len(body))})
+    assert "HTTP/1.0 401 Unauthorized" in writer.output.decode()
+
+    # Same peer but correct bearer token → delivered.
+    writer = call(
+        "POST",
+        "/api/send",
+        body=body,
+        headers={"Content-Length": str(len(body)), "Authorization": "Bearer s3cr3t"},
+    )
+    assert "HTTP/1.0 200 OK" in writer.output.decode()
+
+
+def test_gateway_send_endpoint_forbids_remote_peer_without_token(tmp_path):
+    call, _ = _gateway_send_test_factory(tmp_path, send_token="", remote_peer=True)
+    body = json.dumps({"channel": "telegram", "chat_id": "1", "content": "x"}).encode()
+    writer = call("POST", "/api/send", body=body, headers={"Content-Length": str(len(body))})
+    assert "HTTP/1.0 403 Forbidden" in writer.output.decode()
+
+
+def test_cli_send_callback_relays_cross_channel_to_gateway(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeResp:
+        status_code = 200
+        text = ""
+        reason_phrase = "OK"
+
+    class _FakeAsyncClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return _FakeResp()
+
+    monkeypatch.setattr(cli_commands.httpx, "AsyncClient", _FakeAsyncClient)
+
+    local_published: list[OutboundMessage] = []
+
+    async def _local_publish(msg):
+        local_published.append(msg)
+
+    bus = MagicMock()
+    callback = cli_commands._make_cli_send_callback(
+        bus,
+        gateway_url="http://127.0.0.1:18790/api/send",
+        gateway_token="tok",
+        local_publish=_local_publish,
+    )
+
+    cross = OutboundMessage(channel="telegram", chat_id="9", content="hello", media=["/x.png"])
+    asyncio.run(callback(cross))
+    assert captured["url"] == "http://127.0.0.1:18790/api/send"
+    assert captured["headers"]["Authorization"] == "Bearer tok"
+    assert captured["json"]["channel"] == "telegram"
+    assert captured["json"]["media"] == ["/x.png"]
+    assert local_published == []  # not delivered locally
+
+    # CLI-local sends keep prior in-process behavior.
+    cli_msg = OutboundMessage(channel="cli", chat_id="direct", content="y")
+    asyncio.run(callback(cli_msg))
+    assert local_published == [cli_msg]
+    assert "url" not in captured or captured.get("url")  # no new http call made above
+
+
+def test_cli_send_callback_raises_when_gateway_unreachable(monkeypatch):
+    import httpx
+
+    class _FailingClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, *_, **__):
+            raise httpx.ConnectError("boom", request=None)
+
+    monkeypatch.setattr(cli_commands.httpx, "AsyncClient", _FailingClient)
+
+    async def _noop(_msg):
+        return None
+
+    callback = cli_commands._make_cli_send_callback(
+        MagicMock(),
+        gateway_url="http://127.0.0.1:9/api/send",
+        gateway_token=None,
+        local_publish=_noop,
+    )
+    with pytest.raises(RuntimeError, match="gateway unreachable"):
+        asyncio.run(callback(OutboundMessage(channel="telegram", chat_id="1", content="x")))
+
+
+def test_cli_send_callback_errors_without_gateway_url():
+    async def _noop(_msg):
+        return None
+
+    callback = cli_commands._make_cli_send_callback(
+        MagicMock(), gateway_url="", gateway_token=None, local_publish=_noop,
+    )
+    with pytest.raises(RuntimeError, match="no gateway URL is configured"):
+        asyncio.run(callback(OutboundMessage(channel="telegram", chat_id="1", content="x")))
+
+
+def test_send_token_config_round_trips_through_alias():
+    config = Config()
+    assert config.gateway.send_token == ""
+    config.gateway.send_token = "abc"
+    dumped = config.model_dump(by_alias=True)
+    assert dumped["gateway"]["sendToken"] == "abc"
+
+
 def test_gateway_shutdown_lets_agent_task_own_mcp_cleanup(
     monkeypatch,
     tmp_path: Path,
