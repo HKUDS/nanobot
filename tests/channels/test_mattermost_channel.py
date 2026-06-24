@@ -11,12 +11,12 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.pairing import PAIRING_CODE_META_KEY
 from nanobot.channels.mattermost import (
     MATTERMOST_MAX_MESSAGE_LEN,
     MattermostChannel,
     MattermostConfig,
 )
+from nanobot.pairing import PAIRING_CODE_META_KEY
 
 
 class _FakeHTTPClient:
