@@ -327,3 +327,6 @@ class TestStripReasoningTags:
         assert strip_reasoning_tags("Preparing final response</thinking>") == (
             "Preparing final response"
         )
+
+    def test_non_string_reasoning_ignored(self):
+        assert strip_reasoning_tags(object()) == ""

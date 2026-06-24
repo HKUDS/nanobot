@@ -80,8 +80,10 @@ def strip_think(text: str) -> str:
     return text.strip()
 
 
-def strip_reasoning_tags(text: str) -> str:
+def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
+    if not isinstance(text, str):
+        return ""
     text = re.sub(r"^\s*<(?:think|thinking|thought)/>\s*", "", text)
     text = re.sub(r"\s*<(?:think|thinking|thought)/>\s*$", "", text)
     text = re.sub(r"^\s*<(?:think|thinking|thought)>\s*", "", text)
