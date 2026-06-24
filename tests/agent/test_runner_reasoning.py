@@ -381,8 +381,8 @@ async def test_runner_strips_thinking_tags_from_native_thinking_deltas():
         *, on_content_delta=None, on_thinking_delta=None, **kwargs
     ):
         if on_thinking_delta:
-            await on_thinking_delta("<thinking>")
-            await on_thinking_delta("Preparing final response")
+            await on_thinking_delta("<thinking")
+            await on_thinking_delta(">Preparing final response")
             await on_thinking_delta("</thinking>")
         if on_content_delta:
             await on_content_delta("done")

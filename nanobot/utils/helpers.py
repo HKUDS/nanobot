@@ -84,10 +84,15 @@ def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
     if not isinstance(text, str):
         return ""
+    partial_reasoning_tag = (
+        r"</?(?:t|th|thi|thin|think|thinki|thinkin|thinking|tho|thou|thoug|though|thought)>?"
+    )
+    text = re.sub(rf"^\s*(?:{partial_reasoning_tag})$", "", text)
     text = re.sub(r"^\s*<(?:think|thinking|thought)/>\s*", "", text)
     text = re.sub(r"\s*<(?:think|thinking|thought)/>\s*$", "", text)
     text = re.sub(r"^\s*<(?:think|thinking|thought)>\s*", "", text)
     text = re.sub(r"\s*</(?:think|thinking|thought)>\s*$", "", text)
+    text = re.sub(rf"\s*(?:{partial_reasoning_tag})$", "", text)
     return text.strip()
 
 
