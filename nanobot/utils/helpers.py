@@ -20,12 +20,8 @@ def _tag_regex(tags: tuple[str, ...]) -> str:
 
 
 _THINKING_TAGS = ("think", "thinking", "thought")
-_INLINE_SELF_CLOSING_PRESERVED_TAGS = frozenset({"think", "thought"})
-_INLINE_SELF_CLOSING_THINKING_TAGS = tuple(
-    tag for tag in _THINKING_TAGS if tag not in _INLINE_SELF_CLOSING_PRESERVED_TAGS
-)
 _THINKING_TAG = _tag_regex(_THINKING_TAGS)
-_INLINE_SELF_CLOSING_THINKING_TAG = _tag_regex(_INLINE_SELF_CLOSING_THINKING_TAGS)
+_INLINE_SELF_CLOSING_THINKING_TAG = r"(?:thinking)"
 _THINKING_TAG_PREFIX = "|".join(
     sorted(
         {re.escape(tag[:i]) for tag in _THINKING_TAGS for i in range(1, len(tag) + 1)},
@@ -95,7 +91,6 @@ def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
     if not isinstance(text, str):
         return ""
-    text = re.sub(rf"^\s*(?:{_PARTIAL_THINKING_TAG})$", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}/>\s*", "", text)
     text = re.sub(rf"\s*<{_THINKING_TAG}/>\s*$", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>\s*", "", text)
