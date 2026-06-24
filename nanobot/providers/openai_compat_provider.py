@@ -517,7 +517,9 @@ class OpenAICompatProvider(LLMProvider):
     @staticmethod
     def _coerce_content_to_string(content: Any) -> str | None:
         """Coerce block/list content into plain text for strict string-only APIs."""
-        if content is None or isinstance(content, str):
+        if content is None or content == "(empty)":
+            return " "
+        if isinstance(content, str):
             return content
         text = OpenAICompatProvider._extract_text_content(content)
         if isinstance(text, str) and text:
