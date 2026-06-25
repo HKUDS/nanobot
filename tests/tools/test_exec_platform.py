@@ -105,7 +105,7 @@ class TestSpawnUnix:
 
         args = mock_exec.call_args[0]
         assert "bash" in args[0]
-        assert "-l" in args
+        assert "-l" not in args
         assert "-c" in args
         assert "echo hi" in args
 
