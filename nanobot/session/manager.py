@@ -423,17 +423,17 @@ class SessionManager:
 
     @staticmethod
     def safe_key(key: str) -> str:
-        """Collision-resistant encoding of a session key for use as a filename stem.
+        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
+        return safe_filename(key.replace(":", "_"))
 
-        Uses base64url (no padding) so distinct keys always map to distinct
-        filenames, unlike the previous replace(":", "_") approach which
-        could collide (e.g. telegram:a_b vs telegram:a:b).
-        """
+    @staticmethod
+    def _storage_key(key: str) -> str:
+        """Collision-resistant encoding for internal session storage filenames."""
         return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
 
     def _get_session_path(self, key: str) -> Path:
         """Get the collision-resistant workspace path for a session."""
-        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+        return self.sessions_dir / f"{self._storage_key(key)}.jsonl"
 
     def _get_legacy_lossy_path(self, key: str) -> Path:
         """Previous workspace session path using lossy ':' to '_' replacement."""

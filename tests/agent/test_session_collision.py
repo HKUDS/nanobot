@@ -40,8 +40,8 @@ def test_distinct_keys_have_distinct_filenames(tmp_path: Path, monkeypatch) -> N
     second = sm._get_session_path("telegram:a:b")
 
     assert first.name != second.name
-    assert first.name == f"{SessionManager.safe_key('telegram:a_b')}.jsonl"
-    assert second.name == f"{SessionManager.safe_key('telegram:a:b')}.jsonl"
+    assert sm.safe_key("telegram:a_b") == sm.safe_key("telegram:a:b")
+    assert sm._storage_key("telegram:a_b") != sm._storage_key("telegram:a:b")
 
 
 def test_save_uses_new_path_not_lossy(tmp_path: Path, monkeypatch) -> None:
@@ -93,14 +93,19 @@ def test_load_migrates_lossy_to_new_path(tmp_path: Path, monkeypatch) -> None:
     assert not lossy_path.exists()
 
 
-def test_safe_key_is_collision_resistant() -> None:
+def test_safe_key_is_lossy() -> None:
+    assert SessionManager.safe_key("telegram:a_b") == SessionManager.safe_key("telegram:a:b")
+
+
+def test_storage_key_is_collision_resistant() -> None:
     encoded = {
-        SessionManager.safe_key("a:b"),
-        SessionManager.safe_key("a_b"),
-        SessionManager.safe_key("a:b:c"),
+        SessionManager._storage_key("a:b"),
+        SessionManager._storage_key("a_b"),
+        SessionManager._storage_key("a:b:c"),
     }
 
     assert len(encoded) == 3
+    assert SessionManager._storage_key("telegram:a_b") != SessionManager._storage_key("telegram:a:b")
 
 
 def test_lossy_path_helper_returns_expected_path(tmp_path: Path, monkeypatch) -> None:
@@ -109,3 +114,32 @@ def test_lossy_path_helper_returns_expected_path(tmp_path: Path, monkeypatch) ->
     expected = sm.sessions_dir / f"{safe_filename(key.replace(':', '_'))}.jsonl"
 
     assert sm._get_legacy_lossy_path(key) == expected
+
+
+def test_storage_paths_are_distinct_when_keys_collide_under_safe_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sm = _manager(tmp_path, monkeypatch)
+    first = Session(key="telegram:a_b")
+    first.add_message("user", "underscore history")
+    second = Session(key="telegram:a:b")
+    second.add_message("user", "colon history")
+
+    sm.save(first)
+    sm.save(second)
+
+    assert sm.safe_key(first.key) == sm.safe_key(second.key)
+    assert sm._get_session_path(first.key).exists()
+    assert sm._get_session_path(second.key).exists()
+    assert sm._get_session_path(first.key) != sm._get_session_path(second.key)
+
+    sm.invalidate(first.key)
+    sm.invalidate(second.key)
+    loaded_first = sm._load(first.key)
+    loaded_second = sm._load(second.key)
+
+    assert loaded_first is not None
+    assert loaded_second is not None
+    assert loaded_first.messages[0]["content"] == "underscore history"
+    assert loaded_second.messages[0]["content"] == "colon history"
