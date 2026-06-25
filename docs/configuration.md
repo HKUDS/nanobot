@@ -882,6 +882,29 @@ Some OpenAI-compatible gateways expose request-body extensions such as vLLM guid
 }
 ```
 
+If a custom OpenAI-compatible endpoint exposes a provider-specific thinking toggle, set `thinkingStyle` so nanobot can translate `reasoningEffort` into the right request body. Supported styles are `thinking_type` (`{"thinking":{"type":"enabled"}}`), `enable_thinking` (`{"enable_thinking": true}`), and `reasoning_split` (`{"reasoning_split": true}`):
+
+```json
+{
+  "providers": {
+    "companyProxy": {
+      "apiKey": "${COMPANY_PROXY_API_KEY}",
+      "apiBase": "https://api.your-provider.com/v1",
+      "thinkingStyle": "enable_thinking"
+    }
+  },
+  "modelPresets": {
+    "company": {
+      "provider": "companyProxy",
+      "model": "served-model-name",
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+Leave `thinkingStyle` unset unless the endpoint explicitly documents one of those wire formats. `extraBody` is still applied last, so advanced users can override the generated value.
+
 </details>
 
 <a id="local-providers"></a>
