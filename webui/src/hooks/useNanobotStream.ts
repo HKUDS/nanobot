@@ -73,6 +73,19 @@ function toolEventName(event: ToolProgressEvent): string {
       : "";
 }
 
+function toolProgressEventKey(event: ToolProgressEvent): string | null {
+  if (typeof event.call_id === "string" && event.call_id.length > 0) {
+    return `call:${event.call_id}`;
+  }
+  const name = toolEventName(event);
+  if (!name) return null;
+  const fn = (event as { function?: { arguments?: unknown } }).function;
+  const args = fn?.arguments ?? (event as { arguments?: unknown }).arguments;
+  if (typeof args === "string" && args.length > 0) return `trace:${name}:${args}`;
+  if (args && typeof args === "object") return `trace:${name}:${JSON.stringify(args)}`;
+  return null;
+}
+
 function clarificationAnswerFromToolEvents(events: ToolProgressEvent[]): string | null {
   for (const event of events) {
     if (toolEventName(event) !== ASK_CLARIFICATION_TOOL_NAME) continue;
@@ -102,6 +115,38 @@ function hasAssistantAnswerInCurrentTurn(
     }
   }
   return false;
+}
+
+function hasClarificationFallbackAnswerInCurrentTurn(
+  messages: UIMessage[],
+  content: string,
+  turn: UIMessageTurnFields,
+): boolean {
+  let hasAnswer = false;
+  let hasClarificationTrace = false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user") break;
+    if (!matchesTurn(message, turn)) continue;
+    if (
+      message.role === "assistant"
+      && message.kind !== "trace"
+      && message.content === content
+    ) {
+      hasAnswer = true;
+      continue;
+    }
+    if (message.kind !== "trace") continue;
+    for (const event of message.toolEvents ?? []) {
+      if (toolEventName(event) !== ASK_CLARIFICATION_TOOL_NAME) continue;
+      if (event.phase !== "end") continue;
+      if (typeof event.result !== "string") continue;
+      if (event.result.trim() === content.trim()) {
+        hasClarificationTrace = true;
+      }
+    }
+  }
+  return hasAnswer && hasClarificationTrace;
 }
 
 /** Find a still-open streamed assistant turn. Closed stream segments stay visible
@@ -290,18 +335,7 @@ function absorbCompleteAssistantMessage(
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
 ): UIMessage[] {
   const last = prev[prev.length - 1];
-  if (last && isReasoningOnlyPlaceholder(last) && matchesTurn(last, message)) {
-    return [
-      ...prev.slice(0, -1),
-      {
-        ...last,
-        ...message,
-        isStreaming: false,
-        reasoningStreaming: false,
-      },
-    ];
-  }
-  if (!hasAssistantAnswerInCurrentTurn(prev, message.content, message)) {
+  if (!last || !isReasoningOnlyPlaceholder(last) || !matchesTurn(last, message)) {
     return [
       ...prev,
       {
@@ -312,7 +346,15 @@ function absorbCompleteAssistantMessage(
       },
     ];
   }
-  return prev;
+  return [
+    ...prev.slice(0, -1),
+    {
+      ...last,
+      ...message,
+      isStreaming: false,
+      reasoningStreaming: false,
+    },
+  ];
 }
 
 function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
@@ -352,6 +394,27 @@ function filterCoveredFileEditToolEvents(
 ): ToolProgressEvent[] {
   if (events.length === 0) return events;
   return events.filter((event) => !hasFileEditForToolEvent(messages, event));
+}
+
+function findToolTraceIndex(
+  prev: UIMessage[],
+  segmentId: string | null,
+  incoming: ToolProgressEvent[],
+): number | null {
+  const incomingKeys = new Set(
+    incoming.map(toolProgressEventKey).filter((key): key is string => key !== null),
+  );
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const candidate = prev[i];
+    if (candidate.role === "user") break;
+    if (candidate.kind !== "trace") continue;
+    if (segmentId && candidate.activitySegmentId === segmentId) return i;
+    for (const event of candidate.toolEvents ?? []) {
+      const key = toolProgressEventKey(event);
+      if (key && incomingKeys.has(key)) return i;
+    }
+  }
+  return null;
 }
 
 function stripCoveredFileEditToolHints(message: UIMessage, edits: UIFileEdit[]): UIMessage {
@@ -918,8 +981,8 @@ export function useNanobotStream(
           return;
         }
         // Intermediate agent breadcrumbs (tool-call hints, raw progress).
-        // Attach them to the last trace row if it was the last emitted item
-        // so a sequence of calls collapses into one compact trace group.
+        // Attach them to the current trace group so start/end tool phases
+        // collapse even when a fallback answer is rendered between updates.
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
           const structuredEvents = normalizeToolProgressEvents(ev.tool_events);
           const turn = turnFieldsFromEvent(ev, "activity");
@@ -939,34 +1002,30 @@ export function useNanobotStream(
                   : [];
             let next = base;
             if (lines.length > 0) {
-              const last = base[base.length - 1];
-              if (
-                last
-                && last.kind === "trace"
-                && !last.isStreaming
-                && (!last.activitySegmentId || last.activitySegmentId === segmentId)
-              ) {
-                const previousTraces = last.traces?.length
-                  ? last.traces
-                  : last.content
-                    ? [last.content]
+              const targetIndex = findToolTraceIndex(base, segmentId, visibleStructuredEvents);
+              if (targetIndex !== null) {
+                const target = base[targetIndex];
+                const previousTraces = target.traces?.length
+                  ? target.traces
+                  : target.content
+                    ? [target.content]
                     : [];
                 const mergedLines = visibleStructuredEvents.length > 0
                   ? mergeUniqueToolTraceLines(previousTraces, structuredLines)
                   : null;
                 const merged: UIMessage = {
-                  ...last,
+                  ...target,
                   traces: mergedLines ? mergedLines.traces : [...previousTraces, ...lines],
                   content: mergedLines
                     ? mergedLines.traces[mergedLines.traces.length - 1]
                     : lines[lines.length - 1],
                   toolEvents: visibleStructuredEvents.length
-                    ? mergeToolProgressEvents(last.toolEvents, visibleStructuredEvents)
-                    : last.toolEvents,
-                  activitySegmentId: last.activitySegmentId ?? segmentId,
+                    ? mergeToolProgressEvents(target.toolEvents, visibleStructuredEvents)
+                    : target.toolEvents,
+                  activitySegmentId: target.activitySegmentId ?? segmentId,
                   ...turn,
                 };
-                next = [...base.slice(0, -1), merged];
+                next = replaceMessageAt(base, targetIndex, merged);
               } else {
                 next = [
                   ...base,
@@ -985,6 +1044,7 @@ export function useNanobotStream(
               }
             }
             if (!clarificationAnswer) return next;
+            if (hasAssistantAnswerInCurrentTurn(next, clarificationAnswer, answerTurn)) return next;
             return absorbCompleteAssistantMessage(next, {
               content: clarificationAnswer,
               ...answerTurn,
@@ -1009,6 +1069,13 @@ export function useNanobotStream(
           activeAssistantRef.current = null;
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
           const content = ev.text;
+          const answerTurn = turnFieldsFromEvent(ev, "answer");
+          if (
+            content
+            && hasClarificationFallbackAnswerInCurrentTurn(filtered, content, answerTurn)
+          ) {
+            return filtered;
+          }
           const lat =
             typeof ev.latency_ms === "number" && ev.latency_ms >= 0
               ? Math.round(ev.latency_ms)
@@ -1018,7 +1085,7 @@ export function useNanobotStream(
             ...(hasMedia ? { media } : {}),
             ...(lat !== undefined ? { latencyMs: lat } : {}),
             ...(ev.source ? { source: ev.source } : {}),
-            ...turnFieldsFromEvent(ev, "answer"),
+            ...answerTurn,
           });
         });
         if (hasMedia) {

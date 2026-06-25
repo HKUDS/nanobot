@@ -475,14 +475,28 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results = [tool_message]
+                    context.tool_results = [result]
+                    context.tool_events = [event]
+                    if event.get("status") != "ok":
+                        await self._emit_checkpoint(
+                            spec,
+                            {
+                                "phase": "tools_completed",
+                                "iteration": iteration,
+                                "model": spec.model,
+                                "assistant_message": assistant_message,
+                                "completed_tool_results": completed_tool_results,
+                                "pending_tool_calls": [],
+                            },
+                        )
+                        await hook.after_iteration(context)
+                        continue
                     final_content = (
                         f"Error: {type(fatal_error).__name__}: {fatal_error}"
                         if fatal_error is not None else content
                     )
                     stop_reason = "tool_error" if fatal_error is not None else "clarification"
                     self._append_final_message(messages, final_content)
-                    context.tool_results = [result]
-                    context.tool_events = [event]
                     context.final_content = final_content
                     if fatal_error is not None:
                         error = final_content

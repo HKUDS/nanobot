@@ -251,6 +251,23 @@ class TestConvertMessages:
         assert len(call_ids[0]) <= 64
         assert call_ids == [call_ids[0], call_ids[0]]
 
+    def test_mid_length_tool_call_ids_are_preserved_for_responses_api(self):
+        call_id = "call_" + ("x" * 40)
+
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": call_id,
+                    "function": {"name": "ask_clarification", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": call_id, "content": "Which option?"},
+        ])
+
+        assert [item["call_id"] for item in items] == [call_id, call_id]
+
     def test_tool_message_dict_content(self):
         _, items = convert_messages([{
             "role": "tool",

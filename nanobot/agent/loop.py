@@ -875,7 +875,7 @@ class AgentLoop:
             reset_request_context(request_token)
             reset_file_states(file_state_token)
         self._last_usage = result.usage
-        final_content_streamed = result.final_content_streamed
+        final_content_streamed = _run_result_final_content_streamed(result)
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(
@@ -1531,10 +1531,19 @@ class AgentLoop:
             "running",
             started_at=ctx.visible_run_started_at,
         )
+        legacy_final_content_streamed = False
+
+        async def _on_stream(delta: str) -> None:
+            nonlocal legacy_final_content_streamed
+            if delta:
+                legacy_final_content_streamed = True
+            if ctx.on_stream is not None:
+                await ctx.on_stream(delta)
+
         result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
-            on_stream=ctx.on_stream,
+            on_stream=_on_stream if ctx.on_stream is not None else None,
             on_stream_end=ctx.on_stream_end,
             on_retry_wait=ctx.on_retry_wait,
             session=ctx.session,
@@ -1556,6 +1565,8 @@ class AgentLoop:
         ctx.stop_reason = stop_reason
         ctx.had_injections = had_injections
         ctx.final_content_streamed = _run_result_final_content_streamed(result)
+        if not hasattr(result, "final_content_streamed"):
+            ctx.final_content_streamed = ctx.final_content_streamed or legacy_final_content_streamed
         await turn_continuation.maybe_continue_turn(ctx)
         return "ok"
 

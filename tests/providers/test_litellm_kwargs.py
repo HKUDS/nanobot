@@ -1122,7 +1122,42 @@ def test_openai_compat_shortens_overlong_tool_call_ids_for_chat_completions() ->
 
     tool_call_id = kwargs["messages"][1]["tool_calls"][0]["id"]
     tool_result_id = kwargs["messages"][2]["tool_call_id"]
-    assert len(tool_call_id) <= 64
+    assert len(tool_call_id) <= 40
+    assert tool_call_id == tool_result_id
+
+
+def test_openai_compat_shortens_mid_length_tool_call_ids_for_chat_completions() -> None:
+    call_id = "call_" + ("x" * 40)
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    kwargs = provider._build_kwargs(
+        messages=[
+            {"role": "user", "content": "设计一个齿轮"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [_tool_call(call_id)],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": "ask_clarification",
+                "content": "请选择设计方式",
+            },
+            {"role": "user", "content": "按常见参数"},
+        ],
+        tools=None,
+        model="gpt-5.5",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    tool_call_id = kwargs["messages"][1]["tool_calls"][0]["id"]
+    tool_result_id = kwargs["messages"][2]["tool_call_id"]
+    assert len(tool_call_id) <= 40
     assert tool_call_id == tool_result_id
 
 

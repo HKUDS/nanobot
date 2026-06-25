@@ -56,7 +56,7 @@ def format_clarification_question(
             "description": "Optional answer choices to show the user.",
         },
     },
-    "required": ["question", "clarification_type"],
+    "required": ["question"],
     "additionalProperties": False,
 })
 class AskClarificationTool(Tool):
@@ -81,7 +81,7 @@ class AskClarificationTool(Tool):
     async def execute(
         self,
         question: str,
-        clarification_type: str,
+        clarification_type: str = "missing_info",
         context: str | None = None,
         options: list[str] | None = None,
         **kwargs: Any,

@@ -58,6 +58,45 @@ async def test_ask_clarification_short_circuits_tool_batch():
     assert result.messages[-1]["content"] == result.final_content
 
 
+@pytest.mark.asyncio
+async def test_ask_clarification_error_continues_for_model_repair():
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.agent.tools.clarification import AskClarificationTool
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_bad_clarify",
+                    name="ask_clarification",
+                    arguments={"clarification_type": "missing_info"},
+                ),
+            ],
+        ),
+        LLMResponse(content="Please tell me the span."),
+    ])
+    tools = ToolRegistry()
+    tools.register(AskClarificationTool())
+
+    result = await AgentRunner(provider).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "Design a portal frame"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "Please tell me the span."
+    assert result.stop_reason == "completed"
+    assert provider.chat_with_retry.await_count == 2
+    assert result.messages[-2]["role"] == "tool"
+    assert "Error: Invalid parameters" in result.messages[-2]["content"]
+    assert result.messages[-1]["content"] == "Please tell me the span."
+
+
 def test_snip_history_keeps_latest_clarification_pair():
     from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
@@ -109,7 +148,7 @@ async def test_ask_clarification_tool_formats_question_options():
     tool = AskClarificationTool()
 
     assert tool.name == "ask_clarification"
-    assert "clarification_type" in tool.parameters["required"]
+    assert tool.parameters["required"] == ["question"]
     assert tool.parameters["properties"]["clarification_type"]["enum"] == [
         "missing_info",
         "ambiguous_requirement",
@@ -131,3 +170,14 @@ async def test_ask_clarification_tool_formats_question_options():
         "1. development\n"
         "2. staging"
     )
+
+
+@pytest.mark.asyncio
+async def test_ask_clarification_tool_accepts_schema_minimum_arguments():
+    from nanobot.agent.tools.clarification import AskClarificationTool
+
+    tool = AskClarificationTool()
+
+    result = await tool.execute(question="What span should I use?")
+
+    assert result == "What span should I use?"
