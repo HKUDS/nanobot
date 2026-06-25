@@ -1482,6 +1482,8 @@ Global settings that apply to all channels. Configure under the `channels` secti
 }
 ```
 
+Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API 10.1 `sendRichMessage` rendering; leave it disabled for Telegram Web clients that show unsupported-message errors for rich messages.
+
 ### Retry Behavior
 
 Retry is intentionally simple.

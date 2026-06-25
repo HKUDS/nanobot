@@ -79,6 +79,8 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 ```
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`. Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `richMessages` defaults to `false`. Set it to `true` only if your Telegram client supports Bot API 10.1 rich messages and you want richer markdown rendering; keep it disabled for Telegram Web, which may show unsupported-message errors for rich messages.
 
 
 **3. Run**
