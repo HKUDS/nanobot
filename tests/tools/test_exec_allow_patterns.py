@@ -66,11 +66,20 @@ def test_allow_patterns_do_not_allow_chained_command_bypass():
     assert "deny pattern filter" in result.lower()
 
 
-def test_allow_patterns_strip_shell_comments_before_matching():
-    """Comments are stripped before allow and deny pattern checks."""
-    tool = ExecTool(allow_patterns=[r"echo\s+hello"])
-    result = tool._guard_command("echo hello # comment with rm -rf /", "/tmp")
-    assert result is None
+def test_allow_patterns_do_not_allow_comment_tail_bypass():
+    """Comment tails must not make a non-allowlisted command match."""
+    tool = ExecTool(allow_patterns=[r"echo allowlisted"])
+    result = tool._guard_command("touch canary # echo allowlisted", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_deny_patterns_search_original_command_with_quoted_hash():
+    """Deny checks must still inspect text after a quoted hash."""
+    tool = ExecTool(deny_patterns=[r"\brm\s+-rf\s+/"])
+    result = tool._guard_command('echo "#"; rm -rf /', "/tmp")
+    assert result is not None
+    assert "deny pattern filter" in result.lower()
 
 
 def test_allow_patterns_fullmatch_allows_exact_command():
