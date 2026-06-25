@@ -1013,6 +1013,7 @@ def _build_mcp_server_config(
     headers: dict[str, str],
     use_proxy: bool,
     tool_timeout: int,
+    idle_timeout: int,
     enabled_tools: list[str],
     stdio_error: str,
     remote_error: str,
@@ -1034,6 +1035,7 @@ def _build_mcp_server_config(
         headers=headers,
         use_proxy=use_proxy,
         tool_timeout=tool_timeout,
+        idle_timeout=idle_timeout,
         enabled_tools=enabled_tools,
     )
 
@@ -1050,6 +1052,13 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
             tool_timeout = max(5, min(int(raw_timeout), 600))
         except ValueError as exc:
             raise McpPresetError("tool_timeout must be an integer") from exc
+    raw_idle = (_query_first(query, "idle_timeout") or "").strip()
+    idle_timeout = 0
+    if raw_idle:
+        try:
+            idle_timeout = max(0, min(int(raw_idle), 86400))
+        except ValueError as exc:
+            raise McpPresetError("idle_timeout must be an integer") from exc
     cfg = _build_mcp_server_config(
         transport_raw=_query_first(query, "transport"),
         command=command,
@@ -1061,6 +1070,7 @@ def _custom_server_from_query(query: QueryParams) -> tuple[str, MCPServerConfig]
         headers=headers,
         use_proxy=_proxy_enabled(query),
         tool_timeout=tool_timeout,
+        idle_timeout=idle_timeout,
         enabled_tools=_parse_enabled_tools(parameter_value(query, "enabled_tools")),
         stdio_error="stdio MCP servers require a command",
         remote_error="remote MCP servers require a URL",
@@ -1086,6 +1096,11 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         timeout_int = max(5, min(int(cast(Any, tool_timeout)), 600))
     except (TypeError, ValueError):
         timeout_int = _DEFAULT_CUSTOM_TIMEOUT
+    idle_timeout = server.get("idleTimeout", server.get("idle_timeout", 0))
+    try:
+        idle_timeout_int = max(0, min(int(idle_timeout), 86400))
+    except (TypeError, ValueError):
+        idle_timeout_int = 0
     if not isinstance(args_value, list):
         raise McpPresetError(f"MCP server '{server_name}' args must be a string array")
     args = cast(list[object], args_value)
@@ -1122,6 +1137,7 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         headers=typed_headers,
         use_proxy=use_proxy,
         tool_timeout=timeout_int,
+        idle_timeout=idle_timeout_int,
         enabled_tools=cast(list[str], enabled_tools_value),
         stdio_error=f"MCP server '{server_name}' stdio transport requires a command",
         remote_error=f"MCP server '{server_name}' remote transport requires a URL",

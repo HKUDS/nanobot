@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import time
 import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
@@ -93,6 +94,30 @@ async def _close_mcp_connections(connections: Mapping[str, MCPConnection]) -> No
             cancellation = cancellation or exc
     if cancellation is not None:
         raise cancellation
+
+
+# Idle-server tracking: last use per server plus one watchdog task each.
+# Any request (tool, resource, prompt) refreshes the timestamp; a server
+# idle longer than its configured idle_timeout is closed. idle_timeout 0
+# disables the watchdog for that server.
+_MCP_IDLE_POLL_SECONDS = 5.0
+_mcp_last_accessed: dict[str, float] = {}
+_mcp_watchdog_tasks: dict[str, asyncio.Task[None]] = {}
+
+
+async def _mcp_idle_watchdog(provider: MCPProvider, name: str, timeout: int) -> None:
+    try:
+        while True:
+            await asyncio.sleep(_MCP_IDLE_POLL_SECONDS)
+            if name not in provider.connected_server_names:
+                break
+            last_used = _mcp_last_accessed.get(name, 0)
+            if last_used and (time.time() - last_used) > timeout:
+                logger.info("MCP server '{}' idled for {}s, closing...", name, timeout)
+                await provider._close_server(name)
+                break
+    except asyncio.CancelledError:
+        pass
 
 
 class _OwnedMCPConnection:
@@ -605,6 +630,7 @@ class _MCPWrapperBase(Tool):
             return await request(session)
 
         while True:
+            _mcp_last_accessed[self._server_name] = time.time()
             # Keep the declaration bound to the actual session used by this
             # attempt, even if another call reconnects this wrapper meanwhile.
             session, replay_safe = self._session, self._replay_safe
@@ -1482,6 +1508,8 @@ class MCPProvider:
                 self._connections.update(connected)
                 self._record_connection_result(missing_servers, connected)
                 self._attach_reconnect_handlers(connected)
+                for name in connected:
+                    self._start_idle_watchdog(name)
                 if connected:
                     logger.info("MCP connected servers: {}", sorted(connected))
                 else:
@@ -1577,6 +1605,8 @@ class MCPProvider:
                 self._connections.update(connected)
                 self._record_connection_result(to_connect, connected)
                 self._attach_reconnect_handlers(connected)
+                for name in connected:
+                    self._start_idle_watchdog(name)
 
             failed = sorted(set(to_connect) - set(connected))
             unchanged = not removed and not added and not changed and not retry_missing
@@ -1690,6 +1720,8 @@ class MCPProvider:
             self._connections.update(connected)
             self._record_connection_result({server_name}, connected)
             self._attach_reconnect_handlers(connected)
+            for name in connected:
+                self._start_idle_watchdog(name)
             if server_name not in connected:
                 logger.warning(
                     "MCP server '{}' reconnect failed after session termination",
@@ -1698,7 +1730,28 @@ class MCPProvider:
                 return None
             return self._registry.get(tool_name)
 
+    def _start_idle_watchdog(self, name: str) -> None:
+        """(Re)start the idle watchdog for a freshly connected server."""
+        cfg = self._servers.get(name)
+        idle_timeout = cfg.idle_timeout if cfg is not None else 0
+        if idle_timeout <= 0:
+            return
+        _mcp_last_accessed[name] = time.time()
+        old = _mcp_watchdog_tasks.pop(name, None)
+        if old is not None:
+            old.cancel()
+        _mcp_watchdog_tasks[name] = asyncio.create_task(
+            _mcp_idle_watchdog(self, name, idle_timeout)
+        )
+
     async def _close_server(self, server_name: str) -> None:
+        watchdog = _mcp_watchdog_tasks.pop(server_name, None)
+        # Never cancel the watchdog from its own task: cancel() would raise
+        # CancelledError at the next await inside the close and interrupt
+        # the cleanup itself.
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
+        _mcp_last_accessed.pop(server_name, None)
         connection = self._connections.pop(server_name, None)
         if connection is None:
             return
@@ -1707,6 +1760,13 @@ class MCPProvider:
     async def aclose(self) -> None:
         """Close every connection while excluding reconnect and hot reload."""
         self._closing = True
+        watchdogs = list(_mcp_watchdog_tasks.values())
+        _mcp_watchdog_tasks.clear()
+        _mcp_last_accessed.clear()
+        for task in watchdogs:
+            task.cancel()
+        if watchdogs:
+            await asyncio.gather(*watchdogs, return_exceptions=True)
         async with self._lock:
             connections = dict(self._connections)
             self._connections.clear()
