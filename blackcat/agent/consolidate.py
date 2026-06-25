@@ -57,6 +57,7 @@ class Consolidator:
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = max_completion_tokens
         self.consolidation_ratio = consolidation_ratio
+        self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._unified_session = unified_session

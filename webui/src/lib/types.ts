@@ -100,10 +100,6 @@ export interface SessionAutomationJob {
   id: string;
   name: string;
   enabled: boolean;
-  protected?: boolean;
-  delete_after_run?: boolean;
-  created_at_ms?: number | null;
-  updated_at_ms?: number | null;
   schedule: {
     kind: "at" | "every" | "cron" | string;
     at_ms?: number | null;
@@ -113,49 +109,14 @@ export interface SessionAutomationJob {
   };
   payload: {
     message: string;
-    kind?: "agent_turn" | "system_event" | string;
   };
   state: {
     next_run_at_ms?: number | null;
-    last_run_at_ms?: number | null;
     last_status?: "ok" | "error" | "skipped" | string | null;
-    last_error?: string | null;
-    pending?: boolean;
-    run_history?: Array<{
-      run_at_ms: number;
-      status: "ok" | "error" | "skipped" | string;
-      duration_ms?: number;
-      error?: string | null;
-    }>;
   };
-  origin?: {
-    session_key?: string;
-    channel: string;
-    chat_id?: string;
-    title?: string;
-    preview?: string;
-  } | null;
 }
 
 export interface SessionAutomationsPayload { jobs: SessionAutomationJob[]; }
-export interface AutomationsPayload { jobs: SessionAutomationJob[]; }
-export interface AutomationUpdatePayload {
-  name?: string;
-  message?: string;
-  schedule?: {
-    kind: "at" | "every" | "cron";
-    at_ms?: number;
-    every_ms?: number;
-    expr?: string;
-    tz?: string;
-  };
-}
-
-export interface SessionDeleteResult {
-  deleted: boolean;
-  blocked_by_automations?: boolean;
-  automations?: SessionAutomationJob[];
-}
 
 export interface SkillSummary {
   name: string;
@@ -372,7 +333,6 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
-    reasoning_effort_values?: string[];
   }>;
   providers: Array<{
     name: string;
@@ -915,7 +875,6 @@ export interface WebuiThreadPersistedPayload {
   savedAt?: string;
   messages: UIMessage[];
   fork_boundary_message_count?: number;
-  has_pending_tool_calls?: boolean;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
 }

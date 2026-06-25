@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from blackcat.utils.helpers import stringify_text_blocks
+from blackcat.utils.formatting import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 
@@ -20,16 +20,10 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
     "Please try again or narrow the task."
 )
 
-FINALIZATION_RETRY_PROMPT = (
-    "Please provide your response to the user based on the conversation above."
-)
-
 BUDGET_EXHAUSTED_FINALIZATION_PROMPT = (
-    "The tool-call budget for this turn is exhausted. Based only on the "
-    "conversation and tool results above, provide a concise final response to "
-    "the user. Do not call or request tools. Do not claim the task is complete "
-    "unless the evidence above clearly shows it is complete. State what was "
-    "done, what remains, and the best next step if anything is incomplete."
+    "You have reached the maximum allowed tool rounds. "
+    "Please provide a final response based on the information you have gathered so far. "
+    "Do NOT call any more tools."
 )
 
 LENGTH_RECOVERY_PROMPT = (
@@ -40,6 +34,11 @@ LENGTH_RECOVERY_PROMPT = (
 SUSTAINED_GOAL_CONTINUE_PROMPT = (
     "You have an active sustained goal. Please continue working toward the "
     "objective using your tools, or call complete_goal if the work is truly finished."
+)
+
+FINALIZATION_RETRY_PROMPT = (
+    "You have already finished the tool work. Do not call any more tools. "
+    "Using only the conversation and tool results above, provide the final answer for the user now."
 )
 
 

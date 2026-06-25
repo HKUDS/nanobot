@@ -1,14 +1,14 @@
 import { createHostWebSocket } from "./runtime";
 import type {
-  ConnectionStatus,
-  GoalStateWsPayload,
-  InboundEvent,
-  Outbound,
-  OutboundCliAppMention,
-  OutboundImageGeneration,
-  OutboundMcpPresetMention,
-  OutboundMedia,
-  WorkspaceScopePayload,
+    ConnectionStatus,
+    GoalStateWsPayload,
+    InboundEvent,
+    Outbound,
+    OutboundCliAppMention,
+    OutboundImageGeneration,
+    OutboundMcpPresetMention,
+    OutboundMedia,
+    WorkspaceScopePayload,
 } from "./types";
 
 /** WebSocket readyState constants, referenced by value to stay portable
@@ -101,7 +101,7 @@ interface PendingTranscription {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export interface NanobotClientOptions {
+export interface BlackcatClientOptions {
   url: string;
   reconnect?: boolean;
   /** Called when a connection drops so the app can refresh its token. */
@@ -153,7 +153,7 @@ export class BlackcatClient {
   // and must not schedule a reconnect or flip status back to "reconnecting".
   private intentionallyClosed = false;
 
-  constructor(private options: NanobotClientOptions) {
+  constructor(private options: BlackcatClientOptions) {
     this.shouldReconnect = options.reconnect ?? true;
     this.maxBackoffMs = options.maxBackoffMs ?? 15_000;
     this.socketFactory = options.socketFactory ?? createDefaultSocket;

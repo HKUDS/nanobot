@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "blackcat",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "正在连接 blackcat…",
-      "boot": "正在加载 blackcat…"
+      "connecting": "正在连接 nanobot…",
+      "boot": "正在加载 nanobot…"
     },
     "error": {
-      "title": "无法连接到 blackcat",
-      "gatewayHint": "请确认 gateway 已启动（`blackcat gateway`），并且当前页面与 gateway 运行在同一台机器上。"
+      "title": "无法连接到 nanobot",
+      "gatewayHint": "请确认 gateway 已启动（`nanobot gateway`），并且当前页面与 gateway 运行在同一台机器上。"
     },
     "auth": {
       "title": "需要验证",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "系统",
-      "restartHint": "重启 blackcat 以应用运行时更改。",
-      "restart": "重启 blackcat",
+      "restartHint": "重启 nanobot 以应用运行时更改。",
+      "restart": "重启 nanobot",
       "restarting": "正在重启...",
       "restartEngine": "重启引擎",
       "restartingEngine": "正在重启引擎..."
@@ -33,11 +33,11 @@
       "completed": "重启已完成，用时 {{seconds}} 秒。"
     },
     "documentTitle": {
-      "base": "blackcat",
-      "chat": "{{title}} · blackcat"
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "blackcat Web UI —— 与你的 blackcat 工作区对话。"
+      "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
     }
   },
   "sidebar": {
@@ -131,7 +131,7 @@
       "language": "语言",
       "provider": "提供商",
       "model": "模型",
-      "restart": "重启 blackcat",
+      "restart": "重启 nanobot",
       "configPath": "配置路径",
       "activePreset": "当前预设",
       "gateway": "网关",
@@ -179,7 +179,7 @@
       "theme": "在浅色和深色外观之间切换。",
       "language": "选择 WebUI 使用的语言。",
       "provider": "选择处理新模型请求的提供商。",
-      "model": "设置 blackcat 默认使用的模型名称。",
+      "model": "设置 nanobot 默认使用的模型名称。",
       "configPath": "当前网关正在使用的配置文件。",
       "currentModel": "用于新的回复。",
       "selectedModelProvider": "由选中的模型决定。",
@@ -200,10 +200,10 @@
       "defaultAspectRatio": "当提示词没有指定比例时使用。",
       "defaultImageSize": "发送给支持此选项的提供商的尺寸提示。",
       "maxImagesPerTurn": "单次 generate_image 请求可生成的图片上限。",
-      "botName": "显示在 blackcat 使用展示名称的地方。",
+      "botName": "显示在 nanobot 使用展示名称的地方。",
       "botIcon": "显示在 Bot 名称旁的短 emoji 或文字。",
       "timezone": "用于日程和需要时间感知的回复。",
-      "cliAppsCatalog": "只安装 blackcat 可本地运行的应用 CLI 适配器；不会改动原生应用。",
+      "cliAppsCatalog": "只安装 nanobot 可本地运行的应用 CLI 适配器；不会改动原生应用。",
       "cliAppsFilter": "按应用、类别或能力搜索。",
       "localServiceAccess": "允许完全访问权限下的 shell 命令访问 localhost 服务。",
       "webuiDefaultAccess": "用于没有单独项目权限的 Web 聊天。",
@@ -288,7 +288,7 @@
       "saveCustom": "保存 MCP",
       "configImport": "导入 mcp.json",
       "importConfig": "导入",
-      "restartRequired": "重启 blackcat 以连接更新后的 MCP 工具。",
+      "restartRequired": "重启 nanobot 以连接更新后的 MCP 工具。",
       "toolsFound": "{{count}} 个工具",
       "loading": "正在加载 MCP 预设...",
       "empty": "没有匹配的 MCP 预设。",
@@ -344,11 +344,11 @@
       "loadError": "无法加载设置",
       "unsaved": "有未保存的更改。",
       "upToDate": "已是最新。",
-      "savedRestart": "已保存。重启 blackcat 后生效。",
+      "savedRestart": "已保存。重启 nanobot 后生效。",
       "restartAfterSaving": "保存更改后，在合适时重启。",
       "savedRestartApply": "已保存。准备好后重启。",
       "imageProviderRestart": "图片提供商更改已保存。准备好后重启。",
-      "hostRestartAfterSaving": "保存后 blackcat 会重启引擎。",
+      "hostRestartAfterSaving": "保存后 nanobot 会重启引擎。",
       "hostRestartPending": "已保存。准备好后会重启引擎。",
       "hostApiUnavailable": "宿主操作仅在原生应用中可用。",
       "logsOpened": "已打开日志文件夹。",
@@ -459,7 +459,7 @@
       "missingCredential": "启用图片生成前请先配置此提供商。"
     },
     "apps": {
-      "description": "添加 blackcat 可在聊天中使用的 App CLI 和 MCP 服务。",
+      "description": "添加 nanobot 可在聊天中使用的 App CLI 和 MCP 服务。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "全部",
@@ -747,7 +747,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "设计应用图标",
-          "prompt": "生成一个干净的 1:1 blackcat 应用图标：友好的机器人，简洁矢量风格，蓝白柔和配色，不要文字。"
+          "prompt": "生成一个干净的 1:1 nanobot 应用图标：友好的机器人，简洁矢量风格，蓝白柔和配色，不要文字。"
         },
         "sticker": {
           "title": "制作贴纸",
@@ -887,7 +887,7 @@
             "description": "取消这个对话中正在运行的 agent 回合。"
           },
           "restart": {
-            "title": "重启 blackcat",
+            "title": "重启 nanobot",
             "description": "原地重启 bot 进程。"
           },
           "status": {
@@ -1020,7 +1020,7 @@
     "close": "关闭文件预览",
     "loading": "正在加载预览...",
     "failed": "无法预览这个文件。",
-    "routeMissing": "文件预览需要最新的 gateway。请重启 blackcat gateway 后再试。",
+    "routeMissing": "文件预览需要最新的 gateway。请重启 nanobot gateway 后再试。",
     "resize": "调整文件预览宽度",
     "truncated": "文件较大，当前只显示前半部分预览。"
   },

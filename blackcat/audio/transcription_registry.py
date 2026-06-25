@@ -90,11 +90,22 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         default_api_base="https://api.stepfun.com/v1",
     ),
     TranscriptionProviderSpec(
+        name="stepfun",
+        default_model="stepaudio-2.5-asr",
+        adapter="blackcat.providers.transcription:StepFunTranscriptionProvider",
+    ),
+    TranscriptionProviderSpec(
         name="assemblyai",
         default_model="universal-3-pro,universal-2",
         adapter="blackcat.providers.transcription:AssemblyAITranscriptionProvider",
         env_key="ASSEMBLYAI_API_KEY",
         default_api_base="https://api.assemblyai.com/v2",
+    ),
+    TranscriptionProviderSpec(
+        name="siliconflow",
+        default_model="FunAudioLLM/SenseVoiceSmall",
+        adapter="blackcat.providers.transcription:OpenAITranscriptionProvider",
+        aliases=("silicon",),
     ),
 )
 

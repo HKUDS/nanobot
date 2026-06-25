@@ -5,24 +5,15 @@ import i18n from "@/i18n";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
-  fetchSessionAutomations,
   fetchWebuiThread,
   listSessions,
 } from "@/lib/api";
-import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
-import type {
-  ChatSummary,
-  SessionAutomationJob,
-  SessionDeleteResult,
-  UIMessage,
-  WorkspaceScopePayload,
-} from "@/lib/types";
+import type { ChatSummary, UIMessage, WorkspaceScopePayload } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 const INITIAL_HISTORY_PAGE_LIMIT = 160;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
-const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
 function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
   return messages.map((m, idx) => ({
@@ -30,16 +21,6 @@ function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
     id: m.id ?? `hist-${idx}`,
     createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
   }));
-}
-
-function hasPendingToolCallsFromThread(
-  body: Awaited<ReturnType<typeof fetchWebuiThread>>,
-  messages: UIMessage[],
-): boolean {
-  if (typeof body?.has_pending_tool_calls === "boolean") {
-    return body.has_pending_tool_calls;
-  }
-  return hasPendingAgentActivity(messages);
 }
 
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
@@ -50,11 +31,7 @@ export function useSessions(): {
   refresh: () => Promise<void>;
   createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
-  deleteChat: (
-    key: string,
-    options?: { deleteAutomations?: boolean },
-  ) => Promise<SessionDeleteResult>;
-  getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
+  deleteChat: (key: string) => Promise<void>;
 } {
   const { client, token } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>([]);
@@ -101,7 +78,7 @@ export function useSessions(): {
   }, [client, refresh]);
 
   const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
-    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    const chatId = await client.newChat(5_000, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -127,12 +104,7 @@ export function useSessions(): {
     beforeUserIndex: number,
     title?: string,
   ): Promise<string> => {
-    const chatId = await client.forkChat(
-      sourceChatId,
-      beforeUserIndex,
-      title,
-      CHAT_CREATE_TIMEOUT_MS,
-    );
+    const chatId = await client.forkChat(sourceChatId, beforeUserIndex, title);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     setSessions((prev) => [
@@ -152,31 +124,15 @@ export function useSessions(): {
   }, [client]);
 
   const deleteChat = useCallback(
-    async (key: string, options?: { deleteAutomations?: boolean }) => {
-      const result = await apiDeleteSession(tokenRef.current, key, options);
-      if (!result.deleted) return result;
+    async (key: string) => {
+      await apiDeleteSession(tokenRef.current, key);
       optimisticKeysRef.current.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
-      return result;
     },
     [],
   );
 
-  const getSessionAutomations = useCallback(async (key: string) => {
-    const result = await fetchSessionAutomations(tokenRef.current, key);
-    return result.jobs;
-  }, []);
-
-  return {
-    sessions,
-    loading,
-    error,
-    refresh,
-    createChat,
-    forkChat,
-    deleteChat,
-    getSessionAutomations,
-  };
+  return { sessions, loading, error, refresh, createChat, forkChat, deleteChat };
 }
 
 /** Lazy-load a session's on-disk messages the first time the UI displays it. */
@@ -285,7 +241,8 @@ export function useSessionHistory(key: string | null): {
           return;
         }
         const ui = persistedMessagesToUi(body.messages);
-        const hasPending = hasPendingToolCallsFromThread(body, ui);
+        const last = ui[ui.length - 1];
+        const hasPending = last?.kind === "trace";
         const forkBoundary = typeof body.fork_boundary_message_count === "number"
           ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
           : null;
@@ -369,12 +326,13 @@ export function useSessionHistory(key: string | null): {
           ? null
           : prev.forkBoundaryMessageCount + older.length;
         const nextMessages = [...older, ...prev.messages];
+        const last = nextMessages[nextMessages.length - 1];
         return {
           ...prev,
           messages: nextMessages,
           loadingOlder: false,
           error: null,
-          hasPendingToolCalls: hasPendingAgentActivity(nextMessages),
+          hasPendingToolCalls: last?.kind === "trace",
           forkBoundaryMessageCount: olderBoundary ?? shiftedBoundary,
           beforeCursor: body.page?.before_cursor ?? null,
           hasMoreBefore: body.page?.has_more_before === true,

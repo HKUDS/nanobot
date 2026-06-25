@@ -350,6 +350,25 @@ class MemoryStore:
             return cursor + 1
         return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
+    _INTERNAL_HISTORY_SESSION_KEYS: ClassVar[frozenset[str]] = frozenset({
+        "echo",
+        "consolidation",
+        "curation",
+    })
+    _INTERNAL_HISTORY_SESSION_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "dream:",
+        "cron:",
+    )
+
+    @classmethod
+    def _is_internal_history_session(cls, session_key: str | None) -> bool:
+        if not session_key:
+            return False
+        return (
+            session_key in cls._INTERNAL_HISTORY_SESSION_KEYS
+            or session_key.startswith(cls._INTERNAL_HISTORY_SESSION_PREFIXES)
+        )
+
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with a valid cursor > *since_cursor*."""
         return [e for e, c in self._iter_valid_entries() if c > since_cursor]

@@ -10,3 +10,7 @@ export const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75re
 
 export const TOKEN_REFRESH_MARGIN_MS = 30_000;
 export const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
+
+// UI constants
+export const BLACKCAT_ICON_SRC = "/brand/blackcat_light_logo.png";
+export const BLACKCAT_ICON_SRC_DARK = "/brand/blackcat_dark_logo.png";

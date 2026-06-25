@@ -44,7 +44,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.20",
     "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -56,7 +56,7 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.59.4",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
   }
 }

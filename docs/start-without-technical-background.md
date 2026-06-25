@@ -76,12 +76,12 @@ An OpenRouter key usually starts with `sk-or-v1-`. Other providers use different
 
 ## 4. Install nanobot
 
-The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard. On macOS and Linux it avoids system-wide pip installs by using an active virtual environment, `uv`, `pipx`, or a managed venv under `~/.nanobot/venv`.
+The easiest path is the one-command installer. It installs or upgrades nanobot, then starts the setup wizard.
 
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)"
 ```
 
 **Windows PowerShell**
@@ -93,7 +93,7 @@ irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | i
 These commands install the stable PyPI package. To preview what the installer would do without changing your environment, pass `--dry-run`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dry-run
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dry-run
 ```
 
 ```powershell
@@ -103,28 +103,20 @@ curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.
 Use the development installer only when a maintainer asks you to test the current `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | sh -s -- --dev
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh)" -- --dev
 ```
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1))) --dev
 ```
 
-If the command says `curl` or `irm` is not found, or it cannot download from GitHub, use one of the manual install commands below.
+If the command says `curl` or `irm` is not found, or it cannot download from GitHub, use the manual install command below.
 
-If `uv` is installed, use:
-
-```bash
-uv tool install nanobot-ai
-```
-
-If you prefer pip, use it only inside an environment you control:
+If you prefer to install manually, run:
 
 ```bash
 python -m pip install nanobot-ai
 ```
-
-If pip reports `externally-managed-environment` on macOS or Linux, go back to the one-command installer, use `uv tool install nanobot-ai`, use `pipx install nanobot-ai`, or create a virtual environment first.
 
 Then check that nanobot is installed:
 
@@ -401,7 +393,7 @@ nanobot gateway
 
 To stop the WebUI later, return to the gateway terminal and press `Ctrl+C`.
 
-If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`webui.md`](./webui.md).
+If `nanobot` is not found, run `python -m nanobot gateway`, `python3 -m nanobot gateway`, or `py -m nanobot gateway`, matching the Python command that worked earlier. More details are in [`../webui/README.md`](../webui/README.md).
 
 ### Connect a Chat App
 

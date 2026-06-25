@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "blackcat",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "Đang kết nối tới blackcat…",
-      "boot": "Đang tải blackcat…"
+      "connecting": "Đang kết nối tới nanobot…",
+      "boot": "Đang tải nanobot…"
     },
     "error": {
-      "title": "Không thể kết nối tới blackcat",
-      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`blackcat gateway`) và trang này được mở trên cùng máy."
+      "title": "Không thể kết nối tới nanobot",
+      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
     "auth": {
       "title": "Cần xác thực",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "Hệ thống",
-      "restartHint": "Khởi động lại blackcat để áp dụng thay đổi runtime.",
-      "restart": "Khởi động lại blackcat",
+      "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
+      "restart": "Khởi động lại nanobot",
       "restarting": "Đang khởi động lại...",
       "restartEngine": "Khởi động lại engine",
       "restartingEngine": "Đang khởi động lại engine..."
@@ -33,11 +33,11 @@
       "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
     },
     "documentTitle": {
-      "base": "blackcat",
-      "chat": "{{title}} · blackcat"
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "Giao diện web blackcat — trò chuyện với workspace blackcat của bạn."
+      "description": "Giao diện web nanobot — trò chuyện với workspace nanobot của bạn."
     }
   },
   "sidebar": {
@@ -112,7 +112,7 @@
       "language": "Ngôn ngữ",
       "provider": "Nhà cung cấp",
       "model": "Mô hình",
-      "restart": "Khởi động lại blackcat",
+      "restart": "Khởi động lại nanobot",
       "configPath": "Đường dẫn cấu hình",
       "activePreset": "Preset đang dùng",
       "gateway": "Cổng",
@@ -160,7 +160,7 @@
       "theme": "Chuyển giữa giao diện sáng và tối.",
       "language": "Chọn ngôn ngữ dùng trong WebUI.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
-      "model": "Define el nombre de modelo predeterminado de blackcat.",
+      "model": "Define el nombre de modelo predeterminado de nanobot.",
       "configPath": "Archivo de configuración que usa actualmente el gateway.",
       "selectedPreset": "Los preajustes con nombre son de solo lectura aquí; edítalos en config.json.",
       "presetModel": "Chuyển sang Default để chỉnh sửa mô hình và nhà cung cấp từ WebUI.",
@@ -177,7 +177,7 @@
       "defaultAspectRatio": "Se usa cuando el prompt no elige una proporción.",
       "defaultImageSize": "Gợi ý kích thước gửi tới nhà cung cấp hỗ trợ.",
       "maxImagesPerTurn": "Giới hạn trên cho một yêu cầu generate_image.",
-      "botName": "Se muestra donde blackcat usa un nombre visible.",
+      "botName": "Se muestra donde nanobot usa un nombre visible.",
       "botIcon": "Emoji o texto corto junto al nombre del bot.",
       "timezone": "Se usa para horarios y respuestas con conciencia temporal.",
       "localServiceAccess": "Cho phép lệnh shell Full Access truy cập dịch vụ localhost.",
@@ -187,7 +187,7 @@
       "selectedModelProvider": "Definido por el modelo seleccionado.",
       "selectedModelValue": "Definido por el modelo seleccionado.",
       "brandLogos": "Hiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
-      "cliAppsCatalog": "Instala solo adaptadores CLI de apps que blackcat puede ejecutar localmente; las apps nativas no se modifican.",
+      "cliAppsCatalog": "Instala solo adaptadores CLI de apps que nanobot puede ejecutar localmente; las apps nativas no se modifican.",
       "cliAppsFilter": "Busca por app, categoría o capacidad.",
       "logs": "Abre la carpeta de registros del motor nativo.",
       "diagnostics": "Exporta un pequeño informe de runtime para soporte.",
@@ -229,11 +229,11 @@
       "loadError": "Không thể tải cài đặt",
       "unsaved": "Có thay đổi chưa lưu.",
       "upToDate": "Đã cập nhật.",
-      "savedRestart": "Guardado. Reinicia blackcat para aplicar.",
+      "savedRestart": "Guardado. Reinicia nanobot para aplicar.",
       "restartAfterSaving": "Guarda los cambios y reinicia cuando puedas.",
       "savedRestartApply": "Guardado. Reinicia cuando puedas.",
       "imageProviderRestart": "Cambios del proveedor de imagen guardados. Reinicia cuando puedas.",
-      "hostRestartAfterSaving": "Al guardar, blackcat reiniciará su motor.",
+      "hostRestartAfterSaving": "Al guardar, nanobot reiniciará su motor.",
       "hostRestartPending": "Guardado. El motor se reiniciará cuando esté listo.",
       "hostApiUnavailable": "Las acciones del host solo están disponibles en la app nativa.",
       "logsOpened": "Carpeta de registros abierta.",
@@ -428,7 +428,7 @@
       "saveCustom": "Lưu MCP",
       "configImport": "Nhập mcp.json",
       "importConfig": "Nhập",
-      "restartRequired": "Khởi động lại blackcat để kết nối các công cụ MCP đã cập nhật.",
+      "restartRequired": "Khởi động lại nanobot để kết nối các công cụ MCP đã cập nhật.",
       "toolsFound": "{{count}} công cụ",
       "loading": "Đang tải preset MCP...",
       "empty": "Không có preset MCP nào khớp bộ lọc này.",
@@ -459,7 +459,7 @@
       "thirdPartyBrands": "Tên sản phẩm, logo và thương hiệu thuộc về chủ sở hữu tương ứng. Việc sử dụng chỉ nhằm nhận diện và không ngụ ý được xác nhận."
     },
     "apps": {
-      "description": "Thêm CLI ứng dụng và dịch vụ MCP mà blackcat có thể dùng trong chat.",
+      "description": "Thêm CLI ứng dụng và dịch vụ MCP mà nanobot có thể dùng trong chat.",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "Tất cả",
@@ -747,7 +747,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "Thiết kế biểu tượng app",
-          "prompt": "Tạo một biểu tượng ứng dụng 1:1 gọn gàng cho blackcat: robot thân thiện, phong cách vector đơn giản, bảng màu xanh trắng dịu, không có chữ."
+          "prompt": "Tạo một biểu tượng ứng dụng 1:1 gọn gàng cho nanobot: robot thân thiện, phong cách vector đơn giản, bảng màu xanh trắng dịu, không có chữ."
         },
         "sticker": {
           "title": "Tạo sticker",
@@ -878,7 +878,7 @@
             "description": "Hủy lượt agent đang chạy trong cuộc trò chuyện này."
           },
           "restart": {
-            "title": "Khởi động lại blackcat",
+            "title": "Khởi động lại nanobot",
             "description": "Khởi động lại tiến trình bot tại chỗ."
           },
           "status": {
@@ -1020,7 +1020,7 @@
     "close": "Đóng xem trước tệp",
     "loading": "Đang tải bản xem trước...",
     "failed": "Không thể xem trước tệp này.",
-    "routeMissing": "Xem trước tệp cần gateway mới nhất. Hãy khởi động lại blackcat gateway rồi thử lại.",
+    "routeMissing": "Xem trước tệp cần gateway mới nhất. Hãy khởi động lại nanobot gateway rồi thử lại.",
     "resize": "Đổi kích thước bản xem trước tệp",
     "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },

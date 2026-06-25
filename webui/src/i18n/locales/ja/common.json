@@ -1,13 +1,13 @@
 {
   "app": {
-    "brand": "blackcat",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "blackcat に接続中…",
-      "boot": "blackcat を読み込み中…"
+      "connecting": "nanobot に接続中…",
+      "boot": "nanobot を読み込み中…"
     },
     "error": {
-      "title": "blackcat に接続できませんでした",
-      "gatewayHint": "gateway（`blackcat gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
+      "title": "nanobot に接続できませんでした",
+      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
     "auth": {
       "title": "認証が必要です",
@@ -23,8 +23,8 @@
     },
     "system": {
       "section": "システム",
-      "restartHint": "実行時の変更を適用するには blackcat を再起動します。",
-      "restart": "blackcat を再起動",
+      "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
+      "restart": "nanobot を再起動",
       "restarting": "再起動中...",
       "restartEngine": "エンジンを再起動",
       "restartingEngine": "エンジンを再起動中..."
@@ -33,11 +33,11 @@
       "completed": "{{seconds}} 秒で再起動が完了しました。"
     },
     "documentTitle": {
-      "base": "blackcat",
-      "chat": "{{title}} · blackcat"
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
     },
     "meta": {
-      "description": "blackcat Web UI — blackcat ワークスペースと会話します。"
+      "description": "nanobot Web UI — nanobot ワークスペースと会話します。"
     }
   },
   "sidebar": {
@@ -112,7 +112,7 @@
       "language": "言語",
       "provider": "プロバイダー",
       "model": "モデル",
-      "restart": "blackcat を再起動",
+      "restart": "nanobot を再起動",
       "configPath": "設定パス",
       "activePreset": "アクティブなプリセット",
       "gateway": "ゲートウェイ",
@@ -160,7 +160,7 @@
       "theme": "ライト表示とダーク表示を切り替えます。",
       "language": "WebUI で使用する言語を選択します。",
       "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
-      "model": "blackcat が既定で使用するモデル名を設定します。",
+      "model": "nanobot が既定で使用するモデル名を設定します。",
       "configPath": "現在ゲートウェイが使用している設定ファイルです。",
       "selectedPreset": "名前付きプリセットはここでは読み取り専用です。編集するには config.json を変更してください。",
       "presetModel": "Default に切り替えると、WebUI からモデルとプロバイダーを編集できます。",
@@ -177,7 +177,7 @@
       "defaultAspectRatio": "プロンプトで比率が指定されていない場合に使用します。",
       "defaultImageSize": "対応しているプロバイダーへ送信するサイズ指定です。",
       "maxImagesPerTurn": "1 回の generate_image リクエストで生成できる画像数の上限です。",
-      "botName": "blackcat が表示名を使う場所に表示されます。",
+      "botName": "nanobot が表示名を使う場所に表示されます。",
       "botIcon": "Bot 名の横に表示する短い emoji またはテキストです。",
       "timezone": "スケジュールと時刻を考慮する返信に使用します。",
       "localServiceAccess": "Full Access の shell コマンドが localhost サービスにアクセスできるようにします。",
@@ -187,7 +187,7 @@
       "selectedModelProvider": "選択したモデルによって設定されます。",
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "設定で第三者プロバイダーと CLI のロゴを表示します。",
-      "cliAppsCatalog": "blackcat がローカルで実行できるアプリ CLI アダプターだけをインストールします。ネイティブアプリは変更しません。",
+      "cliAppsCatalog": "nanobot がローカルで実行できるアプリ CLI アダプターだけをインストールします。ネイティブアプリは変更しません。",
       "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
       "logs": "ネイティブエンジンのログフォルダーを開きます。",
       "diagnostics": "サポート用の小さなランタイムレポートを書き出します。",
@@ -229,11 +229,11 @@
       "loadError": "設定を読み込めませんでした",
       "unsaved": "未保存の変更があります。",
       "upToDate": "最新です。",
-      "savedRestart": "保存しました。反映するには blackcat を再起動してください。",
+      "savedRestart": "保存しました。反映するには nanobot を再起動してください。",
       "restartAfterSaving": "変更を保存してから、準備ができたら再起動してください。",
       "savedRestartApply": "保存しました。準備ができたら再起動してください。",
       "imageProviderRestart": "画像プロバイダーの変更を保存しました。準備ができたら再起動してください。",
-      "hostRestartAfterSaving": "保存すると blackcat がエンジンを再起動します。",
+      "hostRestartAfterSaving": "保存すると nanobot がエンジンを再起動します。",
       "hostRestartPending": "保存しました。準備ができたらエンジンを再起動します。",
       "hostApiUnavailable": "ホスト操作はネイティブアプリ内でのみ利用できます。",
       "logsOpened": "ログフォルダーを開きました。",
@@ -428,7 +428,7 @@
       "saveCustom": "MCP を保存",
       "configImport": "mcp.json をインポート",
       "importConfig": "インポート",
-      "restartRequired": "更新された MCP ツールに接続するには blackcat を再起動してください。",
+      "restartRequired": "更新された MCP ツールに接続するには nanobot を再起動してください。",
       "toolsFound": "{{count}} 個のツール",
       "loading": "MCP プリセットを読み込み中...",
       "empty": "この条件に一致する MCP プリセットはありません。",
@@ -459,7 +459,7 @@
       "thirdPartyBrands": "製品名、ロゴ、ブランドはそれぞれの所有者に帰属します。使用は識別のみを目的とし、承認を意味するものではありません。"
     },
     "apps": {
-      "description": "blackcat がチャットで使用できる App CLI と MCP サービスを追加します。",
+      "description": "nanobot がチャットで使用できる App CLI と MCP サービスを追加します。",
       "cliLabel": "CLI",
       "mcpLabel": "MCP",
       "filterAll": "すべて",
@@ -747,7 +747,7 @@
       "imageQuickActions": {
         "icon": {
           "title": "アプリアイコンを作る",
-          "prompt": "blackcat のクリーンな 1:1 アプリアイコンを生成してください。親しみやすいロボット、シンプルなベクター風、柔らかい青と白の配色、文字なし。"
+          "prompt": "nanobot のクリーンな 1:1 アプリアイコンを生成してください。親しみやすいロボット、シンプルなベクター風、柔らかい青と白の配色、文字なし。"
         },
         "sticker": {
           "title": "ステッカーを作る",
@@ -878,7 +878,7 @@
             "description": "このチャットで実行中の agent ターンをキャンセルします。"
           },
           "restart": {
-            "title": "blackcat を再起動",
+            "title": "nanobot を再起動",
             "description": "bot プロセスをその場で再起動します。"
           },
           "status": {
@@ -1020,7 +1020,7 @@
     "close": "ファイルプレビューを閉じる",
     "loading": "プレビューを読み込み中...",
     "failed": "このファイルをプレビューできませんでした。",
-    "routeMissing": "ファイルプレビューには最新の gateway が必要です。blackcat gateway を再起動してから再試行してください。",
+    "routeMissing": "ファイルプレビューには最新の gateway が必要です。nanobot gateway を再起動してから再試行してください。",
     "resize": "ファイルプレビューの幅を変更",
     "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
