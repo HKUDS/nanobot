@@ -34,6 +34,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.providers.tool_call_ids import shorten_overlong_tool_call_id
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -547,7 +548,8 @@ class OpenAICompatProvider(LLMProvider):
             if not isinstance(value, str):
                 return value
             if not normalize_tool_ids:
-                return value
+                shortened = shorten_overlong_tool_call_id(value)
+                return id_map.setdefault(value, shortened) if shortened != value else value
             return id_map.setdefault(value, self._normalize_tool_call_id(value))
 
         def unique_tool_id(value: Any, used_ids: set[str], idx: int) -> str:

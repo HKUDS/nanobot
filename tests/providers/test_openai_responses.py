@@ -232,6 +232,25 @@ class TestConvertMessages:
         assert items[0]["call_id"] == "call_abc"
         assert items[0]["output"] == "result text"
 
+    def test_long_tool_call_ids_are_shortened_for_responses_api(self):
+        long_call_id = "call_" + ("x" * 100)
+
+        _, items = convert_messages([
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": long_call_id,
+                    "function": {"name": "ask_clarification", "arguments": "{}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": long_call_id, "content": "Which option?"},
+        ])
+
+        call_ids = [item["call_id"] for item in items]
+        assert len(call_ids[0]) <= 64
+        assert call_ids == [call_ids[0], call_ids[0]]
+
     def test_tool_message_dict_content(self):
         _, items = convert_messages([{
             "role": "tool",

@@ -1091,6 +1091,41 @@ def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messa
     assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
 
 
+def test_openai_compat_shortens_overlong_tool_call_ids_for_chat_completions() -> None:
+    long_call_id = "call_" + ("x" * 76)
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    kwargs = provider._build_kwargs(
+        messages=[
+            {"role": "user", "content": "设计一榀门式刚架"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [_tool_call(long_call_id)],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": long_call_id,
+                "name": "ask_clarification",
+                "content": "请选择设计方式",
+            },
+            {"role": "user", "content": "按常见参数"},
+        ],
+        tools=None,
+        model="gpt-5.5",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    tool_call_id = kwargs["messages"][1]["tool_calls"][0]["id"]
+    tool_result_id = kwargs["messages"][2]["tool_call_id"]
+    assert len(tool_call_id) <= 64
+    assert tool_call_id == tool_result_id
+
+
 def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(spec=find_by_name("mistral"))
