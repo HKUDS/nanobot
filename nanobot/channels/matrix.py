@@ -129,6 +129,7 @@ class _StreamBuf:
     text: str = ""
     event_id: str | None = None
     last_edit: float = 0.0
+    stream_id: str | None = None
 
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
@@ -531,9 +532,14 @@ class MatrixChannel(BaseChannel):
     async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
         meta = metadata or {}
         relates_to = self._build_thread_relates_to(metadata)
+        stream_id = meta.get("_stream_id")
 
         if meta.get("_stream_end"):
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.get(chat_id)
+            if buf and stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
+                # Stale end for a different stream — leave the active buffer intact.
+                return
+            self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.event_id or not buf.text:
                 return
 
@@ -548,9 +554,11 @@ class MatrixChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None:
-            buf = _StreamBuf()
+        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+            buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
+        elif buf.stream_id is None:
+            buf.stream_id = stream_id
         buf.text += delta
 
         if not buf.text.strip():

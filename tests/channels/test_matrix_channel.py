@@ -306,6 +306,28 @@ async def test_start_skips_load_store_when_device_id_missing(
 
 
 @pytest.mark.asyncio
+async def test_send_delta_keys_buffer_by_stream_id() -> None:
+    """Overlapping streams in one room must not share a buffer (issue #4068)."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.room_send_response = RoomSendResponse(event_id="evt-a", room_id="!room:matrix.org")
+    channel.client = client
+
+    await channel.send_delta("!room:matrix.org", "A1", {"_stream_delta": True, "_stream_id": "a"})
+    await channel.send_delta("!room:matrix.org", "B1", {"_stream_delta": True, "_stream_id": "b"})
+
+    buf = channel._stream_bufs["!room:matrix.org"]
+    assert buf.stream_id == "b"
+    assert buf.text == "B1"  # stream b did not inherit stream a's content
+
+    # A stale _stream_end for stream a must not flush stream b's buffer.
+    sends_before = len(client.room_send_calls)
+    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True, "_stream_id": "a"})
+    assert len(client.room_send_calls) == sends_before
+    assert "!room:matrix.org" in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_register_event_callbacks_uses_media_base_filter() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
