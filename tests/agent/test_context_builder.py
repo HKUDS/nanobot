@@ -193,6 +193,11 @@ class TestBundledToolContract:
         assert "## General Tool Contract" in content
         assert "Use the narrowest structured tool" in content
         assert "Do not use `exec` as a universal workaround" in content
+        assert "## Clarification" in content
+        assert "Clarify before action" in content
+        assert "Ask one focused question at a time" in content
+        assert "Use `options` when the user should choose" in content
+        assert "After `ask_clarification`, stop" in content
         assert "## File and Coding Workflows" in content
         assert "apply_patch" in content
         assert "## Web and External Information" in content

@@ -14,6 +14,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.clarification import ASK_CLARIFICATION_TOOL_NAME
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -422,9 +423,14 @@ class AgentRunner:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
+                clarification = self._find_clarification_call(response.tool_calls)
+                tool_calls_for_turn = (
+                    [clarification] if clarification is not None else response.tool_calls
+                )
+                context.tool_calls = list(tool_calls_for_turn)
                 assistant_message = build_assistant_message(
                     response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+                    tool_calls=[tc.to_openai_tool_call() for tc in tool_calls_for_turn],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -437,11 +443,64 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in tool_calls_for_turn],
                     },
                 )
 
                 await hook.before_execute_tools(context)
+
+                if clarification is not None:
+                    result, event, fatal_error = await self._run_tool(
+                        spec,
+                        clarification,
+                        external_lookup_counts,
+                        workspace_violation_counts,
+                    )
+                    content = self._normalize_tool_result(
+                        spec,
+                        clarification.id,
+                        clarification.name,
+                        result,
+                    )
+                    tool_events.append(event)
+                    if event.get("status") == "ok":
+                        tools_used.append(ASK_CLARIFICATION_TOOL_NAME)
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": clarification.id,
+                        "name": clarification.name,
+                        "content": content,
+                    }
+                    messages.append(tool_message)
+                    completed_tool_results = [tool_message]
+                    final_content = (
+                        f"Error: {type(fatal_error).__name__}: {fatal_error}"
+                        if fatal_error is not None else content
+                    )
+                    stop_reason = "tool_error" if fatal_error is not None else "clarification"
+                    self._append_final_message(messages, final_content)
+                    context.tool_results = [result]
+                    context.tool_events = [event]
+                    context.final_content = final_content
+                    if fatal_error is not None:
+                        error = final_content
+                        context.error = error
+                    context.stop_reason = stop_reason
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "tools_completed",
+                            "iteration": iteration,
+                            "model": spec.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": completed_tool_results,
+                            "pending_tool_calls": [],
+                        },
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    break
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
@@ -1061,6 +1120,76 @@ class AgentRunner:
                 fatal_error = error
         return results, events, fatal_error
 
+    @staticmethod
+    def _tool_call_name(tool_call: dict[str, Any]) -> str:
+        function = tool_call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            return name if isinstance(name, str) else ""
+        name = tool_call.get("name")
+        return name if isinstance(name, str) else ""
+
+    @classmethod
+    def _is_ask_clarification_message(cls, message: dict[str, Any]) -> bool:
+        if message.get("name") == ASK_CLARIFICATION_TOOL_NAME:
+            return True
+        return any(
+            isinstance(tc, dict) and cls._tool_call_name(tc) == ASK_CLARIFICATION_TOOL_NAME
+            for tc in (message.get("tool_calls") or [])
+        )
+
+    @classmethod
+    def _with_latest_clarification_pair(
+        cls,
+        original: list[dict[str, Any]],
+        kept: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not kept or kept[-1].get("role") != "user":
+            return kept
+
+        reply = kept[-1]
+        try:
+            reply_idx = next(
+                idx for idx in range(len(original) - 1, -1, -1)
+                if original[idx] is reply or original[idx] == reply
+            )
+        except StopIteration:
+            return kept
+
+        if reply_idx < 3:
+            return kept
+        if not (
+            original[reply_idx - 3].get("role") == "assistant"
+            and cls._is_ask_clarification_message(original[reply_idx - 3])
+            and original[reply_idx - 2].get("role") == "tool"
+            and cls._is_ask_clarification_message(original[reply_idx - 2])
+            and original[reply_idx - 1].get("role") == "assistant"
+        ):
+            return kept
+
+        start = reply_idx - 3
+        if start and original[start - 1].get("role") == "user":
+            start -= 1
+        protected = [dict(message) for message in original[start: reply_idx + 1]]
+        if len(kept) >= len(protected) and kept[-len(protected):] == protected:
+            return kept
+
+        overlap = 0
+        for size in range(min(len(kept), len(protected)), 0, -1):
+            if kept[-size:] == protected[-size:]:
+                overlap = size
+                break
+        return kept[:-overlap] + protected if overlap else kept + protected
+
+    @staticmethod
+    def _find_clarification_call(
+        tool_calls: list[ToolCallRequest],
+    ) -> ToolCallRequest | None:
+        return next(
+            (tc for tc in tool_calls if tc.name == ASK_CLARIFICATION_TOOL_NAME),
+            None,
+        )
+
     async def _run_tool(
         self,
         spec: AgentRunSpec,
@@ -1551,6 +1680,7 @@ class AgentRunner:
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
+        kept = self._with_latest_clarification_pair(non_system, kept)
         return system_messages + kept
 
     def _partition_tool_batches(
