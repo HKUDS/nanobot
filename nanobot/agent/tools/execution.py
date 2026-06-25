@@ -16,6 +16,7 @@ from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, wit
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
+    repeated_tool_call_error,
     repeated_workspace_violation_error,
 )
 
@@ -57,6 +58,7 @@ async def execute_tool_calls(
     *,
     concurrent: bool,
     external_lookup_counts: dict[str, int],
+    tool_call_counts: dict[str, int] | None = None,
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
@@ -77,13 +79,14 @@ async def execute_tool_calls(
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
     tool_results: list[ToolCallResult | None] = [None] * len(tool_calls)
+    counts = tool_call_counts if tool_call_counts is not None else {}
 
     async def execute(index: int, tool_call: ToolCallRequest) -> None:
         call_context = replace(context, tool_calls=[tool_call], tool_results=[], tool_events=[])
         try:
             await hook.on_tool_execution_event(call_context)
             result, event = await _execute_tool_call_inner(
-                tools, tool_call, external_lookup_counts, workspace_violation_counts,
+                tools, tool_call, external_lookup_counts, counts, workspace_violation_counts,
                 hook, context, read_results,
             )
         except asyncio.CancelledError:
@@ -136,11 +139,25 @@ async def _execute_tool_call_inner(
     tools: ToolRegistry,
     tool_call: ToolCallRequest,
     external_lookup_counts: dict[str, int],
+    tool_call_counts: dict[str, int],
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
     read_results: Callable[[], dict[str, str]],
 ) -> tuple[Any, dict[str, str]]:
+    repeat_error = repeated_tool_call_error(
+        tool_call.name,
+        tool_call.arguments,
+        tool_call_counts,
+    )
+    if repeat_error:
+        event = {
+            "name": tool_call.name,
+            "status": "error",
+            "detail": "repeated identical tool call blocked",
+        }
+        return with_tool_error_hint(repeat_error), event
+
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
         tool_call.arguments,

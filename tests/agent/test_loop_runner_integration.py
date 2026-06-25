@@ -620,10 +620,16 @@ async def test_subagent_max_iterations_announces_partial_incomplete_result(tmp_p
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    call_idx = {"n": 0}
+
+    async def fake_chat_stream(*args, **kwargs):
+        call_idx["n"] += 1
+        return LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": str(call_idx["n"])})],
+        )
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=fake_chat_stream)
     mgr = SubagentManager(
         workspace=tmp_path,
         bus=bus,

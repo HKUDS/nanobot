@@ -389,6 +389,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        tool_call_counts: dict[str, int] = {}
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         # Segments from one uninterrupted length-recovery chain. Tool work or
@@ -645,6 +646,7 @@ class AgentRunner:
                         response.tool_calls,
                         concurrent=spec.concurrent_tools,
                         external_lookup_counts=external_lookup_counts,
+                        tool_call_counts=tool_call_counts,
                         workspace_violation_counts=workspace_violation_counts,
                         hook=hook,
                         context=context,
