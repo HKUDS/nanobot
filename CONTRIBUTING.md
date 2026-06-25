@@ -98,7 +98,7 @@ When contributing, please aim for code that feels:
 In practice:
 
 - Line length: 100 characters (`ruff`)
-- Target: Python 3.11+
+- Target: Python 3.13+
 - Linting: `ruff` with rules E, F, I, N, W (E501 ignored)
 - Async: uses `asyncio` throughout; pytest with `asyncio_mode = "auto"`
 - Prefer readable code over magical code

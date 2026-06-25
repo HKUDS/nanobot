@@ -59,9 +59,8 @@ body:
       label: Python Version
       description: What Python version are you using?
       options:
-        - "3.11"
-        - "3.12"
         - "3.13"
+        - "3.14"
         - Other (specify below)
     validations:
       required: true
