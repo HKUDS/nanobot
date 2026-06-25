@@ -155,20 +155,19 @@ def repeated_tool_call_error(
     if signature is None:
         return None
 
-    count = seen_counts.get(signature, 0) + 1
-    seen_counts[signature] = count
-    if count <= _MAX_REPEAT_TOOL_CALLS:
+    count = seen_counts.get(signature, 0)
+    if count < _MAX_REPEAT_TOOL_CALLS:
         return None
 
     logger.warning(
         "Blocking identical repeated tool call {} on attempt {}",
         signature[:160],
-        count,
+        count + 1,
     )
     return (
         "Error: repeated identical tool call blocked. "
-        "You have already called this tool with these exact arguments multiple times. "
-        "Doing it again will not change the result. "
+        "You have already called this tool with these exact arguments multiple times "
+        "and it failed. Doing it again will not change the result. "
         "Use the results you already have, or try a meaningfully different approach."
     )
 

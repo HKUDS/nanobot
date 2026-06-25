@@ -18,6 +18,7 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_tool_call_error,
     repeated_workspace_violation_error,
+    tool_call_signature,
 )
 
 # SSRF is a hard security block at the tool boundary, but the agent turn
@@ -89,6 +90,7 @@ async def execute_tool_calls(
                 tools, tool_call, external_lookup_counts, counts, workspace_violation_counts,
                 hook, context, read_results,
             )
+            _record_tool_call_outcome(tool_call, event, counts)
         except asyncio.CancelledError:
             cancelled = replace(call_context, tool_results=["Tool execution cancelled"], tool_events=[{
                 "name": tool_call.name, "status": "error", "detail": "cancelled",
@@ -133,6 +135,26 @@ async def execute_tool_calls(
         settled = [result for result in tool_results if result is not None]
         if settled and on_settled is not None:
             await on_settled(settled)
+
+
+def _record_tool_call_outcome(
+    tool_call: ToolCallRequest,
+    event: dict[str, str],
+    tool_call_counts: dict[str, int],
+) -> None:
+    """Count consecutive failures per identical tool call; success resets.
+
+    A blocked call itself is not counted: it is the guard's output, not a
+    fresh failure.
+    """
+    signature = tool_call_signature(tool_call.name, tool_call.arguments)
+    if signature is None:
+        return
+    if event.get("status") == "error":
+        if event.get("detail") != "repeated identical tool call blocked":
+            tool_call_counts[signature] = tool_call_counts.get(signature, 0) + 1
+    else:
+        tool_call_counts[signature] = 0
 
 
 async def _execute_tool_call_inner(
