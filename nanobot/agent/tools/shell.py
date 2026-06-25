@@ -597,16 +597,17 @@ class ExecTool(Tool):
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
+        match_text = re.sub(r"(^|[^\\])#.*$", r"\1", lower).strip()
 
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
         # from the hardcoded deny list via configuration.
         explicitly_allowed = bool(self.allow_patterns) and any(
-            re.search(p, lower) for p in self.allow_patterns
+            re.fullmatch(p, match_text) for p in self.allow_patterns
         )
         if not explicitly_allowed:
             for pattern in self.deny_patterns:
-                if re.search(pattern, lower):
+                if re.search(pattern, match_text):
                     return "Error: Command blocked by deny pattern filter"
 
             if self.allow_patterns:

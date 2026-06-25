@@ -15,7 +15,7 @@ def test_deny_patterns_block_rm_rf():
 
 def test_allow_patterns_bypass_deny():
     """allow_patterns take priority: matching command skips deny check."""
-    tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/tmp/"])
+    tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/tmp/.*"])
     result = tool._guard_command("rm -rf /tmp/build", "/tmp")
     assert result is None
 
@@ -49,10 +49,32 @@ def test_allow_patterns_bypass_extra_deny():
 
 def test_allow_patterns_is_whitelist_only():
     """When allow_patterns is set, non-matching non-denied commands are blocked."""
-    tool = ExecTool(allow_patterns=[r"\becho\b"])
+    tool = ExecTool(allow_patterns=[r"echo\s+hello"])
     # echo matches allow → ok
     assert tool._guard_command("echo hello", "/tmp") is None
     # ls does not match allow and is not in deny → blocked by allowlist
     result = tool._guard_command("ls /tmp", "/tmp")
     assert result is not None
     assert "allowlist" in result.lower()
+
+
+def test_allow_patterns_do_not_allow_chained_command_bypass():
+    """A partial allowlist match must not bypass deny patterns in chained commands."""
+    tool = ExecTool(allow_patterns=[r"\becho\b"])
+    result = tool._guard_command("echo hello; rm -rf /", "/tmp")
+    assert result is not None
+    assert "deny pattern filter" in result.lower()
+
+
+def test_allow_patterns_strip_shell_comments_before_matching():
+    """Comments are stripped before allow and deny pattern checks."""
+    tool = ExecTool(allow_patterns=[r"echo\s+hello"])
+    result = tool._guard_command("echo hello # comment with rm -rf /", "/tmp")
+    assert result is None
+
+
+def test_allow_patterns_fullmatch_allows_exact_command():
+    """A full-command allow pattern can still exempt an exact denied command."""
+    tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/tmp/build"])
+    result = tool._guard_command("rm -rf /tmp/build", "/tmp")
+    assert result is None
