@@ -761,7 +761,9 @@ async def connect_mcp_servers(
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
+            available_wrapped_names = [
+                _sanitize_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools
+            ]
             for tool_def in tools.tools:
                 wrapped_name = _sanitize_name(f"mcp_{name}_{tool_def.name}")
                 if (
@@ -785,6 +787,76 @@ async def connect_mcp_servers(
                     if wrapped_name in enabled_tools:
                         matched_enabled_tools.add(wrapped_name)
 
+            try:
+                resources_result = await session.list_resources()
+                for resource in resources_result.resources:
+                    wrapped_name = _sanitize_name(f"mcp_{name}_resource_{resource.name}")
+                    available_raw_names.append(resource.name)
+                    available_wrapped_names.append(wrapped_name)
+                    if (
+                        not allow_all_tools
+                        and resource.name not in enabled_tools
+                        and wrapped_name not in enabled_tools
+                    ):
+                        logger.debug(
+                            "MCP: skipping resource '{}' from server '{}' (not in enabledTools)",
+                            wrapped_name,
+                            name,
+                        )
+                        continue
+                    wrapper = MCPResourceWrapper(
+                        session, name, resource, resource_timeout=cfg.tool_timeout
+                    )
+                    registry.register(wrapper)
+                    registered_count += 1
+                    logger.debug(
+                        "MCP: registered resource '{}' from server '{}'",
+                        wrapper.name,
+                        name,
+                    )
+                    if enabled_tools:
+                        if resource.name in enabled_tools:
+                            matched_enabled_tools.add(resource.name)
+                        if wrapped_name in enabled_tools:
+                            matched_enabled_tools.add(wrapped_name)
+            except Exception as e:
+                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
+
+            try:
+                prompts_result = await session.list_prompts()
+                for prompt in prompts_result.prompts:
+                    wrapped_name = _sanitize_name(f"mcp_{name}_prompt_{prompt.name}")
+                    available_raw_names.append(prompt.name)
+                    available_wrapped_names.append(wrapped_name)
+                    if (
+                        not allow_all_tools
+                        and prompt.name not in enabled_tools
+                        and wrapped_name not in enabled_tools
+                    ):
+                        logger.debug(
+                            "MCP: skipping prompt '{}' from server '{}' (not in enabledTools)",
+                            wrapped_name,
+                            name,
+                        )
+                        continue
+                    wrapper = MCPPromptWrapper(
+                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                    )
+                    registry.register(wrapper)
+                    registered_count += 1
+                    logger.debug(
+                        "MCP: registered prompt '{}' from server '{}'",
+                        wrapper.name,
+                        name,
+                    )
+                    if enabled_tools:
+                        if prompt.name in enabled_tools:
+                            matched_enabled_tools.add(prompt.name)
+                        if wrapped_name in enabled_tools:
+                            matched_enabled_tools.add(wrapped_name)
+            except Exception as e:
+                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+
             if enabled_tools and not allow_all_tools:
                 unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
                 if unmatched_enabled_tools:
@@ -796,58 +868,6 @@ async def connect_mcp_servers(
                         ", ".join(available_raw_names) or "(none)",
                         ", ".join(available_wrapped_names) or "(none)",
                     )
-
-            # Only register resources and prompts when no tool restriction is
-            # active.  enabledTools is a per-*tool* allowlist; resources and
-            # prompts have no equivalent name filter, so they must be skipped
-            # whenever the operator specified a tool subset.  An empty list
-            # (deny-all) or a list of specific tool names both indicate that
-            # the operator intended to restrict capabilities — registering
-            # unrestricted resource/prompt wrappers would violate that intent.
-            # The default ["*"] (allow-all) means no restriction was intended.
-            register_extras = allow_all_tools
-            if register_extras:
-                try:
-                    resources_result = await session.list_resources()
-                    for resource in resources_result.resources:
-                        wrapper = MCPResourceWrapper(
-                            session, name, resource, resource_timeout=cfg.tool_timeout
-                        )
-                        registry.register(wrapper)
-                        registered_count += 1
-                        logger.debug(
-                            "MCP: registered resource '{}' from server '{}'",
-                            wrapper.name,
-                            name,
-                        )
-                except Exception as e:
-                    logger.debug(
-                        "MCP server '{}': resources not supported or failed: {}", name, e
-                    )
-
-                try:
-                    prompts_result = await session.list_prompts()
-                    for prompt in prompts_result.prompts:
-                        wrapper = MCPPromptWrapper(
-                            session, name, prompt, prompt_timeout=cfg.tool_timeout
-                        )
-                        registry.register(wrapper)
-                        registered_count += 1
-                        logger.debug(
-                            "MCP: registered prompt '{}' from server '{}'",
-                            wrapper.name,
-                            name,
-                        )
-                except Exception as e:
-                    logger.debug(
-                        "MCP server '{}': prompts not supported or failed: {}", name, e
-                    )
-            else:
-                logger.info(
-                    "MCP server '{}': skipping resource/prompt registration "
-                    "(enabledTools does not include '*' — only tools allowed)",
-                    name,
-                )
 
             logger.info(
                 "MCP server '{}': connected, {} capabilities registered", name, registered_count
