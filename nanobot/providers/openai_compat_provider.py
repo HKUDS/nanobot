@@ -1131,14 +1131,21 @@ class OpenAICompatProvider(LLMProvider):
                 if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
 
+            # Deduplicate tool call IDs (same pattern as streaming path)
+            # Some providers reuse the same ID for parallel tool calls.
+            _seen_tc_ids: set[str] = set()
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = parse_tool_arguments(fn.get("arguments", {}))
                 ec, prov, fn_prov = _extract_tc_extras(tc)
+                raw_id = str(tc_map.get("id") or _short_tool_id())
+                if not raw_id or raw_id in _seen_tc_ids:
+                    raw_id = _short_tool_id()
+                _seen_tc_ids.add(raw_id)
                 parsed_tool_calls.append(ToolCallRequest(
-                    id=str(tc_map.get("id") or _short_tool_id()),
+                    id=raw_id,
                     name=str(fn.get("name") or ""),
                     arguments=args,
                     extra_content=ec,
